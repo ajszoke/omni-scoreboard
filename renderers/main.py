@@ -119,7 +119,7 @@ class MainRenderer:
                         self.data.standings.advance_to_next_standings()
                     time.sleep(5)
 
-    # Renders a game screen based on it's status
+    # Renders a game screen based on its status
     def __render_game(self) -> NoReturn:
         # Set the refresh rate
         refresh_rate = self.data.config.scrolling_speed
@@ -193,6 +193,10 @@ class MainRenderer:
 
             loop_point = self.data.config.layout.coords("atbat")["loop"]
             self.scrolling_text_pos = min(self.scrolling_text_pos, loop_point)
+
+            pitcher_stats = game.pitcher_stats()
+            batter_stats = game.batter_stats()
+
             pos = gamerender.render_live_game(
                 self.canvas, layout, colors, scoreboard, self.scrolling_text_pos, self.animation_time
             )

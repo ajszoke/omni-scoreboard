@@ -11,8 +11,8 @@ API_FIELDS = (
     + "reason,probablePitchers,teams,home,away,abbreviation,teamName,players,id,boxscoreName,fullName,liveData,plays,"
     + "currentPlay,result,eventType,playEvents,isPitch,pitchData,startSpeed,details,type,code,description,decisions,"
     + "winner,loser,save,id,linescore,outs,balls,strikes,note,inningState,currentInning,currentInningOrdinal,offense,"
-    + "batter,inHole,onDeck,first,second,third,defense,pitcher,boxscore,teams,runs,players,seasonStats,pitching,wins,"
-    + "losses,saves,era,hits,errors,weather,condition,temp,wind"
+    + "batter,inHole,onDeck,first,second,third,defense,pitcher,boxscore,teams,runs,players,battingOrder,stats,batting,pitching,fielding,seasonStats,batting,homeRuns,avg,ops,pitching,wins,"
+    + "losses,saves,era,hits,errors,gameStats,battingOrder,weather,condition,temp,wind"
 )
 
 SCHEDULE_API_FIELDS = "dates,date,games,status,detailedState,abstractGameState,reason"
@@ -34,13 +34,15 @@ class Game:
         self.starttime = time.time()
         self._data = {}
         self._status = {}
+        self.win_probabilities = {}
 
     def update(self, force=False) -> UpdateStatus:
         if force or self.__should_update():
             self.starttime = time.time()
             try:
                 debug.log("Fetching data for game %s", str(self.game_id))
-                self._data = statsapi.get("game", {"gamePk": self.game_id, "fields": API_FIELDS})
+                self._data = statsapi.get("game", {"gamePk": self.game_id})
+                self.win_probabilities = statsapi.get("game_contextMetrics", {"gamePk": self.game_id})
                 self._status = self._data["gameData"]["status"]
                 if self._data["gameData"]["datetime"]["officialDate"] > self.date:
                     # this is odd, but if a game is postponed then the 'game' endpoint gets the rescheduled game
@@ -131,6 +133,18 @@ class Game:
     def inning_ordinal(self):
         return self._data["liveData"]["linescore"].get("currentInningOrdinal", 0)
 
+    def win_probability(self):
+        home_prob = self.win_probabilities["homeWinProbability"]
+        away_prob = self.win_probabilities["awayWinProbability"]
+        team_multiplier = -1 if home_prob > away_prob else 1
+        return team_multiplier * max(int(home_prob), int(away_prob))
+
+    def batting_team(self):
+        return "away" if self._data["liveData"]["linescore"].get("inningState", 0) in ["Top", "End"] else "home"
+
+    def pitching_team(self):
+        return "home" if self._data["liveData"]["linescore"].get("inningState", 0) in ["Top", "End"] else "away"
+
     def features_team(self, team):
         return team in [
             self._data["gameData"]["teams"]["away"]["teamName"],
@@ -157,7 +171,11 @@ class Game:
 
     def boxscore_name(self, player):
         ID = Game._format_id(player)
-        return self._data["gameData"]["players"][ID]["boxscoreName"]
+        name = self._data["gameData"]["players"][ID]["boxscoreName"]
+        if "," in name:
+            comma_idx = name.index(",")
+            name = name[:comma_idx]
+        return name
 
     def pitcher_stat(self, player, stat, team=None):
         ID = Game._format_id(player)
@@ -196,6 +214,46 @@ class Game:
         except:
             return ""
 
+    def batter_order_num(self):
+        try:
+            team = self.batting_team()
+            batter_id = Game._format_id(self._data["liveData"]["linescore"]["offense"]["batter"]["id"])
+            return int(
+                int(self._data["liveData"]["boxscore"]["teams"][team]["players"][batter_id]["battingOrder"]) / 100)
+        except:
+            return ""
+
+    def batter_stats(self):
+        batter_id = Game._format_id(self._data["liveData"]["linescore"]["offense"]["batter"]["id"])
+        if batter_id == "":
+            return ""
+        team = self.batting_team()
+        box_root = self._data["liveData"]["boxscore"]["teams"][team]["players"][batter_id]["stats"]["batting"]
+        season_root = self._data["liveData"]["boxscore"]["teams"][team]["players"][batter_id]["seasonStats"]["batting"]
+        stats = {}
+
+        if box_root != {}:
+            stats = {
+                "at_bats": box_root["atBats"],
+                "hits": box_root["hits"],
+                "hr": box_root["homeRuns"],
+                "k": box_root["strikeOuts"],
+                "bb": box_root["baseOnBalls"],
+                "3b": box_root["triples"],
+                "2b": box_root["doubles"],
+                "sac": box_root["sacBunts"] + box_root["sacFlies"],
+                "gitp": box_root["groundIntoTriplePlay"],
+                "gidp": box_root["groundIntoDoublePlay"]
+            }
+        if season_root != {}:
+            season_stats = {
+                "season_hr": season_root["homeRuns"],
+                "avg": season_root["avg"],
+                "ops": season_root["ops"],
+            }
+            stats.update(season_stats)
+        return stats
+
     def in_hole(self):
         try:
             batter_id = self._data["liveData"]["linescore"]["offense"]["inHole"]["id"]
@@ -212,10 +270,36 @@ class Game:
 
     def pitcher(self):
         try:
-            batter_id = self._data["liveData"]["linescore"]["defense"]["pitcher"]["id"]
-            return self.boxscore_name(batter_id)
+            pitcher_id = self._data["liveData"]["linescore"]["defense"]["pitcher"]["id"]
+            return self.boxscore_name(pitcher_id)
         except:
             return ""
+
+    def pitcher_stats(self):
+        pitcher_id = Game._format_id(self._data["liveData"]["linescore"]["defense"]["pitcher"]["id"])
+        if pitcher_id == "":
+            return ""
+        team = self.pitching_team()
+        box_root = self._data["liveData"]["boxscore"]["teams"][team]["players"][pitcher_id]["stats"]["pitching"]
+        season_root = self._data["liveData"]["boxscore"]["teams"][team]["players"][pitcher_id]["seasonStats"]["pitching"]
+        stats = {}
+        if box_root != {}:
+            stats = {
+                "ip": box_root["inningsPitched"],
+                "total_pitches": box_root["numberOfPitches"],
+                "hr": box_root["homeRuns"],
+                "er": box_root["earnedRuns"],
+                "hits": box_root["hits"],
+                "walks": box_root["baseOnBalls"],
+                "strikeouts": box_root["strikeOuts"]
+            }
+        if season_root != {}:
+            season_stats = {
+                "era": season_root["era"],
+                "whip": season_root["whip"]
+            }
+            stats.update(season_stats)
+        return stats
 
     def balls(self):
         return self._data["liveData"]["linescore"].get("balls", 0)

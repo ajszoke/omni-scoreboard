@@ -1,3 +1,4 @@
+import json
 import sys
 
 if sys.version_info <= (3, 5):
@@ -18,6 +19,11 @@ from renderers.main import MainRenderer
 from utils import args, led_matrix_options
 from version import SCRIPT_NAME, SCRIPT_VERSION
 
+import requests
+import uuid
+import re
+from datetime import date
+
 try:
     from rgbmatrix import RGBMatrix, __version__
 
@@ -29,6 +35,83 @@ except ImportError:
 
 
 def main(matrix, config_base):
+
+    # playList = []
+    # favoriteTeam = "Vikings"
+    # resp = requests.get(url="https://p.nfltags.com/nfl/NflUmdComponents.NFLToken.js",
+    #                     headers={
+    #                         "sec-fetch-dest": "empty",
+    #                         "sec-fetch-mode": "no-cors",
+    #                         "sec-fetch-site": "same-site",
+    #                         "sec-gpc": "1",
+    #                         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/104.0.5112.81 Safari/537.36",
+    #                         "Host": "p.nfltags.com",
+    #                         "origin": "https://www.nfl.com",
+    #                         "referer": "https://www.nfl.com/"
+    #                     })
+    # responseBody = resp.text
+    # startIdx = responseBody.find("production:{", responseBody.find("desktop:{"))
+    # endIdx = responseBody.find("},", startIdx)
+    # authSubstring = responseBody[startIdx:endIdx]
+    # clientKey = re.match(".*nflClientKey:\"([^\"]*)\".*", authSubstring).groups()[0]
+    # clientSecret = re.match(".*nflClientSecret:\"([^\"]*)\".*", authSubstring).groups()[0]
+    #
+    # resp = requests.post(url="https://api.nfl.com/identity/v3/token",
+    #                      headers={
+    #                          "sec-fetch-dest": "empty",
+    #                          "sec-fetch-mode": "cors",
+    #                          "sec-fetch-site": "same-site",
+    #                          "sec-gpc": "1",
+    #                          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/104.0.5112.81 Safari/537.36",
+    #                          "Host": "api.nfl.com",
+    #                          "path": "/identity/v3/token",
+    #                          "origin": "https://www.nfl.com",
+    #                          "referer": "https://www.nfl.com/"
+    #                      },
+    #                      data={
+    #                          "clientKey": clientKey,
+    #                          "clientSecret": clientSecret,
+    #                          "deviceId": str(uuid.uuid4()),
+    #                          "deviceInfo": "eyJtb2RlbCI6ImRlc2t0b3AiLCJ2ZXJzaW9uIjoiQ2hyb21lIiwib3NOYW1lIjoiV2luZG93cyIsIm9zVmVyc2lvbiI6IjEwIn0=",
+    #                          "networkType": "other",
+    #                          "useRefreshToken": "true"
+    #                      })
+    # # if (resp.status_code == 200):
+    # responseBody = json.loads(resp.text)
+    # refreshToken = responseBody["refreshToken"]
+    # accessToken = responseBody["accessToken"]
+    #
+    # resp = requests.get(url="https://api.nfl.com/football/v2/weeks/date/{}".format(date.today().strftime("%Y-%m-%d")),
+    #                     headers={
+    #                         "Authorization": "Bearer " + accessToken
+    #                     })
+    # responseBody = json.loads(resp.text)
+    # season = responseBody["season"]
+    # seasonType = responseBody["seasonType"]
+    # week = responseBody["week"]
+    #
+    # for week in range(1, 3):
+    #     gameId = ""
+    #     resp = requests.get(url="https://api.nfl.com/experience/v1/games?season={season}&seasonType={seasonType}&week={week}"
+    #                             .format(season=season, seasonType=seasonType, week=week),
+    #                         headers={
+    #                             "Authorization": "Bearer " + accessToken
+    #                         })
+    #     responseBody = json.loads(resp.text)
+    #     for game in responseBody["games"]:
+    #         # if game["homeTeam"]["nickName"] == favoriteTeam or game["awayTeam"]["nickName"] == favoriteTeam:
+    #         gameId = game["id"]
+    #         resp = requests.get(url="https://api.nfl.com/experience/v1/gamedetails/{}".format(gameId),
+    #                             headers={
+    #                                 "Authorization": "Bearer " + accessToken
+    #                             })
+    #         responseBody = json.loads(resp.text)
+    #         for play in responseBody["data"]["viewer"]["gameDetail"]["plays"]:
+    #             playList.append(play["playDescription"])
+    # with open('./playlist.txt', 'w') as f:
+    #     for play in playList:
+    #         f.write(f"{play}\n")
+
 
     # Read scoreboard options from config.json if it exists
     config = Config(config_base, matrix.width, matrix.height)
@@ -48,7 +131,7 @@ def main(matrix, config_base):
         debug.log("Using rgbmatrix version %s", __version__)
 
     # Draw startup screen
-    logo = "assets/mlb-w" + str(matrix.width) + "h" + str(matrix.height) + ".png"
+    logo = "assets/img/logo-w" + str(matrix.width) + "h" + str(matrix.height) + ".png"
 
     # MLB image disabled when using renderer, for now.
     # see: https://github.com/ty-porter/RGBMatrixEmulator/issues/9#issuecomment-922869679

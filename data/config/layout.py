@@ -44,7 +44,7 @@ class Layout:
             raise e
 
         if self.state in AVAILABLE_OPTIONAL_KEYS:
-            if self.state in d:
+            if hasattr(d, '__iter__') and self.state in d:
                 return d[self.state]
         return d
 

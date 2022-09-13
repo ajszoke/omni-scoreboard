@@ -120,3 +120,10 @@ configs/
 
 # Ignore logs
 logs.txt
+
+assets/hardware
+assets/pixil
+assets/img/team-icons
+assets/img/logo.psd
+TEMP
+.idea

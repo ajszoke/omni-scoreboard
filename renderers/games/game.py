@@ -51,6 +51,7 @@ def render_live_game(canvas, layout: Layout, colors: Color, scoreboard: Scoreboa
 
 # --------------- at-bat ---------------
 def _render_at_bat(canvas, layout, colors, atbat: AtBat, text_pos, strikeout, looking, animation, pitches: Pitches):
+    spacer_width = 2
     plength = __render_pitcher_text(canvas, layout, colors, atbat.pitcher, text_pos)
     __render_pitch_text(canvas, layout, colors, pitches)
     if strikeout:
@@ -58,7 +59,7 @@ def _render_at_bat(canvas, layout, colors, atbat: AtBat, text_pos, strikeout, lo
             __render_strikeout(canvas, layout, colors, looking)
         return plength
     else:
-        blength = __render_batter_text(canvas, layout, colors, atbat.batter, text_pos)
+        blength = __render_batter_text(canvas, layout, colors, atbat.batter, text_pos, atbat.batter_order_num)
         return max(plength, blength)
 
 
@@ -70,45 +71,47 @@ def __render_strikeout(canvas, layout, colors, looking):
     graphics.DrawText(canvas, font["font"], coords["x"], coords["y"], color, text)
 
 
-def __render_batter_text(canvas, layout, colors, batter, text_pos):
+def __render_batter_text(canvas, layout, colors, batter, text_pos, batter_order_num):
     coords = layout.coords("atbat.batter")
     color = colors.graphics_color("atbat.batter")
     font = layout.font("atbat.batter")
-    bgcolor = colors.graphics_color("default.background")
-    offset = coords.get("offset", 0)
-    pos = scrollingtext.render_text(
-        canvas,
-        coords["x"] + font["size"]["width"] * 3,
-        coords["y"],
-        coords["width"],
-        font,
-        color,
-        bgcolor,
-        batter,
-        text_pos + offset,
-    )
-    graphics.DrawText(canvas, font["font"], coords["x"], coords["y"], color, "AB:")
-    return pos
+    # bgcolor = colors.graphics_color("default.background")
+    # offset = coords.get("offset", 0)
+    # pos = scrollingtext.render_text(
+    #     canvas,
+    #     coords["x"] + font["size"]["width"] * 3,
+    #     coords["y"],
+    #     coords["width"],
+    #     font,
+    #     color,
+    #     bgcolor,
+    #     batter,
+    #     text_pos + offset,
+    # )
+    display_text = str(batter_order_num) + ". " + batter
+    graphics.DrawText(canvas, font["font"], coords["x"], coords["y"], color, display_text)
+    return coords["x"] + len(display_text) * font["size"]["width"]
 
 
 def __render_pitcher_text(canvas, layout, colors, pitcher, text_pos):
     coords = layout.coords("atbat.pitcher")
     color = colors.graphics_color("atbat.pitcher")
     font = layout.font("atbat.pitcher")
-    bgcolor = colors.graphics_color("default.background")
-    pos = scrollingtext.render_text(
-        canvas,
-        coords["x"] + font["size"]["width"] * 2,
-        coords["y"],
-        coords["width"],
-        font,
-        color,
-        bgcolor,
-        pitcher,
-        text_pos,
-    )
-    graphics.DrawText(canvas, font["font"], coords["x"], coords["y"], color, "P:")
-    return pos
+    # bgcolor = colors.graphics_color("default.background")
+    # pos = scrollingtext.render_text(
+    #     canvas,
+    #     coords["x"] + font["size"]["width"] * 2,
+    #     coords["y"],
+    #     coords["width"],
+    #     font,
+    #     color,
+    #     bgcolor,
+    #     pitcher,
+    #     text_pos,
+    # )
+    display_text = "P: " + pitcher
+    graphics.DrawText(canvas, font["font"], coords["x"], coords["y"], color, display_text)
+    return coords["x"] + len(display_text) * font["size"]["width"]
 
 def __render_pitch_text(canvas, layout, colors, pitches: Pitches):
 #def __render_pitch_text(canvas, layout, colors):

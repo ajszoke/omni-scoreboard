@@ -78,10 +78,11 @@ def __render_static_wide_standings(canvas, layout, colors, division, league):
         record_text_x = center_text_position(record_text, coords["team"]["record"]["x"], font["size"]["width"])
 
         if "-" in str(team.gb):
-            gb_text = " -  "
+            gb_text = " -"
         else:
             gb_text = "{:>4s}".format(str(team.gb))
-        gb_text_x = coords["team"]["games_back"]["x"] - (len(gb_text) * font["size"]["width"])
+        half_offset = 3 if "½" in gb_text else 0
+        gb_text_x = coords["team"]["games_back"]["x"] - (len(gb_text) * font["size"]["width"]) - half_offset
 
         color = team_elim_color if team.elim else (team_clinched_color if team.clinched else team_stat_color)
         graphics.DrawText(canvas, font["font"], record_text_x, offset, color, record_text)

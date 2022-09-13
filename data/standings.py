@@ -1,6 +1,7 @@
 import time
 from datetime import datetime, timedelta
 
+import re
 import statsapi
 
 import debug
@@ -12,7 +13,7 @@ STANDINGS_UPDATE_RATE = 15 * 60  # 15 minutes between standings updates
 
 API_FIELDS = (
     "records,standingsType,teamRecords,team,abbreviation,division,league,nameShort,gamesBack,wildCardGamesBack,"
-    "wildCardEliminationNumber,clinched,wins,losses"
+    "eliminationNumber,wildCardEliminationNumber,clinched,wins,losses"
 )
 
 
@@ -62,11 +63,27 @@ class Standings:
                         season_params["date"] = self.date.strftime("%m/%d/%Y")
 
                     divisons_data = statsapi.get("standings", season_params)
+                    for division in divisons_data["records"]:
+                        for team in division["teamRecords"]:
+                            if team["eliminationNumber"] == "E":
+                                team["gamesBack"] = "E"
+                            else:
+                                team["gamesBack"] = re.sub("^\+0.", "+.", re.sub("^0.", ".", team["gamesBack"]))\
+                                    .replace(".5", "½").replace(".0", "")
+
                     self.standings = [Division(division_data) for division_data in divisons_data["records"]]
 
                     if self.wild_cards:
                         season_params["standingsTypes"] = "wildCard"
                         wc_data = statsapi.get("standings", season_params)
+                        for league in wc_data["records"]:
+                            for team in league["teamRecords"]:
+                                if team["wildCardEliminationNumber"] == "E":
+                                    team["wildCardGamesBack"] = "E"
+                                else:
+                                    team["wildCardGamesBack"] = re.sub("^\+0.", "+.",
+                                            re.sub("^0.", ".", team["wildCardGamesBack"]))\
+                                            .replace(".5", "½").replace(".0", "")
                         self.standings += [Division(data, wc=True) for data in wc_data["records"]]
                 else:
                     postseason_data = statsapi.get(

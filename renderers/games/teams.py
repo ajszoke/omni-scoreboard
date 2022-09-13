@@ -1,5 +1,9 @@
+import os
+
+from PIL import Image
+
 try:
-    from rgbmatrix import graphics
+    from rgbmatrix import RGBMatrix, graphics
 except ImportError:
     from RGBMatrixEmulator import graphics
 
@@ -36,26 +40,43 @@ def render_team_banner(canvas, layout, team_colors, home_team, away_team, full_t
     accent_coords["away"] = layout.coords("teams.accent.away")
     accent_coords["home"] = layout.coords("teams.accent.home")
 
-    for team in ["away", "home"]:
-        for x in range(bg_coords[team]["width"]):
-            for y in range(bg_coords[team]["height"]):
-                color = away_team_color if team == "away" else home_team_color
-                x_offset = bg_coords[team]["x"]
-                y_offset = bg_coords[team]["y"]
-                canvas.SetPixel(x + x_offset, y + y_offset, color["r"], color["g"], color["b"])
+    away_team_path = "assets/img/team-icons/mlb/20/" + away_team.abbrev + ".png"
+    away_team_icon = None
+    if os.path.exists(away_team_path):
+        away_team_icon = Image.open(away_team_path).convert("RGB")
+    else:
+        print(away_team_path + " not found!")
+    home_team_path = "assets/img/team-icons/mlb/20/" + home_team.abbrev + ".png"  # FIXME
+    home_team_icon = None
+    if os.path.exists(home_team_path):
+        home_team_icon = Image.open(home_team_path).convert("RGB")
+    else:
+        print(home_team_path + " not found!")
 
     for team in ["away", "home"]:
-        for x in range(accent_coords[team]["width"]):
-            for y in range(accent_coords[team]["height"]):
-                color = away_team_accent if team == "away" else home_team_accent
-                x_offset = accent_coords[team]["x"]
-                y_offset = accent_coords[team]["y"]
-                canvas.SetPixel(x + x_offset, y + y_offset, color["r"], color["g"], color["b"])
+        try:
+            x_offset = layout.coords("teams.team_icons." + team + ".x")
+            y_offset = layout.coords("teams.team_icons." + team + ".y")
+            for x in range(layout.coords("teams.team_icons." + team + ".size")):
+                for y in range(layout.coords("teams.team_icons." + team + ".size")):
+                    color = away_team_icon.getpixel((x, y)) if team == "away" else home_team_icon.getpixel((x, y))
+                    canvas.SetPixel(x + x_offset, y + y_offset, color[0], color[1], color[2])
+        except:
+            pass
 
-    use_full_team_names = can_use_full_team_names(canvas, full_team_names, short_team_names_for_runs_hits, [home_team, away_team])
 
-    __render_team_text(canvas, layout, away_colors, away_team, "away", use_full_team_names, default_colors)
-    __render_team_text(canvas, layout, home_colors, home_team, "home", use_full_team_names, default_colors)
+    # for team in ["away", "home"]:
+    #     for x in range(accent_coords[team]["width"]):
+    #         for y in range(accent_coords[team]["height"]):
+    #             color = away_team_accent if team == "away" else home_team_accent
+    #             x_offset = accent_coords[team]["x"]
+    #             y_offset = accent_coords[team]["y"]
+    #             canvas.SetPixel(x + x_offset, y + y_offset, color["r"], color["g"], color["b"])
+
+    # use_full_team_names = can_use_full_team_names(canvas, full_team_names, short_team_names_for_runs_hits, [home_team, away_team])
+
+    # __render_team_text(canvas, layout, away_colors, away_team, "away", use_full_team_names, default_colors)
+    # __render_team_text(canvas, layout, home_colors, home_team, "home", use_full_team_names, default_colors)
 
     # Number of characters in each score.
     score_spacing = {
