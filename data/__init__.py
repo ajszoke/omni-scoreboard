@@ -5,6 +5,7 @@ import debug
 from data import status
 from data.game import Game
 from data.headlines import Headlines
+from data.odds import Odds
 from data.schedule import Schedule
 from data.scoreboard import Scoreboard
 from data.scoreboard.postgame import Postgame
@@ -27,6 +28,9 @@ class Data:
 
         # Weather info
         self.weather: Weather = Weather(config)
+
+        # Odds info
+        self.odds: Odds = Odds()
 
         # News headlines
         self.headlines: Headlines = Headlines(config, self.schedule.date.year)
@@ -90,6 +94,9 @@ class Data:
     def refresh_weather(self):
         self.__process_network_status(self.weather.update())
 
+    def refresh_odds(self):
+        self.__process_network_status(self.odds.update())
+
     def refresh_news_ticker(self):
         self.__process_network_status(self.headlines.update())
 
@@ -139,6 +146,6 @@ class Data:
 
     def print_game_data_debug(self):
         debug.log("Game Data Refreshed: %s", self.current_game._data["gameData"]["game"]["id"])
-        debug.log("Pre: %s", Pregame(self.current_game, self.config.time_format))
+        debug.log("Pre: %s", Pregame(self.current_game, self.config.time_format, None))
         debug.log("Live: %s", Scoreboard(self.current_game))
         debug.log("Final: %s", Postgame(self.current_game))

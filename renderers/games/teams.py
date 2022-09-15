@@ -2,12 +2,14 @@ import os
 
 from PIL import Image
 
+import utils
+
 try:
     from rgbmatrix import RGBMatrix, graphics
 except ImportError:
     from RGBMatrixEmulator import graphics
 
-def render_team_banner(canvas, layout, team_colors, home_team, away_team, full_team_names, short_team_names_for_runs_hits):
+def render_team_banner(canvas, layout, team_colors, home_team, away_team, full_team_names, short_team_names_for_runs_hits, should_render_runline):
     default_colors = team_colors.color("default")
 
     away_colors = __team_colors(team_colors, away_team.abbrev)
@@ -40,13 +42,17 @@ def render_team_banner(canvas, layout, team_colors, home_team, away_team, full_t
     accent_coords["away"] = layout.coords("teams.accent.away")
     accent_coords["home"] = layout.coords("teams.accent.home")
 
-    away_team_path = "assets/img/team-icons/mlb/20/" + away_team.abbrev + ".png"
+    delta_e = utils.color_delta_e(away_team_color, home_team_color)
+    similarity_threshold = 10
+    away_team_alt_option = "-alt" if delta_e < similarity_threshold else ""
+
+    away_team_path = "assets/img/team-icons/mlb/20/" + away_team.abbrev + away_team_alt_option + ".png"
     away_team_icon = None
     if os.path.exists(away_team_path):
         away_team_icon = Image.open(away_team_path).convert("RGB")
     else:
         print(away_team_path + " not found!")
-    home_team_path = "assets/img/team-icons/mlb/20/" + home_team.abbrev + ".png"  # FIXME
+    home_team_path = "assets/img/team-icons/mlb/20/" + home_team.abbrev + ".png"
     home_team_icon = None
     if os.path.exists(home_team_path):
         home_team_icon = Image.open(home_team_path).convert("RGB")
@@ -79,13 +85,14 @@ def render_team_banner(canvas, layout, team_colors, home_team, away_team, full_t
     # __render_team_text(canvas, layout, home_colors, home_team, "home", use_full_team_names, default_colors)
 
     # Number of characters in each score.
-    score_spacing = {
-        "runs": max(len(str(away_team.runs)), len(str(home_team.runs))),
-        "hits": max(len(str(away_team.hits)), len(str(home_team.hits))),
-        "errors": max(len(str(away_team.errors)), len(str(home_team.errors))),
-    }
-    __render_team_score(canvas, layout, away_colors, away_team, "away", default_colors, score_spacing)
-    __render_team_score(canvas, layout, home_colors, home_team, "home", default_colors, score_spacing)
+    if should_render_runline:
+        score_spacing = {
+            "runs": max(len(str(away_team.runs)), len(str(home_team.runs))),
+            "hits": max(len(str(away_team.hits)), len(str(home_team.hits))),
+            "errors": max(len(str(away_team.errors)), len(str(home_team.errors))),
+        }
+        __render_team_score(canvas, layout, away_colors, away_team, "away", default_colors, score_spacing)
+        __render_team_score(canvas, layout, home_colors, home_team, "home", default_colors, score_spacing)
 
 def can_use_full_team_names(canvas, enabled, abbreviate_on_overflow, teams):
     # Settings enabled and size is able to display it

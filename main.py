@@ -163,6 +163,7 @@ def __refresh_offday(render_thread, data):  # type: (threading.Thread, Data) -> 
     while render_thread.is_alive():
         time.sleep(30)
         data.refresh_weather()
+        data.refresh_odds()
         data.refresh_news_ticker()
 
 

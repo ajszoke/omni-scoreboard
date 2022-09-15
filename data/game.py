@@ -41,8 +41,14 @@ class Game:
             self.starttime = time.time()
             try:
                 debug.log("Fetching data for game %s", str(self.game_id))
-                self._data = statsapi.get("game", {"gamePk": self.game_id})
-                self.win_probabilities = statsapi.get("game_contextMetrics", {"gamePk": self.game_id})
+                data = statsapi.get("game", {"gamePk": self.game_id})
+                win_probabilities = statsapi.get("game_contextMetrics", {"gamePk": self.game_id})
+                # api_timestamp = datetime.strptime(data["metadata"]["timeStamp"], '%Y%m%d_%H%M%S')
+                # now = datetime.utcnow()
+                # wait_time = (now - api_timestamp).total_seconds()
+                # time.sleep(wait_time + 5)  # fixme
+                self._data = data
+                self.win_probabilities = win_probabilities
                 self._status = self._data["gameData"]["status"]
                 if self._data["gameData"]["datetime"]["officialDate"] > self.date:
                     # this is odd, but if a game is postponed then the 'game' endpoint gets the rescheduled game
@@ -72,6 +78,13 @@ class Game:
     
     def home_abbreviation(self):
         return self._data["gameData"]["teams"]["home"]["abbreviation"]
+
+    def home_longname(self):
+        return self._data["gameData"]["teams"]["home"]["name"]
+
+    def home_record(self):
+        return "{}-{}".format(self._data["gameData"]["teams"]["home"]["record"]["wins"],
+                              self._data["gameData"]["teams"]["home"]["record"]["losses"])
     
     def pregame_weather(self):
         try:
@@ -79,13 +92,20 @@ class Game:
         except KeyError:
             return None
         else:
-            return wx 
-    
+            return wx
+
     def away_name(self):
         return self._data["gameData"]["teams"]["away"]["teamName"]
 
     def away_abbreviation(self):
         return self._data["gameData"]["teams"]["away"]["abbreviation"]
+
+    def away_longname(self):
+        return self._data["gameData"]["teams"]["away"]["name"]
+
+    def away_record(self):
+        return "{}-{}".format(self._data["gameData"]["teams"]["away"]["record"]["wins"],
+                              self._data["gameData"]["teams"]["away"]["record"]["losses"])
 
     def status(self):
         return self._status["detailedState"]
@@ -239,6 +259,7 @@ class Game:
                 "hr": box_root["homeRuns"],
                 "k": box_root["strikeOuts"],
                 "bb": box_root["baseOnBalls"],
+                "hbp": box_root["hitByPitch"],
                 "3b": box_root["triples"],
                 "2b": box_root["doubles"],
                 "sac": box_root["sacBunts"] + box_root["sacFlies"],
@@ -343,7 +364,9 @@ class Game:
     def __should_update(self):
         endtime = time.time()
         time_delta = endtime - self.starttime
-        return time_delta >= GAME_UPDATE_RATE
+        should_update = time_delta >= GAME_UPDATE_RATE
+        # print("should update: " + str(should_update))
+        return should_update
 
     @staticmethod
     def _format_id(player):

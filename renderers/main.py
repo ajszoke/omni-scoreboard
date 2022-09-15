@@ -149,6 +149,7 @@ class MainRenderer:
         scoreboard = Scoreboard(game)
         layout = self.data.config.layout
         colors = self.data.config.scoreboard_colors
+        is_pregame = status.is_pregame(game.status())
         teams.render_team_banner(
             self.canvas,
             layout,
@@ -157,13 +158,15 @@ class MainRenderer:
             scoreboard.away_team,
             self.data.config.full_team_names,
             self.data.config.short_team_names_for_runs_hits,
+            not is_pregame
         )
 
-        if status.is_pregame(game.status()):  # Draw the pregame information
+        if is_pregame:  # Draw the pregame information
             self.__max_scroll_x(layout.coords("pregame.scrolling_text"))
-            pregame = Pregame(game, self.data.config.time_format)
+            pregame = Pregame(game, self.data.config.time_format, self.data.odds)
             pos = pregamerender.render_pregame(self.canvas, layout, colors, pregame, self.scrolling_text_pos, self.data.config.pregame_weather)
-            self.__update_scrolling_text_pos(pos, self.canvas.width)
+            # self.__update_scrolling_text_pos(pos, self.canvas.width)
+            time.sleep(10)
 
         elif status.is_complete(game.status()):  # Draw the game summary
             self.__max_scroll_x(layout.coords("final.scrolling_text"))
@@ -198,7 +201,7 @@ class MainRenderer:
             batter_stats = game.batter_stats()
 
             pos = gamerender.render_live_game(
-                self.canvas, layout, colors, scoreboard, self.scrolling_text_pos, self.animation_time
+                self.canvas, layout, colors, scoreboard, self.scrolling_text_pos, self.animation_time, pitcher_stats, batter_stats
             )
             self.__update_scrolling_text_pos(pos, loop_point)
 
