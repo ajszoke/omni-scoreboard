@@ -256,6 +256,7 @@ class Game:
             stats = {
                 "at_bats": box_root["atBats"],
                 "hits": box_root["hits"],
+                "rbi": box_root["rbi"],
                 "hr": box_root["homeRuns"],
                 "k": box_root["strikeOuts"],
                 "bb": box_root["baseOnBalls"],
@@ -312,6 +313,7 @@ class Game:
                 "er": box_root["earnedRuns"],
                 "hits": box_root["hits"],
                 "walks": box_root["baseOnBalls"],
+                "balks": box_root["balks"],
                 "strikeouts": box_root["strikeOuts"]
             }
         if season_root != {}:

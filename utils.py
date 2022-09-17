@@ -1,5 +1,7 @@
 from math import sqrt
 
+from data.config import Color
+
 try:
     from rgbmatrix import RGBMatrixOptions
 except ImportError:
@@ -25,10 +27,12 @@ def text_matrix_width(text, font):
     except:
         return 0
 
+
 def color_delta_e(color1, color2):
     lab1 = rgb2lab([color1["r"], color1["g"], color1["b"]])
     lab2 = rgb2lab([color2["r"], color2["g"], color2["b"]])
     return sqrt((lab2[0] - lab1[0])**2 + (lab2[1] - lab1[1])**2 + (lab2[2] - lab1[2])**2)
+
 
 # Source: https://gist.github.com/manojpandey/f5ece715132c572c80421febebaf66ae
 # RGB to Lab conversion
@@ -89,6 +93,10 @@ def rgb2lab(inputColor):
     Lab[2] = round(b, 4)
 
     return Lab
+
+
+def is_color_black(color: Color):
+    return color["r"] == 0 and color["g"] == 0 and color["b"] == 0
 
 
 def args():

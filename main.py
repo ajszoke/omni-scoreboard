@@ -131,7 +131,8 @@ def main(matrix, config_base):
         debug.log("Using rgbmatrix version %s", __version__)
 
     # Draw startup screen
-    logo = "assets/img/logo-w" + str(matrix.width) + "h" + str(matrix.height) + ".png"
+    # logo = "assets/img/logo-w" + str(matrix.width) + "h" + str(matrix.height) + ".png"
+    logo = "assets/img/cage.png"
 
     # MLB image disabled when using renderer, for now.
     # see: https://github.com/ty-porter/RGBMatrixEmulator/issues/9#issuecomment-922869679

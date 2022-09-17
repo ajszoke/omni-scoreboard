@@ -1,6 +1,8 @@
 import time
 
 import json
+from datetime import datetime
+
 import requests
 
 import debug
@@ -30,19 +32,20 @@ class Odds:
                 if response.status_code == 200:
                     response_body = json.loads(response.text)
                     for game in response_body[0]["events"]:
-                        new_game = {}
-                        for team in game["competitors"]:
-                            new_game[team["name"]] = {}
-                        for market in game["displayGroups"][0]["markets"]:
-                            if market["descriptionKey"] == "Main Dynamic Asian Runline":
-                                for team in market["outcomes"]:
-                                    new_game[team["description"]]["runline"] = team["price"]["handicap"]
-                                    new_game[team["description"]]["runline_odds"] = team["price"]["american"]
-                            elif market["descriptionKey"] == "Head To Head":
-                                for team in market["outcomes"]:
-                                    new_game[team["description"]]["moneyline"] = team["price"]["american"]
-                            else:
-                                continue
+                        if datetime.now().strftime("%Y%m%d") in game["link"]:
+                            new_game = {}
+                            for team in game["competitors"]:
+                                new_game[team["name"]] = {}
+                            for market in game["displayGroups"][0]["markets"]:
+                                if market["descriptionKey"] == "Main Dynamic Asian Runline":
+                                    for team in market["outcomes"]:
+                                        new_game[team["description"]]["runline"] = team["price"]["handicap"]
+                                        new_game[team["description"]]["runline_odds"] = team["price"]["american"]
+                                elif market["descriptionKey"] == "Head To Head":
+                                    for team in market["outcomes"]:
+                                        new_game[team["description"]]["moneyline"] = team["price"]["american"]
+                                else:
+                                    continue
 
                         self.games.update(new_game)
                     return UpdateStatus.SUCCESS

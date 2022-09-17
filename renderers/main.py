@@ -149,16 +149,30 @@ class MainRenderer:
         scoreboard = Scoreboard(game)
         layout = self.data.config.layout
         colors = self.data.config.scoreboard_colors
+        win_prob = self.data.current_game.win_probability()
         is_pregame = status.is_pregame(game.status())
+        is_live = status.is_live(game.status())
+        is_complete = status.is_complete(game.status())
+        run_text_colors = {
+            "away": colors.graphics_color("team_runline"),
+            "home": colors.graphics_color("team_runline")
+        }
+        if is_complete:
+            winner = game.winning_team()
+            if winner is not None:
+                loser = "away" if winner == "home" else "away"
+                run_text_colors[winner] = colors.graphics_color("postgame.winner")
+                run_text_colors[loser] = colors.graphics_color("postgame.loser")
         teams.render_team_banner(
             self.canvas,
             layout,
             self.data.config.team_colors,
             scoreboard.home_team,
             scoreboard.away_team,
-            self.data.config.full_team_names,
-            self.data.config.short_team_names_for_runs_hits,
-            not is_pregame
+            run_text_colors,
+            win_prob,
+            not is_pregame,
+            is_live
         )
 
         if is_pregame:  # Draw the pregame information

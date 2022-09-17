@@ -37,7 +37,7 @@ def render_live_game(canvas, layout: Layout, colors: Color, scoreboard: Scoreboa
         should_display_nohitter = layout.coords("nohitter")["innings_until_display"]
         if scoreboard.inning.number > should_display_nohitter:
             if layout.state_is_nohitter():
-                nohitter.render_nohit_text(canvas, layout, colors)
+                pass  # nohitter.render_nohit_text(canvas, layout, colors) fixme
 
         _render_count(canvas, layout, colors, scoreboard.pitches)
         _render_outs(canvas, layout, colors, scoreboard.outs)
@@ -197,13 +197,15 @@ def __render_pitch_text(canvas, layout, colors, pitches: Pitches):
 def __getPitcherGameStatsStr(pitcher_stats):
     hr_str = " {} HR".format(pitcher_stats["hr"]) if pitcher_stats["hr"] > 0 else ""
     er_str = " {} ER".format(pitcher_stats["er"]) if pitcher_stats["er"] > 0 else ""
+    balks_str = " {} BALK".format(pitcher_stats["balks"]) if pitcher_stats["balks"] > 0 else ""
     walks_str = " {} BB".format(pitcher_stats["walks"]) if pitcher_stats["walks"] > 0 else ""
     ks_str = " {} K".format(pitcher_stats["strikeouts"]) if pitcher_stats["strikeouts"] > 0 else ""
-    return pitcher_stats["ip"] + " IP" + er_str + ks_str + walks_str + hr_str
+    return pitcher_stats["ip"] + " IP" + er_str + ks_str + balks_str + walks_str + hr_str
 
 def __getBatterGameStatsStr(batter_stats):
     ab_str = "{}-{}".format(batter_stats["hits"], batter_stats["at_bats"])
     hr_str = " {} HR".format(batter_stats["hr"]) if batter_stats["hr"] > 1 else " HR" if batter_stats["hr"] > 0 else ""
+    rbi_str = " {} RBI".format(batter_stats["rbi"]) if batter_stats["rbi"] > 1 else " RBI" if batter_stats["rbi"] > 0 else ""
     walks_str = " {} BB".format(batter_stats["bb"]) if batter_stats["bb"] > 1 else " BB" if batter_stats["bb"] > 0 else ""
     hbp_str = " {} HBP".format(batter_stats["hbp"]) if batter_stats["hbp"] > 1 else " HBP" if batter_stats["hbp"] > 0 else ""
     triple_str = " {} 3B".format(batter_stats["3b"]) if batter_stats["3b"] > 1 else " 3B" if batter_stats["3b"] > 0 else ""
@@ -214,7 +216,7 @@ def __getBatterGameStatsStr(batter_stats):
     gidp_str = " {} GIDP".format(batter_stats["gidp"]) if batter_stats["gidp"] > 1 else " GIDP" if batter_stats["gidp"] > 0 else ""
     avg_str = " {} AVG".format(batter_stats["avg"])
     ops_str = " {} OPS".format(batter_stats["ops"])
-    return ab_str + hr_str + triple_str + double_str + walks_str + ks_str + hbp_str + sac_str + gitp_str + gidp_str + avg_str + ops_str
+    return ab_str + hr_str + rbi_str + triple_str + double_str + walks_str + ks_str + hbp_str + sac_str + gitp_str + gidp_str + avg_str + ops_str
     
 # --------------- bases ---------------
 def _render_bases(canvas, layout, colors, bases: Bases, home_run, animation):
