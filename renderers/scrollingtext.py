@@ -36,7 +36,7 @@ def render_text(canvas, x, y, width, font, text_color, bg_color, text, scroll_po
         return total_width
 
     else:
-        graphics.DrawText(canvas, font["font"], __center_position(text, font, width, x), y, text_color, text)
+        graphics.DrawText(canvas, font["font"], x, y, text_color, text)
         return 0
 
 

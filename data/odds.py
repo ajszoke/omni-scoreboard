@@ -21,8 +21,6 @@ class Odds:
         # Force an update for our initial data
         self.update(True)
 
-    # Make a call to the open weather maps API and update our instance variables
-    # Pass True if you need to ignore the update rate (like for our first update)
     def update(self, force=False) -> UpdateStatus:
         if force or self.__should_update():
             debug.log("Odds should update!")

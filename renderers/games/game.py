@@ -1,3 +1,6 @@
+import utils
+from data.playresult import PlayResult
+
 try:
     from rgbmatrix import graphics
 except ImportError:
@@ -11,7 +14,7 @@ from data.scoreboard.bases import Bases
 from data.scoreboard.inning import Inning
 from data.scoreboard.pitches import Pitches
 from renderers import scrollingtext
-from renderers.games import nohitter
+import data.config.layout as cfglayout
 
 
 def render_live_game(canvas, layout: Layout, colors: Color, scoreboard: Scoreboard, text_pos, animation_time, pitcher_stats, batter_stats):
@@ -19,25 +22,30 @@ def render_live_game(canvas, layout: Layout, colors: Color, scoreboard: Scoreboa
 
     if scoreboard.inning.state == Inning.TOP or scoreboard.inning.state == Inning.BOTTOM:
 
+        # Check if we're deep enough into a game and it's a no hitter or perfect game
+        is_perfect = False
+        is_no_hitter = False
+        should_display_nohitter = layout.coords("nohitter")["innings_until_display"]
+        if scoreboard.inning.number > should_display_nohitter:
+            if layout.state == cfglayout.LAYOUT_STATE_PERFECT:
+                is_perfect = True
+            elif layout.state == cfglayout.LAYOUT_STATE_NOHIT:
+                is_no_hitter = True
+
         pos = _render_at_bat(
             canvas,
             layout,
             colors,
             scoreboard.atbat,
             text_pos,
-            scoreboard.strikeout(),
-            scoreboard.strikeout_looking(),
-            (animation_time // 6) % 2,
+            scoreboard.play_result_data,
+            # (animation_time // 6) % 2,
             scoreboard.pitches,
             pitcher_stats,
-            batter_stats
+            batter_stats,
+            is_perfect,
+            is_no_hitter
         )
-
-        # Check if we're deep enough into a game and it's a no hitter or perfect game
-        should_display_nohitter = layout.coords("nohitter")["innings_until_display"]
-        if scoreboard.inning.number > should_display_nohitter:
-            if layout.state_is_nohitter():
-                pass  # nohitter.render_nohit_text(canvas, layout, colors) fixme
 
         _render_count(canvas, layout, colors, scoreboard.pitches)
         _render_outs(canvas, layout, colors, scoreboard.outs)
@@ -52,20 +60,51 @@ def render_live_game(canvas, layout: Layout, colors: Color, scoreboard: Scoreboa
 
 
 # --------------- at-bat ---------------
-def _render_at_bat(canvas, layout, colors, atbat: AtBat, text_pos, strikeout, looking, animation, pitches: Pitches, pitcher_stats, batter_stats):
+def _render_at_bat(canvas, layout, colors, atbat: AtBat, text_pos, play_result_data, pitches: Pitches, pitcher_stats,
+                   batter_stats, is_perfect, is_no_hitter):
     spacer_width = 3
     plength = __render_pitcher_text(canvas, layout, colors, atbat.pitcher, text_pos)
-    __render_pitch_text(canvas, layout, colors, pitches)
-    __render_pitcher_stats_text(canvas, layout, colors, plength, pitcher_stats, spacer_width)
-    if strikeout:
-        if animation:
-            __render_strikeout(canvas, layout, colors, looking)
-        return plength
-    else:
-        blength = __render_batter_text(canvas, layout, colors, atbat.batter, text_pos, atbat.batter_order_num)
-        __render_batter_stats_text(canvas, layout, colors, blength, batter_stats, spacer_width)
-        return max(plength, blength)
+    blength = __render_batter_text(canvas, layout, colors, atbat.batter, text_pos, atbat.batter_order_num)
 
+    if 'eventType' in play_result_data and play_result_data["eventType"] not in ['pitching_substitution', 'defensive_switch']:  # todo
+        play_result = PlayResult(layout, colors, canvas)
+        play_result.populate(play_result_data)
+        __render_play_result(canvas, layout, colors, play_result)
+
+    else:
+        __render_pitch_text(canvas, layout, colors, pitches)
+        __render_pitch_count(canvas, layout, colors, pitcher_stats)
+        __render_pitcher_stats_text(canvas, layout, colors, plength, pitcher_stats, spacer_width, is_perfect,
+                                    is_no_hitter, text_pos)
+        __render_batter_stats_text(canvas, layout, colors, blength, batter_stats, spacer_width, text_pos)
+
+    # if strikeout:
+    #     if animation:
+    #         __render_strikeout(canvas, layout, colors, looking)
+    #     # return plength
+    # else:
+    #     pass
+    #     # return max(plength, blength)
+    return 0
+
+def __render_play_result(canvas, layout, colors, play_result: PlayResult):
+    text_color = colors.graphics_color("play_result.text")
+    center_x = int((layout.coords("atbat.result.x") + canvas.width) / 2)
+    width = canvas.width - layout.coords("atbat.result.x")
+    if play_result.result_color is not None:
+        y1 = int(canvas.height)
+        y2 = int(layout.coords("atbat.result.y"))
+        x1 = int(layout.coords("atbat.result.x"))
+        x2 = int(canvas.width)
+        color = colors.graphics_color("play_result." + play_result.result_color)
+        for yi in range(y2, y1):
+            graphics.DrawLine(canvas, x1, yi, x2, yi, color)
+    for line in range(1, 4):
+        line_root = play_result.text_lines["line_" + str(line)]
+        if line_root["text"] != '':
+            x = utils.center_text_position(line_root["text"], center_x, int(line_root["font"]["size"]["width"]))
+            y = line_root["y"]
+            graphics.DrawText(canvas, line_root["font"]["font"], x, y, text_color, line_root["text"])
 
 def __render_strikeout(canvas, layout, colors, looking):
     coords = layout.coords("atbat.strikeout")
@@ -117,52 +156,73 @@ def __render_pitcher_text(canvas, layout, colors, pitcher, text_pos):
     graphics.DrawText(canvas, font["font"], coords["x"], coords["y"], color, display_text)
     return coords["x"] + len(display_text) * font["size"]["width"]
 
-def __render_pitcher_stats_text(canvas, layout, colors, text_pos, pitcher_stats, spacer_width):
+def __render_pitcher_stats_text(canvas, layout, colors, p_length, pitcher_stats, spacer_width, is_perfect, is_no_hitter, text_pos):
     y_coord = layout.coords("atbat.pitcher_stats.y")
-    color = colors.graphics_color("atbat.pitcher")
     font = layout.font("atbat.pitcher_stats")
+    core_color = colors.graphics_color("perfect_game_text") if is_perfect \
+        else colors.graphics_color("no_hitter_text") if is_no_hitter \
+        else colors.graphics_color("atbat.pitcher")
+    expanded_color = colors.graphics_color("atbat.pitcher")
     bgcolor = colors.graphics_color("default.background")
-    display_text = __getPitcherGameStatsStr(pitcher_stats)
-    pos = scrollingtext.render_text(
-        canvas,
-        text_pos + spacer_width,
-        y_coord,
-        len(display_text) * font["size"]["width"],
-        font,
-        color,
-        bgcolor,
-        display_text,
-        text_pos,
-    )
-    # display_text = "P: " + pitcher
-    # graphics.DrawText(canvas, font["font"], coords["x"], coords["y"], color, display_text)
-    # return coords["x"] + len(display_text) * font["size"]["width"]
+    display_text_core = " " + __getPitcherCoreGameStatsStr(pitcher_stats)
+    display_text_expanded = __getPitcherExpandedGameStatsStr(pitcher_stats)
+
+    if is_perfect or is_no_hitter:
+        core_len = graphics.DrawText(canvas, font["font"], p_length + spacer_width, y_coord, core_color,
+                                     display_text_core)
+        pos = scrollingtext.render_text(
+            canvas,
+            p_length + (spacer_width * 3) + core_len,
+            y_coord,
+            canvas.width - p_length - (spacer_width * 1) - core_len,
+            font,
+            expanded_color,
+            bgcolor,
+            display_text_core + display_text_expanded,
+            text_pos,
+        )
+    else:
+        x = p_length + (spacer_width * 3)
+        pos = scrollingtext.render_text(
+            canvas,
+            x,
+            y_coord,
+            canvas.width - p_length - (spacer_width * 1),
+            font,
+            core_color,
+            bgcolor,
+            display_text_core + display_text_expanded,
+            text_pos,
+        )
     return pos
 
-def __render_batter_stats_text(canvas, layout, colors, text_pos, batter_stats, spacer_width):
+def __render_batter_stats_text(canvas, layout, colors, b_length, batter_stats, spacer_width, text_pos):
     y_coord = layout.coords("atbat.batter_stats.y")
     color = colors.graphics_color("atbat.batter")
     font = layout.font("atbat.batter_stats")
     bgcolor = colors.graphics_color("default.background")
-    display_text = __getBatterGameStatsStr(batter_stats)
+    display_text = " " + __getBatterGameStatsStr(batter_stats)
     pos = scrollingtext.render_text(
         canvas,
-        text_pos + spacer_width,
+        b_length + (spacer_width * 3),
         y_coord,
-        len(display_text) * font["size"]["width"],
+        canvas.width - b_length - (spacer_width * 1),
         font,
         color,
         bgcolor,
         display_text,
         text_pos,
     )
-    # display_text = "P: " + pitcher
-    # graphics.DrawText(canvas, font["font"], coords["x"], coords["y"], color, display_text)
-    # return coords["x"] + len(display_text) * font["size"]["width"]
     return pos
 
+def __render_pitch_count(canvas, layout, colors, pitcher_stats):
+    coords = layout.coords("atbat.pitch_count")
+    font = layout.font("atbat.pitch_count")
+    color = colors.graphics_color("atbat.pitch_count")
+    count = "P:" + str(pitcher_stats["pitches"])
+    graphics.DrawText(canvas, font["font"], coords["x"], coords["y"], color, count)
+
 def __render_pitch_text(canvas, layout, colors, pitches: Pitches):
-#def __render_pitch_text(canvas, layout, colors):
     coords = layout.coords("atbat.pitch")
     color = colors.graphics_color("atbat.pitch")
     font = layout.font("atbat.pitch")
@@ -178,29 +238,17 @@ def __render_pitch_text(canvas, layout, colors, pitches: Pitches):
         else:
             pitch_text = None
         graphics.DrawText(canvas, font["font"], coords["x"], coords["y"], color, pitch_text)
-    # if (int(pitches.last_pitch_speed) > 0 and layout.coords("atbat.pitch")["enabled"]):
-    #     pitch_text = ""
-    #     if (layout.coords("atbat.pitch")["mph"]):
-    #         speed_text = str(pitches.last_pitch_speed) + "mph"
-    #         if (layout.coords("atbat.pitch")["desc_length"] == "Long"):
-    #             pitch_text = pitches.last_pitch_type_long
-    #             speed_text = str(pitches.last_pitch_speed) + "mph"
-    #         elif (layout.coords("atbat.pitch")["desc_length"] == "Short"):
-    #             pitch_text = pitches.last_pitch_type
-    #             speed_text = str(pitches.last_pitch_speed) + "mph"
-    #     else:
-    #         pitch_text = None
-    #         speed_text = None
-    #     graphics.DrawText(canvas, font["font"], speed_coords["x"], speed_coords["y"], color, speed_text)
-    #     graphics.DrawText(canvas, font["font"], pitch_coords["x"], pitch_coords["y"], color, pitch_text)
 
-def __getPitcherGameStatsStr(pitcher_stats):
+def __getPitcherCoreGameStatsStr(pitcher_stats):
+    return str(pitcher_stats["ip"]) + " IP " + str(pitcher_stats["hits"]) + " H"
+
+def __getPitcherExpandedGameStatsStr(pitcher_stats):
     hr_str = " {} HR".format(pitcher_stats["hr"]) if pitcher_stats["hr"] > 0 else ""
     er_str = " {} ER".format(pitcher_stats["er"]) if pitcher_stats["er"] > 0 else ""
     balks_str = " {} BALK".format(pitcher_stats["balks"]) if pitcher_stats["balks"] > 0 else ""
     walks_str = " {} BB".format(pitcher_stats["walks"]) if pitcher_stats["walks"] > 0 else ""
     ks_str = " {} K".format(pitcher_stats["strikeouts"]) if pitcher_stats["strikeouts"] > 0 else ""
-    return pitcher_stats["ip"] + " IP" + er_str + ks_str + balks_str + walks_str + hr_str
+    return er_str + ks_str + balks_str + walks_str + hr_str
 
 def __getBatterGameStatsStr(batter_stats):
     ab_str = "{}-{}".format(batter_stats["hits"], batter_stats["at_bats"])
@@ -216,7 +264,7 @@ def __getBatterGameStatsStr(batter_stats):
     gidp_str = " {} GIDP".format(batter_stats["gidp"]) if batter_stats["gidp"] > 1 else " GIDP" if batter_stats["gidp"] > 0 else ""
     avg_str = " {} AVG".format(batter_stats["avg"])
     ops_str = " {} OPS".format(batter_stats["ops"])
-    return ab_str + hr_str + rbi_str + triple_str + double_str + walks_str + ks_str + hbp_str + sac_str + gitp_str + gidp_str + avg_str + ops_str
+    return ab_str + hr_str + triple_str + double_str + rbi_str + walks_str + ks_str + hbp_str + sac_str + gitp_str + gidp_str + avg_str + ops_str
     
 # --------------- bases ---------------
 def _render_bases(canvas, layout, colors, bases: Bases, home_run, animation):

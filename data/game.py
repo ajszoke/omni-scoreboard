@@ -314,6 +314,7 @@ class Game:
                 "hits": box_root["hits"],
                 "walks": box_root["baseOnBalls"],
                 "balks": box_root["balks"],
+                "pitches": box_root["numberOfPitches"],
                 "strikeouts": box_root["strikeOuts"]
             }
         if season_root != {}:
@@ -362,6 +363,9 @@ class Game:
         ):
             result += "_looking"
         return result
+
+    def current_play_result_data(self):
+        return self._data["liveData"]["plays"].get("currentPlay", {}).get("result", {})
 
     def __should_update(self):
         endtime = time.time()

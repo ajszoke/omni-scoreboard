@@ -46,7 +46,7 @@ def render_team_banner(canvas, layout, team_colors, home_team, away_team, run_te
     accent_coords["home"] = layout.coords("teams.accent.home")
 
     delta_e = utils.color_delta_e(away_team_color, home_team_color)
-    similarity_threshold = 15
+    similarity_threshold = 20
     away_team_alt_option = ALT if delta_e < similarity_threshold else ""
 
     away_team_path = "assets/img/team-icons/mlb/20/" + away_team.abbrev + away_team_alt_option + ".png"
@@ -61,7 +61,6 @@ def render_team_banner(canvas, layout, team_colors, home_team, away_team, run_te
         home_team_icon = Image.open(home_team_path).convert("RGB")
     else:
         print(home_team_path + " not found!")
-
 
     for team in ["away", "home"]:
         try:
@@ -80,7 +79,8 @@ def render_team_banner(canvas, layout, team_colors, home_team, away_team, run_te
                 do_render_win_prob = True
                 if team == "away" and win_probability > 0:
                     win_prob_color = away_team_color if away_team_alt_option == ALT \
-                                                        and not utils.is_color_black(away_team_color) else away_team_accent
+                                                        and not utils.is_color_black(away_team_color)\
+                                                        else away_team_accent
                     iter_dir = -1
                 elif team == "home" and win_probability < 0:
                     win_prob_color = home_team_accent
@@ -91,6 +91,7 @@ def render_team_banner(canvas, layout, team_colors, home_team, away_team, run_te
                     iter_dir = 0
 
                 if do_render_win_prob:  # fixme
+                    win_probability = (win_probability + (50 * iter_dir)) * 2
                     step_size = int(100/icon_size)
                     for y in range(icon_size):
                         if abs(win_probability) >= step_size:
@@ -109,23 +110,10 @@ def render_team_banner(canvas, layout, team_colors, home_team, away_team, run_te
                         win_probability += iter_dir * step_size
                         if (win_probability >= 0 and iter_dir > 0) or (win_probability <= 0 and iter_dir < 0):
                             break
+                    should_render_prob = False
 
         except:
             pass
-
-
-    # for team in ["away", "home"]:
-    #     for x in range(accent_coords[team]["width"]):
-    #         for y in range(accent_coords[team]["height"]):
-    #             color = away_team_accent if team == "away" else home_team_accent
-    #             x_offset = accent_coords[team]["x"]
-    #             y_offset = accent_coords[team]["y"]
-    #             canvas.SetPixel(x + x_offset, y + y_offset, color["r"], color["g"], color["b"])
-
-    # use_full_team_names = can_use_full_team_names(canvas, full_team_names, short_team_names_for_runs_hits, [home_team, away_team])
-
-    # __render_team_text(canvas, layout, away_colors, away_team, "away", use_full_team_names, default_colors)
-    # __render_team_text(canvas, layout, home_colors, home_team, "home", use_full_team_names, default_colors)
 
     # Number of characters in each score.
     if should_render_runline:
@@ -197,7 +185,7 @@ def __render_score_component(canvas, layout, colors, font, default_colors, coord
 
 def __render_team_score(canvas, layout, colors, run_text_colors, team, homeaway, default_colors, score_spacing):
     coords = layout.coords(f"teams.runs.{homeaway}").copy()
-    font = layout.font("teams.runs.small") if (score_spacing["hits"] > 1 and score_spacing["runs"] > 1) else layout.font("teams.runs.normal")
+    font = layout.font("teams.runs.small") if (score_spacing["hits"] > 1 or score_spacing["runs"] > 1) else layout.font("teams.runs.normal")
     if layout.coords("teams.runs.runs_hits_errors")["show"]:
         __render_score_component(
             canvas, layout, run_text_colors, font, default_colors, coords, team.errors, score_spacing["errors"]

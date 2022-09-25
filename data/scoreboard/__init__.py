@@ -32,6 +32,7 @@ class Scoreboard:
         self.reason = game.reason()
 
         self.play_result = game.current_play_result()
+        self.play_result_data = game.current_play_result_data()
 
     def homerun(self):
         return self.play_result == "home_run"
