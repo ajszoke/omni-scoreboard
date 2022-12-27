@@ -37,6 +37,23 @@ def _render_decision_scroll(canvas, layout, colors, postgame, text_pos):
     return scrollingtext.render_text(
         canvas, coords["x"], coords["y"], coords["width"], font, color, bgcolor, scroll_text, text_pos
     )
+    # coords = layout.coords("final.scrolling_text")
+    # font = layout.font("final.scrolling_text")
+    # color = colors.graphics_color("final.scrolling_text")
+    # bgcolor = colors.graphics_color("default.background")
+    # scroll_text = "W: {} {}-{} L: {} {}-{}".format(
+    #     postgame.winning_pitcher,
+    #     postgame.winning_pitcher_wins,
+    #     postgame.winning_pitcher_losses,
+    #     postgame.losing_pitcher,
+    #     postgame.losing_pitcher_wins,
+    #     postgame.losing_pitcher_losses,
+    # )
+    # if postgame.save_pitcher:
+    #     scroll_text += " SV: {} ({})".format(postgame.save_pitcher, postgame.save_pitcher_saves)
+    # return scrollingtext.render_text(
+    #     canvas, coords["x"], coords["y"], coords["width"], font, color, bgcolor, scroll_text, text_pos
+    # )
 
 
 def _render_final_inning(canvas, layout, colors, scoreboard):
@@ -45,7 +62,7 @@ def _render_final_inning(canvas, layout, colors, scoreboard):
     coords = layout.coords("final.inning")
     font = layout.font("final.inning")
     if scoreboard.inning.number != NORMAL_GAME_LENGTH:
-        text += " " + str(scoreboard.inning.number)
+        text += "/" + str(scoreboard.inning.number)
     text_x = center_text_position(text, coords["x"], font["size"]["width"])
     graphics.DrawText(canvas, font["font"], text_x, coords["y"], color, text)
 

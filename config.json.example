@@ -1,10 +1,10 @@
 {
 	"preferred": {
-		"teams": ["Cubs"],
-		"divisions": ["NL Central", "NL Wild Card"]
+		"teams": ["Braves", "Mets"],
+		"divisions": ["NL East", "NL Wild Card"]
 	},
 	"news_ticker": {
-		"team_offday": true,
+		"team_offday": false,
 		"always_display": false,
 		"preferred_teams": true,
 		"traderumors": true,
@@ -35,16 +35,17 @@
 		}
 	},
 	"weather": {
-		"apikey": "YOUR_API_KEY_HERE",
-		"location": "Chicago,il,us",
+		"apikey": "16c57c1a513f282d809242512ca7649b",
+		"location": "Charlotte,nc,us",
 		"metric_units": false
 	},
 	"time_format": "12h",
-	"end_of_day": "00:00",
+	"end_of_day": "03:00",
 	"full_team_names": true,
 	"short_team_names_for_runs_hits": true,
 	"pregame_weather": true,
-	"scrolling_speed": 2,
-	"debug": false,
+	"scrolling_speed": 3,
+	"delay": 10,
+	"debug": true,
 	"demo_date": false
 }

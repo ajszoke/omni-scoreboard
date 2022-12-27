@@ -1,1 +1,1 @@
-sudo python3 main.py --led-gpio-mapping="adafruit-hat-pwm" --led-rows=32 --led-cols=64
+sudo python3 main.py --led-gpio-mapping="adafruit-hat-pwm" --led-rows=32 --led-cols=64 --led-chain=4 --led-pixel-mapper=U-mapper --led-slowdown-gpio=3 --led-pwm-bits=6 --led-limit-refresh=128

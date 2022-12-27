@@ -33,6 +33,11 @@ def render_team_banner(canvas, layout, team_colors, home_team, away_team, run_te
         away_team_accent = team_colors.color("default.accent")
 
     try:
+        away_team_alt_accent = away_colors["alt-accent"]
+    except KeyError:
+        away_team_alt_accent = team_colors.color("default.accent")
+
+    try:
         home_team_accent = home_colors["accent"]
     except KeyError:
         home_team_accent = team_colors.color("default.accent")
@@ -78,9 +83,8 @@ def render_team_banner(canvas, layout, team_colors, home_team, away_team, run_te
                 prob_width = layout.coords("teams.win_prob_width")
                 do_render_win_prob = True
                 if team == "away" and win_probability > 0:
-                    win_prob_color = away_team_color if away_team_alt_option == ALT \
-                                                        and not utils.is_color_black(away_team_color)\
-                                                        else away_team_accent
+                    win_prob_color = away_team_alt_accent if away_team_alt_option == ALT \
+                        else away_team_accent
                     iter_dir = -1
                 elif team == "home" and win_probability < 0:
                     win_prob_color = home_team_accent

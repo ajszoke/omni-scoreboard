@@ -26,6 +26,7 @@ def render_live_game(canvas, layout: Layout, colors: Color, scoreboard: Scoreboa
         is_perfect = False
         is_no_hitter = False
         should_display_nohitter = layout.coords("nohitter")["innings_until_display"]
+        layout.state = cfglayout.LAYOUT_STATE_WARMUP  # FIXME
         if scoreboard.inning.number > should_display_nohitter:
             if layout.state == cfglayout.LAYOUT_STATE_PERFECT:
                 is_perfect = True
@@ -160,7 +161,7 @@ def __render_pitcher_stats_text(canvas, layout, colors, p_length, pitcher_stats,
     y_coord = layout.coords("atbat.pitcher_stats.y")
     font = layout.font("atbat.pitcher_stats")
     core_color = colors.graphics_color("perfect_game_text") if is_perfect \
-        else colors.graphics_color("no_hitter_text") if is_no_hitter \
+        else colors.graphics_color("nohit_text") if is_no_hitter \
         else colors.graphics_color("atbat.pitcher")
     expanded_color = colors.graphics_color("atbat.pitcher")
     bgcolor = colors.graphics_color("default.background")
@@ -227,6 +228,8 @@ def __render_pitch_text(canvas, layout, colors, pitches: Pitches):
     color = colors.graphics_color("atbat.pitch")
     font = layout.font("atbat.pitch")
     bgcolor = colors.graphics_color("default.background")
+    if int(pitches.last_pitch_speed) > 97:
+        bgcolor = colors.graphics_color("atbat.fast-pitch-bg")
     if(int(pitches.last_pitch_speed) > 0 and layout.coords("atbat.pitch")["enabled"]):
         mph= " "
         if(layout.coords("atbat.pitch")["mph"]):
@@ -264,7 +267,7 @@ def __getBatterGameStatsStr(batter_stats):
     gidp_str = " {} GIDP".format(batter_stats["gidp"]) if batter_stats["gidp"] > 1 else " GIDP" if batter_stats["gidp"] > 0 else ""
     avg_str = " {} AVG".format(batter_stats["avg"])
     ops_str = " {} OPS".format(batter_stats["ops"])
-    return ab_str + hr_str + triple_str + double_str + rbi_str + walks_str + ks_str + hbp_str + sac_str + gitp_str + gidp_str + avg_str + ops_str
+    return ab_str + hr_str + triple_str + double_str + rbi_str + walks_str + ks_str + hbp_str + sac_str + gitp_str + gidp_str + avg_str
     
 # --------------- bases ---------------
 def _render_bases(canvas, layout, colors, bases: Bases, home_run, animation):

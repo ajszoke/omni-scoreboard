@@ -4,18 +4,18 @@
   },
   "bases": {
     "1B": {
-      "x": 112,
-      "y": 42,
+      "x": 115,
+      "y": 11,
       "size": 10
     },
     "2B": {
-      "x": 103,
-      "y": 33,
+      "x": 106,
+      "y": 2,
       "size": 10
     },
     "3B": {
-      "x": 94,
-      "y": 42,
+      "x": 97,
+      "y": 11,
       "size": 10
     }
   },
@@ -26,7 +26,7 @@
     },
     "scrolling_text": {
       "x": 0,
-      "y": 44,
+      "y": 49,
       "width": 128
     },
     "nohit_text": {
@@ -37,12 +37,12 @@
   "inning": {
     "break": {
       "number": {
-        "x": 3,
-        "y": 58
+        "x": 83,
+        "y": 26
       },
       "text": {
-        "x": 3,
-        "y": 44
+        "x": 83,
+        "y": 12
       },
       "due_up": {
         "due": {
@@ -61,7 +61,7 @@
           "y_end": 64
         },
         "leadoff": {
-          "font_name": "7x13",
+          "font_name": "6x12",
           "x": 64,
           "y": 42
         },
@@ -76,79 +76,119 @@
       }
     },
     "number": {
-      "x": 87,
-      "y": 42,
+      "x": 91,
+      "y": 11,
       "nohit": {
-        "x": 93,
-        "y": 42
+        "x": 97,
+        "y": 10
       },
       "perfect_game": {
-        "x": 93,
-        "y": 42
+        "x": 97,
+        "y": 10
       }
     },
     "arrow": {
-      "size": 6,
+      "size": 5,
       "up": {
-        "x_offset": -11,
-        "y_offset": -8
+        "x_offset": -8,
+        "y_offset": -7
       },
       "down": {
-        "x_offset": -11,
-        "y_offset": -4
+        "x_offset": -8,
+        "y_offset": -3
       }
     }
   },
   "outs": {
     "1": {
-      "x": 95,
-      "y": 56,
+      "x": 97,
+      "y": 24,
       "size": 5
     },
     "2": {
-      "x": 106,
-      "y": 56,
+      "x": 108,
+      "y": 24,
       "size": 5
     },
     "3": {
-      "x": 118,
-      "y": 56,
+      "x": 119,
+      "y": 24,
       "size": 5
     }
   },
   "atbat": {
     "batter": {
+      "font_name": "6x13",
+      "x": 1,
+      "y": 62,
+      "width": 63
+    },
+    "batter_stats": {
       "font_name": "5x7",
       "x": 1,
-      "y": 60,
-      "width": 41
+      "y": 62,
+      "width": 63
     },
     "pitcher": {
+      "font_name": "6x13",
+      "x": 1,
+      "y": 50,
+      "width": 63
+    },
+    "pitcher_stats": {
       "font_name": "5x7",
       "x": 1,
-      "y": 40,
-      "width": 41
+      "y": 50,
+      "width": 63
     },
     "pitch": {
       "font_name": "4x6",
-      "x": 1,
-      "y": 50,
-      "width": 41,
+      "x": 90,
+      "y": 39,
+      "width": 32,
       "enabled": true,
       "mph": true,
-      "desc_length": "Long"
+      "desc_length": "Short"
+    },
+    "pitch_speed": {
+      "font_name": "4x6",
+      "x": 72,
+      "y": 39,
+      "width": 32,
+      "enabled": true,
+      "mph": true,
+      "desc_length": "Short"
+    },
+    "pitch_count": {
+      "font_name": "4x6",
+      "x": 68,
+      "y": 39
     },
     "loop": 68,
     "strikeout": {
       "x": 32,
       "y": 60
+    },
+    "result": {
+      "x": 76,
+      "y": 40,
+      "width": 52,
+      "giant": {
+        "font_name": "9x18B"
+      },
+      "normal": {
+        "font_name": "6x13B"
+      },
+      "small": {
+        "font_name": "5x7"
+      }
     }
   },
   "batter_count": {
-    "x": 66,
-    "y": 62,
+    "x": 70,
+    "y": 30,
     "nohit": {
-      "x": 66,
+      "x": 70,
       "y": 64
     },
     "perfect_game": {
@@ -159,7 +199,7 @@
   "nohitter": {
     "x": 66,
     "y": 53,
-    "innings_until_display": 5
+    "innings_until_display": 4
   },
   "pregame": {
     "scrolling_text": {
@@ -179,10 +219,32 @@
     "warmup_text": {
       "x": 66,
       "y": 60
+    },
+    "record": {
+      "font_name": "6x10",
+      "x": 22,
+      "away_y": 9,
+      "home_y": 29
+    },
+    "odds": {
+      "font_name": "4x6",
+      "away_y": 9,
+      "home_y": 29
+    },
+    "starting_pitcher_name": {
+      "font_name": "6x10",
+      "x": 22,
+      "away_y": 19,
+      "home_y": 39
+    },
+    "starting_pitcher_stats": {
+      "font_name": "4x6",
+      "away_y": 19,
+      "home_y": 39
     }
   },
   "standings": {
-    "start": 1,
+    "start": 2,
     "offset": 12,
     "height": 60,
     "width": 128,
@@ -215,12 +277,12 @@
   "status": {
     "text": {
       "x": 56,
-      "y": 46,
+      "y": 50,
       "short_text": false
     },
     "scrolling_text": {
       "x": 0,
-      "y": 58,
+      "y": 62,
       "width": 128
     }
   },
@@ -253,35 +315,39 @@
         "y": 16
       }
     },
-    "name": {
+    "team_icons": {
       "away": {
-        "font_name": "9x18B",
-        "x": 4,
-        "y": 13
+        "x": 0,
+        "y": 0
       },
       "home": {
-        "font_name": "9x18B",    
-        "x": 4,
-        "y": 29
-      }
+        "x": 0,
+        "y": 20
+      },
+      "size": 20
     },
     "runs": {
       "runs_hits_errors": {
         "show": true,
         "compress_digits": true,
         "spacing": 5
-      },	    
+      },
       "away": {
-        "font_name": "9x18B",
-        "x": 126,
-        "y": 13
+        "x": 64,
+        "y": 15
       },
       "home": {
-        "font_name": "9x18B",
-        "x": 126,
-        "y": 29
+        "x": 64,
+        "y": 35
+      },
+      "normal": {
+        "font_name": "9x18B"
+      },
+      "small": {
+       "font_name": "6x13B"
       }
-    }
+    },
+    "win_prob_width": 2
   },
   "offday": {
     "scrolling_text": {
@@ -326,12 +392,12 @@
     "background": {
       "width": 7,
       "height": 7,
-      "x": 57,
-      "y": 25
+      "x": 121,
+      "y": 57
     },
     "text": {
-      "x": 125,
-      "y": 31
+      "x": 126,
+      "y": 63
     }
   }
 }

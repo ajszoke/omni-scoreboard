@@ -41,7 +41,7 @@ class PlayResult:
         }
 
     def retrieve_font_height(self, font):
-        return font["font"].baseline  # works better than height
+        return font["font"].baseline + 2  # works better than height
 
     def determine_out_type(self):
         play_str = ''
@@ -88,6 +88,8 @@ class PlayResult:
         return play_str
 
     def populate(self, json):
+        pre_populated = self.result_json != {}
+
         self.result_json = json
         self.result_code = json["eventType"]
         self.result_desc = json["description"]
@@ -101,6 +103,10 @@ class PlayResult:
         STRIKEOUT_COLOR = 'strikeout'
         HOMERUN_COLOR = 'homerun'
 
+        if not pre_populated:
+            debug.info('eventType = ' + self.result_code)
+            debug.info('description = ' + self.result_desc)
+
         if json["rbi"] > 0:
             self.text_lines["line_3"]["text"] = str(json["rbi"]) + " RBI"
             self.text_lines["line_3"]["font"] = SMALL_FONT
@@ -110,7 +116,7 @@ class PlayResult:
                 pass  # FIXME
             else:
                 self.text_lines["line_1"]["text"] = "PO"
-                self.text_lines["line_1"]["font"] = GIANT_FONT
+                self.text_lines["line_1"]["font"] = NORMAL_FONT
                 self.text_lines["line_2"]["text"] = '' # fixme
                 self.text_lines["line_2"]["font"] = NORMAL_FONT
                 self.result_color = OUT_COLOR
@@ -130,9 +136,9 @@ class PlayResult:
             self.result_color = HOMERUN_COLOR
             if json["rbi"] == 4:
                 self.text_lines["line_1"]["text"] = "GRAND"
-                self.text_lines["line_1"]["font"] = GIANT_FONT
+                self.text_lines["line_1"]["font"] = NORMAL_FONT
                 self.text_lines["line_2"]["text"] = "SLAM"
-                self.text_lines["line_2"]["font"] = GIANT_FONT
+                self.text_lines["line_2"]["font"] = NORMAL_FONT
                 self.text_lines["line_3"]["text"] = ""
                 self.text_lines["line_3"]["font"] = ""
             else:
@@ -140,7 +146,7 @@ class PlayResult:
                 self.text_lines["line_1"]["font"] = GIANT_FONT
         elif "double_play" in self.result_code:
             self.text_lines["line_1"]["text"] = "DP"
-            self.text_lines["line_1"]["font"] = GIANT_FONT
+            self.text_lines["line_1"]["font"] = NORMAL_FONT
             self.text_lines["line_2"]["text"] = self.determine_play_string(False)
             self.text_lines["line_2"]["font"] = NORMAL_FONT
             self.result_color = OUT_COLOR
@@ -173,7 +179,7 @@ class PlayResult:
             self.result_color = STRIKEOUT_COLOR
         elif self.result_code == "triple_play":
             self.text_lines["line_1"]["text"] = "TP"
-            self.text_lines["line_1"]["font"] = GIANT_FONT
+            self.text_lines["line_1"]["font"] = NORMAL_FONT
             self.result_color = OUT_COLOR
             self.text_lines["line_2"]["text"] = self.determine_play_string(False)
             self.text_lines["line_2"]["font"] = NORMAL_FONT
@@ -233,6 +239,11 @@ class PlayResult:
                 self.text_lines["line_1"]["font"] = SMALL_FONT
                 self.text_lines["line_2"]["text"] = "Visit"
                 self.text_lines["line_2"]["font"] = SMALL_FONT
+            elif self.result_desc == "On-field Delay.":
+                self.text_lines["line_1"]["text"] = "Field"
+                self.text_lines["line_1"]["font"] = SMALL_FONT
+                self.text_lines["line_2"]["text"] = "Delay"
+                self.text_lines["line_2"]["font"] = SMALL_FONT
                 self.result_color = OUT_COLOR
         elif self.result_code == "stolen_base":
             self.text_lines["line_1"]["text"] = "SB"
@@ -240,19 +251,19 @@ class PlayResult:
             self.result_color = ON_BASE_COLOR
         elif self.result_code == "stolen_base_2b":
             self.text_lines["line_1"]["text"] = "SB"
-            self.text_lines["line_1"]["font"] = GIANT_FONT
+            self.text_lines["line_1"]["font"] = NORMAL_FONT
             self.text_lines["line_2"]["text"] = "2B"
             self.text_lines["line_2"]["font"] = NORMAL_FONT
             self.result_color = ON_BASE_COLOR
         elif self.result_code == "stolen_base_3b":
             self.text_lines["line_1"]["text"] = "SB"
-            self.text_lines["line_1"]["font"] = GIANT_FONT
+            self.text_lines["line_1"]["font"] = NORMAL_FONT
             self.text_lines["line_2"]["text"] = "3B"
             self.text_lines["line_2"]["font"] = NORMAL_FONT
             self.result_color = ON_BASE_COLOR
         elif self.result_code == "stolen_base_home":
             self.text_lines["line_1"]["text"] = "SB"
-            self.text_lines["line_1"]["font"] = GIANT_FONT
+            self.text_lines["line_1"]["font"] = NORMAL_FONT
             self.text_lines["line_2"]["text"] = "RUN"
             self.text_lines["line_2"]["font"] = NORMAL_FONT
             self.result_color = HOMERUN_COLOR
@@ -262,37 +273,37 @@ class PlayResult:
             self.result_color = OUT_COLOR
         elif self.result_code == "caught_stealing_2b":
             self.text_lines["line_1"]["text"] = "CS"
-            self.text_lines["line_1"]["font"] = GIANT_FONT
+            self.text_lines["line_1"]["font"] = NORMAL_FONT
             self.text_lines["line_2"]["text"] = "2B"
             self.text_lines["line_2"]["font"] = NORMAL_FONT
             self.result_color = OUT_COLOR
         elif self.result_code == "caught_stealing_3b":
             self.text_lines["line_1"]["text"] = "CS"
-            self.text_lines["line_1"]["font"] = GIANT_FONT
+            self.text_lines["line_1"]["font"] = NORMAL_FONT
             self.text_lines["line_2"]["text"] = "3B"
             self.text_lines["line_2"]["font"] = NORMAL_FONT
             self.result_color = OUT_COLOR
         elif self.result_code == "caught_stealing_home":
             self.text_lines["line_1"]["text"] = "CS"
-            self.text_lines["line_1"]["font"] = GIANT_FONT
+            self.text_lines["line_1"]["font"] = NORMAL_FONT
             self.text_lines["line_2"]["text"] = "HOME"
             self.text_lines["line_2"]["font"] = NORMAL_FONT
             self.result_color = OUT_COLOR
         elif self.result_code == "pickoff_caught_stealing_2b":
             self.text_lines["line_1"]["text"] = "CS"
-            self.text_lines["line_1"]["font"] = GIANT_FONT
+            self.text_lines["line_1"]["font"] = NORMAL_FONT
             self.text_lines["line_2"]["text"] = "2B"
             self.text_lines["line_2"]["font"] = NORMAL_FONT
             self.result_color = OUT_COLOR
         elif self.result_code == "pickoff_caught_stealing_3b":
             self.text_lines["line_1"]["text"] = "CS"
-            self.text_lines["line_1"]["font"] = GIANT_FONT
+            self.text_lines["line_1"]["font"] = NORMAL_FONT
             self.text_lines["line_2"]["text"] = "3B"
             self.text_lines["line_2"]["font"] = NORMAL_FONT
             self.result_color = OUT_COLOR
         elif self.result_code == "pickoff_caught_stealing_home":
             self.text_lines["line_1"]["text"] = "CS"
-            self.text_lines["line_1"]["font"] = GIANT_FONT
+            self.text_lines["line_1"]["font"] = NORMAL_FONT
             self.text_lines["line_2"]["text"] = "HOME"
             self.text_lines["line_2"]["font"] = NORMAL_FONT
             self.result_color = OUT_COLOR
