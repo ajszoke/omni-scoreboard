@@ -50,9 +50,9 @@ class Schedule:
             else:
                 self._games = self.__all_games
 
-                if self.config.rotation_only_preferred:
-                    self._games = Schedule.__filter_list_of_games(self.__all_games, self.config.preferred_teams)
-                if self.config.rotation_only_live:
+                if self.config.mlb_rotation_only_preferred:
+                    self._games = Schedule.__filter_list_of_games(self.__all_games, self.config.mlb_preferred_teams)
+                if self.config.mlb_rotation_only_live:
                     games = [g for g in self._games if status.is_live(g["status"]) or status.is_fresh(g["status"])]
                     if games:
                         self._games = games
@@ -67,16 +67,16 @@ class Schedule:
 
     # offday code
     def is_offday_for_preferred_team(self):
-        if self.config.preferred_teams:
+        if self.config.mlb_preferred_teams:
             return not any(
-                data.teams.TEAM_FULL[self.config.preferred_teams[0]] in [game["away_name"], game["home_name"]]
+                data.teams.TEAM_FULL[self.config.mlb_preferred_teams[0]] in [game["away_name"], game["home_name"]]
                 for game in self.__all_games  # only care if preferred team is actually in list
             )
         else:
             return True
 
     def is_offday(self):
-        if self.config.standings_no_games:
+        if self.config.mlb_standings_no_games:
             return not len(self.__all_games)  # care about all MLB
         else:  # only care if we can't rotate a game
             return not len(self._games)
@@ -97,8 +97,8 @@ class Schedule:
         # rotating during mid-innings
         # TODO verify during a double-header
         if (
-            not self.config.rotation_preferred_team_live_enabled
-            and self.config.rotation_preferred_team_live_mid_inning
+            not self.config.mlb_rotation_preferred_team_live_enabled
+            and self.config.mlb_rotation_preferred_team_live_mid_inning
             and not self.is_offday_for_preferred_team()
             and not self.preferred_over
         ):
@@ -125,8 +125,8 @@ class Schedule:
         return self.__current_game()
 
     def _game_index_for_preferred_team(self):
-        if self.config.preferred_teams:
-            team_name = data.teams.TEAM_FULL[self.config.preferred_teams[0]]
+        if self.config.mlb_preferred_teams:
+            team_name = data.teams.TEAM_FULL[self.config.mlb_preferred_teams[0]]
             team_index = self.current_idx
             team_idxs = [i for i, game in enumerate(self._games) if team_name in [game["away_name"], game["home_name"]]]
             if len(team_idxs) > 0:

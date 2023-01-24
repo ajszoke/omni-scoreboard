@@ -1,6 +1,10 @@
 import json
 import sys
 
+from data.nfl import NflManager
+from data.nfl.nflprocessor import NflProcessor
+from data.nfl.api.nflapi import NflApi
+
 if sys.version_info <= (3, 5):
     print("Error: Please run with python3")
     sys.exit(1)
@@ -13,16 +17,11 @@ import time
 from PIL import Image
 
 import debug
-from data import Data
+# from data import MlbData
 from data.config import Config
 from renderers.main import MainRenderer
 from utils import args, led_matrix_options
 from version import SCRIPT_NAME, SCRIPT_VERSION
-
-import requests
-import uuid
-import re
-from datetime import date
 
 try:
     from rgbmatrix import RGBMatrix, __version__
@@ -35,83 +34,6 @@ except ImportError:
 
 
 def main(matrix, config_base):
-
-    # playList = []
-    # favoriteTeam = "Vikings"
-    # resp = requests.get(url="https://p.nfltags.com/nfl/NflUmdComponents.NFLToken.js",
-    #                     headers={
-    #                         "sec-fetch-dest": "empty",
-    #                         "sec-fetch-mode": "no-cors",
-    #                         "sec-fetch-site": "same-site",
-    #                         "sec-gpc": "1",
-    #                         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/104.0.5112.81 Safari/537.36",
-    #                         "Host": "p.nfltags.com",
-    #                         "origin": "https://www.nfl.com",
-    #                         "referer": "https://www.nfl.com/"
-    #                     })
-    # responseBody = resp.text
-    # startIdx = responseBody.find("production:{", responseBody.find("desktop:{"))
-    # endIdx = responseBody.find("},", startIdx)
-    # authSubstring = responseBody[startIdx:endIdx]
-    # clientKey = re.match(".*nflClientKey:\"([^\"]*)\".*", authSubstring).groups()[0]
-    # clientSecret = re.match(".*nflClientSecret:\"([^\"]*)\".*", authSubstring).groups()[0]
-    #
-    # resp = requests.post(url="https://api.nfl.com/identity/v3/token",
-    #                      headers={
-    #                          "sec-fetch-dest": "empty",
-    #                          "sec-fetch-mode": "cors",
-    #                          "sec-fetch-site": "same-site",
-    #                          "sec-gpc": "1",
-    #                          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/104.0.5112.81 Safari/537.36",
-    #                          "Host": "api.nfl.com",
-    #                          "path": "/identity/v3/token",
-    #                          "origin": "https://www.nfl.com",
-    #                          "referer": "https://www.nfl.com/"
-    #                      },
-    #                      data={
-    #                          "clientKey": clientKey,
-    #                          "clientSecret": clientSecret,
-    #                          "deviceId": str(uuid.uuid4()),
-    #                          "deviceInfo": "eyJtb2RlbCI6ImRlc2t0b3AiLCJ2ZXJzaW9uIjoiQ2hyb21lIiwib3NOYW1lIjoiV2luZG93cyIsIm9zVmVyc2lvbiI6IjEwIn0=",
-    #                          "networkType": "other",
-    #                          "useRefreshToken": "true"
-    #                      })
-    # # if (resp.status_code == 200):
-    # responseBody = json.loads(resp.text)
-    # refreshToken = responseBody["refreshToken"]
-    # accessToken = responseBody["accessToken"]
-    #
-    # resp = requests.get(url="https://api.nfl.com/football/v2/weeks/date/{}".format(date.today().strftime("%Y-%m-%d")),
-    #                     headers={
-    #                         "Authorization": "Bearer " + accessToken
-    #                     })
-    # responseBody = json.loads(resp.text)
-    # season = responseBody["season"]
-    # seasonType = responseBody["seasonType"]
-    # week = responseBody["week"]
-    #
-    # for week in range(1, 3):
-    #     gameId = ""
-    #     resp = requests.get(url="https://api.nfl.com/experience/v1/games?season={season}&seasonType={seasonType}&week={week}"
-    #                             .format(season=season, seasonType=seasonType, week=week),
-    #                         headers={
-    #                             "Authorization": "Bearer " + accessToken
-    #                         })
-    #     responseBody = json.loads(resp.text)
-    #     for game in responseBody["games"]:
-    #         # if game["homeTeam"]["nickName"] == favoriteTeam or game["awayTeam"]["nickName"] == favoriteTeam:
-    #         gameId = game["id"]
-    #         resp = requests.get(url="https://api.nfl.com/experience/v1/gamedetails/{}".format(gameId),
-    #                             headers={
-    #                                 "Authorization": "Bearer " + accessToken
-    #                             })
-    #         responseBody = json.loads(resp.text)
-    #         for play in responseBody["data"]["viewer"]["gameDetail"]["plays"]:
-    #             playList.append(play["playDescription"])
-    # with open('./playlist.txt', 'w') as f:
-    #     for play in playList:
-    #         f.write(f"{play}\n")
-
 
     # Read scoreboard options from config.json if it exists
     config = Config(config_base, matrix.width, matrix.height)
@@ -141,25 +63,27 @@ def main(matrix, config_base):
         matrix.SetImage(logo.convert("RGB"))
         logo.close()
 
+    nfl_manager = NflManager(config)
+
     # Create a new data object to manage the MLB data
     # This will fetch initial data from MLB
-    data = Data(config)
+    mlb_data = MlbData(config)
 
     # create render thread
-    render = threading.Thread(target=__render_main, args=[matrix, data], name="render_thread", daemon=True)
+    render = threading.Thread(target=__render_main, args=[matrix, mlb_data], name="render_thread", daemon=True)
     time.sleep(1)
     render.start()
 
-    screen = data.get_screen_type()
+    screen = mlb_data.get_screen_type()
     if screen == "news":
-        __refresh_offday(render, data)
+        __refresh_offday(render, mlb_data)
     elif screen == "standings":
-        __refresh_standings(render, data)
+        __refresh_standings(render, mlb_data)
     else:
-        __refresh_games(render, data)
+        __refresh_games(render, mlb_data)
 
 
-def __refresh_offday(render_thread, data):  # type: (threading.Thread, Data) -> None
+def __refresh_offday(render_thread, data):  # type: (threading.Thread, MlbData) -> None
     debug.log("Main has selected the offday information to refresh")
     while render_thread.is_alive():
         time.sleep(30)
@@ -168,7 +92,7 @@ def __refresh_offday(render_thread, data):  # type: (threading.Thread, Data) -> 
         data.refresh_news_ticker()
 
 
-def __refresh_standings(render_thread, data):  # type: (threading.Thread, Data) -> None
+def __refresh_standings(render_thread, data):  # type: (threading.Thread, MlbData) -> None
     if data.standings.populated():
         debug.log("Main has selected the standings to refresh")
         while render_thread.is_alive():
@@ -178,7 +102,7 @@ def __refresh_standings(render_thread, data):  # type: (threading.Thread, Data) 
         __refresh_offday(render_thread, data)
 
 
-def __refresh_games(render_thread, data):  # type: (threading.Thread, Data) -> None
+def __refresh_games(render_thread, data):  # type: (threading.Thread, MlbData) -> None
     debug.log("Main has selected the game and schedule information to refresh")
 
     starttime = time.time()
@@ -187,7 +111,7 @@ def __refresh_games(render_thread, data):  # type: (threading.Thread, Data) -> N
     while render_thread.is_alive():
         time.sleep(0.5)
         data.refresh_schedule()
-        if data.config.standings_no_games:
+        if data.config.mlb_standings_no_games:
             if not data.schedule.games_live():
                 data.refresh_standings()
                 continue

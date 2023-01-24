@@ -116,7 +116,7 @@ colors/*.json
 #
 submodules/
 configs/
-
+data/nfl/api/archive/*
 
 # Ignore logs
 logs.txt

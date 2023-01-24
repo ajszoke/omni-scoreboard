@@ -91,7 +91,7 @@ TRADE_FEEDS = {
 
 class Headlines:
     def __init__(self, config, year):
-        self.preferred_teams = config.preferred_teams
+        self.preferred_teams = config.mlb_preferred_teams
         self.include_mlb = config.news_ticker_mlb_news
         self.include_preferred = config.news_ticker_preferred_teams
         self.include_traderumors = config.news_ticker_traderumors

@@ -21,9 +21,47 @@ class Config:
     def __init__(self, filename_base, width, height):
         json = self.__get_config(filename_base)
 
+        #############################################
+        # MLB
+        #############################################
+
         # Preferred Teams/Divisions
-        self.preferred_teams = json["preferred"]["teams"]
-        self.preferred_divisions = json["preferred"]["divisions"]
+        self.mlb_preferred_teams = json["mlb"]["preferred"]["teams"]
+        self.mlb_preferred_divisions = json["mlb"]["preferred"]["divisions"]
+
+        # Display Standings
+        self.mlb_standings_team_offday = json["mlb"]["standings"]["team_offday"]
+        self.mlb_standings_mlb_offday = json["mlb"]["standings"]["mlb_offday"]
+        self.mlb_standings_always_display = json["mlb"]["standings"]["always_display"]
+        self.mlb_standings_display_offday = False
+        self.mlb_standings_no_games = json["mlb"]["standings"]["display_no_games_live"]
+
+        # Rotation
+        self.mlb_rotation_enabled = json["mlb"]["rotation"]["enabled"]
+        self.mlb_rotation_scroll_until_finished = json["mlb"]["rotation"]["scroll_until_finished"]
+        self.mlb_rotation_only_preferred = json["mlb"]["rotation"]["only_preferred"]
+        self.mlb_rotation_only_live = json["mlb"]["rotation"]["only_live"]
+        self.mlb_rotation_rates = json["mlb"]["rotation"]["rates"]
+        self.mlb_rotation_preferred_team_live_enabled = json["mlb"]["rotation"]["while_preferred_team_live"]["enabled"]
+        self.mlb_rotation_preferred_team_live_mid_inning = json["mlb"]["rotation"]["while_preferred_team_live"][
+            "during_inning_breaks"
+        ]
+
+        #############################################
+        # NFL
+        #############################################
+
+        # Preferred Teams/Divisions
+        self.nfl_preferred_teams = json["nfl"]["preferred"]["teams"]
+        self.nfl_preferred_divisions = json["nfl"]["preferred"]["divisions"]
+        self.nfl_display_delay = json["nfl"]["display_delay"]
+
+        self.NFL_IS_DEBUG = json["nfl"]["IS_DEBUG"]
+        self.NFL_DEBUG_GAMES = json["nfl"]["DEBUG_GAMES"]
+
+        #############################################
+        # GLOBAL
+        #############################################
 
         # News Ticker
         self.news_ticker_team_offday = json["news_ticker"]["team_offday"]
@@ -34,24 +72,6 @@ class Config:
         self.news_ticker_countdowns = json["news_ticker"]["countdowns"]
         self.news_ticker_date = json["news_ticker"]["date"]
         self.news_ticker_date_format = json["news_ticker"]["date_format"]
-
-        # Display Standings
-        self.standings_team_offday = json["standings"]["team_offday"]
-        self.standings_mlb_offday = json["standings"]["mlb_offday"]
-        self.standings_always_display = json["standings"]["always_display"]
-        self.standings_display_offday = False
-        self.standings_no_games = json["standings"]["display_no_games_live"]
-
-        # Rotation
-        self.rotation_enabled = json["rotation"]["enabled"]
-        self.rotation_scroll_until_finished = json["rotation"]["scroll_until_finished"]
-        self.rotation_only_preferred = json["rotation"]["only_preferred"]
-        self.rotation_only_live = json["rotation"]["only_live"]
-        self.rotation_rates = json["rotation"]["rates"]
-        self.rotation_preferred_team_live_enabled = json["rotation"]["while_preferred_team_live"]["enabled"]
-        self.rotation_preferred_team_live_mid_inning = json["rotation"]["while_preferred_team_live"][
-            "during_inning_breaks"
-        ]
 
         # Weather
         self.weather_apikey = json["weather"]["apikey"]
@@ -97,26 +117,26 @@ class Config:
         self.check_rotate_rates()
 
     def check_preferred_teams(self):
-        if not isinstance(self.preferred_teams, str) and not isinstance(self.preferred_teams, list):
+        if not isinstance(self.mlb_preferred_teams, str) and not isinstance(self.mlb_preferred_teams, list):
             debug.warning(
                 "preferred_teams should be an array of team names or a single team name string."
                 "Using default preferred_teams, {}".format(DEFAULT_PREFERRED_TEAMS)
             )
-            self.preferred_teams = DEFAULT_PREFERRED_TEAMS
-        if isinstance(self.preferred_teams, str):
-            team = self.preferred_teams
-            self.preferred_teams = [team]
+            self.mlb_preferred_teams = DEFAULT_PREFERRED_TEAMS
+        if isinstance(self.mlb_preferred_teams, str):
+            team = self.mlb_preferred_teams
+            self.mlb_preferred_teams = [team]
 
     def check_preferred_divisions(self):
-        if not isinstance(self.preferred_divisions, str) and not isinstance(self.preferred_divisions, list):
+        if not isinstance(self.mlb_preferred_divisions, str) and not isinstance(self.mlb_preferred_divisions, list):
             debug.warning(
                 "preferred_divisions should be an array of division names or a single division name string."
                 "Using default preferred_divisions, {}".format(DEFAULT_PREFERRED_DIVISIONS)
             )
-            self.preferred_divisions = DEFAULT_PREFERRED_DIVISIONS
-        if isinstance(self.preferred_divisions, str):
-            division = self.preferred_divisions
-            self.preferred_divisions = [division]
+            self.mlb_preferred_divisions = DEFAULT_PREFERRED_DIVISIONS
+        if isinstance(self.mlb_preferred_divisions, str):
+            division = self.mlb_preferred_divisions
+            self.mlb_preferred_divisions = [division]
 
     def check_time_format(self):
         if self.time_format.lower() == "24h":
@@ -125,21 +145,21 @@ class Config:
             self.time_format = "%-I"
 
     def check_rotate_rates(self):
-        if not isinstance(self.rotation_rates, dict):
+        if not isinstance(self.mlb_rotation_rates, dict):
             try:
-                rate = float(self.rotation_rates)
-                self.rotation_rates = {"live": rate, "final": rate, "pregame": rate}
+                rate = float(self.mlb_rotation_rates)
+                self.mlb_rotation_rates = {"live": rate, "final": rate, "pregame": rate}
             except:
                 debug.warning(
                     "rotation_rates should be a Dict or Float. Using default value. {}".format(DEFAULT_ROTATE_RATES)
                 )
-                self.rotation_rates = DEFAULT_ROTATE_RATES
+                self.mlb_rotation_rates = DEFAULT_ROTATE_RATES
 
-        for key, value in list(self.rotation_rates.items()):
+        for key, value in list(self.mlb_rotation_rates.items()):
             try:
                 # Try and cast whatever the user passed into a float
                 rate = float(value)
-                self.rotation_rates[key] = rate
+                self.mlb_rotation_rates[key] = rate
             except:
                 # Use the default rotate rate if it fails
                 debug.warning(
@@ -147,20 +167,20 @@ class Config:
                         key, DEFAULT_ROTATE_RATE
                     )
                 )
-                self.rotation_rates[key] = DEFAULT_ROTATE_RATE
+                self.mlb_rotation_rates[key] = DEFAULT_ROTATE_RATE
 
-            if self.rotation_rates[key] < MINIMUM_ROTATE_RATE:
+            if self.mlb_rotation_rates[key] < MINIMUM_ROTATE_RATE:
                 debug.warning(
                     'rotate_rates["{}"] is too low. Please set it greater than {}. Using default value. ({})'.format(
                         key, MINIMUM_ROTATE_RATE, DEFAULT_ROTATE_RATE
                     )
                 )
-                self.rotation_rates[key] = DEFAULT_ROTATE_RATE
+                self.mlb_rotation_rates[key] = DEFAULT_ROTATE_RATE
 
         # Setup some nice attributes to make sure they all exist
-        self.rotation_rates_live = self.rotation_rates.get("live", DEFAULT_ROTATE_RATES["live"])
-        self.rotation_rates_final = self.rotation_rates.get("final", DEFAULT_ROTATE_RATES["final"])
-        self.rotation_rates_pregame = self.rotation_rates.get("pregame", DEFAULT_ROTATE_RATES["pregame"])
+        self.rotation_rates_live = self.mlb_rotation_rates.get("live", DEFAULT_ROTATE_RATES["live"])
+        self.rotation_rates_final = self.mlb_rotation_rates.get("final", DEFAULT_ROTATE_RATES["final"])
+        self.rotation_rates_pregame = self.mlb_rotation_rates.get("pregame", DEFAULT_ROTATE_RATES["pregame"])
 
     def rotate_rate_for_status(self, game_status):
         rotate_rate = self.rotation_rates_live

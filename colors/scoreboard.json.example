@@ -1,4 +1,88 @@
 {
+  "football": {
+    "in_game": {
+      "scores": {
+        "r": 255,
+        "g": 255,
+        "b": 255
+      },
+      "quarter": {
+        "r": 255,
+        "g": 255,
+        "b": 0
+      },
+      "play_time": {
+        "r": 255,
+        "g": 255,
+        "b": 0
+      },
+      "down_and_distance": {
+        "r": 255,
+        "g": 255,
+        "b": 0
+      },
+      "timeouts": {
+        "r": 255,
+        "g": 255,
+        "b": 0
+      },
+      "challenges": {
+        "r": 255,
+        "g": 0,
+        "b": 0
+      },
+      "possession": {
+        "r": 255,
+        "g": 255,
+        "b": 0
+      },
+      "upper_banner_touchdown": {
+        "r": 255,
+        "g": 255,
+        "b": 0
+      },
+      "upper_banner_turnover": {
+        "r": 255,
+        "g": 50,
+        "b": 50
+      },
+      "upper_banner_safety": {
+        "r": 255,
+        "g": 50,
+        "b": 50
+      },
+      "upper_top_line": {
+        "r": 255,
+        "g": 255,
+        "b": 255
+      },
+      "upper_bottom_line": {
+        "r": 255,
+        "g": 255,
+        "b": 255
+      },
+      "bottom_first_player_name": {
+        "r": 255,
+        "g": 255,
+        "b": 0
+      },
+      "bottom_first_player_stats": {
+        "r": 255,
+        "g": 255,
+        "b": 0
+      },
+      "bottom_second_player_name": {
+        "r": 255,
+        "g": 255,
+        "b": 0
+      },
+      "bottom_second_player_stats": {
+        "r": 255,
+        "g": 255,
+        "b": 0
+      }
+    }
+  },
   "bases": {
     "1B": {
       "r": 255,

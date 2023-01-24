@@ -2,7 +2,7 @@ import time
 from typing import NoReturn
 
 import debug
-from data import Data, status
+from data import MlbData, status
 from data.scoreboard import Scoreboard
 from data.scoreboard.postgame import Postgame
 from data.scoreboard.pregame import Pregame
@@ -17,7 +17,7 @@ from renderers.games import teams
 class MainRenderer:
     def __init__(self, matrix, data):
         self.matrix = matrix
-        self.data: Data = data
+        self.data: MlbData = data
         self.canvas = matrix.CreateFrameCanvas()
         self.scrolling_text_pos = self.canvas.width
         self.game_changed_time = time.time()
@@ -78,7 +78,7 @@ class MainRenderer:
         if self.data.standings.is_postseason() and self.canvas.width <= 32:
             return
 
-        while stick or (self.data.config.standings_no_games and not self.data.schedule.games_live()):
+        while stick or (self.data.config.mlb_standings_no_games and not self.data.schedule.games_live()):
             if self.data.standings.is_postseason():
                 standings.render_bracket(
                     self.canvas,
@@ -136,7 +136,7 @@ class MainRenderer:
             self.__draw_game()
 
             # Check if we need to scroll until it's finished
-            if not self.data.config.rotation_scroll_until_finished:
+            if not self.data.config.mlb_rotation_scroll_until_finished:
                 self.data.scrolling_finished = True
 
             time.sleep(refresh_rate)

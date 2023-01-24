@@ -15,7 +15,7 @@ from data.update import UpdateStatus
 from data.weather import Weather
 
 
-class Data:
+class MlbData:
     def __init__(self, config):
         # Save the parsed config
         self.config = config
@@ -46,21 +46,21 @@ class Data:
 
     def should_rotate_to_next_game(self):
         game = self.current_game
-        if not self.config.rotation_enabled:
+        if not self.config.mlb_rotation_enabled:
             return False
 
-        stay_on_preferred_team = self.config.preferred_teams and not self.config.rotation_preferred_team_live_enabled
+        stay_on_preferred_team = self.config.mlb_preferred_teams and not self.config.mlb_rotation_preferred_team_live_enabled
         if not stay_on_preferred_team:
             return True
 
         if self.schedule.num_games() < 2:
-            if self.config.rotation_only_live and self.schedule.games_live():
+            if self.config.mlb_rotation_only_live and self.schedule.games_live():
                 # don't want to get stuck on an dead game
                 return not status.is_live(game.status())
             return False
 
-        if game.features_team(self.config.preferred_teams[0]) and status.is_live(game.status()):
-            if self.config.rotation_preferred_team_live_mid_inning and status.is_inning_break(game.inning_state()):
+        if game.features_team(self.config.mlb_preferred_teams[0]) and status.is_live(game.status()):
+            if self.config.mlb_rotation_preferred_team_live_mid_inning and status.is_inning_break(game.inning_state()):
                 return True
             return False
 
@@ -114,12 +114,12 @@ class Data:
         if self.config.news_ticker_always_display:
             return "news"
         # Always the standings
-        elif self.config.standings_always_display:
+        elif self.config.mlb_standings_always_display:
             return "standings"
 
         # Full MLB Offday
         elif self.schedule.is_offday():
-            if self.config.standings_mlb_offday:
+            if self.config.mlb_standings_mlb_offday:
                 return "standings"
             else:
                 return "news"
@@ -127,7 +127,7 @@ class Data:
         elif self.schedule.is_offday_for_preferred_team():
             if self.config.news_ticker_team_offday:
                 return "news"
-            elif self.config.standings_team_offday:
+            elif self.config.mlb_standings_team_offday:
                 return "standings"
         # Playball!
         else:

@@ -23,8 +23,8 @@ class Standings:
         self.date = self.__parse_today()
         self.playoffs_start_date = playoffs_start_date.date()
         self.starttime = time.time()
-        self.preferred_divisions = config.preferred_divisions
-        self.wild_cards = any("Wild" in division for division in config.preferred_divisions)
+        self.preferred_divisions = config.mlb_preferred_divisions
+        self.wild_cards = any("Wild" in division for division in config.mlb_preferred_divisions)
         self.current_division_index = 0
 
         self.standings = []
