@@ -47,6 +47,11 @@ class NflApi:
         api_res = self.doCall("GET", url, headers=headers).json()
         return api_res["data"]["viewer"]["gameDetail"]
 
+    def getEspnGameData(self, gameId):
+        url = "http://sports.core.api.espn.com/v2/sports/football/leagues/nfl/events/{}/competitions/{}/plays".format(gameId, gameId)
+        api_res = self.doCall("GET", url).json()
+        return api_res
+
     def doCall(self, verb: str, url: str, data=None, headers=None, isRetry=False):
         verb = verb.upper()
         assert verb in ['GET', 'POST']
@@ -78,25 +83,22 @@ class NflApi:
 
 nflApi = NflApi()
 
-gameId = '6f445459-9556-11ed-b824-0d7028be3ce'
-filename = 'archive/230122_CIN_VS_BUF.json'
+gameId = '401492629'
+filename = 'archive/230205_NFC_VS_AFC.json'
 gameState = None
 
 with open(filename, mode='w') as f:
     f.write("")
 
 
-while gameState != 'END_GAME':
+while True:
     with open(filename, mode='a') as f:
         try:
             start = time.time()
-            data = nflApi.getGameData(gameId)
+            data = nflApi.getEspnGameData(gameId)
             end = time.time()
             diff = int((end - start)*100)
-            print("{TS} {TIME} - {LOC} {DOWN} & {DIST} ({MS} ms)".format(TS=datetime.now().strftime("%H:%M:%S"),
-                TIME=data['gameClock'], LOC=data['yardLine'], DOWN=data['down'], DIST=data['distance'], MS=diff))
-            gameState = data['phase']
-            print(data)
+            print("({MS} ms)".format(MS=diff))
             json.dump(data, f)
             f.write('\n')
         except Exception as e:

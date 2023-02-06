@@ -23,7 +23,8 @@ class NflManager:
                         if demoResponseLine[-1] == ',':
                             demoResponseLine = demoResponseLine[:-1]
                         demoResponseLine = json.loads(demoResponseLine)
-                        newStates = NflProcessor.process(demoResponseLine, self.gameStates[gameData['gameId']])
+                        curState = self.boardStateQueue[0] if len(self.boardStateQueue) > 0 else None
+                        newStates = NflProcessor.process(demoResponseLine, self.gameStates[gameData['gameId']], curState)
                         if len(newStates) > 0:
                             self.boardStateQueue.pop()
                             self.boardStateQueue.append(newStates)
