@@ -116,7 +116,7 @@ class NflBoardCenterDto:
 
     @staticmethod
     def createKickoffDto(playDesc, kickTeam):
-        topLine = kickTeam + ' Kick off'
+        topLine = kickTeam + ' Kick-off'
         bottomLine = ''
 
         if 'kicks onside' in playDesc:
@@ -181,6 +181,11 @@ class NflBoardCenterDto:
         parts = re.findall(r'\(\d*:\d{2}\) \([^)]*\) (.*) pass .* INTERCEPTED', playDesc)
         bottomLine = parts[0] if len(parts) == 1 else ''
         return NflBoardCenterDto(type=BannerType.TURNOVER, topLine='INTERCEPTION', bottomLine=bottomLine)
+
+    @staticmethod
+    def createEndQuarterDto(playDesc):
+        quarterNum = playDesc.strip()[-1]
+        return NflBoardCenterDto(type=BannerType.STANDARD, topLine='End', bottomLine='Quarter ' + quarterNum)
 
     @staticmethod
     def createPuntDto(playDesc):
@@ -304,7 +309,7 @@ class NflBoardCenterDto:
 
     @staticmethod
     def createTimeoutDto(playDesc):
-        if playDesc.trim() == 'Two-Minute Warning':
+        if playDesc.strip() == 'Two-Minute Warning':
             return NflBoardCenterDto(type=BannerType.STANDARD, topLine='Two-Minute', bottomLine='Warning')
         bottomLine = ''
         parts = re.findall(r'Timeout #(\d) by (\w+) at', playDesc)

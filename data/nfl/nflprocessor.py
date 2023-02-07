@@ -1,5 +1,6 @@
 import re
 
+import debug
 from data.nfl.nflboardcenterdto import NflBoardCenterDto
 from util import stringhelper
 
@@ -7,21 +8,16 @@ from util import stringhelper
 class NflProcessor:
 
     @staticmethod
-    def process(data, prevPlay):
+    def process(data, prevState):
 
         win_probabilities = {}  # TODO
         player_stats = []
         newCenterDtos = []
-        newBoardStates = []
 
         headData = {}
 
         curPlay = data['plays'][-1]
-        lastPlayIdx = len(data['plays']) - 1
-        if prevPlay is not None and prevPlay['idx'] != lastPlayIdx:
-            if prevPlay['desc'] == curPlay['playDescription']:
-                return []
-            # fix conditionals, check for stats and head data changes
+        playIdx = len(data['plays']) - 1
 
         # head data
         headData['awayScore'] = data['visitorPointsTotal']
@@ -30,16 +26,19 @@ class NflProcessor:
         headData['homeScore'] = data['homePointsTotal']
         headData['homeProb'] = None  # todo
         headData['homeTimeoutsLeft'] = data['homeTimeoutsRemaining']
-        headData['quarter'] = data['period']  # todo overtime, ordinalize
         headData['lineOfScrimmage'] = data['yardLine']
+        # period
+        headData['quarter'] = data['period']
+        if headData['quarter'] in [1, 2, 3, 4]:
+            headData['quarter'] = stringhelper.ordinalize(headData['quarter'])
         # game clock
         gameClock = re.findall(r'(\d+):(\d+)', data['gameClock'])
-        headData['minutes'] = gameClock[0]
-        headData['seconds'] = gameClock[1]
+        headData['minutes'] = gameClock[0][0]
+        headData['seconds'] = gameClock[0][1]
         # down and distance
         down = stringhelper.ordinalize(data['down'])
         distance = data['distance']
-        headData['downAndDistance'] = down + ' & ' + distance
+        headData['downAndDistance'] = down + ' & ' + str(distance)
         # possession
         possessionTeam = data['possessionTeam']['abbreviation']
         if possessionTeam is None:
@@ -48,14 +47,21 @@ class NflProcessor:
             headData['possessingTeam'] = 'AWAY'
         else:
             headData['possessingTeam'] = 'HOME'
+
+        if prevState is not None and prevState['playIdx'] == playIdx:
+            if prevState['desc'] == curPlay['playDescription']:
+                return []
+            # fix conditionals, check for stats and head data changes
+
         # center data
         posTeam = curPlay['possessionTeam']['abbreviation']
         playDesc = curPlay['playDescription']
-        playStats = curPlay['playStats']
+        playData = curPlay['playStats']
         penaltyDtos = []
         touchdownDto = None
         fumbleDto = None
         safetyDto = None
+        standardDto = None
 
         REVERSAL_STRING = 'the play was REVERSED.\r\n'
         reversalIdx = playDesc.find(REVERSAL_STRING)
@@ -65,7 +71,7 @@ class NflProcessor:
         if 'PENALTY' in playDesc:
             penaltyDtos = NflBoardCenterDto.createPenaltyDtos(playDesc)
             if 'No play.' in playDesc:
-                return penaltyDtos
+                return {'headData': headData, 'newCenterDtos': penaltyDtos, 'playIdx': playIdx}
         if 'TOUCHDOWN' in playDesc:
             touchdownDto = NflBoardCenterDto.createTouchdownDto()
         if 'FUMBLES' in playDesc or 'MUFFS' in playDesc:
@@ -78,7 +84,54 @@ class NflProcessor:
 
         if curPlay['playType'] == 'KICK_OFF':
             dto = NflBoardCenterDto.createKickoffDto(playDesc, posTeam)
-            newCenterDtos.append(dto)
+            standardDto = dto
+        elif curPlay['playType'] == 'PASS':
+            dto = NflBoardCenterDto.createPassDto(playData)
+            standardDto = dto
         elif curPlay['playType'] == 'RUSH':
-            dto = NflBoardCenterDto.createRushDto(playStats)
-            newCenterDtos.append(dto)
+            dto = NflBoardCenterDto.createRushDto(playData)
+            standardDto = dto
+        elif curPlay['playType'] == 'XP_KICK':
+            dto = NflBoardCenterDto.createXpKickDto(playData)
+            standardDto = dto
+        elif curPlay['playType'] == 'SACK':
+            dto = NflBoardCenterDto.createSackDto(playData)
+            standardDto = dto
+        elif curPlay['playType'] == 'PUNT':
+            dto = NflBoardCenterDto.createPuntDto(playDesc)
+            standardDto = dto
+        elif curPlay['playType'] == 'INTERCEPTION':
+            dto = NflBoardCenterDto.createInterceptionDto(playDesc)
+            standardDto = dto
+        elif curPlay['playType'] == 'END_QUARTER':
+            dto = NflBoardCenterDto.createEndQuarterDto(playDesc)
+            standardDto = dto
+        elif curPlay['playType'] == 'FIELD_GOAL':
+            dto = NflBoardCenterDto.createFieldGoalDto(playDesc)
+            standardDto = dto
+        elif curPlay['playType'] == 'TIMEOUT':
+            dto = NflBoardCenterDto.createTimeoutDto(playDesc)
+            standardDto = dto
+        elif curPlay['playType'] == 'END_GAME':
+            pass  # todo
+        elif curPlay['playType'] == 'PAT2':
+            dto = NflBoardCenterDto.createPat2Dto(playData)
+            standardDto = dto
+        elif curPlay['playType'] == 'INTERCEPTION':
+            dto = NflBoardCenterDto.createInterceptionDto(playDesc)
+            standardDto = dto
+        else:
+            debug.error('Cannot process play:' + playData)
+
+        if touchdownDto is not None:
+            newCenterDtos.append(touchdownDto)
+        if safetyDto is not None:
+            newCenterDtos.append(safetyDto)
+        if fumbleDto is not None:
+            newCenterDtos.append(fumbleDto)
+        if standardDto is not None:
+            newCenterDtos.append(standardDto)
+        if len(penaltyDtos) > 0:
+            newCenterDtos += penaltyDtos
+
+        return {'headData': headData, 'newCenterDtos': newCenterDtos, 'playIdx': playIdx}
