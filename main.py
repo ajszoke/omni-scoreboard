@@ -4,6 +4,7 @@ import sys
 from data.nfl import NflManager
 from data.nfl.nflprocessor import NflProcessor
 from data.nfl.api.nflapi import NflApi
+from renderers.nfl import NflRenderer
 
 if sys.version_info <= (3, 5):
     print("Error: Please run with python3")
@@ -63,24 +64,26 @@ def main(matrix, config_base):
         matrix.SetImage(logo.convert("RGB"))
         logo.close()
 
-    nfl_manager = NflManager(config)
+    nflManager = NflManager(config)
+    nflRender = threading.Thread(target=__render_nfl, args=[matrix, nflManager], name="nfl_render_thread", daemon=True)
 
     # Create a new data object to manage the MLB data
     # This will fetch initial data from MLB
-    mlb_data = MlbData(config)
+    # mlb_data = MlbData(config)
 
     # create render thread
-    render = threading.Thread(target=__render_main, args=[matrix, mlb_data], name="render_thread", daemon=True)
+    # render = threading.Thread(target=__render_main, args=[matrix, mlb_data], name="render_thread", daemon=True)
     time.sleep(1)
-    render.start()
+    nflRender.start()
+    __refresh_nfl_games(nflRender, nflManager)
 
-    screen = mlb_data.get_screen_type()
-    if screen == "news":
-        __refresh_offday(render, mlb_data)
-    elif screen == "standings":
-        __refresh_standings(render, mlb_data)
-    else:
-        __refresh_games(render, mlb_data)
+    # screen = mlb_data.get_screen_type()
+    # if screen == "news":
+    #     __refresh_offday(render, mlb_data)
+    # elif screen == "standings":
+    #     __refresh_standings(render, mlb_data)
+    # else:
+    #     __refresh_games(render, mlb_data)
 
 
 def __refresh_offday(render_thread, data):  # type: (threading.Thread, MlbData) -> None
@@ -100,6 +103,12 @@ def __refresh_standings(render_thread, data):  # type: (threading.Thread, MlbDat
             data.refresh_standings()
     else:
         __refresh_offday(render_thread, data)
+
+
+def __refresh_nfl_games(render_thread, data):
+    while render_thread.is_alive():
+        data.update()
+        time.sleep(10)  # TODO change > 3
 
 
 def __refresh_games(render_thread, data):  # type: (threading.Thread, MlbData) -> None
@@ -136,6 +145,11 @@ def __refresh_games(render_thread, data):  # type: (threading.Thread, MlbData) -
 
 def __render_main(matrix, data):
     MainRenderer(matrix, data).render()
+
+
+def __render_nfl(matrix, data):
+    r = NflRenderer(matrix, data)
+    r.render()
 
 
 if __name__ == "__main__":

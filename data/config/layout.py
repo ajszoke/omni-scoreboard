@@ -86,7 +86,7 @@ class Layout:
         dimensions = font_name.split("x")
         return {"width": int(dimensions[0]), "height": int(dimensions[1])}
 
-    def __get_font_object(self, font_name):
+    def __get_font_object(self, font_name):  # todo create object class
         f = self.__load_font(font_name)
         s = self.__parse_font_size(font_name)
         return {"font": f, "size": s}

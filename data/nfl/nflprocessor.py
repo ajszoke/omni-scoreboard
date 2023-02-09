@@ -20,6 +20,7 @@ class NflProcessor:
         playIdx = len(data['plays']) - 1
 
         # head data
+        headData['playIdx'] = playIdx
         headData['awayScore'] = data['visitorPointsTotal']
         headData['awayProb'] = None  # todo
         headData['awayTimeoutsLeft'] = data['visitorTimeoutsRemaining']
@@ -27,18 +28,16 @@ class NflProcessor:
         headData['homeProb'] = None  # todo
         headData['homeTimeoutsLeft'] = data['homeTimeoutsRemaining']
         headData['lineOfScrimmage'] = data['yardLine']
+        headData['down'] = stringhelper.ordinalize(data['down'])
+        headData['distance'] = data['distance']
         # period
-        headData['quarter'] = data['period']
-        if headData['quarter'] in [1, 2, 3, 4]:
-            headData['quarter'] = stringhelper.ordinalize(headData['quarter'])
+        headData['quarter_num'] = data['period']
+        if headData['quarter_num'] in [1, 2, 3, 4]:
+            headData['quarter_ordinal'] = stringhelper.ordinalize(headData['quarter_num'])[1:]
         # game clock
         gameClock = re.findall(r'(\d+):(\d+)', data['gameClock'])
         headData['minutes'] = gameClock[0][0]
         headData['seconds'] = gameClock[0][1]
-        # down and distance
-        down = stringhelper.ordinalize(data['down'])
-        distance = data['distance']
-        headData['downAndDistance'] = down + ' & ' + str(distance)
         # possession
         possessionTeam = data['possessionTeam']['abbreviation']
         if possessionTeam is None:
@@ -48,14 +47,15 @@ class NflProcessor:
         else:
             headData['possessingTeam'] = 'HOME'
 
-        if prevState is not None and prevState['playIdx'] == playIdx:
-            if prevState['desc'] == curPlay['playDescription']:
-                return []
+        playDesc = curPlay['playDescription']
+        headData['playDesc'] = playDesc
+        if prevState is not None and prevState['headData']['playIdx'] == playIdx:
+            if prevState['headData']['playDesc'] == playDesc and prevState['headData'] == headData:
+                return {'headData': headData, 'newCenterDtos': [], 'playIdx': playIdx}
             # fix conditionals, check for stats and head data changes
 
         # center data
         posTeam = curPlay['possessionTeam']['abbreviation']
-        playDesc = curPlay['playDescription']
         playData = curPlay['playStats']
         penaltyDtos = []
         touchdownDto = None
