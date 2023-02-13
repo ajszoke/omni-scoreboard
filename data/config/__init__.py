@@ -55,6 +55,7 @@ class Config:
         self.nfl_preferred_teams = json["nfl"]["preferred"]["teams"]
         self.nfl_preferred_divisions = json["nfl"]["preferred"]["divisions"]
         self.nfl_display_delay = json["nfl"]["display_delay"]
+        self.nfl_scroll_rate = json["nfl"]["scroll_rate"]
 
         self.NFL_IS_DEBUG = json["nfl"]["IS_DEBUG"]
         self.NFL_DEBUG_GAME = json["nfl"]["DEBUG_GAME"]

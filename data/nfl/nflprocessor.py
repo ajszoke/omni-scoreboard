@@ -1,6 +1,8 @@
+import copy
 import re
 
 import debug
+from data.nfl.api.bannertype import BannerType
 from data.nfl.nflboardcenterdto import NflBoardCenterDto
 from util import stringhelper
 
@@ -16,6 +18,8 @@ class NflProcessor:
 
         headData = {}
 
+        if len(data['plays']) == 0:
+            return None
         curPlay = data['plays'][-1]
         playIdx = len(data['plays']) - 1
 
@@ -52,7 +56,7 @@ class NflProcessor:
         if prevState is not None and prevState['headData']['playIdx'] == playIdx:
             if prevState['headData']['playDesc'] == playDesc and prevState['headData'] == headData:
                 return {'headData': headData, 'newCenterDtos': [], 'playIdx': playIdx}
-            # fix conditionals, check for stats and head data changes
+            # TODO check for stats
 
         # center data
         posTeam = curPlay['possessionTeam']['abbreviation']
@@ -80,48 +84,39 @@ class NflProcessor:
         if 'SAFETY' in playDesc:
             safetyDto = NflBoardCenterDto.createSafetyDto()
         if '*** play under review ***' in playDesc:
-            pass  # todo
+            lastPlay = prevState['state']
+            if lastPlay['bottomText'] == "Play under review":
+                return {'headData': headData, 'newCenterDtos': [], 'playIdx': playIdx}
+            lastPlay['type'] = BannerType.TURNOVER  # just cause it's red
+            lastPlay['bottomText'] = "Play under review"
+            return {'headData': headData, 'newCenterDtos': [lastPlay], 'playIdx': playIdx}
 
         if curPlay['playType'] == 'KICK_OFF':
-            dto = NflBoardCenterDto.createKickoffDto(playDesc, posTeam)
-            standardDto = dto
+            standardDto = NflBoardCenterDto.createKickoffDto(playDesc, posTeam)
         elif curPlay['playType'] == 'PASS':
-            dto = NflBoardCenterDto.createPassDto(playData)
-            standardDto = dto
+            standardDto = NflBoardCenterDto.createPassDto(playData)
         elif curPlay['playType'] == 'RUSH':
-            dto = NflBoardCenterDto.createRushDto(playData)
-            standardDto = dto
+            standardDto = NflBoardCenterDto.createRushDto(curPlay)
         elif curPlay['playType'] == 'XP_KICK':
-            dto = NflBoardCenterDto.createXpKickDto(playData)
-            standardDto = dto
+            standardDto = NflBoardCenterDto.createXpKickDto(curPlay)
         elif curPlay['playType'] == 'SACK':
-            dto = NflBoardCenterDto.createSackDto(playData)
-            standardDto = dto
+            standardDto = NflBoardCenterDto.createSackDto(curPlay)
         elif curPlay['playType'] == 'PUNT':
-            dto = NflBoardCenterDto.createPuntDto(playDesc)
-            standardDto = dto
+            standardDto = NflBoardCenterDto.createPuntDto(playDesc)
         elif curPlay['playType'] == 'INTERCEPTION':
-            dto = NflBoardCenterDto.createInterceptionDto(playDesc)
-            standardDto = dto
+            standardDto = NflBoardCenterDto.createInterceptionDto(playDesc)
         elif curPlay['playType'] == 'END_QUARTER':
-            dto = NflBoardCenterDto.createEndQuarterDto(playDesc)
-            standardDto = dto
+            standardDto = NflBoardCenterDto.createEndQuarterDto(playDesc)
         elif curPlay['playType'] == 'FIELD_GOAL':
-            dto = NflBoardCenterDto.createFieldGoalDto(playDesc)
-            standardDto = dto
+            standardDto = NflBoardCenterDto.createFieldGoalDto(playDesc)
         elif curPlay['playType'] == 'TIMEOUT':
-            dto = NflBoardCenterDto.createTimeoutDto(playDesc)
-            standardDto = dto
+            standardDto = NflBoardCenterDto.createTimeoutDto(playDesc)
         elif curPlay['playType'] == 'END_GAME':
-            pass  # todo
+            return 'END_GAME'
         elif curPlay['playType'] == 'PAT2':
-            dto = NflBoardCenterDto.createPat2Dto(playData)
-            standardDto = dto
-        elif curPlay['playType'] == 'INTERCEPTION':
-            dto = NflBoardCenterDto.createInterceptionDto(playDesc)
-            standardDto = dto
+            standardDto = NflBoardCenterDto.createPat2Dto(curPlay)
         else:
-            debug.error('Cannot process play:' + playData)
+            debug.error('Cannot process play:' + playDesc)
 
         if touchdownDto is not None:
             newCenterDtos.append(touchdownDto)
@@ -131,7 +126,12 @@ class NflProcessor:
             newCenterDtos.append(fumbleDto)
         if standardDto is not None:
             newCenterDtos.append(standardDto)
+            newCenterDtos.append(standardDto)  # double display time
+            optionalCopy = copy.copy(standardDto)
+            optionalCopy.isRequired = False
+            newCenterDtos.append(optionalCopy)
         if len(penaltyDtos) > 0:
             newCenterDtos += penaltyDtos
+        newCenterDtos.append(NflBoardCenterDto.createEmptyDto())
 
         return {'headData': headData, 'newCenterDtos': newCenterDtos, 'playIdx': playIdx}

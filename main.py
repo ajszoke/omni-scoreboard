@@ -108,7 +108,7 @@ def __refresh_standings(render_thread, data):  # type: (threading.Thread, MlbDat
 def __refresh_nfl_games(render_thread, data):
     while render_thread.is_alive():
         data.update()
-        time.sleep(10)  # TODO change > 3
+        time.sleep(6)  # TODO change > 3
 
 
 def __refresh_games(render_thread, data):  # type: (threading.Thread, MlbData) -> None

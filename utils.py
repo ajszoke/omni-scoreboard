@@ -1,4 +1,5 @@
 from math import sqrt
+from rgbmatrix.graphics import Font
 
 from data.config import Color
 
@@ -13,6 +14,7 @@ import collections
 import debug
 
 
+# TODO replace with a width function that actually counts glyph length
 def center_text_position(text, center_pos, font_width):
     return abs(center_pos - ((len(text) * font_width) // 2))
 
@@ -26,6 +28,13 @@ def text_matrix_width(text, font):
         return len(text) * font["size"]["width"]  # todo shorten for half spaces
     except:
         return 0
+
+
+def text_matrix_width_new(text: str, font):
+    width = 0
+    for c in text:
+        width += Font.CharacterWidth(font)
+    return width
 
 
 def color_delta_e(color1, color2):

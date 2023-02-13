@@ -9,8 +9,9 @@ from util import stringhelper
 
 class NflBoardCenterDto:
 
-    def __init__(self, type=None, banner=None, topLine=None, bottomLine=None, playerOne=None, playerTwo=None):
+    def __init__(self, type=None, isRequired=True, banner=None, topLine=None, bottomLine=None, playerOne=None, playerTwo=None):
         self.type = type
+        self.isRequired = isRequired
         self.banner = banner
         self.topLine = topLine
         self.bottomLine = bottomLine
@@ -38,18 +39,18 @@ class NflBoardCenterDto:
                     debug.error("Parsing error on penalty (couldn't find end idx): " + searchString)
                     return None
                 penaltyIdxes.append([startIdx, enforcedIdx])
-                searchString = searchString[:enforcedIdx + 1]
+                searchString = searchString[enforcedIdx + len('enforced ') + 1:]
             elif enforcedIdx is None:
-                searchString = searchString[:declineIdx + 1]
+                searchString = searchString[declineIdx + len('declined ') + 1:]
             elif enforcedIdx < declineIdx:
                 penaltyIdxes.append([startIdx, enforcedIdx])
-                searchString = searchString[:enforcedIdx + 1]
+                searchString = searchString[enforcedIdx + len('enforced ') + 1:]
             else:
-                searchString = searchString[:declineIdx + 1]
+                searchString = searchString[declineIdx + len('declined ') + 1:]
             startIdx = re.search(r'(Penalty|PENALTY)', searchString)
 
         for [startIdx, endIdx] in penaltyIdxes:
-            searchString = playDesc[startIdx, endIdx]
+            searchString = playDesc[startIdx:endIdx]
 
             if re.search(r'PENALTY ON (\w+)-', searchString).group() != '':
                 # player penalty
@@ -131,7 +132,7 @@ class NflBoardCenterDto:
                 if len(parts) == 1:
                     bottomLine = parts[0]
         if 'Touchback.' in playDesc:
-            return NflBoardCenterDto(type='STANDARD', topLine=topLine, bottomLine="Touchback")
+            return NflBoardCenterDto(type=BannerType.STANDARD, topLine=topLine, bottomLine="Touchback")
 
         recoveryStr = re.findall(r'RECOVERED by (\w+)-', playDesc)
         if len(recoveryStr) == 1:
@@ -214,8 +215,8 @@ class NflBoardCenterDto:
     @staticmethod
     def createRushDto(playData):
         for stat in playData['playStats']:
-            if stat['statId'] == StatType.RUSH_YARDS:
-                topLine = 'Kneel-down' if 'kneels' in playData['playDescription'] else stat['yards'] + ' yard rush'
+            if stat['statId'] == StatType.RUSH_YARDS.value:
+                topLine = 'Kneel-down' if 'kneels' in playData['playDescription'] else str(stat['yards']) + ' yard rush'
                 bottomLine = stat['playerName']
                 return NflBoardCenterDto(type=BannerType.STANDARD, topLine=topLine, bottomLine=bottomLine)
         return NflBoardCenterDto(type=BannerType.EMPTY)
@@ -225,14 +226,14 @@ class NflBoardCenterDto:
         qbName = None
         recName = None
         yards = None
-        for stat in playData['playStats']:
-            if stat['statId'] == StatType.PASS_YARDS:
+        for stat in playData:
+            if stat['statId'] == StatType.PASS_YARDS.value:
                 yards = stat['yards']
                 qbName = stat['playerName']
-            elif stat['statId'] == StatType.REC_YARDS:
+            elif stat['statId'] == StatType.REC_YARDS.value:
                 recName = stat['playerName']
 
-        topLine = yards + ' yard pass' if yards is not None else 'Pass'
+        topLine = str(yards) + ' yard pass' if yards is not None else 'Pass'
         qbName = '' if qbName is None else qbName
         recName = '' if recName is None else ' to ' + recName
         return NflBoardCenterDto(type=BannerType.STANDARD, topLine=topLine, bottomLine=qbName + recName)
@@ -246,14 +247,14 @@ class NflBoardCenterDto:
         if 'extra point is GOOD' in playDesc:
             topLine = 'PAT Good'
             for stat in playData['playStats']:
-                if stat['statId'] == StatType.XP_GOOD:
+                if stat['statId'] == StatType.XP_GOOD.value:
                     bottomLine = stat['playerName']
                     break
         elif 'extra point is No Good' in playDesc:
             topLine = 'PAT NO GOOD'
             type = BannerType.TURNOVER
             for stat in playData['playStats']:
-                if stat['statId'] == StatType.XP_NO_GOOD:
+                if stat['statId'] == StatType.XP_NO_GOOD.value:
                     bottomLine = stat['playerName']
                     break
         elif 'extra point is Blocked' in playDesc:
@@ -262,9 +263,9 @@ class NflBoardCenterDto:
             kicker = ''
             blocker = ''
             for stat in playData['playStats']:
-                if stat['statId'] == StatType.XP_BLOCKED_KICKER:
+                if stat['statId'] == StatType.XP_BLOCKED_KICKER.value:
                     kicker = stat['playerName']
-                elif stat['statId'] == StatType.XP_BLOCKED_BLOCKER:
+                elif stat['statId'] == StatType.XP_BLOCKED_BLOCKER.value:
                     blocker = stat['playerName']
             bottomLine = '{} (by {})'.format(kicker, blocker)
         else:
@@ -317,3 +318,10 @@ class NflBoardCenterDto:
             timeoutNum = stringhelper.ordinalize(parts[0])
             bottomLine = '{} ({})'.format(parts[1], timeoutNum)
         return NflBoardCenterDto(type=BannerType.STANDARD, topLine='Timeout', bottomLine=bottomLine)
+
+    @staticmethod
+    def createEmptyDto():
+        return NflBoardCenterDto(type=BannerType.EMPTY, isRequired=False)
+
+    def __json__(self):
+       return self.__dict__
