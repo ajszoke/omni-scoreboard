@@ -60,6 +60,7 @@
   "api_refresh_rate": 5,
   "sync_delay_seconds": 0,
   "scrolling_speed": 1,
+  "editorial_blurb": true,
   "debug": true,
   "demo_date": false,
   "test_config": {

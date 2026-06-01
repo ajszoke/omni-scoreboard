@@ -40,7 +40,7 @@ class Blurbs:
             mlb = self._content["editorial"][section]["mlb"]
             headline = mlb.get("headline", "")
             subhead = mlb.get("subhead", "")
-            return " ".join((" — ".join(filter(None, [headline, subhead]))).split())
+            return " ".join((" - ".join(filter(None, [headline, subhead]))).split())
         except (KeyError, TypeError):
             return ""
 

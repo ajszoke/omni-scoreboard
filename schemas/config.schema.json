@@ -416,6 +416,12 @@
       "maximum": 6,
       "default": 2
     },
+    "editorial_blurb": {
+      "description": "Include the MLB.com editorial recap/preview blurb in game scroll text?",
+      "type": "boolean",
+      "default": true,
+      "x-format": "checkbox"
+    },
     "debug": {
       "description": "Should the board enable extra logging?",
       "type": "boolean",

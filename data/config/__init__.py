@@ -63,6 +63,8 @@ class Config:
         # TODO moving this inside a 'plugin' is a bit weird?
         self.pregame_weather = json["weather"]["pregame"]
 
+        self.editorial_blurb = json["editorial_blurb"]
+
         # Misc config options
         self.time_format = json["time_format"]
         self.end_of_day = json["end_of_day"]

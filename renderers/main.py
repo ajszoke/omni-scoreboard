@@ -84,6 +84,7 @@ class MainRenderer:
                 pregame,
                 self.scrolling_text_pos,
                 self.data.config.pregame_weather,
+                self.data.config.editorial_blurb,
                 self.data.config.is_postseason(),
             )
             self.__update_scrolling_text_pos(pos, self.canvas.width)
@@ -98,6 +99,7 @@ class MainRenderer:
                 final,
                 scoreboard,
                 self.scrolling_text_pos,
+                self.data.config.editorial_blurb,
                 self.data.config.is_postseason(),
             )
             self.__update_scrolling_text_pos(pos, self.canvas.width)
