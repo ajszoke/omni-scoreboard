@@ -9,6 +9,7 @@ from data import teams
 from bullpen.api import UpdateStatus
 from data.utils.circular_queue import CircularQueue
 from data.uniforms import Uniforms
+from data.blurbs import Blurbs
 from data.scoreboard import Scoreboard
 from data.scoreboard.postgame import Postgame
 from data.scoreboard.pregame import Pregame
@@ -59,6 +60,7 @@ class Game:
         self._api_refresh_rate = config.api_refresh_rate
         self._status: dict[str, Any] = {}
         self._uniform_data = Uniforms(game_id, config.uniform_types)
+        self._blurb_data = Blurbs(game_id)
 
     def update(self, force=False, testing_params={}) -> UpdateStatus:
         if force or self.__should_update():
@@ -94,6 +96,7 @@ class Game:
                     self._status = self._current_data["gameData"]["status"]
 
                 self._uniform_data.update()
+                self._blurb_data.update()
                 self.print_game_data_debug()
                 return UpdateStatus.SUCCESS
             except:
@@ -359,7 +362,15 @@ class Game:
             result += "_looking"
         return result
 
+    def game_recap_blurb(self):
+        return self._blurb_data.recap()
+
+    def game_preview_blurb(self):
+        return self._blurb_data.preview()
+
     def __should_update(self):
+        if self._status.get("abstractGameState") == "Final":
+            return False
         endtime = time.time()
         time_delta = endtime - self.starttime
         return time_delta >= self._api_refresh_rate

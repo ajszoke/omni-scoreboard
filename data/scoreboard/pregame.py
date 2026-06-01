@@ -51,6 +51,7 @@ class Pregame:
 
         self.national_broadcasts = game.broadcasts()
         self.series_status = game.series_status()
+        self.preview_blurb = game.game_preview_blurb()
 
     def __convert_time(self, game_time_utc):
         """Converts MLB's pregame times (UTC) into the local time zone"""
@@ -60,7 +61,7 @@ class Pregame:
         return game_time_utc.astimezone(tzlocal.get_localzone()).strftime(time_str)
 
     def __str__(self):
-        s = "<{} {}> {} @ {}; {}; {} vs {}; Forecast: {}; TV: {}".format(
+        s = "<{} {}> {} @ {}; {}; {} vs {}; Forecast: {}; TV: {}; Preview: {}".format(
             self.__class__.__name__,
             hex(id(self)),
             self.away_team,
@@ -70,5 +71,6 @@ class Pregame:
             self.home_starter,
             self.pregame_weather,
             self.national_broadcasts,
+            self.preview_blurb,
         )
         return s
