@@ -8,8 +8,7 @@ SKIP_CONFIG=false
 SKIP_OPTIMIZATIONS=false
 SKIP_SUDO=false
 SKIP_VENV=false
-
-REQUIREMENTS=requirements.rpi.txt
+SKIP_DRIVER=false
 
 usage() {
     cat <<USAGE
@@ -79,7 +78,7 @@ while [ $# -gt 0 ]; do
         shift
         ;;
     -e | --emulator-only)
-        REQUIREMENTS=requirements.txt
+        SKIP_DRIVER=true
         SKIP_OPTIMIZATIONS=true
         shift
         ;;
@@ -165,9 +164,23 @@ fi
 PYTHON=$(which python3)
 
 if [ "$SKIP_SUDO" = false ]; then
-    sudo "$PYTHON" -m pip install -r $REQUIREMENTS
+    sudo "$PYTHON" -m pip install -r requirements.txt
 else
-    "$PYTHON" -m pip install -r $REQUIREMENTS
+    "$PYTHON" -m pip install -r requirements.txt
+fi
+
+# rpi-rgb-led-matrix hard-codes its version string, this ensures pip doesn't skip recompiling the bindings due to the version never changing
+if [ "$SKIP_DRIVER" = false ]; then
+    echo
+    echo "------------------------------------"
+    echo "  Rebuilding RGB matrix binding..."
+    echo "------------------------------------"
+    echo
+    if [ "$SKIP_SUDO" = false ]; then
+        sudo "$PYTHON" -m pip install --force-reinstall --no-cache-dir --no-deps -r requirements.rpi.txt
+    else
+        "$PYTHON" -m pip install --force-reinstall --no-cache-dir --no-deps -r requirements.rpi.txt
+    fi
 fi
 
 if [ "$SKIP_OPTIMIZATIONS" = false ]; then
