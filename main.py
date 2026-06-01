@@ -104,7 +104,7 @@ if __name__ == "__main__":
     from driver import RGBMatrix, __version__
 
     matrix = RGBMatrix(options=config.matrix_options)
-    config.set_layout(matrix.width, matrix.height)
+    config.set_layout(width=matrix.width, height=matrix.height)
 
     try:
         main(matrix, config)
