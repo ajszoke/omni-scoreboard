@@ -55,7 +55,7 @@ class Postgame:
         self.recap_blurb = game.game_recap_blurb()
 
     def __str__(self):
-        return "<{} {}> W: {} {}-{}; L: {} {}-{}; S: {} ({})".format(
+        return "<{} {}> W: {} {}-{}; L: {} {}-{}; S: {} ({}); Recap: {}".format(
             self.__class__.__name__,
             hex(id(self)),
             self.winning_pitcher,
@@ -66,4 +66,5 @@ class Postgame:
             self.losing_pitcher_losses,
             self.save_pitcher,
             self.save_pitcher_saves,
+            self.recap_blurb,
         )
