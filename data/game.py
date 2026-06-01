@@ -9,6 +9,7 @@ from data import teams
 from bullpen.api import UpdateStatus
 from data.utils.circular_queue import CircularQueue
 from data.uniforms import Uniforms
+from data.blurbs import Blurbs
 from data.scoreboard import Scoreboard
 from data.scoreboard.postgame import Postgame
 from data.scoreboard.pregame import Pregame
@@ -59,6 +60,7 @@ class Game:
         self._api_refresh_rate = config.api_refresh_rate
         self._status: dict[str, Any] = {}
         self._uniform_data = Uniforms(game_id, config.uniform_types)
+        self._blurb_data = Blurbs(game_id)
 
     def update(self, force=False, testing_params={}) -> UpdateStatus:
         if force or self.__should_update():
@@ -91,6 +93,7 @@ class Game:
                         LOGGER.error("Failed to get game status from schedule")
 
                 self._uniform_data.update()
+                self._blurb_data.update()
                 self.print_game_data_debug()
                 return UpdateStatus.SUCCESS
             except:
@@ -356,36 +359,11 @@ class Game:
             result += "_looking"
         return result
 
-    def _fetch_game_content(self):
-        now = time.time()
-        if hasattr(self, "_game_content_cache") and now - getattr(self, "_game_content_cache_time", 0) < 300:
-            return self._game_content_cache
-        try:
-            content = statsapi.get(
-                "game_content",
-                {"gamePk": self.game_id},
-                request_kwargs={"headers": data.headers.API_HEADERS},
-            )
-            self._game_content_cache = content
-            self._game_content_cache_time = now
-            return content
-        except Exception:
-            return {}
-
-    def _blurb_from(self, section):
-        try:
-            mlb = self._fetch_game_content()["editorial"][section]["mlb"]
-            headline = mlb.get("headline", "")
-            subhead = mlb.get("subhead", "")
-            return " ".join((" — ".join(filter(None, [headline, subhead]))).split())
-        except (KeyError, TypeError):
-            return ""
-
     def game_recap_blurb(self):
-        return self._blurb_from("recap")
+        return self._blurb_data.recap()
 
     def game_preview_blurb(self):
-        return self._blurb_from("preview")
+        return self._blurb_data.preview()
 
     def __should_update(self):
         if self._status.get("abstractGameState") == "Final":
