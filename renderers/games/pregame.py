@@ -48,6 +48,9 @@ def _render_pregame_info(canvas, layout, colors, pregame: Pregame, probable_star
     if pregame_weather and pregame.pregame_weather:
         pitchers_text += " Weather: " + pregame.pregame_weather
 
+    if pregame.preview_blurb:
+        pitchers_text += "  —  " + pregame.preview_blurb
+
     if is_playoffs:
         pitchers_text += "   " + pregame.series_status
 
