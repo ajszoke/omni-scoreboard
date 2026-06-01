@@ -63,6 +63,8 @@ class Config:
         # TODO moving this inside a 'plugin' is a bit weird?
         self.pregame_weather = json["weather"]["pregame"]
 
+        self.editorial_blurb = json["editorial_blurb"]
+
         # Misc config options
         self.time_format = json["time_format"]
         self.end_of_day = json["end_of_day"]
@@ -352,8 +354,12 @@ If you aren't sure why you're seeing this, there might not be official support f
         if args.led_no_hardware_pulse:
             options.disable_hardware_pulsing = True
 
-        if args.led_rp1_rio != None:
-            options.rp1_rio = args.led_rp1_rio
+        if args.led_rp1_rio is not None:
+            try:
+                options.rp1_rio = args.led_rp1_rio
+            except AttributeError:
+                LOGGER.warning("Your compiled RGB Matrix Library is out of date.")
+                LOGGER.warning("The --led-rp1-rio argument will not work until it is updated.")
 
         return options
 
