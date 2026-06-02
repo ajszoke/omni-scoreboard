@@ -85,7 +85,7 @@ if __name__ == "__main__":
         while True:
             try:
                 config = Config()
-            except:
+            except Exception:
                 logging.exception("Error error re-loading config")
                 pass
             canvas = draw_teams(canvas, config)

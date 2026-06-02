@@ -47,9 +47,7 @@ class Layout:
         """
         try:
             return self.__get_font_object(self.coords(keypath)[FONTNAME_KEY])
-        except KeyboardInterrupt as e:
-            raise e
-        except:
+        except Exception:
             return self.__get_font_object(self.default_font_name)
 
     def coords(self, keypath):

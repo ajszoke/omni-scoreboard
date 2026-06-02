@@ -72,7 +72,7 @@ class Standings(PluginData):
                     self.leagues["AL"] = League(postseason_data, "AL")
                     self.leagues["NL"] = League(postseason_data, "NL")
 
-            except:
+            except Exception:
                 LOGGER.exception("Failed to refresh standings.")
                 return UpdateStatus.FAIL
             else:

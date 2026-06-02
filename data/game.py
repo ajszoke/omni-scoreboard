@@ -90,7 +90,7 @@ class Game:
                         self._status = next(
                             g["games"][0]["status"] for g in scheduled["dates"] if g["date"] == self.date
                         )
-                    except:
+                    except Exception:
                         LOGGER.error("Failed to get game status from schedule")
                 else:
                     self._status = self._current_data["gameData"]["status"]
@@ -99,7 +99,7 @@ class Game:
                 self._blurb_data.update()
                 self.print_game_data_debug()
                 return UpdateStatus.SUCCESS
-            except:
+            except Exception:
                 LOGGER.exception("Networking Error while refreshing the current game data.")
                 return UpdateStatus.FAIL
         return UpdateStatus.DEFERRED
@@ -246,12 +246,12 @@ class Game:
                 stats = self._current_data["liveData"]["boxscore"]["teams"]["home"]["players"][ID]["seasonStats"][
                     "pitching"
                 ]
-            except:
+            except Exception:
                 try:
                     stats = self._current_data["liveData"]["boxscore"]["teams"]["away"]["players"][ID]["seasonStats"][
                         "pitching"
                     ]
-                except:
+                except Exception:
                     return ""
 
         return stats[stat]
@@ -259,41 +259,41 @@ class Game:
     def probable_pitcher_id(self, team):
         try:
             return self._current_data["gameData"]["probablePitchers"][team]["id"]
-        except:
+        except Exception:
             return None
 
     def decision_pitcher_id(self, decision):
         try:
             return self._current_data["liveData"]["decisions"][decision]["id"]
-        except:
+        except Exception:
             return None
 
     def batter(self):
         try:
             batter_id = self._current_data["liveData"]["linescore"]["offense"]["batter"]["id"]
             return self.boxscore_name(batter_id)
-        except:
+        except Exception:
             return ""
 
     def in_hole(self):
         try:
             batter_id = self._current_data["liveData"]["linescore"]["offense"]["inHole"]["id"]
             return self.boxscore_name(batter_id)
-        except:
+        except Exception:
             return ""
 
     def on_deck(self):
         try:
             batter_id = self._current_data["liveData"]["linescore"]["offense"]["onDeck"]["id"]
             return self.boxscore_name(batter_id)
-        except:
+        except Exception:
             return ""
 
     def pitcher(self):
         try:
             pitcher_id = self._current_data["liveData"]["linescore"]["defense"]["pitcher"]["id"]
             return self.boxscore_name(pitcher_id)
-        except:
+        except Exception:
             return ""
 
     def balls(self):
@@ -314,7 +314,7 @@ class Game:
                     play["details"]["type"]["code"],
                     play["details"]["type"]["description"],
                 )
-        except:
+        except Exception:
             return None
 
     def current_pitcher_pitch_count(self):
@@ -325,26 +325,26 @@ class Game:
                 return self._current_data["liveData"]["boxscore"]["teams"]["away"]["players"][ID]["stats"]["pitching"][
                     "numberOfPitches"
                 ]
-            except:
+            except Exception:
                 return self._current_data["liveData"]["boxscore"]["teams"]["home"]["players"][ID]["stats"]["pitching"][
                     "numberOfPitches"
                 ]
-        except:
+        except Exception:
             return 0
 
     def note(self):
         try:
             return self._current_data["liveData"]["linescore"]["note"]
-        except:
+        except Exception:
             return None
 
     def reason(self):
         try:
             return self._status["reason"]
-        except:
+        except Exception:
             try:
                 return self._status["detailedState"].split(":")[1].strip()
-            except:
+            except Exception:
                 return None
 
     def broadcasts(self):
