@@ -151,7 +151,7 @@ class Config:
                 # Try and cast whatever the user passed into a float
                 rate = float(value)
                 self.rotation_rates[key] = rate
-            except:
+            except Exception:
                 # Use the default rotate rate if it fails
                 LOGGER.warning(
                     'Unable to convert rotate_rates["{}"] to a Float. Using default value. ({})'.format(

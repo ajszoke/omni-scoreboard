@@ -20,7 +20,7 @@ class Pregame:
 
         try:
             self.start_time = self.__convert_time(game.datetime())
-        except:
+        except Exception:
             self.start_time = "TBD"
 
         self.status = game.status()
@@ -34,7 +34,7 @@ class Pregame:
                 losses = game.pitcher_stat(away_id, "losses", "away")
                 era = game.pitcher_stat(away_id, "era", "away")
                 self.away_starter = "{} ({}-{} {} ERA)".format(name, wins, losses, era)
-            except:
+            except Exception:
                 LOGGER.exception("Error getting away starter stats")
 
         self.home_starter = PITCHER_TBD
@@ -46,7 +46,7 @@ class Pregame:
                 losses = game.pitcher_stat(home_id, "losses", "home")
                 era = game.pitcher_stat(home_id, "era", "home")
                 self.home_starter = "{} ({}-{} {} ERA)".format(name, wins, losses, era)
-            except:
+            except Exception:
                 LOGGER.exception("Error getting away starter stats")
 
         self.national_broadcasts = game.broadcasts()
