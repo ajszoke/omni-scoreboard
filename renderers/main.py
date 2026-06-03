@@ -133,6 +133,16 @@ class MainRenderer:
             )
             self.__update_scrolling_text_pos(pos, loop_point)
 
+        # ABS challenge indicators draw inside the team banner (between the
+        # background fill and the score text) so they never overlap digits or
+        # team names; only relevant while the game is live.
+        abs_challenges = None
+        if status.is_live(game.status()):
+            abs_challenges = {
+                "away": scoreboard.away_abs_challenges if scoreboard.away_abs_challenges is not None else 2,
+                "home": scoreboard.home_abs_challenges if scoreboard.home_abs_challenges is not None else 2,
+            }
+
         # draw last so it is always on top
         teams.render_team_banner(
             self.canvas,
@@ -141,12 +151,9 @@ class MainRenderer:
             scoreboard.home_team,
             scoreboard.away_team,
             show_score=not status.is_pregame(game.status()),
+            colors=colors,
+            abs_challenges=abs_challenges,
         )
-
-        # ABS challenge indicators sit on top of the team-banner background,
-        # so render them after the banner -- and only while the game is live.
-        if status.is_live(game.status()):
-            gamerender.render_abs_challenges(self.canvas, layout, colors, scoreboard)
 
         # Show network issues
         if self.data.network_issues:

@@ -11,6 +11,8 @@ def render_team_banner(
     home_team,
     away_team,
     show_score,
+    colors=None,
+    abs_challenges=None,
 ):
     away_colors = away_team.lookup_color(team_colors)
     home_colors = home_team.lookup_color(team_colors)
@@ -31,6 +33,11 @@ def render_team_banner(
         # Accent
         accent_color = home_colors["accent"] if team == "home" else away_colors["accent"]
         __draw_filled_box(canvas, accent_coords[team], accent_color)
+
+    # ABS challenges drawn over the background fill but under the team-name
+    # and score text, so a misplaced colon never obscures the digits.
+    if colors is not None and abs_challenges is not None:
+        __render_abs_challenges(canvas, layout, colors, abs_challenges)
 
     use_full_team_names = can_use_full_team_names(layout, [home_team, away_team])
 
@@ -163,3 +170,33 @@ def __draw_filled_box(canvas, coords, color):
 
     for h in range(coords["height"]):
         graphics.DrawLine(canvas, x, y + h, x + w, y + h, c)
+
+
+def __render_abs_challenges(canvas, layout, colors, counts):
+    try:
+        abs_coords = layout.coords("teams.abs_challenges")
+        available_color = colors.graphics_color("abs_challenges.available")
+        used_color = colors.graphics_color("abs_challenges.used")
+    except KeyError:
+        return
+
+    if not layout.coords("teams.line_score").get("show_abs_challenges", True):
+        return
+
+    for side in ("away", "home"):
+        cfg = abs_coords.get(side)
+        if not cfg:
+            continue
+        remaining = counts[side]
+        squares = cfg["squares"]
+        x = cfg["x"]
+        size = cfg["size"]
+        # Fill from the bottom up so the top dims first when a challenge is spent.
+        for i, y in enumerate(squares):
+            color = available_color if i >= (len(squares) - remaining) else used_color
+            __draw_challenge_square(canvas, x, y, size, color)
+
+
+def __draw_challenge_square(canvas, x, y, size, color):
+    for dy in range(size):
+        graphics.DrawLine(canvas, x, y + dy, x + size - 1, y + dy, color)

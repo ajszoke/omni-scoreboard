@@ -261,47 +261,6 @@ def __fill_out_circle(canvas, out, color):
         graphics.DrawLine(canvas, x, y + y_offset, x + size - 1, y + y_offset, color)
 
 
-# --------------- ABS challenges ---------------
-# Called from main.py after the team banner so the squares sit on top of the
-# team background fill.
-def render_abs_challenges(canvas, layout, colors, scoreboard: Scoreboard):
-    try:
-        abs_coords = layout.coords("teams.abs_challenges")
-        available_color = colors.graphics_color("abs_challenges.available")
-        used_color = colors.graphics_color("abs_challenges.used")
-    except KeyError:
-        return
-
-    if not layout.coords("teams.line_score").get("show_abs_challenges", True):
-        return
-
-    # New rules give each manager two challenges per game; default to 2 if the
-    # API hasn't reported the field (older games, network blip).
-    counts = {
-        "away": scoreboard.away_abs_challenges if scoreboard.away_abs_challenges is not None else 2,
-        "home": scoreboard.home_abs_challenges if scoreboard.home_abs_challenges is not None else 2,
-    }
-
-    for side in ("away", "home"):
-        cfg = abs_coords.get(side)
-        if not cfg:
-            continue
-        remaining = counts[side]
-        squares = cfg["squares"]
-        x = cfg["x"]
-        size = cfg["size"]
-        # Fill from the bottom up: the last (bottom) square stays lit while
-        # remaining > 0; the top dims first when a challenge is spent.
-        for i, y in enumerate(squares):
-            color = available_color if i >= (len(squares) - remaining) else used_color
-            __draw_challenge_square(canvas, x, y, size, color)
-
-
-def __draw_challenge_square(canvas, x, y, size, color):
-    for dy in range(size):
-        graphics.DrawLine(canvas, x, y + dy, x + size - 1, y + dy, color)
-
-
 # --------------- inning information ---------------
 def _render_inning_break(canvas, layout, colors, inning: Inning):
 
