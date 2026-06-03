@@ -44,6 +44,8 @@ def render_live_game(canvas, layout: Layout, colors: Color, scoreboard: Scoreboa
         _render_inning_break(canvas, layout, colors, scoreboard.inning)
         pos = _render_due_up(canvas, layout, colors, scoreboard.atbat, text_pos)
 
+    _render_abs_challenges(canvas, layout, colors, scoreboard)
+
     return pos
 
 
@@ -259,6 +261,39 @@ def __fill_out_circle(canvas, out, color):
     size -= 1
     for y_offset in range(size):
         graphics.DrawLine(canvas, x, y + y_offset, x + size - 1, y + y_offset, color)
+
+
+# --------------- ABS challenges ---------------
+def _render_abs_challenges(canvas, layout, colors, scoreboard: Scoreboard):
+    try:
+        abs_coords = layout.coords("teams.abs_challenges")
+        available_color = colors.graphics_color("abs_challenges.available")
+        used_color = colors.graphics_color("abs_challenges.used")
+    except KeyError:
+        return
+
+    # New rules give each manager two challenges per game; default to 2 if the
+    # API hasn't reported the field (older games, network blip).
+    counts = {
+        "away": scoreboard.away_abs_challenges if scoreboard.away_abs_challenges is not None else 2,
+        "home": scoreboard.home_abs_challenges if scoreboard.home_abs_challenges is not None else 2,
+    }
+
+    for side in ("away", "home"):
+        cfg = abs_coords.get(side)
+        if not cfg or not cfg.get("enabled", True):
+            continue
+        remaining = counts[side]
+        x = cfg["x"]
+        size = cfg["size"]
+        for i, y in enumerate(cfg["squares"]):
+            color = available_color if i < remaining else used_color
+            __draw_challenge_square(canvas, x, y, size, color)
+
+
+def __draw_challenge_square(canvas, x, y, size, color):
+    for dy in range(size):
+        graphics.DrawLine(canvas, x, y + dy, x + size - 1, y + dy, color)
 
 
 # --------------- inning information ---------------

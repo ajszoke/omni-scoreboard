@@ -50,6 +50,9 @@ class Scoreboard:
 
         self.play_result = game.current_play_result()
 
+        self.away_abs_challenges = game.abs_challenges_remaining("away")
+        self.home_abs_challenges = game.abs_challenges_remaining("home")
+
     def homerun(self):
         return self.play_result == "home_run"
 

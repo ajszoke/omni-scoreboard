@@ -314,6 +314,26 @@
       "compress_digits": true,
       "shorten_team_name_on_high_line_score": true,
       "spacing": 5
+    },
+    "abs_challenges": {
+      "away": {
+        "enabled": true,
+        "x": 126,
+        "size": 2,
+        "squares": [
+          5,
+          9
+        ]
+      },
+      "home": {
+        "enabled": true,
+        "x": 126,
+        "size": 2,
+        "squares": [
+          21,
+          25
+        ]
+      }
     }
   },
   "news": {
