@@ -113,12 +113,11 @@
     "abs_challenges_side": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean", "default": true },
         "x":       { "type": "integer" },
         "size":    { "type": "integer", "default": 2, "minimum": 1 },
         "squares": {
           "type": "array",
-          "description": "Y positions for each challenge square (two = colon-style indicator)",
+          "description": "Y positions for each challenge square (two = colon-style indicator). Squares are filled from the bottom up as challenges remain.",
           "items": { "type": "integer" },
           "minItems": 1
         }
@@ -373,6 +372,7 @@
             "away":                                 { "$ref": "#/$defs/named_point" },
             "home":                                 { "$ref": "#/$defs/named_point" },
             "show_hits_and_errors":                 { "type": "boolean" },
+            "show_abs_challenges":                  { "type": "boolean", "default": true },
             "compress_digits":                      { "type": "boolean" },
             "shorten_team_name_on_high_line_score": { "type": "boolean" },
             "spacing":                              { "type": "integer" },

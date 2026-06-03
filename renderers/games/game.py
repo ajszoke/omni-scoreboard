@@ -44,8 +44,6 @@ def render_live_game(canvas, layout: Layout, colors: Color, scoreboard: Scoreboa
         _render_inning_break(canvas, layout, colors, scoreboard.inning)
         pos = _render_due_up(canvas, layout, colors, scoreboard.atbat, text_pos)
 
-    _render_abs_challenges(canvas, layout, colors, scoreboard)
-
     return pos
 
 
@@ -264,12 +262,17 @@ def __fill_out_circle(canvas, out, color):
 
 
 # --------------- ABS challenges ---------------
-def _render_abs_challenges(canvas, layout, colors, scoreboard: Scoreboard):
+# Called from main.py after the team banner so the squares sit on top of the
+# team background fill.
+def render_abs_challenges(canvas, layout, colors, scoreboard: Scoreboard):
     try:
         abs_coords = layout.coords("teams.abs_challenges")
         available_color = colors.graphics_color("abs_challenges.available")
         used_color = colors.graphics_color("abs_challenges.used")
     except KeyError:
+        return
+
+    if not layout.coords("teams.line_score").get("show_abs_challenges", True):
         return
 
     # New rules give each manager two challenges per game; default to 2 if the
@@ -281,13 +284,16 @@ def _render_abs_challenges(canvas, layout, colors, scoreboard: Scoreboard):
 
     for side in ("away", "home"):
         cfg = abs_coords.get(side)
-        if not cfg or not cfg.get("enabled", True):
+        if not cfg:
             continue
         remaining = counts[side]
+        squares = cfg["squares"]
         x = cfg["x"]
         size = cfg["size"]
-        for i, y in enumerate(cfg["squares"]):
-            color = available_color if i < remaining else used_color
+        # Fill from the bottom up: the last (bottom) square stays lit while
+        # remaining > 0; the top dims first when a challenge is spent.
+        for i, y in enumerate(squares):
+            color = available_color if i >= (len(squares) - remaining) else used_color
             __draw_challenge_square(canvas, x, y, size, color)
 
 

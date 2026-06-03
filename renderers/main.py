@@ -143,6 +143,11 @@ class MainRenderer:
             show_score=not status.is_pregame(game.status()),
         )
 
+        # ABS challenge indicators sit on top of the team-banner background,
+        # so render them after the banner -- and only while the game is live.
+        if status.is_live(game.status()):
+            gamerender.render_abs_challenges(self.canvas, layout, colors, scoreboard)
+
         # Show network issues
         if self.data.network_issues:
             network.render_network_error(self.canvas, layout, colors)
