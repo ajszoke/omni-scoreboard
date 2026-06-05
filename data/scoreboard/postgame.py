@@ -24,7 +24,7 @@ class Postgame:
                 self.winning_pitcher = game.full_name(winner)
                 self.winning_pitcher_wins = game.pitcher_stat(winner, "wins", winner_side)
                 self.winning_pitcher_losses = game.pitcher_stat(winner, "losses", winner_side)
-            except:
+            except Exception:
                 LOGGER.exception("Error getting winning pitcher stats")
 
         self.save_pitcher = None
@@ -35,7 +35,7 @@ class Postgame:
             try:
                 self.save_pitcher = game.full_name(save)
                 self.save_pitcher_saves = game.pitcher_stat(save, "saves", winner_side)
-            except:
+            except Exception:
                 LOGGER.exception("Error getting save pitcher stats")
 
         self.losing_pitcher = PITCHER_UNKNOWN
@@ -48,7 +48,7 @@ class Postgame:
                 self.losing_pitcher = game.full_name(loser)
                 self.losing_pitcher_wins = game.pitcher_stat(loser, "wins", loser_side)
                 self.losing_pitcher_losses = game.pitcher_stat(loser, "losses", loser_side)
-            except:
+            except Exception:
                 LOGGER.exception("Error getting losing pitcher stats")
 
         self.series_status = game.series_status()

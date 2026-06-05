@@ -38,7 +38,7 @@ class Schedule:
             try:
                 # add sportId=51 to additionally get WBC games
                 all_games = statsapi.schedule(self.date.strftime("%Y-%m-%d"), sportId="1,51")
-            except:
+            except Exception:
                 LOGGER.exception("Networking error while refreshing schedule")
                 return UpdateStatus.FAIL
             else:

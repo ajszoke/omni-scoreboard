@@ -16,7 +16,7 @@ class Dates:
             if year == now.year and end_date < now:
                 data_d = statsapi.get("season", {"sportId": 1, "seasonId": year + 1})
                 self.__parse_important_dates(data_d["seasons"][0], year + 1)
-        except:
+        except Exception:
             LOGGER.exception("Failed to refresh important dates")
             self.important_dates = [{"text": "None", "date": datetime(3000, 1, 1), "max_days": 1}]
         try:
@@ -25,7 +25,7 @@ class Dates:
                 if d.count("-") == 1:
                     d = f"{year}-{d}"
                 self.__add_date(d, date["text"], date.get("max_days", 365))
-        except:
+        except Exception:
             LOGGER.exception("Failed to parse important dates from config")
 
         LOGGER.debug("Important dates: %s", self.important_dates)

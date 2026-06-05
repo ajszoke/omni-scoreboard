@@ -34,9 +34,7 @@ class Data:
         status = UpdateStatus.FAIL
         try:
             status = plugin.update()
-        except KeyboardInterrupt as e:
-            raise e
-        except:
+        except Exception:
             LOGGER.exception("Failure while updating plugin %s", name)
 
         self.__process_network_status(status)

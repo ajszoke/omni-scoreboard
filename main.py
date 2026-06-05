@@ -108,7 +108,7 @@ if __name__ == "__main__":
 
     try:
         main(matrix, config)
-    except:
+    except Exception:
         LOGGER.exception("Untrapped error in main!")
         sys.exit(1)
     finally:
