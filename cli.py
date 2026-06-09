@@ -148,9 +148,9 @@ def _make_parser(defaults) -> argparse.ArgumentParser:
         type=int,
     )
     parser.add_argument(
-        "--led-rp1-rio",
+        "--led-rp1-pio",
         action="store",
-        help="On Raspberry Pi 5-family boards, use the experimental RP1 RIO backend instead of RP1 PIO. 0=PIO, 1=RIO. (Default: 0)",
+        help="On Raspberry Pi 5-family boards, force the RP1 PIO backend. 0=default RP1 RIO, 1=PIO (Default: 0)",
         default=0,
         choices=[0, 1],
         type=int,
