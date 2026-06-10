@@ -11,8 +11,7 @@ def render_team_banner(
     home_team,
     away_team,
     show_score,
-    colors=None,
-    abs_challenges=None,
+    scoreboard_colors,
 ):
     away_colors = away_team.lookup_color(team_colors)
     home_colors = home_team.lookup_color(team_colors)
@@ -36,8 +35,8 @@ def render_team_banner(
 
     # ABS challenges drawn over the background fill but under the team-name
     # and score text, so a misplaced colon never obscures the digits.
-    if colors is not None and abs_challenges is not None:
-        __render_abs_challenges(canvas, layout, colors, abs_challenges)
+    if scoreboard_colors is not None:
+        __render_abs_challenges(canvas, layout, scoreboard_colors, home_team.abs_challenges, away_team.abs_challenges)
 
     use_full_team_names = can_use_full_team_names(layout, [home_team, away_team])
 
@@ -172,7 +171,7 @@ def __draw_filled_box(canvas, coords, color):
         graphics.DrawLine(canvas, x, y + h, x + w, y + h, c)
 
 
-def __render_abs_challenges(canvas, layout, colors, counts):
+def __render_abs_challenges(canvas, layout, colors, home_remaining, away_remaining):
     try:
         abs_coords = layout.coords("teams.abs_challenges")
         available_color = colors.graphics_color("abs_challenges.available")
@@ -183,11 +182,13 @@ def __render_abs_challenges(canvas, layout, colors, counts):
     if not layout.coords("teams.line_score").get("show_abs_challenges", True):
         return
 
-    for side in ("away", "home"):
+    if away_remaining is None or home_remaining is None:
+        return
+
+    for side, remaining in [("away", away_remaining), ("home", home_remaining)]:
         cfg = abs_coords.get(side)
         if not cfg:
             continue
-        remaining = counts[side]
         squares = cfg["squares"]
         x = cfg["x"]
         size = cfg["size"]
