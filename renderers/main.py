@@ -1,11 +1,13 @@
 import time
 from typing import Callable, NoReturn
+from collections.abc import Iterator
+from contextlib import contextmanager
+
 
 import bullpen.api as api
 
 
 from bullpen.logging import LOGGER
-from bullpen.timing import frame_pacer
 from data import Data, status
 from data.scoreboard import Scoreboard
 from data.scoreboard.postgame import Postgame
@@ -226,3 +228,21 @@ def any_of(*conds) -> Callable[[], bool]:
         return any(c() for c in conds)
 
     return cond
+
+
+@contextmanager
+def frame_pacer(budget: float) -> Iterator[None]:
+    """Hold the wrapped block to at least `budget` seconds.
+
+    Used to ensure consistency (smooth transitions) between rendered frames.
+
+    Stamps a monotonic clock on entry and, on exit, sleeps off any time
+    remaining in the budget. If the block already overran it, no sleep occurs.
+    """
+    start = time.monotonic()
+
+    yield
+
+    elapsed = time.monotonic() - start
+    if elapsed < budget:
+        time.sleep(budget - elapsed)
