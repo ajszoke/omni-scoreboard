@@ -103,8 +103,10 @@ class TestGame(unittest.TestCase):
         game = data.game.Game.from_scheduled(game_data, config)
         self.assertIsNotNone(game)
         # DET was wearing city connects
-        self.assertEqual(game.home_special_uniforms(), "city_connect")
-        self.assertIsNone(game.away_special_uniforms())
+        # This data appears to be deleted from the API
+        # https://statsapi.mlb.com/api/v1/uniforms/game?fields=uniforms,home,away,uniformAssets,uniformAssetText&gamePks=746423
+        # self.assertEqual(game.home_special_uniforms(), "city_connect")
+        # self.assertIsNone(game.away_special_uniforms())
 
         # fifth inning -- too early!
         self.assertEqual(game.update(force=True, testing_params={"timecode": "20240913_234825"}), UpdateStatus.SUCCESS)
