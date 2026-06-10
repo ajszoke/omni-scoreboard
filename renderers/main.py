@@ -5,6 +5,7 @@ import bullpen.api as api
 
 
 from bullpen.logging import LOGGER
+from bullpen.timing import frame_pacer
 from data import Data, status
 from data.scoreboard import Scoreboard
 from data.scoreboard.postgame import Postgame
@@ -62,9 +63,9 @@ class MainRenderer:
                 self.scrolling_finished_cond(),
             )
             while cond():
-                self.data.config.layout.state_for_game(game)
-                self.__draw_game(game)
-                time.sleep(self.data.config.scrolling_speed)
+                with frame_pacer(self.data.config.scrolling_speed):
+                    self.data.config.layout.state_for_game(game)
+                    self.__draw_game(game)
 
     # Draws the provided game on the canvas
     def __draw_game(self, game: Game):
@@ -158,14 +159,16 @@ class MainRenderer:
         data = self.data.plugin_data[plugin_name]
         wait_time = renderer.wait_time()
         while renderer.can_render(data) and cond():
-            pos = renderer.render(data, self.canvas, graphics, self.scrolling_text_pos)
-            self.__update_scrolling_text_pos(pos, self.canvas.width)
+            with frame_pacer(wait_time):
+                pos = renderer.render(data, self.canvas, graphics, self.scrolling_text_pos)
+                self.__update_scrolling_text_pos(pos, self.canvas.width)
 
-            # Show network issues
-            if self.data.network_issues:
-                network.render_network_error(self.canvas, self.data.config.layout, self.data.config.scoreboard_colors)
-            self.canvas = self.matrix.SwapOnVSync(self.canvas)
-            time.sleep(wait_time)
+                # Show network issues
+                if self.data.network_issues:
+                    network.render_network_error(
+                        self.canvas, self.data.config.layout, self.data.config.scoreboard_colors
+                    )
+                self.canvas = self.matrix.SwapOnVSync(self.canvas)
 
         renderer.reset()
 

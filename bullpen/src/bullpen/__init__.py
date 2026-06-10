@@ -1,5 +1,5 @@
-from . import api, logging, util
+from . import api, logging, timing, util
 
 PLUGIN_GROUP = "bullpen.mlbled.plugin"
 
-__all__ = ["api", "logging", "util"]
+__all__ = ["api", "logging", "timing", "util"]
