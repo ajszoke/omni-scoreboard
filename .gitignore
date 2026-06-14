@@ -133,4 +133,9 @@ team_colors.jpg
 
 # Editors
 .vscode/
-.claude/
+
+# Claude Code: commit SHARED project config (.claude/settings.json, skills/, commands/,
+# agents/); keep personal/local overrides out of git.
+.claude/settings.local.json
+.claude/*.local.json
+CLAUDE.local.md

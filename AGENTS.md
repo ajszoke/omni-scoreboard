@@ -8,6 +8,24 @@ Omni Scoreboard is a friends-and-family LED sports scoreboard. It is not a full 
 
 Prioritize reliability, local setup, typed code, fixture replay, and delightful small-display behavior over feature sprawl.
 
+## Status & repository map
+
+This file is the **single, agent-agnostic source of truth**. Tool-specific configs are thin
+wrappers that defer here: `CLAUDE.md` (Claude Code) and `.cursor/rules/` (Cursor). Harness
+config (permissions/skills) lives in `.claude/` but carries no project knowledge.
+
+- **Current status:** `docs/agent_context/STATUS.md` (living — update when state changes).
+- **Deep context:** `docs/agent_context/` — `ROADMAP.md`, `ARCHITECTURE_TYPED_DOMAIN.md`, `BACKLOG.yaml`, `SOURCES.md`.
+- **Dev environment:** uv + project-local `.venv`; software emulator, no Pi needed — `docs/dev_setup.md`.
+- **Code:** `main.py` (entry), `renderers/`, `data/`, local packages `bullpen/ standings/ news/`; `starter_code/` holds typed-domain sketches to grow into `omni/`.
+- **Reference hardware:** a physical `quad_128x64` (2×2) board runs headless on the LAN (`screen` + `run.sh`); its SSH target is machine-local (`CLAUDE.local.md`, git-ignored). Use the `run-on-board` skill. It currently runs the pre-revival code.
+
+## Operating notes
+
+- **Commit identity:** author as `ajszoke <aszoke1@gmail.com>`, set **repo-local** (not global). Push over **HTTPS + `gh`** — SSH may resolve to a different GitHub identity on some machines. Never force-push `main`.
+- **Never commit:** secrets, `config.json`, `emulator_config.json`, `.venv/`, build artifacts/caches.
+- **Knowledge-base hygiene (keep it ingestion-optimal):** one concept per doc; keep this map lean (links, not prose dumps); prune docs for shipped/abandoned work; promote a thrice-repeated fact into a doc and a repeated procedure into a `.claude/skills/` skill; verify a referenced file/flag still exists before relying on it. Claude Code's machine-local auto-memory supplements but never overrides these committed docs.
+
 ## Supported displays
 
 All significant UI work must consider these three profiles equally:

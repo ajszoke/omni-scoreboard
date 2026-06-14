@@ -8,33 +8,18 @@ globs:
 alwaysApply: true
 ---
 
-# Omni Scoreboard Cursor Rules
+# Omni Scoreboard — Cursor rules
 
-This project is a friends-and-family LED sports scoreboard, not a consumer SaaS product.
+The canonical, agent-agnostic project guide is **`AGENTS.md`** at the repo root — follow it.
+This file is a thin wrapper restating only the non-negotiable invariants:
 
-Support these display profiles equally:
+- Friends-and-family LED scoreboard (not a consumer product). Support three panel profiles
+  **equally**: `single_64x32`, `stack_64x64`, `quad_128x64`.
+- Typed domain: `League`, `Team`/`BaseballTeam`, `PanelProfile`, sport event enums,
+  `DisplayTiming`, `CardPriority`, typed `ScoreboardCard`. Raw strings/dicts only at
+  API/config/fixture boundaries. Provider modules convert to typed objects immediately;
+  renderers consume typed cards and never fetch.
+- Build on current upstream MLB-LED-Scoreboard; legacy is reference only. No `v2` in
+  repo/branch/product names.
 
-- `single_64x32`
-- `stack_64x64`
-- `quad_128x64`
-
-Typed/OOP policy:
-
-- Prefer strict typed objects over primitives in domain code.
-- Use `League`, `Team`/`BaseballTeam`, `PanelProfile`, sport-specific event enums, `DisplayTiming`, `CardPriority`, and typed card payloads.
-- Raw strings/dicts are acceptable only at API/config/fixture boundaries.
-- Provider modules convert raw API JSON into typed domain objects immediately.
-- Renderers consume typed `ScoreboardCard` payloads and never fetch data.
-
-Roadmap order:
-
-1. Clean upstream-based repo.
-2. Emulator and fixture replay.
-3. Typed domain core.
-4. Three display profiles.
-5. MLB polish and bug fixes.
-6. Generic TV-delay/interleaved card queue.
-7. Local setup/updater/device management.
-8. NFL, NBA, NHL, PGA, NCAA later.
-
-Do not add `v2` to repo/branch/product names unless it is a throwaway local branch.
+See `AGENTS.md` for the full map, current status, roadmap order, and dev setup.
