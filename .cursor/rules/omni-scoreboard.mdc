@@ -1,0 +1,25 @@
+---
+description: Omni Scoreboard project rules
+globs:
+  - "**/*.py"
+  - "**/*.md"
+  - "**/*.json"
+  - "**/*.yaml"
+alwaysApply: true
+---
+
+# Omni Scoreboard — Cursor rules
+
+The canonical, agent-agnostic project guide is **`AGENTS.md`** at the repo root — follow it.
+This file is a thin wrapper restating only the non-negotiable invariants:
+
+- Friends-and-family LED scoreboard (not a consumer product). Support three panel profiles
+  **equally**: `single_64x32`, `stack_64x64`, `quad_128x64`.
+- Typed domain: `League`, `Team`/`BaseballTeam`, `PanelProfile`, sport event enums,
+  `DisplayTiming`, `CardPriority`, typed `ScoreboardCard`. Raw strings/dicts only at
+  API/config/fixture boundaries. Provider modules convert to typed objects immediately;
+  renderers consume typed cards and never fetch.
+- Build on current upstream MLB-LED-Scoreboard; legacy is reference only. No `v2` in
+  repo/branch/product names.
+
+See `AGENTS.md` for the full map, current status, roadmap order, and dev setup.
