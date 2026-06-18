@@ -439,8 +439,9 @@ class DisplayTiming:
 @dataclass(frozen=True, slots=True)
 class LayoutSupport:
     profiles: frozenset[PanelProfile]
-    fallback_card_kind: str | None = None
     compromise_notes: tuple[str, ...] = ()
+    # fallback_card_kind is deferred until the queue needs card substitution; the
+    # implemented renderers honor all three profiles directly (see omni/renderers).
 
     def supports(self, profile: PanelProfile) -> bool:
         return profile in self.profiles
