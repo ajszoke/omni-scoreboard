@@ -102,3 +102,10 @@ def test_int_enums_round_trip_through_json_value() -> None:
         assert try_coerce_enum(DisplayPriority, priority.to_json_value()) is priority
     for urgency in UpdateUrgency:
         assert try_coerce_enum(UpdateUrgency, urgency.to_json_value()) is urgency
+
+
+def test_coerce_rejects_unhashable_and_numeric_types() -> None:
+    # Non-str, non-enum inputs hit the TypeError/ValueError arm and fall through to None.
+    assert try_coerce_enum(League, ["mlb"]) is None  # unhashable -> TypeError
+    assert try_coerce_enum(League, 3.5) is None
+    assert try_coerce_enum(League, object()) is None

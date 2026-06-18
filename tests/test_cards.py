@@ -64,3 +64,10 @@ def test_scoreboard_card_exposes_league_from_contest() -> None:
     assert card.kind is CardKind.LIVE_GAME
     assert card.priority.band is DisplayPriority.FAVORITE
     assert card.source_event_ids == ()  # default
+
+
+def test_display_timing_without_expiry_is_available_indefinitely() -> None:
+    timing = DisplayTiming(available_at=T, min_display=DurationSeconds(5), max_display=DurationSeconds(30))
+    assert not timing.is_available(T - timedelta(seconds=1))
+    assert timing.is_available(T)
+    assert timing.is_available(T + timedelta(days=3650))  # no expires_at -> available far in the future

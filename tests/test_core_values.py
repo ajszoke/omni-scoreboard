@@ -59,3 +59,12 @@ def test_rgb_luminance_and_contrast_extremes() -> None:
     # WCAG max contrast ratio is 21:1, and it is symmetric.
     assert white.contrast_ratio(black) == pytest.approx(21.0)
     assert black.contrast_ratio(white) == pytest.approx(21.0)
+
+
+def test_relative_luminance_covers_both_srgb_branches() -> None:
+    assert RGBColor(255, 255, 255).relative_luminance() == pytest.approx(1.0)
+    assert RGBColor(0, 0, 0).relative_luminance() == pytest.approx(0.0)
+    # power-curve branch (channel > 0.03928): mid-gray ~= 0.216
+    assert RGBColor(128, 128, 128).relative_luminance() == pytest.approx(0.2159, abs=0.002)
+    # linear branch (channel <= 0.03928): near-black stays a small positive value
+    assert 0.0 < RGBColor(2, 2, 2).relative_luminance() < 0.001
