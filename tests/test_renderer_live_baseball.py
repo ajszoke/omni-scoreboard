@@ -1,6 +1,6 @@
-"""Tests for the live-baseball renderer: draw-op layout + golden-image snapshot.
+"""Tests for the live-baseball renderer: per-profile layouts + golden snapshots.
 
-Regenerate the golden image intentionally with: OMNI_REGEN_GOLDEN=1 pytest -k golden
+Regenerate goldens intentionally with: OMNI_REGEN_GOLDEN=1 pytest -k golden
 """
 
 from __future__ import annotations
@@ -31,6 +31,7 @@ from omni.domain.base import LogoAsset
 from omni.domain.contest import Contest, TeamGame
 from omni.domain.teams import Team
 from omni.events.baseball import BaseballCount, HalfInning
+from omni.panels.geometry import geometry_for
 from omni.renderers.base import Renderer
 from omni.renderers.canvas import RecordingCanvas
 from omni.renderers.live_baseball import LiveBaseballRenderer
@@ -39,6 +40,10 @@ from omni.renderers.pillow_canvas import PillowCanvas
 GOLDEN_DIR = Path(__file__).resolve().parent / "golden"
 T = datetime(2026, 6, 17, 19, 5, tzinfo=timezone.utc)
 SOURCE = SourceRef("mlb_statsapi")
+ALL_PROFILES = (PanelProfile.QUAD_128X64, PanelProfile.STACK_64X64, PanelProfile.SINGLE_64X32)
+AWAY_COLOR = RGBColor(51, 0, 111)
+HOME_COLOR = RGBColor(0, 90, 156)
+WHITE = RGBColor(255, 255, 255)
 
 
 def _team(team_id: str, name: str, abbr: str, color: RGBColor) -> Team:
@@ -60,8 +65,8 @@ def _game() -> TeamGame:
         league=League.MLB,
         status=GameStatus.LIVE,
         scheduled_start=T,
-        away=_team("115", "Colorado Rockies", "COL", RGBColor(51, 0, 111)),
-        home=_team("119", "Los Angeles Dodgers", "LAD", RGBColor(0, 90, 156)),
+        away=_team("115", "Colorado Rockies", "COL", AWAY_COLOR),
+        home=_team("119", "Los Angeles Dodgers", "LAD", HOME_COLOR),
     )
 
 
@@ -87,26 +92,22 @@ def make_card(
         contest=_game(),
         timing=DisplayTiming(available_at=T, min_display=DurationSeconds(5), max_display=DurationSeconds(30)),
         priority=CardPriority(band=DisplayPriority.FAVORITE, score=50.0),
-        layout_support=LayoutSupport(profiles=frozenset({PanelProfile.QUAD_128X64})),
+        layout_support=LayoutSupport(profiles=frozenset(ALL_PROFILES)),
         dedupe_key=DedupeKey("g1:live"),
         payload=payload,
     )
 
 
-def _render(card: ScoreboardCard[LiveBaseballCardPayload]) -> RecordingCanvas:
-    canvas = RecordingCanvas(128, 64)
-    LiveBaseballRenderer().render(card, PanelProfile.QUAD_128X64, canvas)
+def _render(card: ScoreboardCard[LiveBaseballCardPayload], profile: PanelProfile) -> RecordingCanvas:
+    width, height = geometry_for(profile).size
+    canvas = RecordingCanvas(width, height)
+    LiveBaseballRenderer().render(card, profile, canvas)
     return canvas
 
 
-def test_renderer_conforms_to_protocol_and_supports_quad() -> None:
+def test_renderer_supports_all_three_profiles() -> None:
     renderer: Renderer[LiveBaseballCardPayload] = LiveBaseballRenderer()
-    assert renderer.supported_profiles == frozenset({PanelProfile.QUAD_128X64})
-
-
-def test_renderer_rejects_unsupported_profile() -> None:
-    with pytest.raises(NotImplementedError):
-        LiveBaseballRenderer().render(make_card(), PanelProfile.SINGLE_64X32, RecordingCanvas(64, 32))
+    assert renderer.supported_profiles == frozenset(ALL_PROFILES)
 
 
 def test_renderer_rejects_non_teamgame_contest() -> None:
@@ -121,43 +122,62 @@ def test_renderer_rejects_non_teamgame_contest() -> None:
         LiveBaseballRenderer().render(card, PanelProfile.QUAD_128X64, RecordingCanvas(128, 64))
 
 
-def test_draw_op_layout() -> None:
-    canvas = _render(make_card())
-
-    # Background cleared to black first.
+def test_draw_op_quad_128x64() -> None:
+    canvas = _render(make_card(), PanelProfile.QUAD_128X64)
     assert canvas.ops[0].op == "fill" and canvas.ops[0].color == RGBColor(0, 0, 0)
-
     rects = canvas.rects()
-    # Team color stripes: away (top) purple, home (bottom) blue.
-    assert any((r.x, r.y, r.w, r.h) == (0, 0, 4, 32) and r.color == RGBColor(51, 0, 111) for r in rects)
-    assert any((r.x, r.y, r.w, r.h) == (0, 32, 4, 32) and r.color == RGBColor(0, 90, 156) for r in rects)
-    # Occupied first base -> a filled 6x6 white square at (108, 16).
-    assert any((r.x, r.y, r.w, r.h) == (108, 16, 6, 6) and r.color == RGBColor(255, 255, 255) for r in rects)
-
+    assert any((r.x, r.y, r.w, r.h) == (0, 0, 4, 32) and r.color == AWAY_COLOR for r in rects)
+    assert any((r.x, r.y, r.w, r.h) == (0, 32, 4, 32) and r.color == HOME_COLOR for r in rects)
+    assert any((r.x, r.y, r.w, r.h) == (108, 16, 6, 6) and r.color == WHITE for r in rects)  # 1B filled
     texts = {(t.x, t.y, t.text) for t in canvas.texts()}
-    assert {(8, 11, "COL"), (8, 43, "LAD")} <= texts  # abbreviations
-    assert {(52, 11, "3"), (52, 43, "5")} <= texts  # right-aligned single-digit scores
-    assert {(68, 6, "T7"), (68, 14, "2-1"), (68, 22, "2 OUT")} <= texts  # status panel
+    assert {(8, 11, "COL"), (8, 43, "LAD")} <= texts
+    assert {(52, 11, "3"), (52, 43, "5")} <= texts
+    assert {(68, 6, "T7"), (68, 14, "2-1"), (68, 22, "2 OUT")} <= texts
+
+
+def test_draw_op_stack_64x64_keeps_full_status() -> None:
+    canvas = _render(make_card(), PanelProfile.STACK_64X64)
+    rects = canvas.rects()
+    assert any((r.x, r.y, r.w, r.h) == (0, 0, 3, 20) and r.color == AWAY_COLOR for r in rects)
+    assert any((r.x, r.y, r.w, r.h) == (0, 22, 3, 20) and r.color == HOME_COLOR for r in rects)
+    assert any((r.x, r.y, r.w, r.h) == (55, 52, 5, 5) and r.color == WHITE for r in rects)  # 1B filled
+    texts = {(t.x, t.y, t.text) for t in canvas.texts()}
+    assert {(5, 6, "COL"), (5, 28, "LAD")} <= texts
+    assert {(56, 6, "3"), (56, 28, "5")} <= texts  # right-aligned at 62 - 6
+    assert {(3, 46, "T7"), (20, 46, "2-1"), (3, 55, "2 OUT")} <= texts  # full status retained
+
+
+def test_draw_op_single_64x32_is_an_explicit_compromise() -> None:
+    canvas = _render(make_card(), PanelProfile.SINGLE_64X32)
+    texts = {(t.x, t.y, t.text) for t in canvas.texts()}
+    # Essentials shown: abbreviations, scores, inning/half.
+    assert {(4, 5, "COL"), (4, 21, "LAD")} <= texts
+    assert {(36, 3, "3"), (36, 19, "5")} <= texts
+    assert (46, 13, "T7") in texts
+    # Compromise: count, outs, and the bases diamond are omitted at 64x32.
+    joined = " ".join(t.text for t in canvas.texts())
+    assert "OUT" not in joined and "-" not in joined
+    # Only the two team stripes are drawn (no base markers).
+    assert {(r.x, r.y, r.w, r.h) for r in canvas.rects()} == {(0, 0, 2, 16), (0, 16, 2, 16)}
 
 
 def test_draw_op_bottom_inning_shows_b_label() -> None:
-    texts = {(t.x, t.y, t.text) for t in _render(make_card(half=HalfInning.BOTTOM, inning=9)).texts()}
-    assert (68, 6, "B9") in texts
+    # The HalfInning.BOTTOM arm is a ternary (a coverage blind spot), so assert it.
+    canvas = _render(make_card(half=HalfInning.BOTTOM, inning=9), PanelProfile.QUAD_128X64)
+    assert (68, 6, "B9") in {(t.x, t.y, t.text) for t in canvas.texts()}
 
 
 def test_draw_op_two_digit_score_right_aligns() -> None:
-    # "10" is two 6px-wide glyphs, so its left edge is 58 - 12 = 46.
-    texts = {(t.x, t.y, t.text) for t in _render(make_card(away_score=10)).texts()}
-    assert (46, 11, "10") in texts
+    # "10" is two 6px glyphs, so its left edge is 58 - 12 = 46 on quad.
+    canvas = _render(make_card(away_score=10), PanelProfile.QUAD_128X64)
+    assert (46, 11, "10") in {(t.x, t.y, t.text) for t in canvas.texts()}
 
 
 def test_draw_op_empty_bases_draw_dim_outlines() -> None:
-    rects = _render(make_card(bases=BaseballBaseState())).rects()
+    rects = _render(make_card(bases=BaseballBaseState()), PanelProfile.QUAD_128X64).rects()
     dim = RGBColor(60, 60, 60)
-    # Each empty base is drawn as four 1px DIM edges; no base is filled white 6x6.
     assert any((r.x, r.y, r.w, r.h) == (108, 16, 6, 1) and r.color == dim for r in rects)  # 1B top edge
-    assert any((r.x, r.y, r.w, r.h) == (100, 6, 6, 1) and r.color == dim for r in rects)  # 2B top edge
-    assert not any(r.w == 6 and r.h == 6 and r.color == RGBColor(255, 255, 255) for r in rects)
+    assert not any(r.w == 6 and r.h == 6 and r.color == WHITE for r in rects)  # nothing filled white
 
 
 def _assert_matches_golden(image: Image.Image, name: str) -> None:
@@ -171,7 +191,9 @@ def _assert_matches_golden(image: Image.Image, name: str) -> None:
     assert image.convert("RGB").tobytes() == expected.tobytes(), f"render differs from golden {name}"
 
 
-def test_golden_image_quad_128x64() -> None:
-    canvas = PillowCanvas(128, 64)
-    LiveBaseballRenderer().render(make_card(), PanelProfile.QUAD_128X64, canvas)
-    _assert_matches_golden(canvas.image(), "live_baseball_quad_128x64.png")
+@pytest.mark.parametrize("profile", ALL_PROFILES)
+def test_golden_image_per_profile(profile: PanelProfile) -> None:
+    width, height = geometry_for(profile).size
+    canvas = PillowCanvas(width, height)
+    LiveBaseballRenderer().render(make_card(), profile, canvas)
+    _assert_matches_golden(canvas.image(), f"live_baseball_{profile.to_json_value()}.png")

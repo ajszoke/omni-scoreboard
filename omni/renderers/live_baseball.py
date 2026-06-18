@@ -1,10 +1,19 @@
-"""Renderer for the live-baseball card.
+"""Renderer for the live-baseball card across all three panel profiles.
 
-Supports quad_128x64 today; stack_64x64 and single_64x32 layouts follow (each an
-explicit, tested compromise — never a crop of the 128x64 layout).
+Each profile gets its OWN layout, never a crop of another (AGENTS.md forbids
+"cropping 128x64 cards down to 64x32"):
+
+- quad_128x64 : full layout — team rows, scores, inning/count/outs, bases diamond.
+- stack_64x64 : the full layout compressed to 64px wide (same fields, smaller).
+- single_64x32: an explicit COMPROMISE — team abbreviations, scores, and
+  inning/half only. Count, outs, and the bases diamond are omitted (not legible
+  at 64x32). The compromise is asserted by tests so it cannot silently regress
+  into a crop.
 """
 
 from __future__ import annotations
+
+from typing import assert_never
 
 from omni.cards.base import ScoreboardCard
 from omni.cards.baseball import LiveBaseballCardPayload
@@ -25,19 +34,21 @@ _DIM = RGBColor(60, 60, 60)
 _LABEL_FONT = "4x6"
 _SCORE_FONT = "6x10"
 
-# quad_128x64 layout: two stacked team rows on the left, a status panel on the right.
-_STRIPE_W = 4
-_ABBR_X = 8
-_SCORE_RIGHT_X = 58
-_AWAY_Y = 11
-_HOME_Y = 43
-_STATUS_X = 68
+
+def _half_label(half: HalfInning) -> str:
+    return "T" if half is HalfInning.TOP else "B"
 
 
 class LiveBaseballRenderer:
-    """Draws a live MLB game card onto a `Canvas`."""
+    """Draws a live MLB game card onto a `Canvas` for any supported profile."""
 
-    supported_profiles = frozenset({PanelProfile.QUAD_128X64})
+    supported_profiles = frozenset(
+        {
+            PanelProfile.SINGLE_64X32,
+            PanelProfile.STACK_64X64,
+            PanelProfile.QUAD_128X64,
+        }
+    )
 
     def render(
         self,
@@ -45,35 +56,60 @@ class LiveBaseballRenderer:
         profile: PanelProfile,
         canvas: Canvas,
     ) -> None:
-        if profile not in self.supported_profiles:
-            raise NotImplementedError(f"{type(self).__name__} does not support {profile}")
         game = card.contest
         if not isinstance(game, TeamGame):
             raise TypeError("live-baseball card requires a TeamGame contest")
         payload = card.payload
 
         canvas.fill(_BLACK)
+        if profile is PanelProfile.QUAD_128X64:
+            self._render_quad(canvas, game, payload)
+        elif profile is PanelProfile.STACK_64X64:
+            self._render_stack(canvas, game, payload)
+        elif profile is PanelProfile.SINGLE_64X32:
+            self._render_single(canvas, game, payload)
+        else:  # pragma: no cover - exhaustiveness guard; mypy errors if a profile is unhandled
+            assert_never(profile)
 
-        # Team color stripes: away on the top row, home on the bottom row.
-        canvas.fill_rect(0, 0, _STRIPE_W, 32, game.away.primary_color)
-        canvas.fill_rect(0, 32, _STRIPE_W, 32, game.home.primary_color)
+    def _render_quad(self, canvas: Canvas, game: TeamGame, payload: LiveBaseballCardPayload) -> None:
+        # Two stacked team rows on the left, a status panel + bases on the right.
+        canvas.fill_rect(0, 0, 4, 32, game.away.primary_color)
+        canvas.fill_rect(0, 32, 4, 32, game.home.primary_color)
+        canvas.text(8, 11, game.away.abbreviation, _WHITE, font=_SCORE_FONT)
+        canvas.text(8, 43, game.home.abbreviation, _WHITE, font=_SCORE_FONT)
+        self._right_text(canvas, 58, 11, str(payload.away_score), _WHITE, _SCORE_FONT)
+        self._right_text(canvas, 58, 43, str(payload.home_score), _WHITE, _SCORE_FONT)
+        canvas.text(68, 6, f"{_half_label(payload.half)}{payload.inning}", _YELLOW, font=_LABEL_FONT)
+        canvas.text(68, 14, f"{payload.count.balls}-{payload.count.strikes}", _WHITE, font=_LABEL_FONT)
+        canvas.text(68, 22, f"{payload.count.outs} OUT", _WHITE, font=_LABEL_FONT)
+        self._base(canvas, 100, 6, 6, payload.bases.second)
+        self._base(canvas, 92, 16, 6, payload.bases.third)
+        self._base(canvas, 108, 16, 6, payload.bases.first)
 
-        # Abbreviations and right-aligned scores.
-        canvas.text(_ABBR_X, _AWAY_Y, game.away.abbreviation, _WHITE, font=_SCORE_FONT)
-        canvas.text(_ABBR_X, _HOME_Y, game.home.abbreviation, _WHITE, font=_SCORE_FONT)
-        self._right_text(canvas, _SCORE_RIGHT_X, _AWAY_Y, str(payload.away_score), _WHITE, _SCORE_FONT)
-        self._right_text(canvas, _SCORE_RIGHT_X, _HOME_Y, str(payload.home_score), _WHITE, _SCORE_FONT)
+    def _render_stack(self, canvas: Canvas, game: TeamGame, payload: LiveBaseballCardPayload) -> None:
+        # 64x64: the full layout compressed — two team rows up top, status + bases below.
+        canvas.fill_rect(0, 0, 3, 20, game.away.primary_color)
+        canvas.fill_rect(0, 22, 3, 20, game.home.primary_color)
+        canvas.text(5, 6, game.away.abbreviation, _WHITE, font=_SCORE_FONT)
+        canvas.text(5, 28, game.home.abbreviation, _WHITE, font=_SCORE_FONT)
+        self._right_text(canvas, 62, 6, str(payload.away_score), _WHITE, _SCORE_FONT)
+        self._right_text(canvas, 62, 28, str(payload.home_score), _WHITE, _SCORE_FONT)
+        canvas.text(3, 46, f"{_half_label(payload.half)}{payload.inning}", _YELLOW, font=_LABEL_FONT)
+        canvas.text(20, 46, f"{payload.count.balls}-{payload.count.strikes}", _WHITE, font=_LABEL_FONT)
+        canvas.text(3, 55, f"{payload.count.outs} OUT", _WHITE, font=_LABEL_FONT)
+        self._base(canvas, 49, 45, 5, payload.bases.second)
+        self._base(canvas, 43, 52, 5, payload.bases.third)
+        self._base(canvas, 55, 52, 5, payload.bases.first)
 
-        # Status panel: inning, count, outs.
-        half = "T" if payload.half is HalfInning.TOP else "B"
-        canvas.text(_STATUS_X, 6, f"{half}{payload.inning}", _YELLOW, font=_LABEL_FONT)
-        canvas.text(_STATUS_X, 14, f"{payload.count.balls}-{payload.count.strikes}", _WHITE, font=_LABEL_FONT)
-        canvas.text(_STATUS_X, 22, f"{payload.count.outs} OUT", _WHITE, font=_LABEL_FONT)
-
-        # Bases diamond: 2B top, 3B left, 1B right.
-        self._base(canvas, 100, 6, payload.bases.second)
-        self._base(canvas, 92, 16, payload.bases.third)
-        self._base(canvas, 108, 16, payload.bases.first)
+    def _render_single(self, canvas: Canvas, game: TeamGame, payload: LiveBaseballCardPayload) -> None:
+        # 64x32 compromise: abbreviations + scores + inning/half only.
+        canvas.fill_rect(0, 0, 2, 16, game.away.primary_color)
+        canvas.fill_rect(0, 16, 2, 16, game.home.primary_color)
+        canvas.text(4, 5, game.away.abbreviation, _WHITE, font=_LABEL_FONT)
+        canvas.text(4, 21, game.home.abbreviation, _WHITE, font=_LABEL_FONT)
+        self._right_text(canvas, 42, 3, str(payload.away_score), _WHITE, _SCORE_FONT)
+        self._right_text(canvas, 42, 19, str(payload.home_score), _WHITE, _SCORE_FONT)
+        canvas.text(46, 13, f"{_half_label(payload.half)}{payload.inning}", _YELLOW, font=_LABEL_FONT)
 
     @staticmethod
     def _right_text(canvas: Canvas, right_x: int, y: int, s: str, color: RGBColor, font: str) -> None:
@@ -81,11 +117,11 @@ class LiveBaseballRenderer:
         canvas.text(right_x - char_w * len(s), y, s, color, font=font)
 
     @staticmethod
-    def _base(canvas: Canvas, x: int, y: int, occupied: bool) -> None:
+    def _base(canvas: Canvas, x: int, y: int, size: int, occupied: bool) -> None:
         if occupied:
-            canvas.fill_rect(x, y, 6, 6, _WHITE)
+            canvas.fill_rect(x, y, size, size, _WHITE)
             return
-        canvas.fill_rect(x, y, 6, 1, _DIM)  # top edge
-        canvas.fill_rect(x, y + 5, 6, 1, _DIM)  # bottom edge
-        canvas.fill_rect(x, y, 1, 6, _DIM)  # left edge
-        canvas.fill_rect(x + 5, y, 1, 6, _DIM)  # right edge
+        canvas.fill_rect(x, y, size, 1, _DIM)  # top edge
+        canvas.fill_rect(x, y + size - 1, size, 1, _DIM)  # bottom edge
+        canvas.fill_rect(x, y, 1, size, _DIM)  # left edge
+        canvas.fill_rect(x + size - 1, y, 1, size, _DIM)  # right edge
