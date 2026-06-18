@@ -5,6 +5,7 @@ Regenerate the golden image intentionally with: OMNI_REGEN_GOLDEN=1 pytest -k go
 
 from __future__ import annotations
 
+import dataclasses
 import os
 from datetime import datetime, timezone
 from pathlib import Path
@@ -27,9 +28,9 @@ from omni.core.enum import DisplayPriority, GameStatus, League, PanelProfile
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.core.time import DurationSeconds
 from omni.domain.base import LogoAsset
-from omni.domain.contest import TeamGame
+from omni.domain.contest import Contest, TeamGame
 from omni.domain.teams import Team
-from omni.events.baseball import BaseballCount
+from omni.events.baseball import BaseballCount, HalfInning
 from omni.renderers.base import Renderer
 from omni.renderers.canvas import RecordingCanvas
 from omni.renderers.live_baseball import LiveBaseballRenderer
@@ -53,8 +54,8 @@ def _team(team_id: str, name: str, abbr: str, color: RGBColor) -> Team:
     )
 
 
-def make_card() -> ScoreboardCard[LiveBaseballCardPayload]:
-    game = TeamGame(
+def _game() -> TeamGame:
+    return TeamGame(
         id=LeagueScopedId(League.MLB, SOURCE, "g1"),
         league=League.MLB,
         status=GameStatus.LIVE,
@@ -62,24 +63,40 @@ def make_card() -> ScoreboardCard[LiveBaseballCardPayload]:
         away=_team("115", "Colorado Rockies", "COL", RGBColor(51, 0, 111)),
         home=_team("119", "Los Angeles Dodgers", "LAD", RGBColor(0, 90, 156)),
     )
+
+
+def make_card(
+    *,
+    half: HalfInning = HalfInning.TOP,
+    away_score: int = 3,
+    home_score: int = 5,
+    inning: int = 7,
+    bases: BaseballBaseState = BaseballBaseState(first=True),
+) -> ScoreboardCard[LiveBaseballCardPayload]:
     payload = LiveBaseballCardPayload(
-        away_score=3,
-        home_score=5,
-        inning=7,
-        half="top",
+        away_score=away_score,
+        home_score=home_score,
+        inning=inning,
+        half=half,
         count=BaseballCount(balls=2, strikes=1, outs=2),
-        bases=BaseballBaseState(first=True),
+        bases=bases,
     )
     return ScoreboardCard(
         id=CardId("g1:live"),
         kind=CardKind.LIVE_GAME,
-        contest=game,
+        contest=_game(),
         timing=DisplayTiming(available_at=T, min_display=DurationSeconds(5), max_display=DurationSeconds(30)),
         priority=CardPriority(band=DisplayPriority.FAVORITE, score=50.0),
         layout_support=LayoutSupport(profiles=frozenset({PanelProfile.QUAD_128X64})),
         dedupe_key=DedupeKey("g1:live"),
         payload=payload,
     )
+
+
+def _render(card: ScoreboardCard[LiveBaseballCardPayload]) -> RecordingCanvas:
+    canvas = RecordingCanvas(128, 64)
+    LiveBaseballRenderer().render(card, PanelProfile.QUAD_128X64, canvas)
+    return canvas
 
 
 def test_renderer_conforms_to_protocol_and_supports_quad() -> None:
@@ -92,9 +109,20 @@ def test_renderer_rejects_unsupported_profile() -> None:
         LiveBaseballRenderer().render(make_card(), PanelProfile.SINGLE_64X32, RecordingCanvas(64, 32))
 
 
+def test_renderer_rejects_non_teamgame_contest() -> None:
+    contest = Contest(
+        id=LeagueScopedId(League.MLB, SOURCE, "g1"),
+        league=League.MLB,
+        status=GameStatus.LIVE,
+        scheduled_start=T,
+    )
+    card = dataclasses.replace(make_card(), contest=contest)
+    with pytest.raises(TypeError):
+        LiveBaseballRenderer().render(card, PanelProfile.QUAD_128X64, RecordingCanvas(128, 64))
+
+
 def test_draw_op_layout() -> None:
-    canvas = RecordingCanvas(128, 64)
-    LiveBaseballRenderer().render(make_card(), PanelProfile.QUAD_128X64, canvas)
+    canvas = _render(make_card())
 
     # Background cleared to black first.
     assert canvas.ops[0].op == "fill" and canvas.ops[0].color == RGBColor(0, 0, 0)
@@ -110,6 +138,26 @@ def test_draw_op_layout() -> None:
     assert {(8, 11, "COL"), (8, 43, "LAD")} <= texts  # abbreviations
     assert {(52, 11, "3"), (52, 43, "5")} <= texts  # right-aligned single-digit scores
     assert {(68, 6, "T7"), (68, 14, "2-1"), (68, 22, "2 OUT")} <= texts  # status panel
+
+
+def test_draw_op_bottom_inning_shows_b_label() -> None:
+    texts = {(t.x, t.y, t.text) for t in _render(make_card(half=HalfInning.BOTTOM, inning=9)).texts()}
+    assert (68, 6, "B9") in texts
+
+
+def test_draw_op_two_digit_score_right_aligns() -> None:
+    # "10" is two 6px-wide glyphs, so its left edge is 58 - 12 = 46.
+    texts = {(t.x, t.y, t.text) for t in _render(make_card(away_score=10)).texts()}
+    assert (46, 11, "10") in texts
+
+
+def test_draw_op_empty_bases_draw_dim_outlines() -> None:
+    rects = _render(make_card(bases=BaseballBaseState())).rects()
+    dim = RGBColor(60, 60, 60)
+    # Each empty base is drawn as four 1px DIM edges; no base is filled white 6x6.
+    assert any((r.x, r.y, r.w, r.h) == (108, 16, 6, 1) and r.color == dim for r in rects)  # 1B top edge
+    assert any((r.x, r.y, r.w, r.h) == (100, 6, 6, 1) and r.color == dim for r in rects)  # 2B top edge
+    assert not any(r.w == 6 and r.h == 6 and r.color == RGBColor(255, 255, 255) for r in rects)
 
 
 def _assert_matches_golden(image: Image.Image, name: str) -> None:

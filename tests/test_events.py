@@ -15,6 +15,7 @@ from omni.events.baseball import (
     BaseballGameEvent,
     BaseballGameEventType,
     BaseballPlayPayload,
+    HalfInning,
 )
 
 T = datetime(2026, 6, 17, 19, 5, tzinfo=timezone.utc)
@@ -67,7 +68,7 @@ def test_baseball_count_rejects_negative() -> None:
 def test_play_payload_keeps_fielder_sequence_structured() -> None:
     payload = BaseballPlayPayload(
         inning=7,
-        half="bottom",
+        half=HalfInning.BOTTOM,
         description="6-4-3 double play",
         count=BaseballCount(balls=1, strikes=2, outs=1),
         fielder_sequence=(6, 4, 3),
@@ -86,7 +87,7 @@ def test_baseball_game_event_is_typed_and_derives_league() -> None:
         source_time=T,
         observed_at=T,
         importance=make_importance(),
-        payload=BaseballPlayPayload(inning=9, half="top", description="walk-off homer", rbi=1),
+        payload=BaseballPlayPayload(inning=9, half=HalfInning.TOP, description="walk-off homer", rbi=1),
     )
     assert isinstance(event, GameEvent)
     assert event.league is League.MLB
@@ -94,3 +95,30 @@ def test_baseball_game_event_is_typed_and_derives_league() -> None:
     assert event.payload.rbi == 1
     assert event.competitors == ()  # default
     assert event.importance.combined_score() > 0
+
+
+def test_importance_accepts_inclusive_0_and_1_boundaries() -> None:
+    imp = make_importance(leverage=0.0, rarity=1.0, favorite_relevance=0.0)
+    assert imp.leverage == 0.0 and imp.rarity == 1.0
+
+
+def test_importance_combined_score_is_monotonic_in_each_component() -> None:
+    base = make_importance(leverage=0.4, rarity=0.4, favorite_relevance=0.4).combined_score()
+    assert make_importance(leverage=0.6, rarity=0.4, favorite_relevance=0.4).combined_score() > base
+    assert make_importance(leverage=0.4, rarity=0.6, favorite_relevance=0.4).combined_score() > base
+    assert make_importance(leverage=0.4, rarity=0.4, favorite_relevance=0.6).combined_score() > base
+
+
+def test_baseball_count_rejects_impossible_values() -> None:
+    BaseballCount(balls=4, strikes=3, outs=3)  # terminal maxima are allowed
+    with pytest.raises(ValueError):
+        BaseballCount(balls=5, strikes=0, outs=0)
+    with pytest.raises(ValueError):
+        BaseballCount(balls=0, strikes=4, outs=0)
+    with pytest.raises(ValueError):
+        BaseballCount(balls=0, strikes=0, outs=4)
+
+
+def test_half_inning_enum_serializes() -> None:
+    assert HalfInning.TOP.to_json_value() == "top"
+    assert HalfInning("bottom") is HalfInning.BOTTOM

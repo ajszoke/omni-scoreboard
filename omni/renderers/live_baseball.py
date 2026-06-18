@@ -11,6 +11,7 @@ from omni.cards.baseball import LiveBaseballCardPayload
 from omni.core.colors import RGBColor
 from omni.core.enum import PanelProfile
 from omni.domain.contest import TeamGame
+from omni.events.baseball import HalfInning
 from omni.renderers.canvas import Canvas
 from omni.renderers.font import char_size
 
@@ -64,7 +65,7 @@ class LiveBaseballRenderer:
         self._right_text(canvas, _SCORE_RIGHT_X, _HOME_Y, str(payload.home_score), _WHITE, _SCORE_FONT)
 
         # Status panel: inning, count, outs.
-        half = "T" if payload.half == "top" else "B"
+        half = "T" if payload.half is HalfInning.TOP else "B"
         canvas.text(_STATUS_X, 6, f"{half}{payload.inning}", _YELLOW, font=_LABEL_FONT)
         canvas.text(_STATUS_X, 14, f"{payload.count.balls}-{payload.count.strikes}", _WHITE, font=_LABEL_FONT)
         canvas.text(_STATUS_X, 22, f"{payload.count.outs} OUT", _WHITE, font=_LABEL_FONT)

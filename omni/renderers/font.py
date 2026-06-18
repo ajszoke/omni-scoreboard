@@ -33,7 +33,7 @@ FONTS: dict[str, FontSpec] = {
 
 
 @lru_cache(maxsize=None)
-def _load(name: str) -> Any:
+def _load(name: str) -> Any:  # Any: bdfparser ships no type stubs
     spec = FONTS[name]
     return bdfparser.Font(str(_FONT_DIR / f"{spec.name}.bdf"))
 
