@@ -1,0 +1,27 @@
+{
+  "gameData": {
+    "teams": {
+      "away": { "id": 115, "abbreviation": "COL" },
+      "home": { "id": 119, "abbreviation": "LAD" }
+    },
+    "status": { "detailedState": "In Progress" }
+  },
+  "liveData": {
+    "linescore": {
+      "currentInning": 7,
+      "inningState": "Top",
+      "teams": {
+        "away": { "runs": 3, "hits": 7, "errors": 0 },
+        "home": { "runs": 5, "hits": 9, "errors": 1 }
+      },
+      "balls": 2,
+      "strikes": 1,
+      "outs": 2,
+      "offense": {
+        "batter": { "id": 500001, "fullName": "A. Batter" },
+        "first": { "id": 500002, "fullName": "R. OnFirst" },
+        "third": { "id": 500003, "fullName": "R. OnThird" }
+      }
+    }
+  }
+}
