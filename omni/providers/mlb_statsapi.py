@@ -1,0 +1,145 @@
+"""MLB provider backed by the MLB StatsAPI `schedule` endpoint.
+
+Parses the flat rows that `statsapi.schedule(...)` returns into typed `TeamGame`
+contests (matchup + status + start + venue). The raw dict shape is confined to
+this module; everything it returns is typed.
+
+Live game state (score, inning, count, bases) comes from the richer per-game
+feed and lands with the `CardFactory` in a later step — this provider answers
+"who is playing, when, and what's the status".
+"""
+
+from __future__ import annotations
+
+from datetime import date, datetime, timezone
+from typing import Any, Callable
+
+from omni.core.enum import GameStatus, League
+from omni.core.ids import LeagueScopedId, SourceRef
+from omni.domain.contest import TeamGame
+from omni.providers.base import ProviderError, ProviderUpdate
+from omni.providers.mlb_teams import MlbTeamRegistry
+
+__all__ = ["MlbStatsApiProvider", "ScheduleFetcher", "map_game_status"]
+
+# (game_date, sport_ids) -> the list of flat schedule rows.
+ScheduleFetcher = Callable[[date, str], list[dict[str, Any]]]
+
+_SOURCE = SourceRef("mlb_statsapi", "https://statsapi.mlb.com")
+
+# StatsAPI `detailedState` strings -> our typed status. Variants that carry a
+# suffix ("Delayed: Rain", "Suspended: Rain") are matched by prefix below.
+_STATUS_MAP: dict[str, GameStatus] = {
+    "Scheduled": GameStatus.SCHEDULED,
+    "Pre-Game": GameStatus.PREGAME,
+    "Warmup": GameStatus.PREGAME,
+    "In Progress": GameStatus.LIVE,
+    "Manager Challenge": GameStatus.LIVE,
+    "Final": GameStatus.FINAL,
+    "Game Over": GameStatus.FINAL,
+    "Completed Early": GameStatus.FINAL,
+    "Postponed": GameStatus.POSTPONED,
+    "Cancelled": GameStatus.CANCELED,
+    "Canceled": GameStatus.CANCELED,
+}
+_STATUS_PREFIXES: tuple[tuple[str, GameStatus], ...] = (
+    ("Delayed", GameStatus.DELAYED),
+    ("Suspended", GameStatus.SUSPENDED),
+    ("Completed Early", GameStatus.FINAL),
+)
+
+
+def map_game_status(detailed_state: str) -> GameStatus:
+    """Map a StatsAPI `detailedState` to a typed `GameStatus` (UNKNOWN if unrecognized)."""
+    if detailed_state in _STATUS_MAP:
+        return _STATUS_MAP[detailed_state]
+    for prefix, status in _STATUS_PREFIXES:
+        if detailed_state.startswith(prefix):
+            return status
+    return GameStatus.UNKNOWN
+
+
+class _SkipGame(Exception):
+    """A single schedule row could not be parsed; recorded as a warning and skipped."""
+
+
+class MlbStatsApiProvider:
+    """Fetches today's MLB schedule and returns typed `TeamGame` contests."""
+
+    league = League.MLB
+
+    def __init__(
+        self,
+        registry: MlbTeamRegistry,
+        fetch_schedule: ScheduleFetcher | None = None,
+        *,
+        source: SourceRef | None = None,
+        sport_ids: str = "1,51",  # 1 = MLB, 51 = WBC (mirrors upstream)
+    ) -> None:
+        self._registry = registry
+        self._fetch = fetch_schedule if fetch_schedule is not None else _default_fetch_schedule
+        self.source = source if source is not None else _SOURCE
+        self._sport_ids = sport_ids
+
+    def refresh(self, now: datetime) -> ProviderUpdate:
+        try:
+            rows = self._fetch(now.date(), self._sport_ids)
+        except Exception as exc:  # network/library failure -> whole-update error
+            raise ProviderError(f"MLB schedule fetch failed: {exc}") from exc
+
+        contests: list[TeamGame] = []
+        warnings: list[str] = []
+        for row in rows:
+            try:
+                contests.append(self._parse_game(row))
+            except _SkipGame as skip:
+                warnings.append(str(skip))
+        return ProviderUpdate(
+            source=self.source,
+            observed_at=now,
+            contests=tuple(contests),
+            warnings=tuple(warnings),
+        )
+
+    def _parse_game(self, row: dict[str, Any]) -> TeamGame:
+        try:
+            game_pk = row["game_id"]
+            away_id = int(row["away_id"])
+            home_id = int(row["home_id"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise _SkipGame(f"schedule row missing/invalid team ids: {exc}") from exc
+
+        try:
+            away = self._registry.resolve(away_id, full_name=row.get("away_name"))
+            home = self._registry.resolve(home_id, full_name=row.get("home_name"))
+        except KeyError as exc:
+            raise _SkipGame(f"unknown team id {exc} in game {game_pk}") from exc
+
+        return TeamGame(
+            id=LeagueScopedId(League.MLB, self.source, str(game_pk)),
+            league=League.MLB,
+            status=map_game_status(str(row.get("status", ""))),
+            scheduled_start=_parse_start(row.get("game_datetime"), game_pk),
+            away=away,
+            home=home,
+            venue_name=row.get("venue_name") or None,
+        )
+
+
+def _parse_start(raw: Any, game_pk: Any) -> datetime:
+    if not isinstance(raw, str) or not raw:
+        raise _SkipGame(f"game {game_pk} has no start time")
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise _SkipGame(f"game {game_pk} has unparseable start time {raw!r}") from exc
+    # Treat a naive timestamp as UTC so downstream timing math always has a tz.
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
+
+
+def _default_fetch_schedule(game_date: date, sport_ids: str) -> list[dict[str, Any]]:  # pragma: no cover - real network
+    # Lazy import keeps the network library out of `omni` import time and tests.
+    import statsapi
+
+    result: list[dict[str, Any]] = statsapi.schedule(date=game_date.strftime("%Y-%m-%d"), sportId=sport_ids)
+    return result
