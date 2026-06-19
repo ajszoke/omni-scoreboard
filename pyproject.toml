@@ -15,3 +15,6 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = "RGBMatrixEmulator.*"
 no_implicit_reexport = false
+
+[tool.coverage.run]
+omit = ["*/__main__.py"]  # `python -m` entry shims; not unit-tested
