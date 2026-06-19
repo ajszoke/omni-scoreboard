@@ -1,0 +1,50 @@
+{
+  "_comment": "Preview scenario: a tied game, bottom of the 9th, bases loaded, full count. Run with: python -m omni.preview --profile quad_128x64 --fixture fixtures/mlb/live-close-game.json",
+  "schedule": [
+    {
+      "game_id": 700100,
+      "game_datetime": "2026-06-18T23:10:00Z",
+      "game_date": "2026-06-18",
+      "game_type": "R",
+      "status": "In Progress",
+      "away_name": "New York Yankees",
+      "home_name": "Boston Red Sox",
+      "away_id": 147,
+      "home_id": 111,
+      "away_score": 5,
+      "home_score": 5,
+      "current_inning": 9,
+      "inning_state": "Bottom",
+      "venue_id": 3,
+      "venue_name": "Fenway Park"
+    }
+  ],
+  "game": {
+    "gameData": {
+      "teams": {
+        "away": { "id": 147, "abbreviation": "NYY" },
+        "home": { "id": 111, "abbreviation": "BOS" }
+      },
+      "status": { "detailedState": "In Progress" }
+    },
+    "liveData": {
+      "linescore": {
+        "currentInning": 9,
+        "inningState": "Bottom",
+        "teams": {
+          "away": { "runs": 5, "hits": 11, "errors": 0 },
+          "home": { "runs": 5, "hits": 9, "errors": 1 }
+        },
+        "balls": 3,
+        "strikes": 2,
+        "outs": 2,
+        "offense": {
+          "batter": { "id": 600001, "fullName": "W. Walkoff" },
+          "first": { "id": 600002, "fullName": "R. First" },
+          "second": { "id": 600003, "fullName": "R. Second" },
+          "third": { "id": 600004, "fullName": "R. Third" }
+        }
+      }
+    }
+  }
+}
