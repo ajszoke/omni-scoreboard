@@ -6,6 +6,9 @@ from dataclasses import dataclass
 from enum import Enum
 
 from omni.core.enum import StrEnumMixin
+
+# HalfInning/BaseballCount are domain value objects; re-exported here for back-compat.
+from omni.domain.baseball import BaseballCount, HalfInning
 from omni.events.base import GameEvent
 
 __all__ = [
@@ -50,29 +53,6 @@ class BaseballGameEventType(StrEnumMixin, str, Enum):
     NO_HITTER_BROKEN = "no_hitter_broken"
     PERFECT_GAME_ACTIVE = "perfect_game_active"
     PERFECT_GAME_BROKEN = "perfect_game_broken"
-
-
-class HalfInning(StrEnumMixin, str, Enum):
-    """Top or bottom of an inning (replaces a stringly-typed ``half``)."""
-
-    TOP = "top"
-    BOTTOM = "bottom"
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class BaseballCount:
-    """Balls/strikes/outs at the moment of a play."""
-
-    balls: int
-    strikes: int
-    outs: int
-
-    def __post_init__(self) -> None:
-        if self.balls < 0 or self.strikes < 0 or self.outs < 0:
-            raise ValueError("balls, strikes, and outs must be non-negative")
-        # Terminal maxima: 4th ball (walk), 3rd strike (K), 3rd out (inning end).
-        if self.balls > 4 or self.strikes > 3 or self.outs > 3:
-            raise ValueError("balls/strikes/outs exceed their terminal maximums (4/3/3)")
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

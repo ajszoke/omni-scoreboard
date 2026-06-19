@@ -5,18 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from omni.cards.base import ScoreboardCard
-from omni.events.baseball import BaseballCount, HalfInning
+
+# Baseball value objects live in the domain layer; re-exported for back-compat.
+from omni.domain.baseball import BaseballBaseState, BaseballCount, HalfInning
 
 __all__ = ["BaseballBaseState", "LiveBaseballCardPayload", "LiveBaseballCard"]
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class BaseballBaseState:
-    """Base occupancy for rendering the diamond (a player model comes later)."""
-
-    first: bool = False
-    second: bool = False
-    third: bool = False
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

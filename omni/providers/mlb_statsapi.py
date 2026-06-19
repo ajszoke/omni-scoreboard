@@ -16,14 +16,20 @@ from typing import Any, Callable
 
 from omni.core.enum import GameStatus, League
 from omni.core.ids import LeagueScopedId, SourceRef
+from omni.domain.baseball import BaseballBaseState, BaseballCount, BaseballGameState, HalfInning
 from omni.domain.contest import TeamGame
 from omni.providers.base import ProviderError, ProviderUpdate
 from omni.providers.mlb_teams import MlbTeamRegistry
 
-__all__ = ["MlbStatsApiProvider", "ScheduleFetcher", "map_game_status"]
+__all__ = ["MlbStatsApiProvider", "ScheduleFetcher", "GameFetcher", "map_game_status"]
 
 # (game_date, sport_ids) -> the list of flat schedule rows.
 ScheduleFetcher = Callable[[date, str], list[dict[str, Any]]]
+# game_pk -> the raw nested game feed (statsapi.get("game", ...)).
+GameFetcher = Callable[[Any], dict[str, Any]]
+
+# StatsAPI `inningState` values that mean the bottom half is current/next.
+_BOTTOM_INNING_STATES = frozenset({"Bottom", "End"})
 
 _SOURCE = SourceRef("mlb_statsapi", "https://statsapi.mlb.com")
 
@@ -73,11 +79,13 @@ class MlbStatsApiProvider:
         registry: MlbTeamRegistry,
         fetch_schedule: ScheduleFetcher | None = None,
         *,
+        fetch_game: GameFetcher | None = None,
         source: SourceRef | None = None,
         sport_ids: str = "1,51",  # 1 = MLB, 51 = WBC (mirrors upstream)
     ) -> None:
         self._registry = registry
         self._fetch = fetch_schedule if fetch_schedule is not None else _default_fetch_schedule
+        self._fetch_game = fetch_game if fetch_game is not None else _default_fetch_game
         self.source = source if source is not None else _SOURCE
         self._sport_ids = sport_ids
 
@@ -100,6 +108,19 @@ class MlbStatsApiProvider:
             contests=tuple(contests),
             warnings=tuple(warnings),
         )
+
+    def fetch_game_state(self, game_pk: int | str) -> BaseballGameState:
+        """Fetch one game's live feed and parse it into typed `BaseballGameState`.
+
+        Separate from `refresh` (which is one cheap schedule call): the caller
+        decides which live games are worth a per-game request. Raises
+        `ProviderError` if the fetch fails or the feed has no live state.
+        """
+        try:
+            raw = self._fetch_game(game_pk)
+        except Exception as exc:
+            raise ProviderError(f"MLB game fetch failed for {game_pk}: {exc}") from exc
+        return _parse_game_state(raw)
 
     def _parse_game(self, row: dict[str, Any]) -> TeamGame:
         try:
@@ -137,9 +158,59 @@ def _parse_start(raw: Any, game_pk: Any) -> datetime:
     return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
 
 
+def _half_from_inning_state(inning_state: str) -> HalfInning:
+    # "Middle"/"End" are the breaks after the top/bottom; collapse to our two halves.
+    return HalfInning.BOTTOM if inning_state in _BOTTOM_INNING_STATES else HalfInning.TOP
+
+
+def _parse_game_state(raw: dict[str, Any]) -> BaseballGameState:
+    """Parse a StatsAPI game feed's linescore into typed `BaseballGameState`.
+
+    Base occupancy is read from `offense.{first,second,third}` (a key is present
+    only when that base is occupied), mirroring upstream's `man_on`.
+    """
+    try:
+        line = raw["liveData"]["linescore"]
+        inning = int(line.get("currentInning", 0) or 0)
+        if inning < 1:
+            raise ValueError("game feed has no current inning (not live yet?)")
+        teams = line.get("teams", {})
+        offense = line.get("offense", {})
+        return BaseballGameState(
+            away_score=int(teams.get("away", {}).get("runs", 0) or 0),
+            home_score=int(teams.get("home", {}).get("runs", 0) or 0),
+            inning=inning,
+            half=_half_from_inning_state(str(line.get("inningState", "Top"))),
+            count=BaseballCount(
+                balls=int(line.get("balls", 0) or 0),
+                strikes=int(line.get("strikes", 0) or 0),
+                outs=int(line.get("outs", 0) or 0),
+            ),
+            bases=BaseballBaseState(
+                first="first" in offense,
+                second="second" in offense,
+                third="third" in offense,
+            ),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ProviderError(f"could not parse game state: {exc}") from exc
+
+
 def _default_fetch_schedule(game_date: date, sport_ids: str) -> list[dict[str, Any]]:  # pragma: no cover - real network
     # Lazy import keeps the network library out of `omni` import time and tests.
     import statsapi
 
     result: list[dict[str, Any]] = statsapi.schedule(date=game_date.strftime("%Y-%m-%d"), sportId=sport_ids)
+    return result
+
+
+_GAME_FIELDS = (
+    "liveData,linescore,teams,home,away,runs,currentInning,inningState,balls,strikes,outs,offense,first,second,third"
+)
+
+
+def _default_fetch_game(game_pk: Any) -> dict[str, Any]:  # pragma: no cover - real network
+    import statsapi
+
+    result: dict[str, Any] = statsapi.get("game", {"gamePk": game_pk, "fields": _GAME_FIELDS})
     return result
