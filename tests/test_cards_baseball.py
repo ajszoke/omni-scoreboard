@@ -1,4 +1,4 @@
-"""Tests for omni.cards.baseball payloads: base state, HalfInning, validation."""
+"""Tests for omni.cards.baseball payloads: base state, InningPhase, validation."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ from datetime import datetime, timezone
 
 import pytest
 
-from omni.cards.baseball import BaseballBaseState, LiveBaseballCardPayload, PregameCardPayload
-from omni.events.baseball import BaseballCount, HalfInning
+from omni.cards.baseball import LiveBaseballCardPayload, PregameCardPayload
+from omni.domain.baseball import BaseballBaseState, BaseballCount, InningPhase
 
 _COUNT = BaseballCount(balls=2, strikes=1, outs=2)
 
@@ -19,22 +19,22 @@ def test_base_state_defaults_to_empty() -> None:
 
 def test_live_payload_uses_half_inning_enum() -> None:
     payload = LiveBaseballCardPayload(
-        away_score=1, home_score=0, inning=3, half=HalfInning.BOTTOM, count=_COUNT, bases=BaseballBaseState()
+        away_score=1, home_score=0, inning=3, phase=InningPhase.BOTTOM, count=_COUNT, bases=BaseballBaseState()
     )
-    assert payload.half is HalfInning.BOTTOM
+    assert payload.phase is InningPhase.BOTTOM
 
 
 def test_live_payload_rejects_negative_scores() -> None:
     with pytest.raises(ValueError):
         LiveBaseballCardPayload(
-            away_score=-1, home_score=0, inning=1, half=HalfInning.TOP, count=_COUNT, bases=BaseballBaseState()
+            away_score=-1, home_score=0, inning=1, phase=InningPhase.TOP, count=_COUNT, bases=BaseballBaseState()
         )
 
 
 def test_live_payload_rejects_inning_below_one() -> None:
     with pytest.raises(ValueError):
         LiveBaseballCardPayload(
-            away_score=0, home_score=0, inning=0, half=HalfInning.TOP, count=_COUNT, bases=BaseballBaseState()
+            away_score=0, home_score=0, inning=0, phase=InningPhase.TOP, count=_COUNT, bases=BaseballBaseState()
         )
 
 

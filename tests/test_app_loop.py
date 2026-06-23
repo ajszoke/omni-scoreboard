@@ -13,7 +13,7 @@ from omni.cards.factory import CardFactory
 from omni.core.enum import GameStatus, League, PanelProfile
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.core.time import DurationSeconds
-from omni.domain.baseball import BaseballBaseState, BaseballCount, BaseballGameState, HalfInning
+from omni.domain.baseball import BaseballBaseState, BaseballCount, BaseballGameState, InningPhase
 from omni.domain.contest import TeamGame
 from omni.providers.base import ProviderError, ProviderUpdate
 from omni.providers.mlb_teams import MlbTeamRegistry
@@ -44,7 +44,7 @@ def _state(away: int = 1, home: int = 2) -> BaseballGameState:
         away_score=away,
         home_score=home,
         inning=5,
-        half=HalfInning.TOP,
+        phase=InningPhase.TOP,
         count=BaseballCount(balls=0, strikes=0, outs=0),
         bases=BaseballBaseState(),
     )

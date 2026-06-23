@@ -9,7 +9,7 @@ from omni.cards.factory import CardFactory
 from omni.core.enum import DisplayPriority, GameStatus, League, PanelProfile
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.core.time import DurationSeconds
-from omni.domain.baseball import BaseballBaseState, BaseballCount, BaseballGameState, HalfInning
+from omni.domain.baseball import BaseballBaseState, BaseballCount, BaseballGameState, InningPhase
 from omni.domain.contest import TeamGame
 from omni.providers.mlb_teams import MlbTeamRegistry
 
@@ -35,7 +35,7 @@ def _state() -> BaseballGameState:
         away_score=3,
         home_score=5,
         inning=7,
-        half=HalfInning.TOP,
+        phase=InningPhase.TOP,
         count=BaseballCount(balls=2, strikes=1, outs=2),
         bases=BaseballBaseState(first=True, third=True),
     )
@@ -52,7 +52,7 @@ def test_live_baseball_card_carries_state_and_metadata() -> None:
 
     p = card.payload
     assert (p.away_score, p.home_score) == (3, 5)
-    assert p.inning == 7 and p.half is HalfInning.TOP
+    assert p.inning == 7 and p.phase is InningPhase.TOP
     assert (p.count.balls, p.count.strikes, p.count.outs) == (2, 1, 2)
     assert p.bases.first and p.bases.third and not p.bases.second
 

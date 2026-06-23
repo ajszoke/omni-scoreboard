@@ -22,7 +22,7 @@ from omni.cards.base import (
     LayoutSupport,
     ScoreboardCard,
 )
-from omni.cards.baseball import BaseballBaseState, LiveBaseballCardPayload
+from omni.cards.baseball import LiveBaseballCardPayload
 from omni.core.colors import RGBColor
 from omni.core.enum import DisplayPriority, GameStatus, League, PanelProfile
 from omni.core.ids import LeagueScopedId, SourceRef
@@ -30,7 +30,7 @@ from omni.core.time import DurationSeconds
 from omni.domain.base import LogoAsset
 from omni.domain.contest import Contest, TeamGame
 from omni.domain.teams import Team
-from omni.events.baseball import BaseballCount, HalfInning
+from omni.domain.baseball import BaseballBaseState, BaseballCount, InningPhase
 from omni.panels.geometry import geometry_for
 from omni.renderers.base import Renderer
 from omni.renderers.canvas import RecordingCanvas
@@ -73,7 +73,7 @@ def _game() -> TeamGame:
 
 def make_card(
     *,
-    half: HalfInning = HalfInning.TOP,
+    phase: InningPhase = InningPhase.TOP,
     away_score: int = 3,
     home_score: int = 5,
     inning: int = 7,
@@ -83,7 +83,7 @@ def make_card(
         away_score=away_score,
         home_score=home_score,
         inning=inning,
-        half=half,
+        phase=phase,
         count=BaseballCount(balls=2, strikes=1, outs=2),
         bases=bases,
     )
@@ -153,7 +153,7 @@ def test_draw_op_stack_64x64_keeps_full_status() -> None:
 def test_draw_op_single_64x32_is_an_explicit_compromise() -> None:
     canvas = _render(make_card(), PanelProfile.SINGLE_64X32)
     texts = {(t.x, t.y, t.text) for t in canvas.texts()}
-    # Essentials shown: abbreviations, scores, inning/half.
+    # Essentials shown: abbreviations, scores, inning phase.
     assert {(4, 5, "COL"), (4, 21, "LAD")} <= texts
     assert {(36, 3, "3"), (36, 19, "5")} <= texts
     assert (46, 13, "T7") in texts
@@ -165,9 +165,31 @@ def test_draw_op_single_64x32_is_an_explicit_compromise() -> None:
 
 
 def test_draw_op_bottom_inning_shows_b_label() -> None:
-    # The HalfInning.BOTTOM arm is a ternary (a coverage blind spot), so assert it.
-    canvas = _render(make_card(half=HalfInning.BOTTOM, inning=9), PanelProfile.QUAD_128X64)
+    # The InningPhase.BOTTOM arm is a ternary (a coverage blind spot), so assert it.
+    canvas = _render(make_card(phase=InningPhase.BOTTOM, inning=9), PanelProfile.QUAD_128X64)
     assert (68, 6, "B9") in {(t.x, t.y, t.text) for t in canvas.texts()}
+
+
+def test_draw_op_middle_break_shows_label_and_suppresses_at_bat() -> None:
+    # Between halves there is no active at-bat: the larger panels show the phase
+    # label alone, not a stale "2-1 / 2 OUT" or a bases diamond.
+    for profile in (PanelProfile.QUAD_128X64, PanelProfile.STACK_64X64):
+        canvas = _render(make_card(phase=InningPhase.MIDDLE, inning=7), profile)
+        texts = [t.text for t in canvas.texts()]
+        assert "MID7" in texts
+        assert "2-1" not in texts and not any("OUT" in t for t in texts)  # at-bat suppressed
+        assert not any(r.color == WHITE and r.w == r.h for r in canvas.rects())  # no bases drawn
+
+
+def test_draw_op_end_break_shows_end_label() -> None:
+    canvas = _render(make_card(phase=InningPhase.END, inning=8), PanelProfile.QUAD_128X64)
+    assert "END8" in {t.text for t in canvas.texts()}
+
+
+def test_draw_op_single_profile_shows_break_label() -> None:
+    # The 64x32 compromise never showed an at-bat anyway — it just swaps the label.
+    canvas = _render(make_card(phase=InningPhase.MIDDLE, inning=7), PanelProfile.SINGLE_64X32)
+    assert (46, 13, "MID7") in {(t.x, t.y, t.text) for t in canvas.texts()}
 
 
 def test_draw_op_two_digit_score_right_aligns() -> None:
@@ -200,3 +222,13 @@ def test_golden_image_per_profile(profile: PanelProfile) -> None:
     canvas = PillowCanvas(width, height)
     LiveBaseballRenderer().render(make_card(), RenderContext(profile=profile, now=T), canvas)
     _assert_matches_golden(canvas.image(), f"live_baseball_{profile.to_json_value()}.png")
+
+
+@pytest.mark.parametrize("profile", ALL_PROFILES)
+def test_break_golden_image_per_profile(profile: PanelProfile) -> None:
+    # The between-halves (MIDDLE) layout: matchup + scores + phase label, no at-bat.
+    width, height = geometry_for(profile).size
+    canvas = PillowCanvas(width, height)
+    card = make_card(phase=InningPhase.MIDDLE, inning=7)
+    LiveBaseballRenderer().render(card, RenderContext(profile=profile, now=T), canvas)
+    _assert_matches_golden(canvas.image(), f"live_baseball_break_{profile.to_json_value()}.png")

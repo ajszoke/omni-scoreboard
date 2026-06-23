@@ -67,7 +67,7 @@ class CardFactory:
             away_score=state.away_score,
             home_score=state.home_score,
             inning=state.inning,
-            half=state.half,
+            phase=state.phase,
             count=state.count,
             bases=state.bases,
         )

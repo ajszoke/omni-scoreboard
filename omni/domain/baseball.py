@@ -13,14 +13,29 @@ from enum import Enum
 
 from omni.core.enum import StrEnumMixin
 
-__all__ = ["HalfInning", "BaseballCount", "BaseballBaseState", "BaseballGameState"]
+__all__ = ["InningPhase", "BaseballCount", "BaseballBaseState", "BaseballGameState"]
 
 
-class HalfInning(StrEnumMixin, str, Enum):
-    """Top or bottom of an inning (replaces a stringly-typed ``half``)."""
+class InningPhase(StrEnumMixin, str, Enum):
+    """The phase of an inning, including the breaks between halves.
+
+    `TOP`/`BOTTOM` are active half-innings (a team is batting); `MIDDLE` (after the
+    top) and `END` (after the bottom) are the breaks where there is no active at-bat.
+    Modelling the breaks explicitly — instead of collapsing ``Middle``/``End`` into
+    the adjacent half — is what lets lifecycle cards show a real "between innings"
+    state rather than a stale count (round-1 Medium #5). A play/event only ever
+    occurs in `TOP`/`BOTTOM`; the break values are reachable only via game state.
+    """
 
     TOP = "top"
+    MIDDLE = "middle"
     BOTTOM = "bottom"
+    END = "end"
+
+    @property
+    def is_break(self) -> bool:
+        """True for a between-halves break (`MIDDLE`/`END`) — no active at-bat."""
+        return self in (InningPhase.MIDDLE, InningPhase.END)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -50,18 +65,20 @@ class BaseballBaseState:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class BaseballGameState:
-    """A live baseball game's observed state: score/inning/half/count/bases.
+    """A live baseball game's observed state: score/inning/phase/count/bases.
 
     This is the domain truth a provider produces from the game feed; a
     `CardFactory` maps it into a renderable `LiveBaseballCardPayload` (where
     presentation choices live). Keeping the two separate is the seam between
-    "what the game is" and "how a card shows it".
+    "what the game is" and "how a card shows it". ``phase`` carries the full
+    inning phase (including breaks); during a break the ``count``/``bases`` are
+    between-innings and a renderer should not present them as a live at-bat.
     """
 
     away_score: int
     home_score: int
     inning: int
-    half: HalfInning
+    phase: InningPhase
     count: BaseballCount
     bases: BaseballBaseState
 

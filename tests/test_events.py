@@ -8,14 +8,13 @@ import pytest
 
 from omni.core.enum import DisplayPriority, GameStatus, League, UpdateUrgency
 from omni.core.ids import LeagueScopedId, SourceRef
+from omni.domain.baseball import BaseballCount, InningPhase
 from omni.domain.contest import Contest
 from omni.events.base import EventImportance, GameEvent
 from omni.events.baseball import (
-    BaseballCount,
     BaseballGameEvent,
     BaseballGameEventType,
     BaseballPlayPayload,
-    HalfInning,
 )
 
 T = datetime(2026, 6, 17, 19, 5, tzinfo=timezone.utc)
@@ -68,7 +67,7 @@ def test_baseball_count_rejects_negative() -> None:
 def test_play_payload_keeps_fielder_sequence_structured() -> None:
     payload = BaseballPlayPayload(
         inning=7,
-        half=HalfInning.BOTTOM,
+        phase=InningPhase.BOTTOM,
         description="6-4-3 double play",
         count=BaseballCount(balls=1, strikes=2, outs=1),
         fielder_sequence=(6, 4, 3),
@@ -87,7 +86,7 @@ def test_baseball_game_event_is_typed_and_derives_league() -> None:
         source_time=T,
         observed_at=T,
         importance=make_importance(),
-        payload=BaseballPlayPayload(inning=9, half=HalfInning.TOP, description="walk-off homer", rbi=1),
+        payload=BaseballPlayPayload(inning=9, phase=InningPhase.TOP, description="walk-off homer", rbi=1),
     )
     assert isinstance(event, GameEvent)
     assert event.league is League.MLB
@@ -120,5 +119,5 @@ def test_baseball_count_rejects_impossible_values() -> None:
 
 
 def test_half_inning_enum_serializes() -> None:
-    assert HalfInning.TOP.to_json_value() == "top"
-    assert HalfInning("bottom") is HalfInning.BOTTOM
+    assert InningPhase.TOP.to_json_value() == "top"
+    assert InningPhase("bottom") is InningPhase.BOTTOM

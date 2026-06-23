@@ -12,7 +12,7 @@ from omni.cards.base import CardKind, LayoutSupport, ScoreboardCard
 from omni.cards.factory import CardFactory
 from omni.core.enum import GameStatus, League, PanelProfile, Sport
 from omni.core.ids import LeagueScopedId, SourceRef
-from omni.domain.baseball import BaseballBaseState, BaseballCount, BaseballGameState, HalfInning
+from omni.domain.baseball import BaseballBaseState, BaseballCount, BaseballGameState, InningPhase
 from omni.domain.contest import TeamGame
 from omni.providers.mlb_teams import MlbTeamRegistry
 from omni.renderers.canvas import Canvas, RecordingCanvas
@@ -39,7 +39,7 @@ def _live_card() -> ScoreboardCard[Any]:
         away_score=1,
         home_score=2,
         inning=5,
-        half=HalfInning.TOP,
+        phase=InningPhase.TOP,
         count=BaseballCount(balls=1, strikes=2, outs=1),
         bases=BaseballBaseState(first=True),
     )

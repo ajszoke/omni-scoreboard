@@ -68,7 +68,7 @@ def test_buffer_holds_a_real_card_until_release() -> None:
     from omni.cards.factory import CardFactory
     from omni.core.enum import GameStatus, League
     from omni.core.ids import LeagueScopedId, SourceRef
-    from omni.domain.baseball import BaseballBaseState, BaseballCount, BaseballGameState, HalfInning
+    from omni.domain.baseball import BaseballBaseState, BaseballCount, BaseballGameState, InningPhase
     from omni.domain.contest import TeamGame
     from omni.providers.mlb_teams import MlbTeamRegistry
 
@@ -85,7 +85,7 @@ def test_buffer_holds_a_real_card_until_release() -> None:
         away_score=3,
         home_score=5,
         inning=7,
-        half=HalfInning.TOP,
+        phase=InningPhase.TOP,
         count=BaseballCount(balls=0, strikes=0, outs=0),
         bases=BaseballBaseState(),
     )
