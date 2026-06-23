@@ -12,6 +12,7 @@ from omni.core.ids import LeagueScopedId, SourceRef
 from omni.core.time import DurationSeconds
 from omni.domain.baseball import BaseballBaseState, BaseballCount, BaseballGameState, InningPhase
 from omni.domain.contest import TeamGame
+from omni.events.baseball import LiveBaseballFeed
 from omni.providers.base import ProviderUpdate
 from omni.providers.mlb_teams import MlbTeamRegistry
 
@@ -39,20 +40,22 @@ class _Provider:
         return ProviderUpdate(source=SOURCE, observed_at=now, contests=(_game(),))
 
 
-def _fetch_state(game: TeamGame) -> BaseballGameState:
-    return BaseballGameState(
-        away_score=1,
-        home_score=2,
-        inning=7,
-        phase=InningPhase.BOTTOM,
-        count=BaseballCount(balls=2, strikes=1, outs=1),
-        bases=BaseballBaseState(first=True),
+def _fetch_feed(game: TeamGame, now: datetime) -> LiveBaseballFeed:
+    return LiveBaseballFeed(
+        state=BaseballGameState(
+            away_score=1,
+            home_score=2,
+            inning=7,
+            phase=InningPhase.BOTTOM,
+            count=BaseballCount(balls=2, strikes=1, outs=1),
+            bases=BaseballBaseState(first=True),
+        )
     )
 
 
 def test_build_loop_produces_a_working_loop() -> None:
     sink = RecordingDisplaySink(PanelProfile.QUAD_128X64)
-    loop = build_loop(_Provider(), _fetch_state, sink, broadcast_lag=DurationSeconds(0))
+    loop = build_loop(_Provider(), _fetch_feed, sink, broadcast_lag=DurationSeconds(0))
     result = loop.run_once(T)
     assert result.shown is not None
     assert sink.committed == 1
@@ -60,7 +63,7 @@ def test_build_loop_produces_a_working_loop() -> None:
 
 def test_build_loop_wires_the_broadcast_delay() -> None:
     sink = RecordingDisplaySink(PanelProfile.QUAD_128X64)
-    loop = build_loop(_Provider(), _fetch_state, sink, broadcast_lag=DurationSeconds(30))
+    loop = build_loop(_Provider(), _fetch_feed, sink, broadcast_lag=DurationSeconds(30))
     assert loop.run_once(T).shown is None  # inside the delay — nothing shown yet
     assert loop.run_once(T + timedelta(seconds=30)).shown is not None
     assert sink.committed == 1

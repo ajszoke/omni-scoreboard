@@ -16,7 +16,7 @@ from omni.app.clock import Clock
 from omni.app.contest_store import ContestStore
 from omni.app.display import DisplaySink
 from omni.app.loop import AppLoop
-from omni.app.pipeline import LiveBaseballPipeline, StateFetcher
+from omni.app.pipeline import FeedFetcher, LiveBaseballPipeline
 from omni.app.supervisor import BackoffPolicy, ProviderSupervisor
 from omni.cards.factory import CardFactory
 from omni.core.time import DurationSeconds
@@ -31,7 +31,7 @@ __all__ = ["build_loop", "run_forever"]
 
 def build_loop(
     provider: Provider,
-    fetch_state: StateFetcher,
+    fetch_feed: FeedFetcher,
     sink: DisplaySink,
     *,
     favorites: frozenset[str] = frozenset(),
@@ -54,7 +54,7 @@ def build_loop(
         queue=queue,
         registry=default_registry(),
         sink=sink,
-        fetch_state=fetch_state,
+        fetch_feed=fetch_feed,
     )
 
 

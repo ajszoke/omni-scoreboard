@@ -21,7 +21,7 @@ from datetime import datetime
 
 from omni.app.contest_store import ContestStore, Reconciliation
 from omni.app.display import DisplaySink
-from omni.app.pipeline import LiveBaseballPipeline, PipelineResult, StateFetcher
+from omni.app.pipeline import FeedFetcher, LiveBaseballPipeline, PipelineResult
 from omni.app.supervisor import ProviderStatus, ProviderSupervisor
 from omni.cards.base import CardId
 from omni.domain.contest import TeamGame
@@ -55,7 +55,7 @@ class AppLoop:
         queue: InterleavedCardQueue,
         registry: RendererRegistry,
         sink: DisplaySink,
-        fetch_state: StateFetcher,
+        fetch_feed: FeedFetcher,
     ) -> None:
         self._supervisor = supervisor
         self._store = store
@@ -63,7 +63,7 @@ class AppLoop:
         self._queue = queue
         self._registry = registry
         self._sink = sink
-        self._fetch_state = fetch_state
+        self._fetch_feed = fetch_feed
 
     def run_once(self, now: datetime) -> TickResult:
         """One full pass of the appliance as of ``now``."""
@@ -71,7 +71,7 @@ class AppLoop:
         reconciliation = self._store.apply(snapshot.update) if snapshot.update is not None else None
 
         team_games = [contest for contest in self._store.contests if isinstance(contest, TeamGame)]
-        pipeline_result = self._pipeline.refresh(team_games, now=now, fetch_state=self._fetch_state)
+        pipeline_result = self._pipeline.refresh(team_games, now=now, fetch_feed=self._fetch_feed)
 
         card = self._queue.next_card(now, self._sink.profile)
         shown: CardId | None = None

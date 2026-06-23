@@ -22,6 +22,125 @@
         "first": { "id": 500002, "fullName": "R. OnFirst" },
         "third": { "id": 500003, "fullName": "R. OnThird" }
       }
+    },
+    "plays": {
+      "allPlays": [
+        {
+          "atBatIndex": 0,
+          "result": {
+            "type": "atBat",
+            "event": "Single",
+            "eventType": "single",
+            "description": "Ezequiel Tovar singles on a line drive to left field.",
+            "rbi": 0,
+            "awayScore": 0,
+            "homeScore": 0
+          },
+          "about": {
+            "atBatIndex": 0,
+            "halfInning": "top",
+            "isTopInning": true,
+            "inning": 1,
+            "isScoringPlay": false,
+            "isComplete": true,
+            "startTime": "2026-06-17T22:15:05.000Z",
+            "endTime": "2026-06-17T22:15:30.000Z"
+          },
+          "count": { "balls": 1, "strikes": 2, "outs": 0 }
+        },
+        {
+          "atBatIndex": 4,
+          "result": {
+            "type": "atBat",
+            "event": "Strikeout",
+            "eventType": "strikeout",
+            "description": "Charlie Blackmon strikes out swinging.",
+            "rbi": 0,
+            "awayScore": 0,
+            "homeScore": 0
+          },
+          "about": {
+            "atBatIndex": 4,
+            "halfInning": "top",
+            "isTopInning": true,
+            "inning": 1,
+            "isScoringPlay": false,
+            "isComplete": true,
+            "startTime": "2026-06-17T22:17:40.000Z",
+            "endTime": "2026-06-17T22:18:00.000Z"
+          },
+          "count": { "balls": 0, "strikes": 3, "outs": 1 }
+        },
+        {
+          "atBatIndex": 11,
+          "result": {
+            "type": "atBat",
+            "event": "Home Run",
+            "eventType": "home_run",
+            "description": "Mookie Betts homers (15) on a fly ball to left center field. Shohei Ohtani scores.",
+            "rbi": 2,
+            "awayScore": 0,
+            "homeScore": 2
+          },
+          "about": {
+            "atBatIndex": 11,
+            "halfInning": "bottom",
+            "isTopInning": false,
+            "inning": 3,
+            "isScoringPlay": true,
+            "isComplete": true,
+            "startTime": "2026-06-17T22:44:30.000Z",
+            "endTime": "2026-06-17T22:45:10.000Z"
+          },
+          "count": { "balls": 1, "strikes": 1, "outs": 1 }
+        },
+        {
+          "atBatIndex": 22,
+          "result": {
+            "type": "atBat",
+            "event": "Walk",
+            "eventType": "walk",
+            "description": "Ryan McMahon walks.",
+            "rbi": 0,
+            "awayScore": 1,
+            "homeScore": 2
+          },
+          "about": {
+            "atBatIndex": 22,
+            "halfInning": "top",
+            "isTopInning": true,
+            "inning": 5,
+            "isScoringPlay": false,
+            "isComplete": true,
+            "startTime": "2026-06-17T23:04:20.000Z",
+            "endTime": "2026-06-17T23:05:00.000Z"
+          },
+          "count": { "balls": 4, "strikes": 2, "outs": 2 }
+        },
+        {
+          "atBatIndex": 30,
+          "result": {
+            "type": "atBat",
+            "event": "Triple",
+            "eventType": "triple",
+            "description": "Shohei Ohtani triples (2) on a sharp line drive to right field. Will Smith scores.",
+            "rbi": 1,
+            "awayScore": 1,
+            "homeScore": 5
+          },
+          "about": {
+            "atBatIndex": 30,
+            "halfInning": "bottom",
+            "isTopInning": false,
+            "inning": 6,
+            "isScoringPlay": true,
+            "isComplete": true,
+            "startTime": "2026-06-17T23:20:10.000Z",
+            "endTime": "2026-06-17T23:20:45.000Z"
+          },
+          "count": { "balls": 0, "strikes": 0, "outs": 0 }
+        }
+      ]
     }
   }
 }

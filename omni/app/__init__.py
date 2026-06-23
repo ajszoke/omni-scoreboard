@@ -14,7 +14,7 @@ from omni.app.clock import Clock, FakeClock, SystemClock
 from omni.app.contest_store import ContestStore, Reconciliation
 from omni.app.display import DisplaySink, MatrixDevice, MatrixDisplaySink, RecordingDisplaySink
 from omni.app.loop import AppLoop, TickResult
-from omni.app.pipeline import LiveBaseballPipeline, PipelineResult, StateFetcher
+from omni.app.pipeline import FeedFetcher, LiveBaseballPipeline, PipelineResult
 from omni.app.runner import build_loop, run_forever
 from omni.app.supervisor import BackoffPolicy, ProviderStatus, ProviderSupervisor, SupervisedSnapshot
 
@@ -30,7 +30,7 @@ __all__ = [
     "Reconciliation",
     "LiveBaseballPipeline",
     "PipelineResult",
-    "StateFetcher",
+    "FeedFetcher",
     "DisplaySink",
     "RecordingDisplaySink",
     "MatrixDevice",

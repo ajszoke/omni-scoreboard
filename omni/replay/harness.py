@@ -23,8 +23,8 @@ from omni.app.supervisor import ProviderStatus
 from omni.core.enum import League, PanelProfile
 from omni.core.ids import SourceRef
 from omni.core.time import DurationSeconds
-from omni.domain.baseball import BaseballGameState
 from omni.domain.contest import TeamGame
+from omni.events.baseball import LiveBaseballFeed
 from omni.providers.base import ProviderError, ProviderUpdate
 from omni.replay.timeline import Timeline
 
@@ -85,14 +85,14 @@ def replay(
 
     clock = FakeClock(timeline.start)
 
-    def fetch_state(game: TeamGame) -> BaseballGameState:
-        state = timeline.state_at(game.id, clock.now())
+    def fetch_feed(game: TeamGame, now: datetime) -> LiveBaseballFeed:
+        state = timeline.state_at(game.id, now)
         if state is None:  # pragma: no cover - Timeline guarantees LIVE frames carry state
             raise ProviderError(f"no replay state for live game {game.id.raw}")
-        return state
+        return LiveBaseballFeed(state=state)
 
     sink = RecordingDisplaySink(profile)
-    loop = build_loop(ReplayProvider(timeline), fetch_state, sink, favorites=favorites, broadcast_lag=broadcast_lag)
+    loop = build_loop(ReplayProvider(timeline), fetch_feed, sink, favorites=favorites, broadcast_lag=broadcast_lag)
 
     trace: list[TraceEntry] = []
     while clock.now() <= stop:

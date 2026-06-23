@@ -25,16 +25,18 @@ from omni.core.ids import LeagueScopedId
 from omni.core.observation import Observation
 from omni.domain.baseball import BaseballGameState
 from omni.domain.contest import TeamGame
+from omni.events.baseball import LiveBaseballFeed
 from omni.providers.base import ProviderError
 from omni.queue.delay_policy import DelayPolicy
 from omni.queue.delayed_feed import DelayedFeed
 from omni.queue.priority import PriorityScorer
 from omni.queue.scheduler import InterleavedCardQueue
 
-__all__ = ["StateFetcher", "PipelineResult", "LiveBaseballPipeline"]
+__all__ = ["FeedFetcher", "PipelineResult", "LiveBaseballPipeline"]
 
-# How the pipeline obtains one game's live state (wraps the provider's per-game fetch).
-StateFetcher = Callable[[TeamGame], BaseballGameState]
+# How the pipeline pulls one game's live feed as of `now` (wraps the provider's
+# per-game fetch): the current state plus the play-by-play events from the same fetch.
+FeedFetcher = Callable[[TeamGame, datetime], LiveBaseballFeed]
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -65,7 +67,7 @@ class LiveBaseballPipeline:
         self._feeds: dict[LeagueScopedId, DelayedFeed[BaseballGameState]] = {}
         self._card_keys: dict[LeagueScopedId, str] = {}  # contest id -> its live card's dedupe key
 
-    def refresh(self, games: Iterable[TeamGame], *, now: datetime, fetch_state: StateFetcher) -> PipelineResult:
+    def refresh(self, games: Iterable[TeamGame], *, now: datetime, fetch_feed: FeedFetcher) -> PipelineResult:
         """Observe live games, surface lag-safe cards into the queue, drop stale ones."""
         live = [game for game in games if game.status is GameStatus.LIVE]
         live_ids = {game.id for game in live}
@@ -76,7 +78,7 @@ class LiveBaseballPipeline:
 
         for game in live:
             try:
-                state = fetch_state(game)
+                state = fetch_feed(game, now).state  # events ride along; consumed in B1(4b-ii)
             except ProviderError as exc:
                 skipped.append(f"{game.id.raw}: {exc}")
                 continue

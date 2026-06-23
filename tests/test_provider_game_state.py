@@ -9,7 +9,10 @@ from typing import Any
 
 import pytest
 
+from omni.core.enum import GameStatus, League
+from omni.core.ids import LeagueScopedId, SourceRef
 from omni.domain.baseball import InningPhase
+from omni.domain.contest import TeamGame
 from omni.providers.base import ProviderError
 from omni.providers.mlb_statsapi import (
     MlbStatsApiProvider,
@@ -20,11 +23,24 @@ from omni.providers.mlb_teams import MlbTeamRegistry
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "providers" / "mlb_game_live.json"
 NOW = datetime(2026, 6, 17, 23, 30, tzinfo=timezone.utc)
+SOURCE = SourceRef("mlb_statsapi", "https://statsapi.mlb.com")
+_REG = MlbTeamRegistry.from_color_file()
 
 
 def _feed() -> dict[str, Any]:
     data: dict[str, Any] = json.loads(FIXTURE.read_text())
     return data
+
+
+def _game() -> TeamGame:
+    return TeamGame(
+        id=LeagueScopedId(League.MLB, SOURCE, "700001"),
+        league=League.MLB,
+        status=GameStatus.LIVE,
+        scheduled_start=NOW,
+        away=_REG.resolve(115),
+        home=_REG.resolve(119),
+    )
 
 
 def test_parse_game_state_from_fixture() -> None:
@@ -37,7 +53,7 @@ def test_parse_game_state_from_fixture() -> None:
     assert state.bases.first and state.bases.third and not state.bases.second
 
 
-def test_fetch_game_state_uses_injected_fetcher() -> None:
+def test_fetch_live_feed_uses_injected_fetcher() -> None:
     calls: list[Any] = []
 
     def fetch_game(game_pk: Any) -> dict[str, Any]:
@@ -45,9 +61,9 @@ def test_fetch_game_state_uses_injected_fetcher() -> None:
         return _feed()
 
     provider = MlbStatsApiProvider(MlbTeamRegistry({}), fetch_game=fetch_game)
-    state = provider.fetch_game_state(700001)
-    assert calls == [700001]
-    assert state.home_score == 5
+    feed = provider.fetch_live_feed(_game(), now=NOW)
+    assert calls == ["700001"]  # fetched by the game's raw id
+    assert feed.state.home_score == 5
 
 
 def test_fetch_game_failure_becomes_provider_error() -> None:
@@ -56,7 +72,7 @@ def test_fetch_game_failure_becomes_provider_error() -> None:
 
     provider = MlbStatsApiProvider(MlbTeamRegistry({}), fetch_game=boom)
     with pytest.raises(ProviderError) as exc_info:
-        provider.fetch_game_state(700001)
+        provider.fetch_live_feed(_game(), now=NOW)
     assert isinstance(exc_info.value.__cause__, RuntimeError)
 
 
