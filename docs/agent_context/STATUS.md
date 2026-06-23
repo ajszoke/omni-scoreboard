@@ -2,20 +2,19 @@
 
 _Living status doc. Keep it short; update whenever project state changes (branch, PR, milestone). This is the first thing an agent should read after `AGENTS.md`._
 
-## Now (2026-06-18)
+## Now (2026-06-23)
 
-- Revived repo **bootstrapped from upstream MLB-LED-Scoreboard v9.1.5**; `main` = upstream + PRs #1–#13 (agent context, typed core, domain, events, first card+renderer, QC hardening, multi-profile renderer, MLB provider boundary, live-state + CardFactory, on-screen emulator preview, priority scoring, TV-delay buffer, interleaved card queue).
+- **Operating mode: the external-review cadence is live** (head/hand — the flagship/CGPT plans, Claude Code implements; *not* `/code-review`). **Round 1 (build-fidelity) is in flight:** the bundle was sent to CGPT and we're awaiting its verdict. **Do not build the next phase ahead of the verdict — process it first.** State + how-to: `~/omni-review/` (machine-local home), the `omni-review-cadence` auto-memory, and the `external-review` skill.
+- Revived repo **bootstrapped from upstream MLB-LED-Scoreboard v9.1.5**; `main` = upstream + PRs #1–#16 (typed pipeline through Phase 4; then handoff docs, the **frozen kernel** at `docs/agent_context/kernel/`, the `external-review` skill, and the ARCHITECTURE as-built reconciliation). PR #17 (review-home relocation) open.
 - Remotes: `origin` = `ajszoke/omni-scoreboard` (HTTPS), `upstream` = `MLB-LED-Scoreboard/mlb-led-scoreboard` (branch `master`), `legacy` = `ajszoke/omni-scoreboard-legacy` (pre-revival Omni work: `legacy/master`, `legacy/dev`).
-- **PRs #1–#13 merged and cleaned up.** Feature branches deleted locally and on `origin`. `main` is green and between feature PRs (a docs-only `agent/handoff-backlog-refresh` branch carries this update).
-- **Phase 4 complete — the typed pipeline is whole:** provider → score → delay → interleave → render, each stage typed, tested, and dogfooded. 269 tests; `omni/` ~99% (queue/providers/factory 100% incl. branch); `mypy`/`black` clean. **Handoff-ready** for an external full review.
+- **PRs #1–#16 merged and cleaned up;** #17 open. `main` is green.
+- **Phase 4 complete — the typed pipeline is whole:** provider → score → delay → interleave → render, each stage typed, tested, and dogfooded. 269 tests; `omni/` ~99% (queue/providers/factory 100% incl. branch); `mypy`/`black` clean. **Now under external review** (round 1 in flight).
 - Dev env: **uv + `.venv`** (Py 3.12); emulator runs headless (`http://localhost:8888/`). `pytest`/`pytest-cov` pinned in `requirements.dev.txt`; `starter_code/` excluded from `mypy`/`black`; `*/__main__.py` omitted from coverage. Coverage: `--cov=omni --cov-branch` (see `test` skill). See `docs/dev_setup.md`.
 - Physical **`quad_128x64` reference board** is live on the LAN running the pre-revival code; reachable from WSL (`ssh omni-board`). Details in `CLAUDE.local.md`. Deploying the revived repo to it is future work.
 
-## Next
-
-- **Handoff:** external full review (`/code-review ultra`, user-launched) is the immediate step — `main` is green and the docs are current.
-- **Running-app orchestration:** wire provider → `DelayBuffer` → `PriorityScorer` → `InterleavedCardQueue` → renderer into an actual refresh/render loop (the live equivalent of `omni preview`), with the dwell loop using each card's `min_display`/`max_display`. Priority-bypass of the delay for ALERT-band cards lives here (orchestration decides what skips the buffer).
-- Then **MLB P0/P1 polish** (M3: pregame/final cards, fielder sequences, contrast) and league expansion (M6 NFL via an ESPN provider behind the same `Provider` interface).
+- **Process the CGPT round-1 verdict** — the immediate step (blocks the rest). Archive it verbatim to `~/omni-review/rounds/round-1-verdict.md`, adjudicate each finding, **verify its `file:line` claims in-code**, then fold the sequenced next phase into this list. **The verdict sequences the options below — don't build ahead of it.**
+- **Running-app orchestration** (option A): wire provider → `DelayBuffer` → `PriorityScorer` → `InterleavedCardQueue` → renderer into an actual refresh/render loop (the live equivalent of `omni preview`), with the dwell loop using each card's `min_display`/`max_display`. Priority-bypass of the delay for ALERT-band cards lives here.
+- **MLB P0/P1 polish** (option B / M3: pregame/final cards, fielder sequences, contrast) and **league expansion** (option C / M6 NFL via an ESPN provider behind the same `Provider` interface).
 
 ## Done
 
