@@ -27,7 +27,7 @@ from omni.domain.baseball import InningPhase
 from omni.domain.contest import TeamGame
 from omni.renderers.canvas import Canvas
 from omni.renderers.context import RenderContext
-from omni.renderers.font import char_size
+from omni.renderers.text import draw_centered, draw_right_aligned
 
 __all__ = ["LiveBaseballRenderer"]
 
@@ -91,11 +91,11 @@ class LiveBaseballRenderer:
         canvas.fill_rect(0, 32, 4, 32, game.home.primary_color)
         canvas.text(8, 11, game.away.abbreviation, _WHITE, font=_SCORE_FONT)
         canvas.text(8, 43, game.home.abbreviation, _WHITE, font=_SCORE_FONT)
-        self._right_text(canvas, 58, 11, str(payload.away_score), _WHITE, _SCORE_FONT)
-        self._right_text(canvas, 58, 43, str(payload.home_score), _WHITE, _SCORE_FONT)
+        draw_right_aligned(canvas, 58, 11, str(payload.away_score), _WHITE, _SCORE_FONT)
+        draw_right_aligned(canvas, 58, 43, str(payload.home_score), _WHITE, _SCORE_FONT)
         label = _phase_label(payload.phase, payload.inning)
         if payload.phase.is_break:
-            self._center_text(canvas, 64, 128, 28, label, _YELLOW, _LABEL_FONT)  # break: no live at-bat
+            draw_centered(canvas, 64, 128, 28, label, _YELLOW, _LABEL_FONT)  # break: no live at-bat
             return
         canvas.text(68, 6, label, _YELLOW, font=_LABEL_FONT)
         canvas.text(68, 14, f"{payload.count.balls}-{payload.count.strikes}", _WHITE, font=_LABEL_FONT)
@@ -110,11 +110,11 @@ class LiveBaseballRenderer:
         canvas.fill_rect(0, 22, 3, 20, game.home.primary_color)
         canvas.text(5, 6, game.away.abbreviation, _WHITE, font=_SCORE_FONT)
         canvas.text(5, 28, game.home.abbreviation, _WHITE, font=_SCORE_FONT)
-        self._right_text(canvas, 62, 6, str(payload.away_score), _WHITE, _SCORE_FONT)
-        self._right_text(canvas, 62, 28, str(payload.home_score), _WHITE, _SCORE_FONT)
+        draw_right_aligned(canvas, 62, 6, str(payload.away_score), _WHITE, _SCORE_FONT)
+        draw_right_aligned(canvas, 62, 28, str(payload.home_score), _WHITE, _SCORE_FONT)
         label = _phase_label(payload.phase, payload.inning)
         if payload.phase.is_break:
-            self._center_text(canvas, 0, 64, 50, label, _YELLOW, _LABEL_FONT)  # break: no live at-bat
+            draw_centered(canvas, 0, 64, 50, label, _YELLOW, _LABEL_FONT)  # break: no live at-bat
             return
         canvas.text(3, 46, label, _YELLOW, font=_LABEL_FONT)
         canvas.text(20, 46, f"{payload.count.balls}-{payload.count.strikes}", _WHITE, font=_LABEL_FONT)
@@ -129,20 +129,10 @@ class LiveBaseballRenderer:
         canvas.fill_rect(0, 16, 2, 16, game.home.primary_color)
         canvas.text(4, 5, game.away.abbreviation, _WHITE, font=_LABEL_FONT)
         canvas.text(4, 21, game.home.abbreviation, _WHITE, font=_LABEL_FONT)
-        self._right_text(canvas, 42, 3, str(payload.away_score), _WHITE, _SCORE_FONT)
-        self._right_text(canvas, 42, 19, str(payload.home_score), _WHITE, _SCORE_FONT)
+        draw_right_aligned(canvas, 42, 3, str(payload.away_score), _WHITE, _SCORE_FONT)
+        draw_right_aligned(canvas, 42, 19, str(payload.home_score), _WHITE, _SCORE_FONT)
         # The phase label (T7/MID7/B7/END7) already conveys the break; no count/bases here anyway.
         canvas.text(46, 13, _phase_label(payload.phase, payload.inning), _YELLOW, font=_LABEL_FONT)
-
-    @staticmethod
-    def _right_text(canvas: Canvas, right_x: int, y: int, s: str, color: RGBColor, font: str) -> None:
-        char_w, _ = char_size(font)
-        canvas.text(right_x - char_w * len(s), y, s, color, font=font)
-
-    @staticmethod
-    def _center_text(canvas: Canvas, left: int, right: int, y: int, s: str, color: RGBColor, font: str) -> None:
-        char_w, _ = char_size(font)
-        canvas.text(left + (right - left - char_w * len(s)) // 2, y, s, color, font=font)
 
     @staticmethod
     def _base(canvas: Canvas, x: int, y: int, size: int, occupied: bool) -> None:
