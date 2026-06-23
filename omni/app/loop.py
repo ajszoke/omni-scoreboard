@@ -79,7 +79,7 @@ class AppLoop:
         if card is not None:
             try:
                 frame = self._sink.new_frame()
-                context = RenderContext(profile=self._sink.profile)
+                context = RenderContext(profile=self._sink.profile, now=now)
                 self._registry.render(card, context, frame)
                 self._sink.commit(frame)
                 shown = card.id

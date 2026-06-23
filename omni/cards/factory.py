@@ -25,7 +25,7 @@ from omni.cards.base import (
     LayoutSupport,
     ScoreboardCard,
 )
-from omni.cards.baseball import LiveBaseballCardPayload
+from omni.cards.baseball import LiveBaseballCardPayload, PregameCardPayload
 from omni.core.enum import DisplayPriority, PanelProfile
 from omni.core.time import DurationSeconds
 from omni.domain.baseball import BaseballGameState
@@ -35,6 +35,9 @@ __all__ = ["CardFactory"]
 
 # The live-baseball renderer natively supports all three profiles (see PR #7).
 _LIVE_BASEBALL_PROFILES = frozenset({PanelProfile.SINGLE_64X32, PanelProfile.STACK_64X64, PanelProfile.QUAD_128X64})
+# Pregame renders natively on all three; the small panel drops the "first pitch" label.
+_PREGAME_PROFILES = frozenset({PanelProfile.SINGLE_64X32, PanelProfile.STACK_64X64, PanelProfile.QUAD_128X64})
+_PREGAME_COMPROMISE = ("single_64x32: matchup + countdown only — the 'first pitch' label is dropped (no room).",)
 _DEFAULT_PRIORITY = CardPriority(band=DisplayPriority.NORMAL, score=0.0)
 
 
@@ -48,6 +51,8 @@ class CardFactory:
 
     live_min_display: DurationSeconds = DurationSeconds(8)
     live_max_display: DurationSeconds = DurationSeconds(30)
+    pregame_min_display: DurationSeconds = DurationSeconds(8)
+    pregame_max_display: DurationSeconds = DurationSeconds(20)
 
     def live_baseball(
         self,
@@ -78,6 +83,35 @@ class CardFactory:
             ),
             priority=priority if priority is not None else _DEFAULT_PRIORITY,
             layout_support=LayoutSupport(profiles=_LIVE_BASEBALL_PROFILES),
+            dedupe_key=DedupeKey(key),
+            payload=payload,
+        )
+
+    def pregame(
+        self,
+        game: TeamGame,
+        *,
+        now: datetime,
+        priority: CardPriority | None = None,
+    ) -> ScoreboardCard[PregameCardPayload]:
+        """Build a pregame MLB card from a scheduled matchup.
+
+        The card snapshots the scheduled first pitch; the renderer derives the live
+        countdown from the render clock, so one card stays correct across ticks.
+        """
+        payload = PregameCardPayload(scheduled_start=game.scheduled_start)
+        key = f"{game.id.raw}:pregame"
+        return ScoreboardCard(
+            id=CardId(key),
+            kind=CardKind.PREGAME,
+            contest=game,
+            timing=DisplayTiming(
+                available_at=now,
+                min_display=self.pregame_min_display,
+                max_display=self.pregame_max_display,
+            ),
+            priority=priority if priority is not None else _DEFAULT_PRIORITY,
+            layout_support=LayoutSupport(profiles=_PREGAME_PROFILES, compromise_notes=_PREGAME_COMPROMISE),
             dedupe_key=DedupeKey(key),
             payload=payload,
         )

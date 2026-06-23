@@ -52,14 +52,15 @@ def _configure_options(options: Any, profile: PanelProfile) -> Any:
 def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives the live emulator
     args = _parse_args(argv)
     profile = PanelProfile(args.profile)
-    card = build_card_from_scenario(args.fixture, now=datetime.now(timezone.utc))
+    now = datetime.now(timezone.utc)
+    card = build_card_from_scenario(args.fixture, now=now)
 
     from RGBMatrixEmulator import RGBMatrix, RGBMatrixOptions
 
     width, height = geometry_for(profile).size
     matrix = RGBMatrix(options=_configure_options(RGBMatrixOptions(), profile))
     frame = matrix.CreateFrameCanvas()
-    default_registry().render(card, RenderContext(profile=profile), MatrixCanvas(frame, width, height))
+    default_registry().render(card, RenderContext(profile=profile, now=now), MatrixCanvas(frame, width, height))
     matrix.SwapOnVSync(frame)
 
     import time

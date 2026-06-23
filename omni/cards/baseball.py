@@ -3,13 +3,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 
 from omni.cards.base import ScoreboardCard
 
 # Baseball value objects live in the domain layer; re-exported for back-compat.
 from omni.domain.baseball import BaseballBaseState, BaseballCount, HalfInning
 
-__all__ = ["BaseballBaseState", "LiveBaseballCardPayload", "LiveBaseballCard"]
+__all__ = [
+    "BaseballBaseState",
+    "LiveBaseballCardPayload",
+    "LiveBaseballCard",
+    "PregameCardPayload",
+    "PregameCard",
+]
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -33,3 +40,23 @@ class LiveBaseballCardPayload:
 
 # A live baseball card is a ScoreboardCard carrying the live payload above.
 LiveBaseballCard = ScoreboardCard[LiveBaseballCardPayload]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class PregameCardPayload:
+    """The pregame "situation" a baseball card renders before first pitch: when the
+    game starts. Teams come from the contest. Held as a self-contained snapshot (a
+    copy of the scheduled start) so the renderer derives the live countdown from the
+    render clock, not from a mutable contest. Probable pitchers / team records will
+    join here when the provider surfaces them.
+    """
+
+    scheduled_start: datetime
+
+    def __post_init__(self) -> None:
+        if self.scheduled_start.tzinfo is None:
+            raise ValueError("scheduled_start must be timezone-aware")
+
+
+# A pregame baseball card is a ScoreboardCard carrying the pregame payload above.
+PregameCard = ScoreboardCard[PregameCardPayload]
