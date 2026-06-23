@@ -10,7 +10,7 @@ next. Selection is **two-level** so nothing starves:
 2. **Card** — within that group, pick the most-overdue *card*, weighted by its band,
    so siblings for one game (LIVE, BIG_PLAY, FINAL, ...) share airtime fairly.
 
-Attention is **bounded and separate from priority** (the verdict's High #3 fix): a
+Attention is **bounded and separate from priority**: a
 card with a `BURST` `AttentionPolicy` takes over the screen only for its
 `takeover_for` window (derived from its `available_at`), then rejoins normal
 rotation — display priority alone never grants a permanent takeover.

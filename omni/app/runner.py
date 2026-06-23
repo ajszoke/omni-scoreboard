@@ -1,9 +1,9 @@
 """Assemble and drive the running app.
 
 `build_loop` wires the spine's collaborators into an `AppLoop` from a provider, a
-state fetcher, and a display sink — the one place the standard wiring lives, so the
+feed fetcher, and a display sink — the one place the standard wiring lives, so the
 emulator entry, a future hardware entry, and tests all build the loop the same way.
-`run_forever` is the thin real-time wrapper the verdict calls for: tick the clock,
+`run_forever` is the thin real-time wrapper: tick the clock,
 run one deterministic pass, sleep.
 """
 

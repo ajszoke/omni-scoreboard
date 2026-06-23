@@ -3,7 +3,7 @@
 Proves the whole typed pipeline closes — a schedule row becomes a `TeamGame`, a
 game feed becomes a `BaseballGameState`, the factory assembles a card, and the
 renderer draws the fixture's actual state (notably runners on first AND third,
-which the PR #7 golden — first only — does not cover).
+which a first-base-only golden does not cover).
 """
 
 from __future__ import annotations

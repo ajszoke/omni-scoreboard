@@ -23,7 +23,7 @@ class InningPhase(StrEnumMixin, str, Enum):
     top) and `END` (after the bottom) are the breaks where there is no active at-bat.
     Modelling the breaks explicitly — instead of collapsing ``Middle``/``End`` into
     the adjacent half — is what lets lifecycle cards show a real "between innings"
-    state rather than a stale count (round-1 Medium #5). A play/event only ever
+    state rather than a stale count. A play/event only ever
     occurs in `TOP`/`BOTTOM`; the break values are reachable only via game state.
     """
 
