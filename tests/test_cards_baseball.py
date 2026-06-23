@@ -6,7 +6,13 @@ from datetime import datetime, timezone
 
 import pytest
 
-from omni.cards.baseball import BigPlayCardPayload, FinalCardPayload, LiveBaseballCardPayload, PregameCardPayload
+from omni.cards.baseball import (
+    BigPlayCardPayload,
+    FinalCardPayload,
+    LiveBaseballCardPayload,
+    NoHitterCardPayload,
+    PregameCardPayload,
+)
 from omni.core.enum import HomeAway
 from omni.domain.baseball import BaseballBaseState, BaseballCount, InningPhase
 from omni.events.baseball import BaseballGameEventType
@@ -64,3 +70,17 @@ def test_final_payload_rejects_negative_scores() -> None:
 def test_big_play_payload_rejects_negative_scores() -> None:
     with pytest.raises(ValueError):
         BigPlayCardPayload(event_type=BaseballGameEventType.HOME_RUN, description="x", away_score=-1, home_score=0)
+
+
+def test_no_hitter_payload_holds_side_and_depth() -> None:
+    payload = NoHitterCardPayload(pitching_side=HomeAway.HOME, through_inning=7, perfect=True)
+    assert payload.pitching_side is HomeAway.HOME and payload.through_inning == 7 and payload.perfect is True
+
+
+def test_no_hitter_payload_defaults_to_not_perfect() -> None:
+    assert NoHitterCardPayload(pitching_side=HomeAway.AWAY, through_inning=6).perfect is False
+
+
+def test_no_hitter_payload_rejects_inning_below_one() -> None:
+    with pytest.raises(ValueError):
+        NoHitterCardPayload(pitching_side=HomeAway.HOME, through_inning=0)

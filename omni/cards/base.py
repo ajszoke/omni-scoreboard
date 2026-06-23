@@ -30,6 +30,7 @@ class CardKind(StrEnumMixin, str, Enum):
     PREGAME = "pregame"
     FINAL = "final"
     BIG_PLAY = "big_play"
+    NO_HITTER = "no_hitter"
     ALERT = "alert"
     LEADERBOARD = "leaderboard"
     OFFDAY = "offday"
