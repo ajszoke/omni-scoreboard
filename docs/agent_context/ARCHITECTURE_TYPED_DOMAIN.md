@@ -83,6 +83,37 @@ omni/
 
 This can be introduced incrementally inside the upstream tree. Do not attempt a giant rewrite before the emulator works.
 
+### As-built reconciliation (2026-06-23, after PRs #1–#13)
+
+The package above is the *proposed* layout. It landed faithfully for `core/`, `domain/`, `events/`
+(all sport taxonomies), `cards/`, **`queue/` (exact)**, and `providers/`. The deviations below are
+deliberate; the renderer axis and sequencing are flagged for external review, not silently settled.
+
+- **`renderers/` — per-card, not per-profile.** Built `base.py` + a hardware-agnostic `Canvas`
+  protocol (`canvas.py`) with `RecordingCanvas`/`PillowCanvas`/`MatrixCanvas` adapters + `font.py`,
+  and one renderer per *card* (`live_baseball.py`) that handles all three profiles via
+  `assert_never` dispatch — instead of the proposed `profile_single_64x32.py` / `_stack_64x64` /
+  `_quad_128x64` modules. Rationale: a card's layout is cohesive across profiles, and the `Canvas`
+  seam lets one renderer drive a golden image, a recording double, or a real panel. **Axis inversion —
+  for the head to bless.**
+- **`core/serialization.py` — absent.** Serialization is inline on enums (`to_json_value()`); no
+  central module was needed yet.
+- **`panels/` — `geometry.py` only.** `PanelProfile` lives in `core/enum.py` (subsumes `profiles.py`);
+  the `layout_contract.py` concept is realized as `cards/base.py::LayoutSupport` + a renderer's
+  `supported_profiles`.
+- **`preview/` — `cli.py` + `scenario.py` + `__main__.py`.** `python -m omni.preview` replaces the
+  proposed `web.py`/`fixture_replay.py`; golden snapshots live in `tests/` (run via pytest) rather
+  than a `snapshot.py` module / `omni snapshot` CLI.
+- **`CardFactory` in `cards/factory.py`**, not `queue/` (it produces cards; the queue consumes them).
+- **Baseball value types** (`HalfInning`, `BaseballCount`, `BaseballBaseState`) + the live
+  `BaseballGameState` snapshot live in `domain/baseball.py` (relocated there in PR #9, re-exported
+  from `events`/`cards` for back-compat). **`providers/mlb_teams.py`** (the team registry) was added.
+- **Sequencing:** the queue (`omni/queue/`) was built before MLB feature-completeness, inverting the
+  kernel roadmap's "MLB polish → queue" order. MLB is live-card-only so far. **For the head to
+  sequence.**
+
+The frozen original layout is preserved at `docs/agent_context/kernel/`.
+
 ## Core enums
 
 ```python
