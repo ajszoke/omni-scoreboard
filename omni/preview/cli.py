@@ -15,8 +15,8 @@ from typing import Any, Sequence
 from omni.core.enum import PanelProfile
 from omni.panels.geometry import geometry_for
 from omni.preview.scenario import build_card_from_scenario
-from omni.renderers.live_baseball import LiveBaseballRenderer
 from omni.renderers.matrix_canvas import MatrixCanvas
+from omni.renderers.registry import default_registry
 
 __all__ = ["main"]
 
@@ -58,7 +58,7 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
     width, height = geometry_for(profile).size
     matrix = RGBMatrix(options=_configure_options(RGBMatrixOptions(), profile))
     frame = matrix.CreateFrameCanvas()
-    LiveBaseballRenderer().render(card, profile, MatrixCanvas(frame, width, height))
+    default_registry().render(card, profile, MatrixCanvas(frame, width, height))
     matrix.SwapOnVSync(frame)
 
     import time
