@@ -5,8 +5,11 @@ feed. Pushing every observation through a `DelayBuffer` set to that lag means th
 scoreboard reveals a run/score only once the watcher could have seen it too.
 
 Generic over the held item (a card, an event, a state) so one mechanism serves
-the whole pipeline. The buffer owns delay timing only; priority-based bypass
-(e.g. letting an ALERT skip the delay) is a queue-policy concern layered on top.
+the whole pipeline. The buffer owns delay timing only. **Display priority never
+shortens the delay** — a sports ALERT (walk-off, no-hitter) is exactly the most
+spoiler-heavy content, so it waits like everything else. Only a separate
+system/setup status (network fault, configuration), which is not sports content,
+may use a different policy; that lives outside this buffer.
 """
 
 from __future__ import annotations

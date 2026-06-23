@@ -73,8 +73,9 @@ def test_team_game_requires_distinct_teams() -> None:
         )
 
 
-def test_team_game_preserves_explicit_competitors() -> None:
-    # A provider may supply `competitors` itself; don't overwrite it.
+def test_team_game_derives_competitors_ignoring_contradictory_input() -> None:
+    # Even when a caller supplies a contradictory `competitors`, the canonical
+    # view is always derived from (away, home) so the two cannot disagree.
     away = make_team("115", "Colorado Rockies", "COL")
     home = make_team("119", "Los Angeles Dodgers", "LAD")
     game = TeamGame(
@@ -82,11 +83,35 @@ def test_team_game_preserves_explicit_competitors() -> None:
         league=League.MLB,
         status=GameStatus.LIVE,
         scheduled_start=KICKOFF,
-        competitors=(home, away),  # deliberately reversed
+        competitors=(home, away),  # deliberately reversed — must be overridden
         away=away,
         home=home,
     )
-    assert game.competitors == (home, away)
+    assert game.competitors == (away, home)
+
+
+def test_contest_rejects_league_disagreeing_with_id() -> None:
+    with pytest.raises(ValueError, match="disagrees with id.league"):
+        Contest(
+            id=LeagueScopedId(League.MLB, SourceRef("mlb_statsapi"), "g1"),
+            league=League.NFL,  # disagrees with id.league
+            status=GameStatus.SCHEDULED,
+            scheduled_start=KICKOFF,
+        )
+
+
+def test_team_rejects_league_disagreeing_with_id() -> None:
+    with pytest.raises(ValueError, match="disagrees with id.league"):
+        Team(
+            id=LeagueScopedId(League.MLB, SourceRef("mlb_statsapi"), "115"),
+            league=League.NFL,  # disagrees with id.league
+            display_name="Colorado Rockies",
+            short_name="Rockies",
+            abbreviation="COL",
+            primary_color=RGBColor(51, 0, 111),
+            secondary_color=RGBColor(196, 206, 212),
+            logo=LogoAsset(key="col", path="assets/col.png"),
+        )
 
 
 def test_golf_tournament_holds_individual_competitors() -> None:

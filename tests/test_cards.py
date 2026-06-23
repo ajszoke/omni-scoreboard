@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from omni.cards.base import (
     CardId,
     CardKind,
@@ -71,3 +73,34 @@ def test_display_timing_without_expiry_is_available_indefinitely() -> None:
     assert not timing.is_available(T - timedelta(seconds=1))
     assert timing.is_available(T)
     assert timing.is_available(T + timedelta(days=3650))  # no expires_at -> available far in the future
+
+
+def test_display_timing_rejects_naive_available_at() -> None:
+    naive = datetime(2026, 6, 17, 19, 5)  # no tzinfo
+    with pytest.raises(ValueError, match="available_at must be timezone-aware"):
+        DisplayTiming(available_at=naive, min_display=DurationSeconds(5), max_display=DurationSeconds(30))
+
+
+def test_display_timing_rejects_naive_expires_at() -> None:
+    with pytest.raises(ValueError, match="expires_at must be timezone-aware"):
+        DisplayTiming(
+            available_at=T,
+            expires_at=datetime(2026, 6, 17, 20, 5),  # no tzinfo
+            min_display=DurationSeconds(5),
+            max_display=DurationSeconds(30),
+        )
+
+
+def test_display_timing_rejects_min_display_above_max() -> None:
+    with pytest.raises(ValueError, match="min_display cannot exceed max_display"):
+        DisplayTiming(available_at=T, min_display=DurationSeconds(31), max_display=DurationSeconds(30))
+
+
+def test_display_timing_rejects_expiry_at_or_before_availability() -> None:
+    with pytest.raises(ValueError, match="expires_at must be after available_at"):
+        DisplayTiming(
+            available_at=T,
+            expires_at=T,  # not strictly after
+            min_display=DurationSeconds(5),
+            max_display=DurationSeconds(30),
+        )

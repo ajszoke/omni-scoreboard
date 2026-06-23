@@ -25,6 +25,11 @@ class Team:
     secondary_color: RGBColor
     logo: LogoAsset
 
+    def __post_init__(self) -> None:
+        # `league` is also carried by `id`; they must never disagree.
+        if self.league != self.id.league:
+            raise ValueError(f"team league {self.league} disagrees with id.league {self.id.league}")
+
     def best_text_color_on_primary(self) -> RGBColor:
         """White or black text, whichever contrasts better on the primary color."""
         white = RGBColor(255, 255, 255)

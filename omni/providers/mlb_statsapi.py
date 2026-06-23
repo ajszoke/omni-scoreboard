@@ -1,12 +1,10 @@
 """MLB provider backed by the MLB StatsAPI `schedule` endpoint.
 
-Parses the flat rows that `statsapi.schedule(...)` returns into typed `TeamGame`
-contests (matchup + status + start + venue). The raw dict shape is confined to
-this module; everything it returns is typed.
-
-Live game state (score, inning, count, bases) comes from the richer per-game
-feed and lands with the `CardFactory` in a later step — this provider answers
-"who is playing, when, and what's the status".
+Two calls, both confined to this module's raw dict shape: `refresh(now)` is one
+cheap `statsapi.schedule(...)` call parsed into typed `TeamGame` contests
+(matchup + status + start + venue); `fetch_game_state(game_pk)` pulls one game's
+richer per-game feed into a typed `BaseballGameState` (score, inning, count,
+bases). Everything either returns is typed.
 """
 
 from __future__ import annotations
