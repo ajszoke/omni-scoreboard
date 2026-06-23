@@ -35,6 +35,12 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     )
     parser.add_argument("--delay", type=int, default=45, help="TV broadcast delay in seconds (default 45)")
     parser.add_argument("--tick", type=int, default=12, help="seconds between display refreshes (default 12)")
+    parser.add_argument(
+        "--timezone",
+        default="America/New_York",
+        metavar="IANA",
+        help="IANA zone for the schedule day, e.g. America/Denver (default America/New_York)",
+    )
     return parser.parse_args(argv)
 
 
@@ -45,10 +51,12 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
     # Lazy imports keep the network library and emulator out of import time and tests.
     import statsapi  # noqa: F401  (ensures the dependency is present before we start)
 
+    from zoneinfo import ZoneInfo
+
     from omni.providers.mlb_statsapi import MlbStatsApiProvider
     from omni.providers.mlb_teams import MlbTeamRegistry
 
-    provider = MlbStatsApiProvider(MlbTeamRegistry.from_color_file())
+    provider = MlbStatsApiProvider(MlbTeamRegistry.from_color_file(), schedule_timezone=ZoneInfo(args.timezone))
 
     def fetch_state(game: TeamGame) -> BaseballGameState:
         return provider.fetch_game_state(game.id.raw)

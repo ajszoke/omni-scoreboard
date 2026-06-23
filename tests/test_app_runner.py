@@ -71,11 +71,26 @@ def test_parse_args_defaults() -> None:
     assert ns.profile == "quad_128x64"
     assert ns.emulated is True
     assert ns.favorite == [] and ns.delay == 45 and ns.tick == 12
+    assert ns.timezone == "America/New_York"
 
 
 def test_parse_args_collects_favorites_and_overrides() -> None:
     ns = _parse_args(
-        ["--profile", "single_64x32", "--favorite", "COL", "--favorite", "LAD", "--delay", "30", "--tick", "8"]
+        [
+            "--profile",
+            "single_64x32",
+            "--favorite",
+            "COL",
+            "--favorite",
+            "LAD",
+            "--delay",
+            "30",
+            "--tick",
+            "8",
+            "--timezone",
+            "America/Denver",
+        ]
     )
     assert ns.favorite == ["COL", "LAD"]
     assert ns.delay == 30 and ns.tick == 8
+    assert ns.timezone == "America/Denver"
