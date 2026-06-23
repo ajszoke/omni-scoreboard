@@ -6,15 +6,11 @@ from dataclasses import dataclass
 from enum import Enum
 
 from omni.core.enum import StrEnumMixin
-
-# HalfInning/BaseballCount are domain value objects; re-exported here for back-compat.
-from omni.domain.baseball import BaseballCount, HalfInning
+from omni.domain.baseball import BaseballCount, InningPhase
 from omni.events.base import GameEvent
 
 __all__ = [
     "BaseballGameEventType",
-    "HalfInning",
-    "BaseballCount",
     "BaseballPlayPayload",
     "BaseballGameEvent",
 ]
@@ -64,7 +60,7 @@ class BaseballPlayPayload:
     """
 
     inning: int
-    half: HalfInning
+    phase: InningPhase
     description: str
     count: BaseballCount | None = None
     rbi: int = 0

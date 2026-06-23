@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from omni.core.enum import PanelProfile
-from omni.domain.baseball import HalfInning
+from omni.domain.baseball import InningPhase
 from omni.panels.geometry import geometry_for
 from omni.preview.cli import _configure_options, _parse_args
 from omni.preview.scenario import build_card_from_scenario
@@ -26,7 +26,7 @@ def test_build_card_from_close_game_scenario() -> None:
 
     p = card.payload
     assert (p.away_score, p.home_score) == (5, 5)
-    assert p.inning == 9 and p.half is HalfInning.BOTTOM
+    assert p.inning == 9 and p.phase is InningPhase.BOTTOM
     assert (p.count.balls, p.count.strikes, p.count.outs) == (3, 2, 2)
     assert p.bases.first and p.bases.second and p.bases.third  # bases loaded
 

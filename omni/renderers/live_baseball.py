@@ -5,10 +5,14 @@ Each profile gets its OWN layout, never a crop of another (AGENTS.md forbids
 
 - quad_128x64 : full layout — team rows, scores, inning/count/outs, bases diamond.
 - stack_64x64 : the full layout compressed to 64px wide (same fields, smaller).
-- single_64x32: an explicit COMPROMISE — team abbreviations, scores, and
-  inning/half only. Count, outs, and the bases diamond are omitted (not legible
-  at 64x32). The compromise is asserted by tests so it cannot silently regress
-  into a crop.
+- single_64x32: an explicit COMPROMISE — team abbreviations, scores, and the
+  inning-phase label only. Count, outs, and the bases diamond are omitted (not
+  legible at 64x32). The compromise is asserted by tests so it cannot silently
+  regress into a crop.
+
+During a between-halves break (`InningPhase.MIDDLE`/`END`) there is no active
+at-bat, so the larger profiles show the phase label alone and suppress the count,
+outs, and bases — a stale "1-2, 2 OUT" between innings would be misinformation.
 """
 
 from __future__ import annotations
@@ -19,8 +23,8 @@ from omni.cards.base import ScoreboardCard
 from omni.cards.baseball import LiveBaseballCardPayload
 from omni.core.colors import RGBColor
 from omni.core.enum import PanelProfile
+from omni.domain.baseball import InningPhase
 from omni.domain.contest import TeamGame
-from omni.events.baseball import HalfInning
 from omni.renderers.canvas import Canvas
 from omni.renderers.context import RenderContext
 from omni.renderers.font import char_size
@@ -35,9 +39,17 @@ _DIM = RGBColor(60, 60, 60)
 _LABEL_FONT = "4x6"
 _SCORE_FONT = "6x10"
 
+_PHASE_ABBR = {
+    InningPhase.TOP: "T",
+    InningPhase.MIDDLE: "MID",
+    InningPhase.BOTTOM: "B",
+    InningPhase.END: "END",
+}
 
-def _half_label(half: HalfInning) -> str:
-    return "T" if half is HalfInning.TOP else "B"
+
+def _phase_label(phase: InningPhase, inning: int) -> str:
+    """Compact inning-phase label: ``T7``/``B7`` when active, ``MID7``/``END7`` on a break."""
+    return f"{_PHASE_ABBR[phase]}{inning}"
 
 
 class LiveBaseballRenderer:
@@ -81,7 +93,11 @@ class LiveBaseballRenderer:
         canvas.text(8, 43, game.home.abbreviation, _WHITE, font=_SCORE_FONT)
         self._right_text(canvas, 58, 11, str(payload.away_score), _WHITE, _SCORE_FONT)
         self._right_text(canvas, 58, 43, str(payload.home_score), _WHITE, _SCORE_FONT)
-        canvas.text(68, 6, f"{_half_label(payload.half)}{payload.inning}", _YELLOW, font=_LABEL_FONT)
+        label = _phase_label(payload.phase, payload.inning)
+        if payload.phase.is_break:
+            self._center_text(canvas, 64, 128, 28, label, _YELLOW, _LABEL_FONT)  # break: no live at-bat
+            return
+        canvas.text(68, 6, label, _YELLOW, font=_LABEL_FONT)
         canvas.text(68, 14, f"{payload.count.balls}-{payload.count.strikes}", _WHITE, font=_LABEL_FONT)
         canvas.text(68, 22, f"{payload.count.outs} OUT", _WHITE, font=_LABEL_FONT)
         self._base(canvas, 100, 6, 6, payload.bases.second)
@@ -96,7 +112,11 @@ class LiveBaseballRenderer:
         canvas.text(5, 28, game.home.abbreviation, _WHITE, font=_SCORE_FONT)
         self._right_text(canvas, 62, 6, str(payload.away_score), _WHITE, _SCORE_FONT)
         self._right_text(canvas, 62, 28, str(payload.home_score), _WHITE, _SCORE_FONT)
-        canvas.text(3, 46, f"{_half_label(payload.half)}{payload.inning}", _YELLOW, font=_LABEL_FONT)
+        label = _phase_label(payload.phase, payload.inning)
+        if payload.phase.is_break:
+            self._center_text(canvas, 0, 64, 50, label, _YELLOW, _LABEL_FONT)  # break: no live at-bat
+            return
+        canvas.text(3, 46, label, _YELLOW, font=_LABEL_FONT)
         canvas.text(20, 46, f"{payload.count.balls}-{payload.count.strikes}", _WHITE, font=_LABEL_FONT)
         canvas.text(3, 55, f"{payload.count.outs} OUT", _WHITE, font=_LABEL_FONT)
         self._base(canvas, 49, 45, 5, payload.bases.second)
@@ -104,19 +124,25 @@ class LiveBaseballRenderer:
         self._base(canvas, 55, 52, 5, payload.bases.first)
 
     def _render_single(self, canvas: Canvas, game: TeamGame, payload: LiveBaseballCardPayload) -> None:
-        # 64x32 compromise: abbreviations + scores + inning/half only.
+        # 64x32 compromise: abbreviations + scores + the inning-phase label only.
         canvas.fill_rect(0, 0, 2, 16, game.away.primary_color)
         canvas.fill_rect(0, 16, 2, 16, game.home.primary_color)
         canvas.text(4, 5, game.away.abbreviation, _WHITE, font=_LABEL_FONT)
         canvas.text(4, 21, game.home.abbreviation, _WHITE, font=_LABEL_FONT)
         self._right_text(canvas, 42, 3, str(payload.away_score), _WHITE, _SCORE_FONT)
         self._right_text(canvas, 42, 19, str(payload.home_score), _WHITE, _SCORE_FONT)
-        canvas.text(46, 13, f"{_half_label(payload.half)}{payload.inning}", _YELLOW, font=_LABEL_FONT)
+        # The phase label (T7/MID7/B7/END7) already conveys the break; no count/bases here anyway.
+        canvas.text(46, 13, _phase_label(payload.phase, payload.inning), _YELLOW, font=_LABEL_FONT)
 
     @staticmethod
     def _right_text(canvas: Canvas, right_x: int, y: int, s: str, color: RGBColor, font: str) -> None:
         char_w, _ = char_size(font)
         canvas.text(right_x - char_w * len(s), y, s, color, font=font)
+
+    @staticmethod
+    def _center_text(canvas: Canvas, left: int, right: int, y: int, s: str, color: RGBColor, font: str) -> None:
+        char_w, _ = char_size(font)
+        canvas.text(left + (right - left - char_w * len(s)) // 2, y, s, color, font=font)
 
     @staticmethod
     def _base(canvas: Canvas, x: int, y: int, size: int, occupied: bool) -> None:

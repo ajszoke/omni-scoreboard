@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 from omni.core.enum import GameStatus, League
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.core.time import local_date
-from omni.domain.baseball import BaseballBaseState, BaseballCount, BaseballGameState, HalfInning
+from omni.domain.baseball import BaseballBaseState, BaseballCount, BaseballGameState, InningPhase
 from omni.domain.contest import TeamGame
 from omni.providers.base import ProviderError, ProviderUpdate
 from omni.providers.mlb_teams import MlbTeamRegistry
@@ -28,8 +28,13 @@ ScheduleFetcher = Callable[[date, str], list[dict[str, Any]]]
 # game_pk -> the raw nested game feed (statsapi.get("game", ...)).
 GameFetcher = Callable[[Any], dict[str, Any]]
 
-# StatsAPI `inningState` values that mean the bottom half is current/next.
-_BOTTOM_INNING_STATES = frozenset({"Bottom", "End"})
+# StatsAPI `inningState` -> our typed phase; the breaks (Middle/End) are kept distinct.
+_INNING_STATE_PHASE: dict[str, InningPhase] = {
+    "Top": InningPhase.TOP,
+    "Middle": InningPhase.MIDDLE,
+    "Bottom": InningPhase.BOTTOM,
+    "End": InningPhase.END,
+}
 
 _SOURCE = SourceRef("mlb_statsapi", "https://statsapi.mlb.com")
 # MLB's league-office zone; a sensible default "baseball day" until a device sets its own.
@@ -164,9 +169,9 @@ def _parse_start(raw: Any, game_pk: Any) -> datetime:
     return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
 
 
-def _half_from_inning_state(inning_state: str) -> HalfInning:
-    # "Middle"/"End" are the breaks after the top/bottom; collapse to our two halves.
-    return HalfInning.BOTTOM if inning_state in _BOTTOM_INNING_STATES else HalfInning.TOP
+def _phase_from_inning_state(inning_state: str) -> InningPhase:
+    # Keep Middle/End distinct from the active halves; default to TOP on an unknown label.
+    return _INNING_STATE_PHASE.get(inning_state, InningPhase.TOP)
 
 
 def _parse_game_state(raw: dict[str, Any]) -> BaseballGameState:
@@ -186,7 +191,7 @@ def _parse_game_state(raw: dict[str, Any]) -> BaseballGameState:
             away_score=int(teams.get("away", {}).get("runs", 0) or 0),
             home_score=int(teams.get("home", {}).get("runs", 0) or 0),
             inning=inning,
-            half=_half_from_inning_state(str(line.get("inningState", "Top"))),
+            phase=_phase_from_inning_state(str(line.get("inningState", "Top"))),
             count=BaseballCount(
                 balls=int(line.get("balls", 0) or 0),
                 strikes=int(line.get("strikes", 0) or 0),

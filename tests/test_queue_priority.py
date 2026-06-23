@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 from omni.core.enum import DisplayPriority, GameStatus, League
 from omni.core.ids import LeagueScopedId, SourceRef
-from omni.domain.baseball import BaseballBaseState, BaseballCount, BaseballGameState, HalfInning
+from omni.domain.baseball import BaseballBaseState, BaseballCount, BaseballGameState, InningPhase
 from omni.domain.contest import TeamGame
 from omni.providers.mlb_teams import MlbTeamRegistry
 from omni.queue.priority import PriorityScorer
@@ -33,7 +33,7 @@ def _state(
     away: int = 8,
     home: int = 3,
     inning: int = 2,
-    half: HalfInning = HalfInning.TOP,
+    phase: InningPhase = InningPhase.TOP,
     balls: int = 0,
     strikes: int = 0,
     outs: int = 0,
@@ -45,7 +45,7 @@ def _state(
         away_score=away,
         home_score=home,
         inning=inning,
-        half=half,
+        phase=phase,
         count=BaseballCount(balls=balls, strikes=strikes, outs=outs),
         bases=BaseballBaseState(first=first, second=second, third=third),
     )
@@ -91,7 +91,7 @@ def test_bases_loaded_tie_ninth_is_maximum_drama() -> None:
             away=5,
             home=5,
             inning=9,
-            half=HalfInning.BOTTOM,
+            phase=InningPhase.BOTTOM,
             balls=3,
             strikes=2,
             outs=2,

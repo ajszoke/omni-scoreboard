@@ -7,11 +7,10 @@ from datetime import datetime
 
 from omni.cards.base import ScoreboardCard
 
-# Baseball value objects live in the domain layer; re-exported for back-compat.
-from omni.domain.baseball import BaseballBaseState, BaseballCount, HalfInning
+# Domain value objects used by the payload fields below (imported for use, not re-exported).
+from omni.domain.baseball import BaseballBaseState, BaseballCount, InningPhase
 
 __all__ = [
-    "BaseballBaseState",
     "LiveBaseballCardPayload",
     "LiveBaseballCard",
     "PregameCardPayload",
@@ -26,7 +25,7 @@ class LiveBaseballCardPayload:
     away_score: int
     home_score: int
     inning: int
-    half: HalfInning
+    phase: InningPhase
     count: BaseballCount
     bases: BaseballBaseState
     last_play: str | None = None

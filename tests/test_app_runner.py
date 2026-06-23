@@ -10,7 +10,7 @@ from omni.app.runner import build_loop
 from omni.core.enum import GameStatus, League, PanelProfile
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.core.time import DurationSeconds
-from omni.domain.baseball import BaseballBaseState, BaseballCount, BaseballGameState, HalfInning
+from omni.domain.baseball import BaseballBaseState, BaseballCount, BaseballGameState, InningPhase
 from omni.domain.contest import TeamGame
 from omni.providers.base import ProviderUpdate
 from omni.providers.mlb_teams import MlbTeamRegistry
@@ -44,7 +44,7 @@ def _fetch_state(game: TeamGame) -> BaseballGameState:
         away_score=1,
         home_score=2,
         inning=7,
-        half=HalfInning.BOTTOM,
+        phase=InningPhase.BOTTOM,
         count=BaseballCount(balls=2, strikes=1, outs=1),
         bases=BaseballBaseState(first=True),
     )

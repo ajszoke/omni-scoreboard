@@ -13,7 +13,7 @@ from omni.cards.factory import CardFactory
 from omni.core.colors import RGBColor
 from omni.core.enum import GameStatus, League, PanelProfile
 from omni.core.ids import LeagueScopedId, SourceRef
-from omni.domain.baseball import BaseballBaseState, BaseballCount, BaseballGameState, HalfInning
+from omni.domain.baseball import BaseballBaseState, BaseballCount, BaseballGameState, InningPhase
 from omni.domain.contest import TeamGame
 from omni.panels.geometry import geometry_for
 from omni.providers.mlb_teams import MlbTeamRegistry
@@ -50,7 +50,7 @@ def _card() -> object:
         away_score=3,
         home_score=5,
         inning=7,
-        half=HalfInning.TOP,
+        phase=InningPhase.TOP,
         count=BaseballCount(balls=2, strikes=1, outs=2),
         bases=BaseballBaseState(first=True, third=True),
     )
