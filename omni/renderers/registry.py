@@ -1,6 +1,6 @@
 """RendererRegistry: pick and validate the renderer for a card.
 
-Orchestration must not hard-code `LiveBaseballRenderer` (as the preview did). The
+Orchestration must not hard-code `LiveBaseballRenderer`. The
 registry maps ``(Sport, CardKind) -> Renderer`` and, at dispatch, verifies the three
 declarations that can otherwise drift apart all agree:
 

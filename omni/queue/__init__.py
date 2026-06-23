@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from omni.queue.delay_buffer import DelayBuffer
 from omni.queue.delay_policy import DelayAnchor, DelayPolicy
+from omni.queue.delayed_event_stream import DelayedEventStream
 from omni.queue.delayed_feed import DelayedFeed
 from omni.queue.priority import PriorityScorer
 from omni.queue.scheduler import InterleavedCardQueue
@@ -19,6 +20,7 @@ __all__ = [
     "DelayAnchor",
     "DelayBuffer",
     "DelayPolicy",
+    "DelayedEventStream",
     "DelayedFeed",
     "InterleavedCardQueue",
     "PriorityScorer",

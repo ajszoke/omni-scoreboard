@@ -1,7 +1,7 @@
 """Replay harness: run the real AppLoop over a Timeline under a FakeClock.
 
-This is the deterministic time-series replayer the kernel calls for and A0's second
-acceptance gate names. It swaps only the *clock* and the *data source*: a
+This is the deterministic time-series replayer. It swaps only the *clock* and the
+*data source*: a
 `ReplayProvider` serves the timeline's schedule as of ``now`` and a state-fetcher
 serves each live game's state, then `build_loop` wires the exact production spine
 (supervisor -> store -> pipeline -> queue -> registry -> sink). `replay()` ticks

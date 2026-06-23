@@ -177,7 +177,7 @@ def test_rotation_resumes_after_burst_card_removed() -> None:
 
 
 def test_sibling_cards_for_one_contest_share_airtime() -> None:
-    # Two cards for the SAME contest (one group) must both surface — High #4.
+    # Two cards for the SAME contest (one group) must both surface.
     queue = InterleavedCardQueue()
     live = _card("g1")
     queue.ingest(live)

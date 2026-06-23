@@ -21,6 +21,7 @@ from omni.providers.mlb_statsapi import (
     _parse_iso,
     _parse_one_play,
     _safe_count,
+    _safe_int,
 )
 from omni.providers.mlb_teams import MlbTeamRegistry
 
@@ -90,6 +91,22 @@ def test_home_run_event_payload_and_times() -> None:
     assert p.inning == 3 and p.phase is InningPhase.BOTTOM and p.rbi == 2
     assert "Betts" in p.description
     assert p.count is not None and (p.count.balls, p.count.strikes, p.count.outs) == (1, 1, 1)
+
+
+def test_play_carries_its_post_play_score() -> None:
+    # The score the play *left the game at* — what a delayed big-play card shows.
+    events = {e.event_type: e for e in _events()}
+    hr = events[BaseballGameEventType.HOME_RUN].payload
+    assert (hr.away_score, hr.home_score) == (0, 2)
+    triple = events[BaseballGameEventType.TRIPLE].payload
+    assert (triple.away_score, triple.home_score) == (1, 5)
+
+
+def test_safe_int_coerces_or_returns_none() -> None:
+    assert _safe_int(3) == 3
+    assert _safe_int("4") == 4
+    assert _safe_int(None) is None
+    assert _safe_int("nope") is None
 
 
 def test_importance_ranks_home_run_above_single() -> None:

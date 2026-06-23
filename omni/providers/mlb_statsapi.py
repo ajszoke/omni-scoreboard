@@ -281,6 +281,16 @@ def _parse_iso(raw: Any) -> datetime | None:
     return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
 
 
+def _safe_int(value: Any) -> int | None:
+    """Coerce a StatsAPI numeric to int, or None if absent/non-numeric."""
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _safe_count(count: Any) -> BaseballCount | None:
     """Build a `BaseballCount` from a play's count, or None if it is missing/impossible.
 
@@ -338,6 +348,8 @@ def _parse_one_play(
         description=str(result.get("description", "")),
         count=_safe_count(play.get("count")),
         rbi=int(result.get("rbi") or 0),
+        away_score=_safe_int(result.get("awayScore")),
+        home_score=_safe_int(result.get("homeScore")),
     )
     return BaseballGameEvent(
         id=LeagueScopedId(contest.league, source, f"{contest.id.raw}:ab:{at_bat_index}"),
@@ -380,7 +392,8 @@ def _default_fetch_schedule(game_date: date, sport_ids: str) -> list[dict[str, A
 # data — keep this in sync with what `_parse_game_state` / `_parse_game_events` read.
 _GAME_FIELDS = (
     "liveData,linescore,teams,home,away,runs,currentInning,inningState,balls,strikes,outs,offense,first,second,third,"
-    "plays,allPlays,result,eventType,description,rbi,about,inning,halfInning,atBatIndex,endTime,startTime,count"
+    "plays,allPlays,result,eventType,description,rbi,awayScore,homeScore,about,inning,halfInning,atBatIndex,"
+    "endTime,startTime,count"
 )
 
 

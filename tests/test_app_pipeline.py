@@ -6,12 +6,13 @@ from datetime import datetime, timedelta, timezone
 
 from omni.app.pipeline import LiveBaseballPipeline, PipelineResult
 from omni.cards.factory import CardFactory
-from omni.core.enum import GameStatus, League, PanelProfile
+from omni.core.enum import DisplayPriority, GameStatus, League, PanelProfile, UpdateUrgency
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.core.time import DurationSeconds
 from omni.domain.baseball import BaseballBaseState, BaseballCount, BaseballGameState, InningPhase
 from omni.domain.contest import TeamGame
-from omni.events.baseball import LiveBaseballFeed
+from omni.events.base import EventImportance
+from omni.events.baseball import BaseballGameEvent, BaseballGameEventType, BaseballPlayPayload, LiveBaseballFeed
 from omni.providers.base import ProviderError
 from omni.providers.mlb_teams import MlbTeamRegistry
 from omni.queue.delay_policy import DelayPolicy
@@ -50,20 +51,49 @@ def _state(away: int = 0, home: int = 0, inning: int = 3) -> BaseballGameState:
     )
 
 
+def _event(
+    eid: str,
+    *,
+    event_type: BaseballGameEventType = BaseballGameEventType.HOME_RUN,
+    band: DisplayPriority = DisplayPriority.ALERT,
+    source_time: datetime = T,
+    away: int = 1,
+    home: int = 0,
+) -> BaseballGameEvent:
+    return BaseballGameEvent(
+        id=_id(eid),
+        contest=_game("g1"),
+        event_type=event_type,
+        source=SOURCE,
+        source_time=source_time,
+        observed_at=source_time,
+        importance=EventImportance(
+            priority=band, urgency=UpdateUrgency.HIGH, leverage=0.0, rarity=0.5, favorite_relevance=0.0
+        ),
+        payload=BaseballPlayPayload(
+            inning=7, phase=InningPhase.BOTTOM, description="homer", rbi=1, away_score=away, home_score=home
+        ),
+    )
+
+
 class _Fetch:
     """A configurable game-feed fetcher that can also fail on command."""
 
     def __init__(self) -> None:
         self.states: dict[str, BaseballGameState] = {}
+        self.events: dict[str, tuple[BaseballGameEvent, ...]] = {}
         self.fail: set[str] = set()
 
     def set(self, raw: str, state: BaseballGameState) -> None:
         self.states[raw] = state
 
+    def set_events(self, raw: str, events: tuple[BaseballGameEvent, ...]) -> None:
+        self.events[raw] = events
+
     def __call__(self, game: TeamGame, now: datetime) -> LiveBaseballFeed:
         if game.id.raw in self.fail:
             raise ProviderError("game feed down")
-        return LiveBaseballFeed(state=self.states[game.id.raw])
+        return LiveBaseballFeed(state=self.states[game.id.raw], events=self.events.get(game.id.raw, ()))
 
 
 def _setup(lag: int = 30) -> tuple[LiveBaseballPipeline, InterleavedCardQueue]:
@@ -112,7 +142,7 @@ def test_ignores_non_live_games() -> None:
     fetch = _Fetch()
     fetch.set("g1", _state())
     res = pipe.refresh([_game("g1", GameStatus.SCHEDULED), _game("g2", GameStatus.FINAL)], now=T, fetch_feed=fetch)
-    assert res == PipelineResult(ingested=(), held=(), removed=(), skipped=())
+    assert res == PipelineResult(ingested=(), big_plays=(), held=(), removed=(), skipped=())
     assert len(queue) == 0
 
 
@@ -158,3 +188,63 @@ def test_drops_feed_when_a_game_leaves_before_ever_surfacing() -> None:
     # The feed was dropped: going live again starts buffering afresh.
     res3 = pipe.refresh([_game("g1")], now=T + timedelta(seconds=20), fetch_feed=fetch)
     assert res3.held == (_id("g1"),)
+
+
+# --- big-play event path ----------------------------------------------------------
+
+
+def test_notable_event_surfaces_a_big_play_after_the_delay() -> None:
+    pipe, queue = _setup(lag=30)
+    fetch = _Fetch()
+    fetch.set("g1", _state())
+    pipe.refresh([_game("g1")], now=T, fetch_feed=fetch)  # first sight: nothing to flash yet
+    fetch.set_events("g1", (_event("g1:ab:9", source_time=T + timedelta(seconds=5)),))
+    held = pipe.refresh([_game("g1")], now=T + timedelta(seconds=5), fetch_feed=fetch)
+    assert held.big_plays == ()  # observed, but still inside the TV delay
+    fired = pipe.refresh([_game("g1")], now=T + timedelta(seconds=35), fetch_feed=fetch)  # source_time + lag
+    assert len(fired.big_plays) == 1 and "bigplay" in fired.big_plays[0].raw
+
+
+def test_a_big_play_fires_exactly_once_across_polls() -> None:
+    pipe, queue = _setup(lag=0)  # eligible as soon as it is observed
+    fetch = _Fetch()
+    fetch.set("g1", _state())
+    pipe.refresh([_game("g1")], now=T, fetch_feed=fetch)
+    fetch.set_events("g1", (_event("g1:ab:9", source_time=T),))
+    r2 = pipe.refresh([_game("g1")], now=T + timedelta(seconds=10), fetch_feed=fetch)
+    r3 = pipe.refresh([_game("g1")], now=T + timedelta(seconds=20), fetch_feed=fetch)  # same event still in feed
+    assert len(r2.big_plays) == 1
+    assert r3.big_plays == ()  # deduped by lineage — not re-flashed every tick
+
+
+def test_a_routine_event_does_not_flash() -> None:
+    pipe, queue = _setup(lag=0)
+    fetch = _Fetch()
+    fetch.set("g1", _state())
+    pipe.refresh([_game("g1")], now=T, fetch_feed=fetch)
+    single = _event("g1:ab:3", event_type=BaseballGameEventType.SINGLE, band=DisplayPriority.NORMAL, source_time=T)
+    fetch.set_events("g1", (single,))
+    res = pipe.refresh([_game("g1")], now=T + timedelta(seconds=10), fetch_feed=fetch)
+    assert res.big_plays == ()  # below the big-play band: informs the live card, never a takeover
+
+
+def test_backlog_is_suppressed_on_first_sight() -> None:
+    pipe, queue = _setup(lag=30)
+    fetch = _Fetch()
+    fetch.set("g1", _state())
+    fetch.set_events("g1", (_event("g1:ab:9", source_time=T),))  # already in the feed when we tune in
+    pipe.refresh([_game("g1")], now=T, fetch_feed=fetch)  # primed -> suppressed
+    res = pipe.refresh([_game("g1")], now=T + timedelta(seconds=120), fetch_feed=fetch)  # long past any delay
+    assert res.big_plays == ()  # joining mid-game never dumps the earlier plays onto the screen
+
+
+def test_event_stream_is_dropped_when_a_game_leaves() -> None:
+    pipe, queue = _setup(lag=30)
+    fetch = _Fetch()
+    fetch.set("g1", _state())
+    pipe.refresh([_game("g1")], now=T, fetch_feed=fetch)
+    fetch.set_events("g1", (_event("g1:ab:9", source_time=T + timedelta(seconds=5)),))
+    pipe.refresh([_game("g1")], now=T + timedelta(seconds=5), fetch_feed=fetch)  # an event is held in the stream
+    assert _id("g1") in pipe._event_streams and pipe._event_streams[_id("g1")].pending() == 1
+    pipe.refresh([_game("g1", GameStatus.FINAL)], now=T + timedelta(seconds=10), fetch_feed=fetch)
+    assert _id("g1") not in pipe._event_streams  # cleaned up with the game — no leak

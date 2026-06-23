@@ -5,9 +5,8 @@ should *behave* — `NORMAL` rotation, a brief `BURST` takeover after a scoring 
 periodic `RECURRING` reminder for an active no-hitter, or a persistent `BADGE` shown
 alongside. Crucially it is **bounded**: a BURST monopolizes only for `takeover_for`
 then yields, and RECURRING is capped by `cooldown` / `max_repeats` — so high-priority
-content is seen *without burying normal updates forever* (the verdict's High #3 fix
-for "ALERT = indefinite full-screen monopoly"). The queue reads this; it never lets
-display priority alone grant a permanent takeover.
+content is seen *without burying normal updates forever*. The queue reads this; it never
+lets display priority alone grant a permanent takeover.
 """
 
 from __future__ import annotations

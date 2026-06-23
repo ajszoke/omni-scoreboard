@@ -1,6 +1,6 @@
 """Tests for the replay harness: the real AppLoop driven over a Timeline, deterministically.
 
-These are A0 acceptance gate 2 — the same `run_once` code path production uses, ticked
+These drive the same `run_once` code path production uses, ticked
 under a FakeClock from a fixture timeline, yielding a reproducible queue trace.
 """
 
