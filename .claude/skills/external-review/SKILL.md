@@ -1,6 +1,6 @@
 ---
 name: external-review
-description: Run a round of the head/hand external review — bundle the build state for the external flagship model (ChatGPT, "CGPT") to review fidelity-to-plan and steer the next phase, using the plan-trio + round-zip cadence. Use after a milestone/phase, before a framework-level direction change, or whenever the build needs the planner to bless deviations or sequence what's next. Produces a scannable plan-trio in ~/.claude/plans/ and an immutable round-N.zip + prompt to hand off. NOT for routine PRs, bug fixes, or single-file edits.
+description: Run a round of the head/hand external review — bundle the build state for the external flagship model (ChatGPT, "CGPT") to review fidelity-to-plan and steer the next phase, using the plan-trio + round-zip cadence. Use after a milestone/phase, before a framework-level direction change, or whenever the build needs the planner to bless deviations or sequence what's next. Produces a scannable plan-trio in ~/omni-review/plans/ and an immutable round-N.zip + prompt to hand off. NOT for routine PRs, bug fixes, or single-file edits.
 ---
 
 # External-review cadence (head/hand, plan-trio + round-zips)
@@ -31,20 +31,23 @@ Always state explicitly what's **current-ship** vs **deferred** and ask the head
 
 ## The artifacts
 
+All review artifacts live in one durable WSL home, `~/omni-review/` (machine-local — *not* in the repo):
+
 ```
-~/.claude/plans/
-  omni-<slug>.md             ← main plan / review brief, stays SCANNABLE
-  omni-<slug>-SUPPLEMENT.md  ← evidence locker: file:line touchpoints, in-code verifications, drift table
-  omni-<slug>-REVIEWS.md     ← per-round log: briefing + verbatim verdict + our adjudication
-~/scratchpad/omni-scoreboard/
-  round-N-prompt.md          ← the briefing handed to the flagship (also bundled)
-  round-N.zip                ← plans/ snapshot + prompt + sources/ + prior verdict
-  round-N-verdict.md         ← the flagship's verbatim verdict, archived per round
+~/omni-review/
+  plans/                       ← the living plan-trio, updated across rounds
+    omni-<slug>.md             ← main plan / review brief, stays SCANNABLE
+    omni-<slug>-SUPPLEMENT.md  ← evidence locker: file:line touchpoints, in-code verifications, drift table
+    omni-<slug>-REVIEWS.md     ← per-round log: briefing + verbatim verdict + our adjudication
+  rounds/                      ← immutable per-round bundles
+    round-N-prompt.md          ← the briefing handed to the flagship (also bundled)
+    round-N.zip                ← plans/ snapshot + prompt + sources/ + prior verdict
+    round-N-verdict.md         ← the flagship's verbatim verdict, archived per round
 ```
 
 `<slug>` is a stable memorable handle. **One zip per round, never overwrite — it's the audit trail.**
-Copy the final `round-N.zip` + `round-N-prompt.md` to a user-reachable spot (e.g. a Windows
-`Downloads/omni_review_round-N/` folder) so the user can upload them to the flagship.
+The home is reachable from Windows at `\\wsl.localhost\Ubuntu\home\<user>\omni-review\`, so the user can
+upload `rounds/round-N.zip` + `round-N-prompt.md` to the flagship directly — no copy into Downloads.
 
 ## The loop
 

@@ -4,7 +4,7 @@ Copy-paste skeletons for the [external-review](SKILL.md) skill. Replace `<…>`.
 
 ---
 
-## A. Main brief — `~/.claude/plans/omni-<slug>.md`
+## A. Main brief — `~/omni-review/plans/omni-<slug>.md`
 
 ```markdown
 # Omni external review — <slug> (round N)
@@ -38,7 +38,7 @@ Copy-paste skeletons for the [external-review](SKILL.md) skill. Replace `<…>`.
 
 ---
 
-## B. SUPPLEMENT — `~/.claude/plans/omni-<slug>-SUPPLEMENT.md`
+## B. SUPPLEMENT — `~/omni-review/plans/omni-<slug>-SUPPLEMENT.md`
 
 ```markdown
 # Omni external review — <slug> — SUPPLEMENT
@@ -60,12 +60,12 @@ Companion to `omni-<slug>.md`. Citations: **[verified]** = read this session; **
 
 ---
 
-## C. REVIEWS — `~/.claude/plans/omni-<slug>-REVIEWS.md`
+## C. REVIEWS — `~/omni-review/plans/omni-<slug>-REVIEWS.md`
 
 ```markdown
 # Omni external review — <slug> — rounds
 
-Per-round log. Bundles at `~/scratchpad/omni-scoreboard/round-N.zip`.
+Per-round log. Bundles at `~/omni-review/rounds/round-N.zip`.
 
 ## Round N — [pending | date]
 **Bundle:** `round-N.zip`  **Briefing:** `round-N-prompt.md`
@@ -91,7 +91,7 @@ Stops when: clean "Proceed" + no open framing questions + all accepted findings 
 
 ---
 
-## D. Round-N briefing — `~/scratchpad/omni-scoreboard/round-N-prompt.md`
+## D. Round-N briefing — `~/omni-review/rounds/round-N-prompt.md`
 
 ```markdown
 # Omni Scoreboard — external review, round N (<fidelity + plan | converge>)

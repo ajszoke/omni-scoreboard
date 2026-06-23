@@ -4,7 +4,7 @@ Detailed conventions for the [external-review](SKILL.md) skill. Skeletons in [te
 
 ---
 
-## 1. The plan-trio (`~/.claude/plans/`)
+## 1. The plan-trio (`~/omni-review/plans/`)
 
 Three sibling files sharing an `omni-<slug>` handle. The split keeps the main brief scannable.
 
@@ -18,7 +18,7 @@ Tag claims **[verified]** (read this session) vs **[reported]** (secondhand) in 
 
 ---
 
-## 2. The round-zip (`~/scratchpad/omni-scoreboard/`)
+## 2. The round-zip (`~/omni-review/rounds/`)
 
 ```
 round-N-prompt.md     ← authored FIRST, then a copy is bundled
