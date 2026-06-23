@@ -42,6 +42,11 @@ class MatrixCanvas:
     def height(self) -> int:
         return self._h
 
+    @property
+    def surface(self) -> MatrixSurface:
+        """The underlying matrix frame canvas (so a display sink can swap it)."""
+        return self._surface
+
     def fill(self, color: RGBColor) -> None:
         self.fill_rect(0, 0, self._w, self._h, color)
 

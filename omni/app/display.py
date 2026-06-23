@@ -9,13 +9,14 @@ double here captures committed frames for tests.
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from omni.core.enum import PanelProfile
 from omni.panels.geometry import geometry_for
 from omni.renderers.canvas import Canvas, RecordingCanvas
+from omni.renderers.matrix_canvas import MatrixCanvas, MatrixSurface
 
-__all__ = ["DisplaySink", "RecordingDisplaySink"]
+__all__ = ["DisplaySink", "RecordingDisplaySink", "MatrixDevice", "MatrixDisplaySink"]
 
 
 @runtime_checkable
@@ -32,6 +33,15 @@ class DisplaySink(Protocol):
     def commit(self, frame: Canvas) -> None:
         """Push a drawn frame to the display."""
         ...
+
+
+@runtime_checkable
+class MatrixDevice(Protocol):
+    """The slice of the rgbmatrix / RGBMatrixEmulator API the sink needs (names per the lib)."""
+
+    def CreateFrameCanvas(self) -> MatrixSurface: ...
+
+    def SwapOnVSync(self, frame: MatrixSurface) -> Any: ...
 
 
 class RecordingDisplaySink:
@@ -55,3 +65,30 @@ class RecordingDisplaySink:
     @property
     def committed(self) -> int:
         return len(self.frames)
+
+
+class MatrixDisplaySink:
+    """A `DisplaySink` backed by an rgbmatrix / emulator device (double-buffered).
+
+    Each frame draws onto a fresh off-screen `CreateFrameCanvas`, then `commit`
+    presents it with `SwapOnVSync` — so the panel never shows a half-drawn frame.
+    """
+
+    def __init__(self, matrix: MatrixDevice, profile: PanelProfile) -> None:
+        self._matrix = matrix
+        self._profile = profile
+        geometry = geometry_for(profile)
+        self._width = geometry.width
+        self._height = geometry.height
+
+    @property
+    def profile(self) -> PanelProfile:
+        return self._profile
+
+    def new_frame(self) -> Canvas:
+        return MatrixCanvas(self._matrix.CreateFrameCanvas(), self._width, self._height)
+
+    def commit(self, frame: Canvas) -> None:
+        if not isinstance(frame, MatrixCanvas):
+            raise TypeError("MatrixDisplaySink.commit expects a MatrixCanvas from new_frame()")
+        self._matrix.SwapOnVSync(frame.surface)
