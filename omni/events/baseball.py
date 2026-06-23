@@ -56,6 +56,11 @@ class BaseballGameEventType(StrEnumMixin, str, Enum):
 class BaseballPlayPayload:
     """The baseball-specific body of a `BaseballGameEvent`.
 
+    `away_score`/`home_score` are the score *after* this play — what the play left the
+    game at — so an event-derived card (a big play) shows the exact resulting score, not
+    the live, possibly-spoiler score. They are optional because a non-scoring status
+    event (e.g. a no-hitter badge) carries no score; the provider fills them for plays.
+
     `fielder_sequence` is structured as ints (e.g. ``(9, 6, 4)``), not a string
     like ``"9-6-4-"``; rendering joins it late and avoids dangling delimiters.
     """
@@ -65,6 +70,8 @@ class BaseballPlayPayload:
     description: str
     count: BaseballCount | None = None
     rbi: int = 0
+    away_score: int | None = None
+    home_score: int | None = None
     pitch_type: str | None = None
     fielder_sequence: tuple[int, ...] = ()
 

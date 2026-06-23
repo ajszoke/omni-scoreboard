@@ -18,7 +18,7 @@ from omni.cards.base import CardKind, ScoreboardCard
 from omni.cards.factory import CardFactory
 from omni.core.enum import DisplayPriority, GameStatus, League, PanelProfile, UpdateUrgency
 from omni.core.ids import LeagueScopedId, SourceRef
-from omni.domain.baseball import BaseballBaseState, BaseballCount, BaseballGameState, InningPhase
+from omni.domain.baseball import InningPhase
 from omni.domain.contest import Contest, TeamGame
 from omni.events.base import EventImportance
 from omni.events.baseball import BaseballGameEvent, BaseballGameEventType, BaseballPlayPayload
@@ -55,6 +55,8 @@ def _event(
     event_type: BaseballGameEventType = BaseballGameEventType.HOME_RUN,
     description: str = "Betts homers",
     eid: str = "e1",
+    away_score: int | None = 3,
+    home_score: int | None = 5,
 ) -> BaseballGameEvent:
     return BaseballGameEvent(
         id=LeagueScopedId(League.MLB, SOURCE, eid),
@@ -70,18 +72,14 @@ def _event(
             rarity=0.7,
             favorite_relevance=0.0,
         ),
-        payload=BaseballPlayPayload(inning=7, phase=InningPhase.BOTTOM, description=description, rbi=1),
-    )
-
-
-def _state(away: int = 3, home: int = 5) -> BaseballGameState:
-    return BaseballGameState(
-        away_score=away,
-        home_score=home,
-        inning=7,
-        phase=InningPhase.BOTTOM,
-        count=BaseballCount(balls=0, strikes=0, outs=1),
-        bases=BaseballBaseState(),
+        payload=BaseballPlayPayload(
+            inning=7,
+            phase=InningPhase.BOTTOM,
+            description=description,
+            rbi=1,
+            away_score=away_score,
+            home_score=home_score,
+        ),
     )
 
 
@@ -92,8 +90,8 @@ def _card(
     away: int = 3,
     home: int = 5,
 ) -> ScoreboardCard[BigPlayCardPayload]:
-    event = _event(event_type=event_type, description=description)
-    return CardFactory().big_play(_game(), event, _state(away, home), now=NOW)
+    event = _event(event_type=event_type, description=description, away_score=away, home_score=home)
+    return CardFactory().big_play(_game(), event, now=NOW)
 
 
 def _render(card: ScoreboardCard[BigPlayCardPayload], profile: PanelProfile) -> RecordingCanvas:
@@ -103,29 +101,42 @@ def _render(card: ScoreboardCard[BigPlayCardPayload], profile: PanelProfile) -> 
     return canvas
 
 
-# --- lineage + attention (the High #1 fix) ----------------------------------------
+# --- lineage + attention --------------------------------------------------------
 
 
 def test_big_play_card_carries_event_lineage() -> None:
     # An event-derived card retains its source event id(s) — dedupable + auditable.
     event = _event(eid="play-42")
-    card = CardFactory().big_play(_game(), event, _state(), now=NOW)
+    card = CardFactory().big_play(_game(), event, now=NOW)
     assert card.kind is CardKind.BIG_PLAY
-    assert card.source_event_ids == (event.id,)  # <- lineage populated (round-1 High #1)
+    assert card.source_event_ids == (event.id,)  # <- lineage populated
     assert event.id.raw in card.dedupe_key.raw  # dedupe keyed on the specific play
 
 
 def test_big_play_uses_bounded_burst_attention() -> None:
-    card = CardFactory().big_play(_game(), _event(), _state(), now=NOW)
+    card = CardFactory().big_play(_game(), _event(), now=NOW)
     assert card.attention.mode is AttentionMode.BURST
     assert card.attention.takeover_for.value > 0  # a bounded takeover, never permanent
     assert card.priority.band is DisplayPriority.ALERT
 
 
 def test_big_play_has_a_finite_window() -> None:
-    card = CardFactory().big_play(_game(), _event(), _state(), now=NOW)
+    card = CardFactory().big_play(_game(), _event(), now=NOW)
     expires = card.timing.expires_at
     assert expires is not None and not card.timing.is_available(expires)
+
+
+def test_big_play_score_comes_from_the_event_not_live_state() -> None:
+    # The card shows the play's resulting score (carried on the event), so a delayed
+    # flash can never reveal a later, un-aired score.
+    card = CardFactory().big_play(_game(), _event(away_score=2, home_score=1), now=NOW)
+    assert (card.payload.away_score, card.payload.home_score) == (2, 1)
+
+
+def test_big_play_requires_a_post_play_score() -> None:
+    scoreless = _event(away_score=None, home_score=None)  # e.g. a status event
+    with pytest.raises(ValueError):
+        CardFactory().big_play(_game(), scoreless, now=NOW)
 
 
 # --- headline + layouts -----------------------------------------------------------

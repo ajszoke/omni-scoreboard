@@ -40,7 +40,7 @@ from omni.events.baseball import BaseballGameEvent
 
 __all__ = ["CardFactory"]
 
-# The live-baseball renderer natively supports all three profiles (see PR #7).
+# The live-baseball renderer natively supports all three profiles.
 _LIVE_BASEBALL_PROFILES = frozenset({PanelProfile.SINGLE_64X32, PanelProfile.STACK_64X64, PanelProfile.QUAD_128X64})
 # Pregame renders natively on all three; the small panel drops the "first pitch" label.
 _PREGAME_PROFILES = frozenset({PanelProfile.SINGLE_64X32, PanelProfile.STACK_64X64, PanelProfile.QUAD_128X64})
@@ -173,22 +173,27 @@ class CardFactory:
         self,
         game: TeamGame,
         event: BaseballGameEvent,
-        state: BaseballGameState,
         *,
         now: datetime,
         priority: CardPriority | None = None,
     ) -> ScoreboardCard[BigPlayCardPayload]:
-        """Build a big-play card from a typed event + the resulting game state.
+        """Build a big-play card from a typed event.
 
-        The card carries the event's lineage (`source_event_ids`) so the play stays
-        dedupable, replayable, and auditable (round-1 High #1), and a bounded `BURST`
-        attention so it flashes then yields rather than monopolizing the screen.
+        The score shown is the play's *resulting* score, carried on the event payload —
+        not the live game state — so a delayed big play never reveals a later, un-aired
+        score. The card carries the event's lineage (`source_event_ids`) so the play
+        stays dedupable, replayable, and auditable, and a bounded `BURST` attention so
+        it flashes then yields rather than monopolizing the screen.
         """
+        away_score = event.payload.away_score
+        home_score = event.payload.home_score
+        if away_score is None or home_score is None:
+            raise ValueError("big-play event must carry a post-play score")
         payload = BigPlayCardPayload(
             event_type=event.event_type,
             description=event.payload.description,
-            away_score=state.away_score,
-            home_score=state.home_score,
+            away_score=away_score,
+            home_score=home_score,
         )
         key = f"{game.id.raw}:bigplay:{event.id.raw}"
         return ScoreboardCard(
