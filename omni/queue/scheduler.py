@@ -10,10 +10,12 @@ next. Selection is **two-level** so nothing starves:
 2. **Card** — within that group, pick the most-overdue *card*, weighted by its band,
    so siblings for one game (LIVE, BIG_PLAY, FINAL, ...) share airtime fairly.
 
-Attention is **bounded and separate from priority**: a
-card with a `BURST` `AttentionPolicy` takes over the screen only for its
-`takeover_for` window (derived from its `available_at`), then rejoins normal
-rotation — display priority alone never grants a permanent takeover.
+Attention is **bounded and separate from priority**: a `BURST` card takes over the
+screen only for its `takeover_for` window (derived from its `available_at`), then
+rejoins normal rotation; a `RECURRING` card (an active no-hitter) resurfaces on its
+`cooldown` beat — ahead of normal rotation, capped by `max_repeats` — and is otherwise
+held back, so it reminds periodically without showing every tick. Display priority
+alone never grants a permanent takeover.
 
 The queue answers "what next" only — per-card dwell (min/max display) is the render
 loop's job.
@@ -55,6 +57,8 @@ class InterleavedCardQueue:
         self._tick = 0
         self._group_last_shown: dict[LeagueScopedId, int] = {}  # contest id -> tick
         self._card_last_shown: dict[str, int] = {}  # DedupeKey.raw -> tick
+        self._card_last_shown_at: dict[str, datetime] = {}  # DedupeKey.raw -> time shown (RECURRING cooldown)
+        self._recurring_count: dict[str, int] = {}  # DedupeKey.raw -> times a RECURRING card has surfaced
 
     def ingest(self, card: ScoreboardCard[Any]) -> None:
         """Add a card, or replace the one sharing its `DedupeKey` (a fresh update)."""
@@ -96,12 +100,20 @@ class InterleavedCardQueue:
             return None
 
         bursting = [card for card in pool if self._is_bursting(card, now)]
+        due_recurring = [card for card in pool if self._is_recurring_due(card, now)]
         if bursting:
             # A bounded BURST takes over the screen for its window, then yields.
             chosen = max(bursting, key=self._card_rank)
+        elif due_recurring:
+            # A RECURRING card surfaces on its cooldown beat, ahead of normal rotation.
+            chosen = max(due_recurring, key=self._card_rank)
         else:
+            # Two-level rotation, with not-yet-due RECURRING cards held back this tick.
+            rotating = [card for card in pool if card.attention.mode is not AttentionMode.RECURRING]
+            if not rotating:
+                return None  # only RECURRING cards remain and none are due yet — show nothing
             groups: dict[LeagueScopedId, list[ScoreboardCard[Any]]] = defaultdict(list)
-            for card in pool:
+            for card in rotating:
                 groups[card.contest.id].append(card)
             chosen_group = max(groups, key=lambda gid: self._group_rank(gid, groups[gid]))
             chosen = max(groups[chosen_group], key=self._card_rank)
@@ -109,6 +121,9 @@ class InterleavedCardQueue:
         self._tick += 1
         self._group_last_shown[chosen.contest.id] = self._tick
         self._card_last_shown[chosen.dedupe_key.raw] = self._tick
+        self._card_last_shown_at[chosen.dedupe_key.raw] = now
+        if chosen.attention.mode is AttentionMode.RECURRING:
+            self._recurring_count[chosen.dedupe_key.raw] = self._recurring_count.get(chosen.dedupe_key.raw, 0) + 1
         return chosen
 
     def _showable(self, card: ScoreboardCard[Any], now: datetime, profile: PanelProfile) -> bool:
@@ -120,6 +135,18 @@ class InterleavedCardQueue:
             return False
         end = card.timing.available_at + policy.takeover_for.as_timedelta()
         return card.timing.available_at <= now < end
+
+    def _is_recurring_due(self, card: ScoreboardCard[Any], now: datetime) -> bool:
+        # A RECURRING card is due on its first sight, then once per `cooldown`, until it
+        # has surfaced `max_repeats` times (None = unbounded while the card lives).
+        policy = card.attention
+        if policy.mode is not AttentionMode.RECURRING:
+            return False
+        key = card.dedupe_key.raw
+        if policy.max_repeats is not None and self._recurring_count.get(key, 0) >= policy.max_repeats:
+            return False
+        last_shown = self._card_last_shown_at.get(key)
+        return last_shown is None or now >= last_shown + policy.cooldown.as_timedelta()
 
     def _group_rank(self, group_id: LeagueScopedId, cards: list[ScoreboardCard[Any]]) -> tuple[int, int, float, str]:
         # most overdue group first; weighted by its highest-priority card, then ties.
@@ -141,3 +168,5 @@ class InterleavedCardQueue:
         live_groups = {card.contest.id for card in self._cards.values()}
         self._card_last_shown = {key: tick for key, tick in self._card_last_shown.items() if key in live_keys}
         self._group_last_shown = {gid: tick for gid, tick in self._group_last_shown.items() if gid in live_groups}
+        self._card_last_shown_at = {key: t for key, t in self._card_last_shown_at.items() if key in live_keys}
+        self._recurring_count = {key: c for key, c in self._recurring_count.items() if key in live_keys}
