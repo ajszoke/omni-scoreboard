@@ -28,6 +28,7 @@ __all__ = [
     "League",
     "PanelProfile",
     "GameStatus",
+    "HomeAway",
     "DisplayPriority",
     "UpdateUrgency",
 ]
@@ -151,6 +152,13 @@ class GameStatus(StrEnumMixin, str, Enum):
     POSTPONED = "postponed"
     CANCELED = "canceled"
     UNKNOWN = "unknown"
+
+
+class HomeAway(StrEnumMixin, str, Enum):
+    """Which side of a team contest — the typed result of a winner derivation."""
+
+    AWAY = "away"
+    HOME = "home"
 
 
 class DisplayPriority(IntEnumMixin, IntEnum):

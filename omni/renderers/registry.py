@@ -22,6 +22,7 @@ from omni.panels.geometry import geometry_for
 from omni.renderers.base import Renderer
 from omni.renderers.canvas import Canvas
 from omni.renderers.context import RenderContext
+from omni.renderers.final import FinalRenderer
 from omni.renderers.live_baseball import LiveBaseballRenderer
 from omni.renderers.pregame import PregameRenderer
 
@@ -68,8 +69,9 @@ class RendererRegistry:
 
 
 def default_registry() -> RendererRegistry:
-    """A registry wired with the renderers shipped today (baseball live + pregame)."""
+    """A registry wired with the renderers shipped today (baseball live + pregame + final)."""
     registry = RendererRegistry()
     registry.register(Sport.BASEBALL, CardKind.LIVE_GAME, LiveBaseballRenderer())
     registry.register(Sport.BASEBALL, CardKind.PREGAME, PregameRenderer())
+    registry.register(Sport.BASEBALL, CardKind.FINAL, FinalRenderer())
     return registry
