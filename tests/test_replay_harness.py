@@ -104,6 +104,8 @@ def test_live_card_persists_through_inning_breaks() -> None:
                 phase=phase,
                 count=BaseballCount(balls=0, strikes=0, outs=0),
                 bases=BaseballBaseState(),
+                away_hits=5,
+                home_hits=4,  # a normal game — not an accidental no-hitter at this inning
             ),
         )
         for i, phase in enumerate(phases)

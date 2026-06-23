@@ -40,7 +40,7 @@ def _game(raw: str, status: GameStatus = GameStatus.LIVE) -> TeamGame:
     )
 
 
-def _state(away: int = 0, home: int = 0, inning: int = 3) -> BaseballGameState:
+def _state(away: int = 0, home: int = 0, inning: int = 3, away_hits: int = 5, home_hits: int = 5) -> BaseballGameState:
     return BaseballGameState(
         away_score=away,
         home_score=home,
@@ -48,6 +48,8 @@ def _state(away: int = 0, home: int = 0, inning: int = 3) -> BaseballGameState:
         phase=InningPhase.TOP,
         count=BaseballCount(balls=0, strikes=0, outs=0),
         bases=BaseballBaseState(),
+        away_hits=away_hits,
+        home_hits=home_hits,
     )
 
 
@@ -142,7 +144,7 @@ def test_ignores_non_live_games() -> None:
     fetch = _Fetch()
     fetch.set("g1", _state())
     res = pipe.refresh([_game("g1", GameStatus.SCHEDULED), _game("g2", GameStatus.FINAL)], now=T, fetch_feed=fetch)
-    assert res == PipelineResult(ingested=(), big_plays=(), held=(), removed=(), skipped=())
+    assert res == PipelineResult(ingested=(), big_plays=(), no_hitters=(), held=(), removed=(), skipped=())
     assert len(queue) == 0
 
 
@@ -248,3 +250,44 @@ def test_event_stream_is_dropped_when_a_game_leaves() -> None:
     assert _id("g1") in pipe._event_streams and pipe._event_streams[_id("g1")].pending() == 1
     pipe.refresh([_game("g1", GameStatus.FINAL)], now=T + timedelta(seconds=10), fetch_feed=fetch)
     assert _id("g1") not in pipe._event_streams  # cleaned up with the game — no leak
+
+
+# --- no-hitter path ---------------------------------------------------------------
+
+
+def test_no_hitter_card_surfaces_when_a_side_is_hitless() -> None:
+    pipe, queue = _setup(lag=0)
+    fetch = _Fetch()
+    fetch.set("g1", _state(inning=7, away_hits=0, home_hits=4))  # away hitless -> home's no-no
+    res = pipe.refresh([_game("g1")], now=T, fetch_feed=fetch)
+    assert [c.raw for c in res.no_hitters] == ["g1:nohitter"]
+    assert len(queue) == 2  # the live card + the no-hitter card
+
+
+def test_no_hitter_card_is_removed_when_the_bid_breaks() -> None:
+    pipe, queue = _setup(lag=0)
+    fetch = _Fetch()
+    fetch.set("g1", _state(inning=7, away_hits=0))
+    pipe.refresh([_game("g1")], now=T, fetch_feed=fetch)
+    assert len(queue) == 2
+    fetch.set("g1", _state(inning=7, away_hits=1))  # a hit — the bid is broken
+    res = pipe.refresh([_game("g1")], now=T + timedelta(seconds=10), fetch_feed=fetch)
+    assert res.no_hitters == () and len(queue) == 1  # just the live card now
+
+
+def test_no_hitter_card_not_surfaced_before_the_min_inning() -> None:
+    pipe, queue = _setup(lag=0)
+    fetch = _Fetch()
+    fetch.set("g1", _state(inning=3, away_hits=0))  # hitless, but only the 3rd — routine
+    res = pipe.refresh([_game("g1")], now=T, fetch_feed=fetch)
+    assert res.no_hitters == () and len(queue) == 1
+
+
+def test_no_hitter_card_dropped_when_its_game_leaves() -> None:
+    pipe, queue = _setup(lag=0)
+    fetch = _Fetch()
+    fetch.set("g1", _state(inning=8, away_hits=0))
+    pipe.refresh([_game("g1")], now=T, fetch_feed=fetch)
+    assert _id("g1") in pipe._no_hitter_keys
+    pipe.refresh([_game("g1", GameStatus.FINAL)], now=T + timedelta(seconds=10), fetch_feed=fetch)
+    assert _id("g1") not in pipe._no_hitter_keys and len(queue) == 0  # cleaned up with the game
