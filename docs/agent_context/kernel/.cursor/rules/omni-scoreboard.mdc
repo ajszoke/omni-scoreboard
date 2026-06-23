@@ -1,0 +1,40 @@
+---
+description: Omni Scoreboard project rules
+globs:
+  - "**/*.py"
+  - "**/*.md"
+  - "**/*.json"
+  - "**/*.yaml"
+alwaysApply: true
+---
+
+# Omni Scoreboard Cursor Rules
+
+This project is a friends-and-family LED sports scoreboard, not a consumer SaaS product.
+
+Support these display profiles equally:
+
+- `single_64x32`
+- `stack_64x64`
+- `quad_128x64`
+
+Typed/OOP policy:
+
+- Prefer strict typed objects over primitives in domain code.
+- Use `League`, `Team`/`BaseballTeam`, `PanelProfile`, sport-specific event enums, `DisplayTiming`, `CardPriority`, and typed card payloads.
+- Raw strings/dicts are acceptable only at API/config/fixture boundaries.
+- Provider modules convert raw API JSON into typed domain objects immediately.
+- Renderers consume typed `ScoreboardCard` payloads and never fetch data.
+
+Roadmap order:
+
+1. Clean upstream-based repo.
+2. Emulator and fixture replay.
+3. Typed domain core.
+4. Three display profiles.
+5. MLB polish and bug fixes.
+6. Generic TV-delay/interleaved card queue.
+7. Local setup/updater/device management.
+8. NFL, NBA, NHL, PGA, NCAA later.
+
+Do not add `v2` to repo/branch/product names unless it is a throwaway local branch.

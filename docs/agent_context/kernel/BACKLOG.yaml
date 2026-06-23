@@ -1,0 +1,270 @@
+project: omni-scoreboard
+updated: "2026-06-14"
+principles:
+  - friends_and_family_scope
+  - no_consumer_saas
+  - equal_display_profile_support
+  - typed_domain_objects_over_primitives
+  - free_low_cost_data_by_default
+  - fixture_replay_before_visual_polish
+
+display_profiles:
+  - id: single_64x32
+    physical: "1x1 64x32 panel"
+    logical_width: 64
+    logical_height: 32
+    role: "primary compact family unit"
+  - id: stack_64x64
+    physical: "2x1 vertical stack of 64x32 panels or native equivalent"
+    logical_width: 64
+    logical_height: 64
+    role: "balanced rich compact layout"
+  - id: quad_128x64
+    physical: "2x2 matrix of 64x32 panels"
+    logical_width: 128
+    logical_height: 64
+    role: "legacy/rich dashboard"
+
+milestones:
+  - id: M0
+    name: repo_reset_local_foundation
+    goal: "New omni-scoreboard repo from current upstream; legacy preserved; emulator running."
+    tasks:
+      - id: M0-001
+        title: "Rename old fork to omni-scoreboard-legacy"
+        labels: [repo, github, p0]
+        acceptance:
+          - "ajszoke/omni-scoreboard no longer points to the legacy repo"
+          - "legacy repo remains accessible as omni-scoreboard-legacy"
+          - "No old branches/tags are deleted"
+      - id: M0-002
+        title: "Create revived omni-scoreboard from upstream history"
+        labels: [repo, upstream, p0]
+        notes:
+          - "May need clone-and-push path because GitHub may not allow second personal fork of same upstream."
+        acceptance:
+          - "origin points to ajszoke/omni-scoreboard"
+          - "upstream points to MLB-LED-Scoreboard/mlb-led-scoreboard"
+          - "legacy points to ajszoke/omni-scoreboard-legacy"
+      - id: M0-003
+        title: "Install/run upstream emulator"
+        labels: [emulator, dev_env, p0]
+        acceptance:
+          - "Can launch emulated scoreboard locally"
+          - "Document exact command in README or docs/dev.md"
+
+  - id: M1
+    name: typed_domain_core
+    goal: "Typed OOP foundation for leagues, teams, contests, events, cards, display profiles."
+    tasks:
+      - id: M1-001
+        title: "Add enum mixins and base enums"
+        labels: [typing, architecture, p0]
+        acceptance:
+          - "StrEnumMixin and IntEnumMixin available under omni/core/enum.py"
+          - "League, Sport, PanelProfile, GameStatus, DisplayPriority, UpdateUrgency implemented"
+          - "Enum JSON serialization policy documented"
+      - id: M1-002
+        title: "Add typed IDs/value objects"
+        labels: [typing, architecture, p0]
+        acceptance:
+          - "LeagueScopedId, SourceRef, DurationSeconds, RGBColor, LogoAsset, PanelGeometry implemented"
+      - id: M1-003
+        title: "Add competitor/team/contest model"
+        labels: [typing, domain, p0]
+        acceptance:
+          - "Team, BaseballTeam, FootballTeam, BasketballTeam, HockeyTeam, Golfer, Contest, TeamGame, GolfTournament implemented"
+      - id: M1-004
+        title: "Add sport-specific event enums"
+        labels: [typing, events, p1]
+        acceptance:
+          - "BaseballGameEventType implemented first"
+          - "NFL/NBA/NHL/PGA placeholder enums exist or are planned"
+      - id: M1-005
+        title: "Redesign GameEvent and ScoreboardCard as typed generics"
+        labels: [typing, events, cards, p0]
+        acceptance:
+          - "GameEvent[event_type, payload] generic exists"
+          - "ScoreboardCard[payload] generic exists"
+          - "DisplayTiming, CardPriority, LayoutSupport, DedupeKey implemented"
+
+  - id: M2
+    name: display_profiles_preview_snapshots
+    goal: "All three display profiles are first-class and testable."
+    tasks:
+      - id: M2-001
+        title: "Implement DisplayProfile and PanelGeometry mapping"
+        labels: [display, panels, p0]
+      - id: M2-002
+        title: "Add renderer contract with profile support declaration"
+        labels: [rendering, typing, p0]
+      - id: M2-003
+        title: "Add fixture record/replay"
+        labels: [fixtures, dev_env, p0]
+      - id: M2-004
+        title: "Add emulator/browser preview"
+        labels: [preview, dev_env, p1]
+      - id: M2-005
+        title: "Add golden-image snapshot tests per display profile"
+        labels: [testing, rendering, p1]
+
+  - id: M3
+    name: mlb_excellence
+    goal: "MLB is polished across all three profiles."
+    tasks:
+      - id: M3-001
+        title: "Fix pregame card display halt"
+        labels: [mlb, bug, p0]
+      - id: M3-002
+        title: "Wrap sync delay into TV delay presets"
+        labels: [delay, config, mlb, p0]
+      - id: M3-003
+        title: "Fix logos/backgrounds/probability colors"
+        labels: [assets, color, mlb, p1]
+        notes: ["Pirates, Twins, White Sox, BAL probability contrast called out by user."]
+      - id: M3-004
+        title: "Reinstate color-clash alt logo background logic"
+        labels: [assets, color, rendering, p1]
+      - id: M3-005
+        title: "Map SWPR pitch type"
+        labels: [mlb, data, bug, p1]
+      - id: M3-006
+        title: "Stat line debounce and anchor stabilization"
+        labels: [rendering, mlb, p1]
+      - id: M3-007
+        title: "Fix bot-right cards spacing and fielder sequence truncation"
+        labels: [rendering, mlb, p1]
+      - id: M3-008
+        title: "Preserve last-K/play-of-inning card before inning transition"
+        labels: [mlb, queue, p2]
+      - id: M3-009
+        title: "No-hitter/perfect-game sticky priority"
+        labels: [mlb, priority, p2]
+      - id: M3-010
+        title: "Backwards K and K tracker"
+        labels: [mlb, rendering, p2]
+      - id: M3-011
+        title: "Challenge and ABS state tightening"
+        labels: [mlb, data, rendering, p2]
+      - id: M3-012
+        title: "End-of-game winner/loser logic and W/L/S tightening"
+        labels: [mlb, rendering, p2]
+      - id: M3-013
+        title: "Other-game/news ticker during idle/non-active states"
+        labels: [ticker, mlb, p2]
+      - id: M3-014
+        title: "Mid-inning linescore"
+        labels: [mlb, rendering, p3]
+      - id: M3-015
+        title: "K-zone with pitch blips"
+        labels: [mlb, rendering, p3]
+      - id: M3-016
+        title: "Pitching-change transition card"
+        labels: [mlb, animation, p3]
+      - id: M3-017
+        title: "HR stats/arcs experimental card"
+        labels: [mlb, fun, p4]
+
+  - id: M4
+    name: event_queue_delay_priority
+    goal: "Generic event/card engine for all leagues."
+    tasks:
+      - id: M4-001
+        title: "Implement DelayBuffer over source_time + tv delay"
+        labels: [queue, delay, p0]
+      - id: M4-002
+        title: "Implement PriorityScorer with reason codes"
+        labels: [queue, priority, p0]
+      - id: M4-003
+        title: "Implement InterleavedCardQueue fairness across contests/leagues"
+        labels: [queue, scheduler, p0]
+      - id: M4-004
+        title: "Add sticky alert semantics"
+        labels: [queue, priority, p1]
+      - id: M4-005
+        title: "Add priority-driven polling cadence"
+        labels: [providers, priority, p2]
+
+  - id: M5
+    name: family_device_experience
+    goal: "Local setup, safe updating, sleep/wake, physical switch."
+    tasks:
+      - id: M5-001
+        title: "First-boot Wi-Fi AP and local config portal"
+        labels: [setup, wifi, p0]
+      - id: M5-002
+        title: "Safe systemd updater with rollback"
+        labels: [updater, systemd, p0]
+      - id: M5-003
+        title: "Sleep/wake/night-dim schedule"
+        labels: [device, schedule, p1]
+      - id: M5-004
+        title: "GPIO physical switch/button support"
+        labels: [hardware, gpio, p1]
+      - id: M5-005
+        title: "1x1/2x1/2x2 case-design notes and BOM"
+        labels: [hardware, case, p2]
+
+  - id: M6
+    name: nfl_support
+    goal: "First non-MLB league."
+    tasks:
+      - id: M6-001
+        title: "ESPN NFL provider spike"
+        labels: [nfl, provider, p1]
+      - id: M6-002
+        title: "NFL domain/events/cards"
+        labels: [nfl, typing, rendering, p1]
+      - id: M6-003
+        title: "NFL red-zone/scoring/turnover priority"
+        labels: [nfl, priority, p2]
+
+  - id: M7
+    name: nba_support
+    goal: "NBA favorite-team support."
+    tasks:
+      - id: M7-001
+        title: "ESPN NBA provider spike"
+        labels: [nba, provider, p2]
+      - id: M7-002
+        title: "NBA live/final/clutch cards"
+        labels: [nba, rendering, p2]
+
+  - id: M8
+    name: nhl_support
+    goal: "NHL favorite-team support."
+    tasks:
+      - id: M8-001
+        title: "NHL provider spike"
+        labels: [nhl, provider, p2]
+      - id: M8-002
+        title: "NHL power-play/goal/final cards"
+        labels: [nhl, rendering, p2]
+
+  - id: M9
+    name: pga_support
+    goal: "PGA before NCAA."
+    tasks:
+      - id: M9-001
+        title: "ESPN PGA provider spike"
+        labels: [pga, provider, p2]
+      - id: M9-002
+        title: "Golf competitor/tournament/leaderboard model"
+        labels: [pga, typing, p2]
+      - id: M9-003
+        title: "Favorite golfer and leaderboard cards"
+        labels: [pga, rendering, p2]
+      - id: M9-004
+        title: "Cut-line/final-round priority model"
+        labels: [pga, priority, p3]
+      - id: M9-005
+        title: "Evaluate DataGolf for probability/cut-line enhancements"
+        labels: [pga, api, p3]
+
+  - id: M10
+    name: ncaa_later
+    goal: "NCAA after pro sports/PGA stability."
+    tasks:
+      - id: M10-001
+        title: "NCAAF/NCAAB provider and scope assessment"
+        labels: [ncaa, provider, p4]
