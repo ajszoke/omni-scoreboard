@@ -22,6 +22,7 @@ from omni.core.enum import PanelProfile
 from omni.domain.contest import TeamGame
 from omni.events.baseball import HalfInning
 from omni.renderers.canvas import Canvas
+from omni.renderers.context import RenderContext
 from omni.renderers.font import char_size
 
 __all__ = ["LiveBaseballRenderer"]
@@ -53,13 +54,14 @@ class LiveBaseballRenderer:
     def render(
         self,
         card: ScoreboardCard[LiveBaseballCardPayload],
-        profile: PanelProfile,
+        context: RenderContext,
         canvas: Canvas,
     ) -> None:
         game = card.contest
         if not isinstance(game, TeamGame):
             raise TypeError("live-baseball card requires a TeamGame contest")
         payload = card.payload
+        profile = context.profile
 
         canvas.fill(_BLACK)
         if profile is PanelProfile.QUAD_128X64:

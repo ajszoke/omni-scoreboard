@@ -34,6 +34,7 @@ from omni.events.baseball import BaseballCount, HalfInning
 from omni.panels.geometry import geometry_for
 from omni.renderers.base import Renderer
 from omni.renderers.canvas import RecordingCanvas
+from omni.renderers.context import RenderContext
 from omni.renderers.live_baseball import LiveBaseballRenderer
 from omni.renderers.pillow_canvas import PillowCanvas
 
@@ -101,7 +102,7 @@ def make_card(
 def _render(card: ScoreboardCard[LiveBaseballCardPayload], profile: PanelProfile) -> RecordingCanvas:
     width, height = geometry_for(profile).size
     canvas = RecordingCanvas(width, height)
-    LiveBaseballRenderer().render(card, profile, canvas)
+    LiveBaseballRenderer().render(card, RenderContext(profile=profile), canvas)
     return canvas
 
 
@@ -119,7 +120,7 @@ def test_renderer_rejects_non_teamgame_contest() -> None:
     )
     card = dataclasses.replace(make_card(), contest=contest)
     with pytest.raises(TypeError):
-        LiveBaseballRenderer().render(card, PanelProfile.QUAD_128X64, RecordingCanvas(128, 64))
+        LiveBaseballRenderer().render(card, RenderContext(profile=PanelProfile.QUAD_128X64), RecordingCanvas(128, 64))
 
 
 def test_draw_op_quad_128x64() -> None:
@@ -195,5 +196,5 @@ def _assert_matches_golden(image: Image.Image, name: str) -> None:
 def test_golden_image_per_profile(profile: PanelProfile) -> None:
     width, height = geometry_for(profile).size
     canvas = PillowCanvas(width, height)
-    LiveBaseballRenderer().render(make_card(), profile, canvas)
+    LiveBaseballRenderer().render(make_card(), RenderContext(profile=profile), canvas)
     _assert_matches_golden(canvas.image(), f"live_baseball_{profile.to_json_value()}.png")

@@ -17,10 +17,11 @@ from __future__ import annotations
 from typing import Any
 
 from omni.cards.base import CardKind, ScoreboardCard
-from omni.core.enum import PanelProfile, Sport
+from omni.core.enum import Sport
 from omni.panels.geometry import geometry_for
 from omni.renderers.base import Renderer
 from omni.renderers.canvas import Canvas
+from omni.renderers.context import RenderContext
 from omni.renderers.live_baseball import LiveBaseballRenderer
 
 __all__ = ["RenderDispatchError", "RendererRegistry", "default_registry"]
@@ -48,8 +49,9 @@ class RendererRegistry:
         except KeyError:
             raise RenderDispatchError(f"no renderer registered for {card.league.sport}/{card.kind}") from None
 
-    def render(self, card: ScoreboardCard[Any], profile: PanelProfile, canvas: Canvas) -> None:
-        """Validate the card/renderer/canvas agree on ``profile``, then draw."""
+    def render(self, card: ScoreboardCard[Any], context: RenderContext, canvas: Canvas) -> None:
+        """Validate the card/renderer/canvas agree on ``context.profile``, then draw."""
+        profile = context.profile
         renderer = self.renderer_for(card)
         if not card.layout_support.supports(profile):
             raise RenderDispatchError(f"card {card.kind} does not support {profile}")
@@ -61,7 +63,7 @@ class RendererRegistry:
                 f"canvas {canvas.width}x{canvas.height} does not match {profile} geometry "
                 f"{geometry.width}x{geometry.height}"
             )
-        renderer.render(card, profile, canvas)
+        renderer.render(card, context, canvas)
 
 
 def default_registry() -> RendererRegistry:

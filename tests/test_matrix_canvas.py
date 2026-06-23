@@ -17,6 +17,7 @@ from omni.domain.baseball import BaseballBaseState, BaseballCount, BaseballGameS
 from omni.domain.contest import TeamGame
 from omni.panels.geometry import geometry_for
 from omni.providers.mlb_teams import MlbTeamRegistry
+from omni.renderers.context import RenderContext
 from omni.renderers.live_baseball import LiveBaseballRenderer
 from omni.renderers.matrix_canvas import MatrixCanvas, MatrixSurface
 from omni.renderers.pillow_canvas import PillowCanvas
@@ -96,10 +97,10 @@ def test_matrix_canvas_matches_pillow_pixel_for_pixel() -> None:
         width, height = geometry_for(profile).size
 
         fake = FakeMatrix()
-        renderer.render(card, profile, MatrixCanvas(fake, width, height))  # type: ignore[arg-type]
+        renderer.render(card, RenderContext(profile=profile), MatrixCanvas(fake, width, height))  # type: ignore[arg-type]
 
         pillow = PillowCanvas(width, height)
-        renderer.render(card, profile, pillow)  # type: ignore[arg-type]
+        renderer.render(card, RenderContext(profile=profile), pillow)  # type: ignore[arg-type]
         image = pillow.image().convert("RGB")
 
         for y in range(height):
