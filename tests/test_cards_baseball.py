@@ -6,9 +6,10 @@ from datetime import datetime, timezone
 
 import pytest
 
-from omni.cards.baseball import FinalCardPayload, LiveBaseballCardPayload, PregameCardPayload
+from omni.cards.baseball import BigPlayCardPayload, FinalCardPayload, LiveBaseballCardPayload, PregameCardPayload
 from omni.core.enum import HomeAway
 from omni.domain.baseball import BaseballBaseState, BaseballCount, InningPhase
+from omni.events.baseball import BaseballGameEventType
 
 _COUNT = BaseballCount(balls=2, strikes=1, outs=2)
 
@@ -58,3 +59,8 @@ def test_final_payload_derives_winner_from_score() -> None:
 def test_final_payload_rejects_negative_scores() -> None:
     with pytest.raises(ValueError):
         FinalCardPayload(away_score=-1, home_score=0)
+
+
+def test_big_play_payload_rejects_negative_scores() -> None:
+    with pytest.raises(ValueError):
+        BigPlayCardPayload(event_type=BaseballGameEventType.HOME_RUN, description="x", away_score=-1, home_score=0)

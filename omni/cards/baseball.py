@@ -10,6 +10,7 @@ from omni.core.enum import HomeAway
 
 # Domain value objects used by the payload fields below (imported for use, not re-exported).
 from omni.domain.baseball import BaseballBaseState, BaseballCount, InningPhase
+from omni.events.baseball import BaseballGameEventType
 
 __all__ = [
     "LiveBaseballCardPayload",
@@ -18,6 +19,8 @@ __all__ = [
     "PregameCard",
     "FinalCardPayload",
     "FinalCard",
+    "BigPlayCardPayload",
+    "BigPlayCard",
 ]
 
 
@@ -93,3 +96,26 @@ class FinalCardPayload:
 
 # A final baseball card is a ScoreboardCard carrying the final payload above.
 FinalCard = ScoreboardCard[FinalCardPayload]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class BigPlayCardPayload:
+    """A notable play flashed onto the screen: what happened + the resulting score.
+
+    A render snapshot, denormalized from the `BaseballGameEvent` that triggered it.
+    The play's *lineage* — the event id(s) that produced this card — lives on the
+    card's `source_event_ids`, not here, so big plays stay dedupable and auditable.
+    """
+
+    event_type: BaseballGameEventType
+    description: str
+    away_score: int
+    home_score: int
+
+    def __post_init__(self) -> None:
+        if self.away_score < 0 or self.home_score < 0:
+            raise ValueError("scores cannot be negative")
+
+
+# A big-play baseball card is a ScoreboardCard carrying the big-play payload above.
+BigPlayCard = ScoreboardCard[BigPlayCardPayload]
