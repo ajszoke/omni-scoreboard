@@ -15,6 +15,7 @@ from omni.core.ids import LeagueScopedId, SourceRef
 from omni.core.time import DurationSeconds
 from omni.domain.baseball import BaseballBaseState, BaseballCount, BaseballGameState, InningPhase
 from omni.domain.contest import TeamGame
+from omni.events.baseball import LiveBaseballFeed
 from omni.providers.base import ProviderError, ProviderUpdate
 from omni.providers.mlb_teams import MlbTeamRegistry
 from omni.queue.delay_policy import DelayPolicy
@@ -66,8 +67,8 @@ class _Provider:
         return ProviderUpdate(source=SOURCE, observed_at=now, contests=self._contests)
 
 
-def _fetch_state(game: TeamGame) -> BaseballGameState:
-    return _state()
+def _fetch_feed(game: TeamGame, now: datetime) -> LiveBaseballFeed:
+    return LiveBaseballFeed(state=_state())
 
 
 def _build(
@@ -89,7 +90,7 @@ def _build(
         queue=queue,
         registry=registry if registry is not None else default_registry(),
         sink=sink,
-        fetch_state=_fetch_state,
+        fetch_feed=_fetch_feed,
     )
     return loop, sink, provider
 

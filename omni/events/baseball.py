@@ -6,13 +6,14 @@ from dataclasses import dataclass
 from enum import Enum
 
 from omni.core.enum import StrEnumMixin
-from omni.domain.baseball import BaseballCount, InningPhase
+from omni.domain.baseball import BaseballCount, BaseballGameState, InningPhase
 from omni.events.base import GameEvent
 
 __all__ = [
     "BaseballGameEventType",
     "BaseballPlayPayload",
     "BaseballGameEvent",
+    "LiveBaseballFeed",
 ]
 
 
@@ -71,3 +72,18 @@ class BaseballPlayPayload:
 @dataclass(frozen=True, slots=True, kw_only=True)
 class BaseballGameEvent(GameEvent[BaseballGameEventType, BaseballPlayPayload]):
     """A `GameEvent` specialized to baseball event types and play payloads."""
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class LiveBaseballFeed:
+    """The typed result of one per-game live-feed fetch: the current `state` plus the
+    typed `events` parsed from the *same* payload.
+
+    One network fetch yields both, so the pipeline never double-fetches the feed; the
+    events carry the lineage (`BaseballGameEvent.id`) that a bare state snapshot lacks,
+    which is what lets a derived big-play card point back at the play that produced it.
+    The pipeline consumes `state` for the live card and `events` for big-play cards.
+    """
+
+    state: BaseballGameState
+    events: tuple[BaseballGameEvent, ...] = ()

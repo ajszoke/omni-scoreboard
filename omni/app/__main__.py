@@ -12,13 +12,15 @@ from __future__ import annotations
 import argparse
 from typing import Sequence
 
+from datetime import datetime
+
 from omni.app.clock import SystemClock
 from omni.app.display import MatrixDisplaySink
 from omni.app.runner import build_loop, run_forever
 from omni.core.enum import PanelProfile
 from omni.core.time import DurationSeconds
-from omni.domain.baseball import BaseballGameState
 from omni.domain.contest import TeamGame
+from omni.events.baseball import LiveBaseballFeed
 from omni.panels.geometry import geometry_for
 
 __all__ = ["main"]
@@ -58,8 +60,8 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
 
     provider = MlbStatsApiProvider(MlbTeamRegistry.from_color_file(), schedule_timezone=ZoneInfo(args.timezone))
 
-    def fetch_state(game: TeamGame) -> BaseballGameState:
-        return provider.fetch_game_state(game.id.raw)
+    def fetch_feed(game: TeamGame, now: datetime) -> LiveBaseballFeed:
+        return provider.fetch_live_feed(game, now=now)
 
     from RGBMatrixEmulator import RGBMatrix, RGBMatrixOptions
 
@@ -75,7 +77,7 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
     sink = MatrixDisplaySink(matrix, profile)  # type: ignore[arg-type]
     loop = build_loop(
         provider,
-        fetch_state,
+        fetch_feed,
         sink,
         favorites=frozenset(args.favorite),
         broadcast_lag=DurationSeconds(args.delay),

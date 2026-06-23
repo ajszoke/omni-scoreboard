@@ -51,5 +51,5 @@ def build_card_from_scenario(
     if not contests:
         raise ValueError(f"scenario {path} produced no team games")
     game = contests[0]
-    state = provider.fetch_game_state(game.id.raw)
+    state = provider.fetch_live_feed(game, now=now).state
     return CardFactory().live_baseball(game, state, now=now)

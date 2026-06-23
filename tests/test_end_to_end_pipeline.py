@@ -45,7 +45,7 @@ def _assembled_card() -> Any:
     update = provider.refresh(NOW)
     game = next(c for c in update.contests if c.id.raw == "700001")
     assert isinstance(game, TeamGame) and game.status is GameStatus.LIVE
-    state = provider.fetch_game_state("700001")
+    state = provider.fetch_live_feed(game, now=NOW).state
     return CardFactory().live_baseball(game, state, now=NOW)
 
 
