@@ -16,6 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
+from omni.cards.attention import AttentionMode, AttentionPolicy
 from omni.cards.base import (
     CardId,
     CardKind,
@@ -25,11 +26,17 @@ from omni.cards.base import (
     LayoutSupport,
     ScoreboardCard,
 )
-from omni.cards.baseball import FinalCardPayload, LiveBaseballCardPayload, PregameCardPayload
+from omni.cards.baseball import (
+    BigPlayCardPayload,
+    FinalCardPayload,
+    LiveBaseballCardPayload,
+    PregameCardPayload,
+)
 from omni.core.enum import DisplayPriority, PanelProfile
 from omni.core.time import DurationSeconds
 from omni.domain.baseball import BaseballGameState
 from omni.domain.contest import TeamGame
+from omni.events.baseball import BaseballGameEvent
 
 __all__ = ["CardFactory"]
 
@@ -41,6 +48,12 @@ _PREGAME_COMPROMISE = ("single_64x32: matchup + countdown only — the 'first pi
 # Final renders natively on all three; the small panel shortens the status label.
 _FINAL_PROFILES = frozenset({PanelProfile.SINGLE_64X32, PanelProfile.STACK_64X64, PanelProfile.QUAD_128X64})
 _FINAL_COMPROMISE = ('single_64x32: the status reads "FIN" — "FINAL" does not fit at 64px wide.',)
+# A big play flashes on all three; the small panel drops the play description.
+_BIG_PLAY_PROFILES = frozenset({PanelProfile.SINGLE_64X32, PanelProfile.STACK_64X64, PanelProfile.QUAD_128X64})
+_BIG_PLAY_COMPROMISE = ("single_64x32: headline + score only — the play description is dropped (no room).",)
+# A scoring play takes the screen with a bounded BURST, then yields (never permanent).
+_BIG_PLAY_ATTENTION = AttentionPolicy(mode=AttentionMode.BURST, takeover_for=DurationSeconds(8))
+_BIG_PLAY_PRIORITY = CardPriority(band=DisplayPriority.ALERT, score=0.0)
 _DEFAULT_PRIORITY = CardPriority(band=DisplayPriority.NORMAL, score=0.0)
 
 
@@ -59,6 +72,9 @@ class CardFactory:
     final_min_display: DurationSeconds = DurationSeconds(8)
     final_max_display: DurationSeconds = DurationSeconds(20)
     final_postgame_window: DurationSeconds = DurationSeconds(1800)  # how long a final lingers post-game
+    big_play_min_display: DurationSeconds = DurationSeconds(6)
+    big_play_max_display: DurationSeconds = DurationSeconds(15)
+    big_play_window: DurationSeconds = DurationSeconds(120)  # how long a big play stays in rotation
 
     def live_baseball(
         self,
@@ -150,5 +166,45 @@ class CardFactory:
             priority=priority if priority is not None else _DEFAULT_PRIORITY,
             layout_support=LayoutSupport(profiles=_FINAL_PROFILES, compromise_notes=_FINAL_COMPROMISE),
             dedupe_key=DedupeKey(key),
+            payload=payload,
+        )
+
+    def big_play(
+        self,
+        game: TeamGame,
+        event: BaseballGameEvent,
+        state: BaseballGameState,
+        *,
+        now: datetime,
+        priority: CardPriority | None = None,
+    ) -> ScoreboardCard[BigPlayCardPayload]:
+        """Build a big-play card from a typed event + the resulting game state.
+
+        The card carries the event's lineage (`source_event_ids`) so the play stays
+        dedupable, replayable, and auditable (round-1 High #1), and a bounded `BURST`
+        attention so it flashes then yields rather than monopolizing the screen.
+        """
+        payload = BigPlayCardPayload(
+            event_type=event.event_type,
+            description=event.payload.description,
+            away_score=state.away_score,
+            home_score=state.home_score,
+        )
+        key = f"{game.id.raw}:bigplay:{event.id.raw}"
+        return ScoreboardCard(
+            id=CardId(key),
+            kind=CardKind.BIG_PLAY,
+            contest=game,
+            timing=DisplayTiming(
+                available_at=now,
+                min_display=self.big_play_min_display,
+                max_display=self.big_play_max_display,
+                expires_at=now + self.big_play_window.as_timedelta(),
+            ),
+            priority=priority if priority is not None else _BIG_PLAY_PRIORITY,
+            layout_support=LayoutSupport(profiles=_BIG_PLAY_PROFILES, compromise_notes=_BIG_PLAY_COMPROMISE),
+            dedupe_key=DedupeKey(key),
+            source_event_ids=(event.id,),
+            attention=_BIG_PLAY_ATTENTION,
             payload=payload,
         )
