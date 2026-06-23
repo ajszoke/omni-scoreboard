@@ -214,3 +214,70 @@ def test_scored_and_delayed_cards_compose_through_the_queue() -> None:
     assert len(queue) == 2
     # The favorite shows first (higher band breaks the equal-staleness tie).
     assert _shown(queue.next_card(later, QUAD)) == "g2"
+
+
+# --- RECURRING attention (the no-hitter cadence) ----------------------------------
+
+
+def _recurring(
+    gid: str, *, cooldown_s: int = 60, max_repeats: int | None = None
+) -> ScoreboardCard[LiveBaseballCardPayload]:
+    return _card(
+        gid,
+        band=DisplayPriority.ALERT,
+        attention=AttentionPolicy(
+            mode=AttentionMode.RECURRING, cooldown=DurationSeconds(cooldown_s), max_repeats=max_repeats
+        ),
+    )
+
+
+def test_recurring_surfaces_on_its_beat_then_holds_back() -> None:
+    queue = InterleavedCardQueue()
+    queue.ingest(_recurring("nono"))  # a no-hitter-like RECURRING card
+    queue.ingest(_card("live"))  # a normal live card, different game
+    assert _shown(queue.next_card(NOW, QUAD)) == "nono"  # due on first sight
+    # Within the cooldown it is held back; the normal card rotates instead.
+    assert _shown(queue.next_card(NOW + timedelta(seconds=5), QUAD)) == "live"
+    assert _shown(queue.next_card(NOW + timedelta(seconds=30), QUAD)) == "live"
+    # Once the cooldown elapses it is due again and resurfaces.
+    assert _shown(queue.next_card(NOW + timedelta(seconds=65), QUAD)) == "nono"
+
+
+def test_recurring_is_capped_by_max_repeats() -> None:
+    queue = InterleavedCardQueue()
+    queue.ingest(_recurring("nono", cooldown_s=10, max_repeats=2))
+    queue.ingest(_card("live"))
+    shown = [_shown(queue.next_card(NOW + timedelta(seconds=s), QUAD)) for s in range(0, 60, 10)]
+    assert shown[0] == "nono"  # due on first sight
+    assert shown.count("nono") == 2  # then never again past its cap — yields to rotation
+
+
+def test_burst_preempts_a_due_recurring() -> None:
+    queue = InterleavedCardQueue()
+    queue.ingest(_recurring("nono"))
+    queue.ingest(
+        _card(
+            "bang",
+            band=DisplayPriority.ALERT,
+            attention=AttentionPolicy(mode=AttentionMode.BURST, takeover_for=DurationSeconds(8)),
+        )
+    )
+    # Both want the screen now, but a BURST (a scoring play) outranks a periodic reminder.
+    assert _shown(queue.next_card(NOW, QUAD)) == "bang"
+
+
+def test_due_recurring_preempts_even_a_stale_normal_card() -> None:
+    queue = InterleavedCardQueue()
+    queue.ingest(_card("live"))
+    for s in (0, 10, 20):  # let the live card accumulate staleness
+        queue.next_card(NOW + timedelta(seconds=s), QUAD)
+    queue.ingest(_recurring("nono"))
+    assert _shown(queue.next_card(NOW + timedelta(seconds=30), QUAD)) == "nono"  # the reminder still preempts
+
+
+def test_recurring_alone_and_not_due_shows_nothing() -> None:
+    queue = InterleavedCardQueue()
+    queue.ingest(_recurring("nono", cooldown_s=60))
+    assert _shown(queue.next_card(NOW, QUAD)) == "nono"  # due on first sight
+    # The only card, now within its cooldown: a periodic reminder is not a constant one.
+    assert queue.next_card(NOW + timedelta(seconds=10), QUAD) is None
