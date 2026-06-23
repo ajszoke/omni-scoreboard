@@ -97,10 +97,10 @@ def test_matrix_canvas_matches_pillow_pixel_for_pixel() -> None:
         width, height = geometry_for(profile).size
 
         fake = FakeMatrix()
-        renderer.render(card, RenderContext(profile=profile), MatrixCanvas(fake, width, height))  # type: ignore[arg-type]
+        renderer.render(card, RenderContext(profile=profile, now=NOW), MatrixCanvas(fake, width, height))  # type: ignore[arg-type]
 
         pillow = PillowCanvas(width, height)
-        renderer.render(card, RenderContext(profile=profile), pillow)  # type: ignore[arg-type]
+        renderer.render(card, RenderContext(profile=profile, now=NOW), pillow)  # type: ignore[arg-type]
         image = pillow.image().convert("RGB")
 
         for y in range(height):

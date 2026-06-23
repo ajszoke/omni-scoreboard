@@ -23,6 +23,7 @@ from omni.renderers.base import Renderer
 from omni.renderers.canvas import Canvas
 from omni.renderers.context import RenderContext
 from omni.renderers.live_baseball import LiveBaseballRenderer
+from omni.renderers.pregame import PregameRenderer
 
 __all__ = ["RenderDispatchError", "RendererRegistry", "default_registry"]
 
@@ -67,7 +68,8 @@ class RendererRegistry:
 
 
 def default_registry() -> RendererRegistry:
-    """A registry wired with the renderers shipped today (baseball live game)."""
+    """A registry wired with the renderers shipped today (baseball live + pregame)."""
     registry = RendererRegistry()
     registry.register(Sport.BASEBALL, CardKind.LIVE_GAME, LiveBaseballRenderer())
+    registry.register(Sport.BASEBALL, CardKind.PREGAME, PregameRenderer())
     return registry

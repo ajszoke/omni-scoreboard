@@ -62,7 +62,7 @@ def test_pipeline_renders_fixture_state_on_quad() -> None:
     card = _assembled_card()
     width, height = geometry_for(PanelProfile.QUAD_128X64).size
     canvas = RecordingCanvas(width, height)
-    LiveBaseballRenderer().render(card, RenderContext(profile=PanelProfile.QUAD_128X64), canvas)
+    LiveBaseballRenderer().render(card, RenderContext(profile=PanelProfile.QUAD_128X64, now=NOW), canvas)
 
     texts = {(t.x, t.y, t.text) for t in canvas.texts()}
     assert {(8, 11, "COL"), (8, 43, "LAD")} <= texts
@@ -82,7 +82,7 @@ def test_pipeline_renders_on_all_three_profiles() -> None:
     for profile in PanelProfile:
         width, height = geometry_for(profile).size
         canvas = RecordingCanvas(width, height)
-        LiveBaseballRenderer().render(card, RenderContext(profile=profile), canvas)
+        LiveBaseballRenderer().render(card, RenderContext(profile=profile, now=NOW), canvas)
         joined = " ".join(t.text for t in canvas.texts())
         # Team abbreviations and the inning label appear on every profile.
         assert "COL" in joined and "LAD" in joined and "T7" in joined

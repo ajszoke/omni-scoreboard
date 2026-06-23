@@ -23,7 +23,7 @@ _REG = MlbTeamRegistry.from_color_file()
 SOURCE = SourceRef("mlb_statsapi", "https://statsapi.mlb.com")
 T = datetime(2026, 6, 17, 23, 0, 0, tzinfo=timezone.utc)
 QUAD = PanelProfile.QUAD_128X64
-CTX = RenderContext(profile=QUAD)
+CTX = RenderContext(profile=QUAD, now=T)
 
 
 def _live_card() -> ScoreboardCard[Any]:
@@ -105,3 +105,23 @@ def test_default_registry_renders_a_live_baseball_card() -> None:
     canvas = RecordingCanvas(128, 64)
     default_registry().render(_live_card(), CTX, canvas)
     assert len(canvas.ops) > 0  # the real LiveBaseballRenderer drew something
+
+
+def _pregame_card() -> ScoreboardCard[Any]:
+    game = TeamGame(
+        id=LeagueScopedId(League.MLB, SOURCE, "g1"),
+        league=League.MLB,
+        status=GameStatus.PREGAME,
+        scheduled_start=T,
+        away=_REG.resolve(115),
+        home=_REG.resolve(119),
+    )
+    return CardFactory().pregame(game, now=T)
+
+
+def test_default_registry_routes_pregame_to_its_renderer() -> None:
+    # A PREGAME card dispatches by (sport, kind) to the PregameRenderer, not the live one.
+    canvas = RecordingCanvas(128, 64)
+    default_registry().render(_pregame_card(), CTX, canvas)
+    drawn = {t.text for t in canvas.texts()}
+    assert "FIRST PITCH" in drawn  # proof the pregame renderer (not live) handled it
