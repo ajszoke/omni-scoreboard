@@ -26,6 +26,7 @@ from omni.app.supervisor import ProviderStatus, ProviderSupervisor
 from omni.cards.base import CardId
 from omni.domain.contest import TeamGame
 from omni.queue.scheduler import InterleavedCardQueue
+from omni.renderers.context import RenderContext
 from omni.renderers.registry import RendererRegistry
 
 __all__ = ["TickResult", "AppLoop"]
@@ -78,7 +79,8 @@ class AppLoop:
         if card is not None:
             try:
                 frame = self._sink.new_frame()
-                self._registry.render(card, self._sink.profile, frame)
+                context = RenderContext(profile=self._sink.profile)
+                self._registry.render(card, context, frame)
                 self._sink.commit(frame)
                 shown = card.id
             except Exception as exc:  # isolate render/display failures — never crash the loop
