@@ -7,6 +7,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Generic, TypeVar
 
+from omni.cards.attention import NORMAL_ATTENTION, AttentionPolicy
 from omni.core.enum import DisplayPriority, League, PanelProfile, StrEnumMixin
 from omni.core.ids import LeagueScopedId
 from omni.core.time import DurationSeconds
@@ -108,6 +109,7 @@ class ScoreboardCard(Generic[CardPayloadT]):
     dedupe_key: DedupeKey
     payload: CardPayloadT
     source_event_ids: tuple[LeagueScopedId, ...] = ()
+    attention: AttentionPolicy = NORMAL_ATTENTION
 
     @property
     def league(self) -> League:
