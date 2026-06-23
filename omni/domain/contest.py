@@ -28,6 +28,11 @@ class Contest:
     competitors: tuple[Competitor, ...] = ()
     venue_name: str | None = None
 
+    def __post_init__(self) -> None:
+        # `league` is also carried by `id`; they must never disagree.
+        if self.league != self.id.league:
+            raise ValueError(f"contest league {self.league} disagrees with id.league {self.id.league}")
+
     @property
     def sport(self) -> Sport:
         return self.league.sport
@@ -41,11 +46,14 @@ class TeamGame(Contest):
     home: Team
 
     def __post_init__(self) -> None:
+        # Explicit parent call (not `super()`): `@dataclass(slots=True)` rebuilds
+        # the class, so a zero-arg `super()` would resolve to the pre-slots class.
+        Contest.__post_init__(self)  # league/id consistency
         if self.away == self.home:
             raise ValueError("home and away teams must differ")
-        if not self.competitors:
-            # Keep the general `competitors` view consistent with home/away.
-            object.__setattr__(self, "competitors", (self.away, self.home))
+        # Always derive the general `competitors` view from home/away so the two
+        # can never contradict each other; any caller-supplied tuple is ignored.
+        object.__setattr__(self, "competitors", (self.away, self.home))
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

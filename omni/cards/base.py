@@ -46,12 +46,29 @@ class DedupeKey:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class DisplayTiming:
-    """When a card may show and for how long — typed instead of loose datetimes/ints."""
+    """When a card may show and for how long — typed instead of loose datetimes/ints.
+
+    Validated on construction so a long-running appliance fails fast rather than
+    silently comparing naive vs. aware datetimes (or holding an already-expired
+    or zero/negative-window card): every datetime must be timezone-aware,
+    ``min_display <= max_display``, and any ``expires_at`` must be after
+    ``available_at``.
+    """
 
     available_at: datetime
     min_display: DurationSeconds
     max_display: DurationSeconds
     expires_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        if self.available_at.tzinfo is None:
+            raise ValueError("available_at must be timezone-aware")
+        if self.expires_at is not None and self.expires_at.tzinfo is None:
+            raise ValueError("expires_at must be timezone-aware")
+        if self.min_display.value > self.max_display.value:
+            raise ValueError("min_display cannot exceed max_display")
+        if self.expires_at is not None and self.expires_at <= self.available_at:
+            raise ValueError("expires_at must be after available_at")
 
     def is_available(self, now: datetime) -> bool:
         return now >= self.available_at and (self.expires_at is None or now < self.expires_at)

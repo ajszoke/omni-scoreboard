@@ -4,8 +4,11 @@ This is the seam between "what the game is" (domain `BaseballGameState`) and
 "how a card shows it" (a `LiveBaseballCardPayload` plus display metadata). It is
 pure — no I/O, no provider JSON — so it is fully unit-testable.
 
-TV-delay (`available_at` offset) and real priority scoring arrive with the queue
-layer; for now timing starts at `now` and priority defaults to NORMAL.
+The factory stays pure: it stamps timing from the `now` it is handed and takes an
+already-scored `priority` (defaulting to NORMAL only when none is supplied). The
+queue layer wires the real values around it — `PriorityScorer` produces the
+priority, and the TV-delay is applied to the timing upstream (a typed delay
+policy in the forthcoming orchestration spine, not inside the factory).
 """
 
 from __future__ import annotations

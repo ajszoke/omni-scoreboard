@@ -91,7 +91,8 @@ def test_card_is_not_shown_before_its_available_at() -> None:
 
 def test_expired_cards_are_pruned_and_not_shown() -> None:
     queue = InterleavedCardQueue()
-    queue.ingest(_card("g1", expires_at=NOW))  # now >= expires_at -> gone
+    # Available a minute ago, expiring exactly at NOW: now >= expires_at -> gone.
+    queue.ingest(_card("g1", available_at=NOW - timedelta(seconds=60), expires_at=NOW))
     assert len(queue) == 1
     assert queue.next_card(NOW, QUAD) is None
     assert len(queue) == 0
