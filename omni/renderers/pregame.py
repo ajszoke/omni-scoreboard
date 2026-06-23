@@ -27,7 +27,7 @@ from omni.core.enum import PanelProfile
 from omni.domain.contest import TeamGame
 from omni.renderers.canvas import Canvas
 from omni.renderers.context import RenderContext
-from omni.renderers.font import char_size
+from omni.renderers.text import draw_centered, draw_right_aligned
 
 __all__ = ["PregameRenderer", "first_pitch_label"]
 
@@ -97,7 +97,7 @@ class PregameRenderer:
         canvas.text(8, 11, game.away.abbreviation, _WHITE, font=_VALUE_FONT)
         canvas.text(8, 43, game.home.abbreviation, _WHITE, font=_VALUE_FONT)
         canvas.text(66, 16, _FIRST_PITCH, _YELLOW, font=_LABEL_FONT)
-        self._center_text(canvas, 64, 128, 34, countdown, _WHITE, _VALUE_FONT)
+        draw_centered(canvas, 64, 128, 34, countdown, _WHITE, _VALUE_FONT)
 
     def _render_stack(self, canvas: Canvas, game: TeamGame, countdown: str) -> None:
         # 64x64: two team rows up top, label + countdown below.
@@ -106,7 +106,7 @@ class PregameRenderer:
         canvas.text(5, 6, game.away.abbreviation, _WHITE, font=_VALUE_FONT)
         canvas.text(5, 28, game.home.abbreviation, _WHITE, font=_VALUE_FONT)
         canvas.text(3, 46, _FIRST_PITCH, _YELLOW, font=_LABEL_FONT)
-        self._center_text(canvas, 0, 64, 54, countdown, _WHITE, _VALUE_FONT)
+        draw_centered(canvas, 0, 64, 54, countdown, _WHITE, _VALUE_FONT)
 
     def _render_single(self, canvas: Canvas, game: TeamGame, countdown: str) -> None:
         # 64x32 compromise: abbreviations + countdown only, no "first pitch" label.
@@ -114,15 +114,4 @@ class PregameRenderer:
         canvas.fill_rect(0, 16, 2, 16, game.home.primary_color)
         canvas.text(4, 5, game.away.abbreviation, _WHITE, font=_LABEL_FONT)
         canvas.text(4, 21, game.home.abbreviation, _WHITE, font=_LABEL_FONT)
-        self._right_text(canvas, 62, 11, countdown, _WHITE, _VALUE_FONT)
-
-    @staticmethod
-    def _right_text(canvas: Canvas, right_x: int, y: int, s: str, color: RGBColor, font: str) -> None:
-        char_w, _ = char_size(font)
-        canvas.text(right_x - char_w * len(s), y, s, color, font=font)
-
-    @staticmethod
-    def _center_text(canvas: Canvas, left: int, right: int, y: int, s: str, color: RGBColor, font: str) -> None:
-        char_w, _ = char_size(font)
-        x = left + (right - left - char_w * len(s)) // 2
-        canvas.text(x, y, s, color, font=font)
+        draw_right_aligned(canvas, 62, 11, countdown, _WHITE, _VALUE_FONT)
