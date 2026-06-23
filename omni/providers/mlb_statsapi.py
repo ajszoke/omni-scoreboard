@@ -11,9 +11,11 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 from typing import Any, Callable
+from zoneinfo import ZoneInfo
 
 from omni.core.enum import GameStatus, League
 from omni.core.ids import LeagueScopedId, SourceRef
+from omni.core.time import local_date
 from omni.domain.baseball import BaseballBaseState, BaseballCount, BaseballGameState, HalfInning
 from omni.domain.contest import TeamGame
 from omni.providers.base import ProviderError, ProviderUpdate
@@ -30,6 +32,8 @@ GameFetcher = Callable[[Any], dict[str, Any]]
 _BOTTOM_INNING_STATES = frozenset({"Bottom", "End"})
 
 _SOURCE = SourceRef("mlb_statsapi", "https://statsapi.mlb.com")
+# MLB's league-office zone; a sensible default "baseball day" until a device sets its own.
+_DEFAULT_SCHEDULE_TZ = ZoneInfo("America/New_York")
 
 # StatsAPI `detailedState` strings -> our typed status. Variants that carry a
 # suffix ("Delayed: Rain", "Suspended: Rain") are matched by prefix below.
@@ -80,16 +84,20 @@ class MlbStatsApiProvider:
         fetch_game: GameFetcher | None = None,
         source: SourceRef | None = None,
         sport_ids: str = "1,51",  # 1 = MLB, 51 = WBC (mirrors upstream)
+        schedule_timezone: ZoneInfo | None = None,
     ) -> None:
         self._registry = registry
         self._fetch = fetch_schedule if fetch_schedule is not None else _default_fetch_schedule
         self._fetch_game = fetch_game if fetch_game is not None else _default_fetch_game
         self.source = source if source is not None else _SOURCE
         self._sport_ids = sport_ids
+        self._tz = schedule_timezone if schedule_timezone is not None else _DEFAULT_SCHEDULE_TZ
 
     def refresh(self, now: datetime) -> ProviderUpdate:
         try:
-            rows = self._fetch(now.date(), self._sport_ids)
+            # Localize to the configured zone, not UTC: in US evenings `now.date()`
+            # (UTC) is already tomorrow while tonight's games are still on.
+            rows = self._fetch(local_date(now, self._tz), self._sport_ids)
         except Exception as exc:  # network/library failure -> whole-update error
             raise ProviderError(f"MLB schedule fetch failed: {exc}") from exc
 

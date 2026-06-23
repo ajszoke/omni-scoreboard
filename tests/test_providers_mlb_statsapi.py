@@ -6,6 +6,7 @@ import json
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -47,11 +48,26 @@ def _by_id(update: ProviderUpdate, raw: str) -> TeamGame:
     return game
 
 
+def test_refresh_localizes_the_schedule_date_to_the_configured_zone() -> None:
+    calls: list[date] = []
+
+    def fetch(game_date: date, sport_ids: str) -> list[dict[str, Any]]:
+        calls.append(game_date)
+        return []
+
+    provider = MlbStatsApiProvider(
+        MlbTeamRegistry.from_color_file(), fetch, schedule_timezone=ZoneInfo("America/New_York")
+    )
+    # 02:00 UTC Jun 18 == 22:00 EDT Jun 17 — still "tonight" in New York.
+    provider.refresh(datetime(2026, 6, 18, 2, 0, tzinfo=timezone.utc))
+    assert calls == [date(2026, 6, 17)]  # today's games, not tomorrow's (UTC would say Jun 18)
+
+
 def test_refresh_parses_known_games_and_warns_on_unknown_team() -> None:
     provider, calls = _provider()
     update = provider.refresh(NOW)
 
-    assert calls == [(NOW.date(), "1,51")]  # fetched today's schedule incl. WBC
+    assert calls == [(NOW.date(), "1,51")]  # 21:00Z == 17:00 ET same day, so local == UTC date here
     assert update.observed_at == NOW
     assert update.source.name == "mlb_statsapi"
     assert update.events == ()
