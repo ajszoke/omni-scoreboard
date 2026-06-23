@@ -1,30 +1,31 @@
-"""InterleavedCardQueue: fair, priority-weighted rotation across contests.
+"""InterleavedCardQueue: fair, two-level rotation across contests and their cards.
 
-The capstone of the display pipeline. Cards (already scored and TV-delayed)
-are ingested and deduped by `DedupeKey`; `next_card(now, profile)` decides what
-to show next, balancing two goals:
+The capstone of the display pipeline. Cards (already scored and TV-delayed) are
+ingested and deduped by `DedupeKey`; `next_card(now, profile)` decides what to show
+next. Selection is **two-level** so nothing starves:
 
-- **Priority** — favorite / high-leverage cards get more airtime, and
-  ALERT/STICKY cards take over the screen entirely while they're live.
-- **Fairness** — no single contest monopolizes the display; every eligible
-  game still surfaces.
+1. **Group** — pick the most-overdue *rotation group* (a contest), weighted by its
+   highest-priority card, so a favorite / high-leverage game gets more airtime while
+   a quiet one is never buried.
+2. **Card** — within that group, pick the most-overdue *card*, weighted by its band,
+   so siblings for one game (LIVE, BIG_PLAY, FINAL, ...) share airtime fairly.
 
-Selection is "most overdue wins": the time since a contest was last shown times
-a per-band weight. A high-priority contest goes overdue faster (so it shows more
-often), but a low-priority one's wait still grows, so it is never buried. With
-few contests this naturally alternates; with many, priority cuts the line.
+Attention is **bounded and separate from priority** (the verdict's High #3 fix): a
+card with a `BURST` `AttentionPolicy` takes over the screen only for its
+`takeover_for` window (derived from its `available_at`), then rejoins normal
+rotation — display priority alone never grants a permanent takeover.
 
-The queue answers "what next" only — dwell (min/max display) is the caller's
-render loop. True per-league round-robin (vs. per-contest) is a future
-refinement; priority weighting already keeps one busy league from drowning a
-lone high-leverage game elsewhere.
+The queue answers "what next" only — per-card dwell (min/max display) is the render
+loop's job.
 """
 
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import datetime
 from typing import Any, Iterable
 
+from omni.cards.attention import AttentionMode
 from omni.cards.base import ScoreboardCard
 from omni.core.enum import DisplayPriority, PanelProfile
 from omni.core.ids import LeagueScopedId
@@ -49,11 +50,11 @@ class InterleavedCardQueue:
     `ScoreboardCard[Any]`; the renderer dispatches on the concrete payload.
     """
 
-    def __init__(self, *, sticky_band: DisplayPriority = DisplayPriority.ALERT) -> None:
+    def __init__(self) -> None:
         self._cards: dict[str, ScoreboardCard[Any]] = {}  # DedupeKey.raw -> card
-        self._sticky_band = sticky_band
         self._tick = 0
-        self._last_shown: dict[LeagueScopedId, int] = {}
+        self._group_last_shown: dict[LeagueScopedId, int] = {}  # contest id -> tick
+        self._card_last_shown: dict[str, int] = {}  # DedupeKey.raw -> tick
 
     def ingest(self, card: ScoreboardCard[Any]) -> None:
         """Add a card, or replace the one sharing its `DedupeKey` (a fresh update)."""
@@ -65,6 +66,7 @@ class InterleavedCardQueue:
 
     def remove(self, dedupe_key: str) -> None:
         self._cards.pop(dedupe_key, None)
+        self._forget_orphans()
 
     def prune(self, now: datetime) -> int:
         """Drop cards whose `expires_at` has passed; returns how many were removed."""
@@ -75,6 +77,8 @@ class InterleavedCardQueue:
         ]
         for key in expired:
             del self._cards[key]
+        if expired:
+            self._forget_orphans()
         return len(expired)
 
     def __len__(self) -> int:
@@ -90,18 +94,50 @@ class InterleavedCardQueue:
         pool = self.eligible(now, profile)
         if not pool:
             return None
-        # An ALERT/STICKY card takes over the screen while it's live.
-        stickies = [card for card in pool if card.priority.band >= self._sticky_band]
-        chosen = max(stickies or pool, key=self._rank)
+
+        bursting = [card for card in pool if self._is_bursting(card, now)]
+        if bursting:
+            # A bounded BURST takes over the screen for its window, then yields.
+            chosen = max(bursting, key=self._card_rank)
+        else:
+            groups: dict[LeagueScopedId, list[ScoreboardCard[Any]]] = defaultdict(list)
+            for card in pool:
+                groups[card.contest.id].append(card)
+            chosen_group = max(groups, key=lambda gid: self._group_rank(gid, groups[gid]))
+            chosen = max(groups[chosen_group], key=self._card_rank)
+
         self._tick += 1
-        self._last_shown[chosen.contest.id] = self._tick
+        self._group_last_shown[chosen.contest.id] = self._tick
+        self._card_last_shown[chosen.dedupe_key.raw] = self._tick
         return chosen
 
     def _showable(self, card: ScoreboardCard[Any], now: datetime, profile: PanelProfile) -> bool:
         return card.timing.is_available(now) and card.layout_support.supports(profile)
 
-    def _rank(self, card: ScoreboardCard[Any]) -> tuple[int, int, float, str]:
-        # most overdue first; ties broken by band, then score, then id (deterministic).
-        staleness = self._tick - self._last_shown.get(card.contest.id, -1)
+    def _is_bursting(self, card: ScoreboardCard[Any], now: datetime) -> bool:
+        policy = card.attention
+        if policy.mode is not AttentionMode.BURST or policy.takeover_for.value <= 0:
+            return False
+        end = card.timing.available_at + policy.takeover_for.as_timedelta()
+        return card.timing.available_at <= now < end
+
+    def _group_rank(self, group_id: LeagueScopedId, cards: list[ScoreboardCard[Any]]) -> tuple[int, int, float, str]:
+        # most overdue group first; weighted by its highest-priority card, then ties.
+        staleness = self._tick - self._group_last_shown.get(group_id, -1)
+        weight = max(_BAND_WEIGHT.get(card.priority.band, 1) for card in cards)
+        top_band = max(int(card.priority.band) for card in cards)
+        top_score = max(card.priority.score for card in cards)
+        return (staleness * weight, top_band, top_score, str(group_id))
+
+    def _card_rank(self, card: ScoreboardCard[Any]) -> tuple[int, int, float, str]:
+        # most overdue card first; ties broken by band, then score, then id.
+        staleness = self._tick - self._card_last_shown.get(card.dedupe_key.raw, -1)
         weight = _BAND_WEIGHT.get(card.priority.band, 1)
         return (staleness * weight, int(card.priority.band), card.priority.score, card.id.raw)
+
+    def _forget_orphans(self) -> None:
+        # Drop recency bookkeeping for cards/groups that no longer exist (no slow leak).
+        live_keys = set(self._cards)
+        live_groups = {card.contest.id for card in self._cards.values()}
+        self._card_last_shown = {key: tick for key, tick in self._card_last_shown.items() if key in live_keys}
+        self._group_last_shown = {gid: tick for gid, tick in self._group_last_shown.items() if gid in live_groups}
