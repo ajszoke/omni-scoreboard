@@ -21,6 +21,8 @@ __all__ = [
     "FinalCard",
     "BigPlayCardPayload",
     "BigPlayCard",
+    "NoHitterCardPayload",
+    "NoHitterCard",
 ]
 
 
@@ -119,3 +121,28 @@ class BigPlayCardPayload:
 
 # A big-play baseball card is a ScoreboardCard carrying the big-play payload above.
 BigPlayCard = ScoreboardCard[BigPlayCardPayload]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class NoHitterCardPayload:
+    """A no-hitter (or perfect game) in progress: which side is throwing it, and how far.
+
+    The feat belongs to the *defending* team, so `pitching_side` says which side of the
+    contest that is and the renderer names the team from the contest (never a stored
+    string). `perfect` distinguishes a perfect game (no baserunner has reached at all)
+    from a plain no-hitter; `through_inning` is how deep it has carried. Unlike a big
+    play this is a standing condition, not a one-shot event — it carries no lineage and
+    lives (recurring) until it is broken.
+    """
+
+    pitching_side: HomeAway
+    through_inning: int
+    perfect: bool = False
+
+    def __post_init__(self) -> None:
+        if self.through_inning < 1:
+            raise ValueError("through_inning must be >= 1")
+
+
+# A no-hitter baseball card is a ScoreboardCard carrying the no-hitter payload above.
+NoHitterCard = ScoreboardCard[NoHitterCardPayload]

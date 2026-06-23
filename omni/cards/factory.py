@@ -30,9 +30,10 @@ from omni.cards.baseball import (
     BigPlayCardPayload,
     FinalCardPayload,
     LiveBaseballCardPayload,
+    NoHitterCardPayload,
     PregameCardPayload,
 )
-from omni.core.enum import DisplayPriority, PanelProfile
+from omni.core.enum import DisplayPriority, HomeAway, PanelProfile
 from omni.core.time import DurationSeconds
 from omni.domain.baseball import BaseballGameState
 from omni.domain.contest import TeamGame
@@ -54,7 +55,22 @@ _BIG_PLAY_COMPROMISE = ("single_64x32: headline + score only — the play descri
 # A scoring play takes the screen with a bounded BURST, then yields (never permanent).
 _BIG_PLAY_ATTENTION = AttentionPolicy(mode=AttentionMode.BURST, takeover_for=DurationSeconds(8))
 _BIG_PLAY_PRIORITY = CardPriority(band=DisplayPriority.ALERT, score=0.0)
+# A no-hitter renders natively on all three; the small panel drops the "through N" inning.
+_NO_HITTER_PROFILES = frozenset({PanelProfile.SINGLE_64X32, PanelProfile.STACK_64X64, PanelProfile.QUAD_128X64})
+_NO_HITTER_COMPROMISE = ("single_64x32: headline + team only — the 'through N' inning is dropped (no room).",)
+# An active no-hitter resurfaces periodically (not constantly) while the bid is alive; it
+# has no max_repeats — the pipeline removes the card when the no-hitter is broken or ends.
+_NO_HITTER_ATTENTION = AttentionPolicy(mode=AttentionMode.RECURRING, cooldown=DurationSeconds(60))
 _DEFAULT_PRIORITY = CardPriority(band=DisplayPriority.NORMAL, score=0.0)
+
+
+def _no_hitter_priority(perfect: bool) -> CardPriority:
+    """A no-hitter is an ALERT; a perfect game outranks a plain one (explainable, not a magic float)."""
+    return CardPriority(
+        band=DisplayPriority.ALERT,
+        score=1.0 if perfect else 0.0,
+        reasons=("perfect game",) if perfect else ("no-hitter",),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,6 +91,8 @@ class CardFactory:
     big_play_min_display: DurationSeconds = DurationSeconds(6)
     big_play_max_display: DurationSeconds = DurationSeconds(15)
     big_play_window: DurationSeconds = DurationSeconds(120)  # how long a big play stays in rotation
+    no_hitter_min_display: DurationSeconds = DurationSeconds(8)
+    no_hitter_max_display: DurationSeconds = DurationSeconds(20)
 
     def live_baseball(
         self,
@@ -211,5 +229,40 @@ class CardFactory:
             dedupe_key=DedupeKey(key),
             source_event_ids=(event.id,),
             attention=_BIG_PLAY_ATTENTION,
+            payload=payload,
+        )
+
+    def no_hitter(
+        self,
+        game: TeamGame,
+        *,
+        pitching_side: HomeAway,
+        through_inning: int,
+        perfect: bool = False,
+        now: datetime,
+        priority: CardPriority | None = None,
+    ) -> ScoreboardCard[NoHitterCardPayload]:
+        """Build a no-hitter / perfect-game card for an in-progress feat.
+
+        A standing alert, not a one-shot play: it carries a bounded `RECURRING` attention
+        so it resurfaces periodically (not constantly) while the bid is alive, and no
+        `expires_at` — the pipeline removes it when the no-hitter is broken or the game
+        ends. One card per game (keyed `:nohitter`), refreshed as the bid carries deeper.
+        """
+        payload = NoHitterCardPayload(pitching_side=pitching_side, through_inning=through_inning, perfect=perfect)
+        key = f"{game.id.raw}:nohitter"
+        return ScoreboardCard(
+            id=CardId(key),
+            kind=CardKind.NO_HITTER,
+            contest=game,
+            timing=DisplayTiming(
+                available_at=now,
+                min_display=self.no_hitter_min_display,
+                max_display=self.no_hitter_max_display,
+            ),
+            priority=priority if priority is not None else _no_hitter_priority(perfect),
+            layout_support=LayoutSupport(profiles=_NO_HITTER_PROFILES, compromise_notes=_NO_HITTER_COMPROMISE),
+            dedupe_key=DedupeKey(key),
+            attention=_NO_HITTER_ATTENTION,
             payload=payload,
         )
