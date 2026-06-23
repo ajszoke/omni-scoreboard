@@ -1,0 +1,155 @@
+"""Tests for the final card: winner-derived treatment, finite rotation, goldens.
+
+Regenerate goldens intentionally with: OMNI_REGEN_GOLDEN=1 pytest -k final
+"""
+
+from __future__ import annotations
+
+import os
+from datetime import datetime, timezone
+from pathlib import Path
+
+import pytest
+from PIL import Image
+
+from omni.cards.baseball import FinalCardPayload
+from omni.cards.base import CardKind, ScoreboardCard
+from omni.cards.factory import CardFactory
+from omni.core.colors import RGBColor
+from omni.core.enum import GameStatus, League, PanelProfile
+from omni.core.ids import LeagueScopedId, SourceRef
+from omni.domain.baseball import BaseballBaseState, BaseballCount, BaseballGameState, InningPhase
+from omni.domain.contest import Contest, TeamGame
+from omni.panels.geometry import geometry_for
+from omni.providers.mlb_teams import MlbTeamRegistry
+from omni.renderers.canvas import RecordingCanvas
+from omni.renderers.context import RenderContext
+from omni.renderers.final import FinalRenderer
+from omni.renderers.pillow_canvas import PillowCanvas
+
+GOLDEN_DIR = Path(__file__).resolve().parent / "golden"
+ALL_PROFILES = list(PanelProfile)
+SOURCE = SourceRef("mlb_statsapi", "https://statsapi.mlb.com")
+NOW = datetime(2026, 6, 17, 23, 30, tzinfo=timezone.utc)
+_REG = MlbTeamRegistry.from_color_file()
+AWAY = _REG.resolve(115)
+HOME = _REG.resolve(119)
+WHITE = RGBColor(255, 255, 255)  # winner
+LOSER = RGBColor(110, 110, 110)  # loser (dimmed)
+
+
+def _game() -> TeamGame:
+    return TeamGame(
+        id=LeagueScopedId(League.MLB, SOURCE, "g1"),
+        league=League.MLB,
+        status=GameStatus.FINAL,
+        scheduled_start=NOW,
+        away=AWAY,
+        home=HOME,
+    )
+
+
+def _card(away: int = 3, home: int = 5) -> ScoreboardCard[FinalCardPayload]:
+    state = BaseballGameState(
+        away_score=away,
+        home_score=home,
+        inning=9,
+        phase=InningPhase.BOTTOM,
+        count=BaseballCount(balls=0, strikes=0, outs=3),
+        bases=BaseballBaseState(),
+    )
+    return CardFactory().final(_game(), state, now=NOW)
+
+
+def _render(card: ScoreboardCard[FinalCardPayload], profile: PanelProfile) -> RecordingCanvas:
+    width, height = geometry_for(profile).size
+    canvas = RecordingCanvas(width, height)
+    FinalRenderer().render(card, RenderContext(profile=profile, now=NOW), canvas)
+    return canvas
+
+
+def _colors_by_text(canvas: RecordingCanvas) -> dict[str, RGBColor | None]:
+    return {t.text: t.color for t in canvas.texts()}
+
+
+# --- layout + winner treatment ----------------------------------------------------
+
+
+@pytest.mark.parametrize("profile", ALL_PROFILES)
+def test_matchup_scores_and_final_marker_on_every_profile(profile: PanelProfile) -> None:
+    texts = {t.text for t in _render(_card(away=3, home=5), profile).texts()}
+    assert AWAY.abbreviation in texts and HOME.abbreviation in texts
+    assert "3" in texts and "5" in texts
+    assert "FINAL" in texts or "FIN" in texts  # the status marker (full or compromised)
+
+
+def test_home_winner_is_bright_and_away_loser_is_dimmed() -> None:
+    colors = _colors_by_text(_render(_card(away=3, home=5), PanelProfile.QUAD_128X64))  # home wins
+    assert colors[HOME.abbreviation] == WHITE and colors["5"] == WHITE  # winner bright
+    assert colors[AWAY.abbreviation] == LOSER and colors["3"] == LOSER  # loser dimmed
+
+
+def test_away_winner_treatment() -> None:
+    colors = _colors_by_text(_render(_card(away=7, home=2), PanelProfile.QUAD_128X64))  # away wins
+    assert colors[AWAY.abbreviation] == WHITE and colors[HOME.abbreviation] == LOSER
+
+
+def test_tie_leaves_both_sides_bright() -> None:
+    colors = _colors_by_text(_render(_card(away=4, home=4), PanelProfile.QUAD_128X64))
+    assert colors[AWAY.abbreviation] == WHITE and colors[HOME.abbreviation] == WHITE  # no loser dim
+
+
+def test_single_profile_compromise_shortens_to_fin() -> None:
+    texts = {t.text for t in _render(_card(), PanelProfile.SINGLE_64X32).texts()}
+    assert "FIN" in texts and "FINAL" not in texts
+
+
+def test_compromise_is_declared_on_the_card() -> None:
+    assert any("single_64x32" in note for note in _card().layout_support.compromise_notes)
+
+
+def test_renderer_rejects_non_teamgame_contest() -> None:
+    import dataclasses
+
+    bad = Contest(
+        id=LeagueScopedId(League.MLB, SOURCE, "g1"),
+        league=League.MLB,
+        status=GameStatus.FINAL,
+        scheduled_start=NOW,
+    )
+    card = dataclasses.replace(_card(), contest=bad)
+    with pytest.raises(TypeError):
+        FinalRenderer().render(card, RenderContext(profile=PanelProfile.QUAD_128X64, now=NOW), RecordingCanvas(128, 64))
+
+
+# --- finite postgame rotation -----------------------------------------------------
+
+
+def test_final_card_has_a_finite_postgame_window() -> None:
+    card = _card()
+    assert card.kind is CardKind.FINAL
+    assert card.timing.is_available(NOW)  # shows immediately
+    expires = card.timing.expires_at
+    assert expires is not None and not card.timing.is_available(expires)  # then rotates out
+
+
+# --- goldens ----------------------------------------------------------------------
+
+
+def _assert_matches_golden(image: Image.Image, name: str) -> None:
+    path = GOLDEN_DIR / name
+    if os.environ.get("OMNI_REGEN_GOLDEN"):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        image.save(path)
+        return
+    assert path.exists(), f"missing golden {name}; regenerate with OMNI_REGEN_GOLDEN=1"
+    expected = Image.open(path).convert("RGB")
+    assert image.convert("RGB").tobytes() == expected.tobytes(), f"render differs from golden {name}"
+
+
+@pytest.mark.parametrize("profile", ALL_PROFILES)
+def test_golden_image_per_profile(profile: PanelProfile) -> None:
+    width, height = geometry_for(profile).size
+    canvas = PillowCanvas(width, height)
+    FinalRenderer().render(_card(away=3, home=5), RenderContext(profile=profile, now=NOW), canvas)
+    _assert_matches_golden(canvas.image(), f"final_{profile.to_json_value()}.png")

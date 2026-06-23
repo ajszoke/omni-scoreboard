@@ -25,7 +25,7 @@ from omni.cards.base import (
     LayoutSupport,
     ScoreboardCard,
 )
-from omni.cards.baseball import LiveBaseballCardPayload, PregameCardPayload
+from omni.cards.baseball import FinalCardPayload, LiveBaseballCardPayload, PregameCardPayload
 from omni.core.enum import DisplayPriority, PanelProfile
 from omni.core.time import DurationSeconds
 from omni.domain.baseball import BaseballGameState
@@ -38,6 +38,9 @@ _LIVE_BASEBALL_PROFILES = frozenset({PanelProfile.SINGLE_64X32, PanelProfile.STA
 # Pregame renders natively on all three; the small panel drops the "first pitch" label.
 _PREGAME_PROFILES = frozenset({PanelProfile.SINGLE_64X32, PanelProfile.STACK_64X64, PanelProfile.QUAD_128X64})
 _PREGAME_COMPROMISE = ("single_64x32: matchup + countdown only — the 'first pitch' label is dropped (no room).",)
+# Final renders natively on all three; the small panel shortens the status label.
+_FINAL_PROFILES = frozenset({PanelProfile.SINGLE_64X32, PanelProfile.STACK_64X64, PanelProfile.QUAD_128X64})
+_FINAL_COMPROMISE = ('single_64x32: the status reads "FIN" — "FINAL" does not fit at 64px wide.',)
 _DEFAULT_PRIORITY = CardPriority(band=DisplayPriority.NORMAL, score=0.0)
 
 
@@ -53,6 +56,9 @@ class CardFactory:
     live_max_display: DurationSeconds = DurationSeconds(30)
     pregame_min_display: DurationSeconds = DurationSeconds(8)
     pregame_max_display: DurationSeconds = DurationSeconds(20)
+    final_min_display: DurationSeconds = DurationSeconds(8)
+    final_max_display: DurationSeconds = DurationSeconds(20)
+    final_postgame_window: DurationSeconds = DurationSeconds(1800)  # how long a final lingers post-game
 
     def live_baseball(
         self,
@@ -112,6 +118,37 @@ class CardFactory:
             ),
             priority=priority if priority is not None else _DEFAULT_PRIORITY,
             layout_support=LayoutSupport(profiles=_PREGAME_PROFILES, compromise_notes=_PREGAME_COMPROMISE),
+            dedupe_key=DedupeKey(key),
+            payload=payload,
+        )
+
+    def final(
+        self,
+        game: TeamGame,
+        state: BaseballGameState,
+        *,
+        now: datetime,
+        priority: CardPriority | None = None,
+    ) -> ScoreboardCard[FinalCardPayload]:
+        """Build a final MLB card from a completed game's state.
+
+        The winner is derived from the score by the payload; the card lingers for a
+        finite postgame window (``final_postgame_window``), then expires from rotation.
+        """
+        payload = FinalCardPayload(away_score=state.away_score, home_score=state.home_score)
+        key = f"{game.id.raw}:final"
+        return ScoreboardCard(
+            id=CardId(key),
+            kind=CardKind.FINAL,
+            contest=game,
+            timing=DisplayTiming(
+                available_at=now,
+                min_display=self.final_min_display,
+                max_display=self.final_max_display,
+                expires_at=now + self.final_postgame_window.as_timedelta(),
+            ),
+            priority=priority if priority is not None else _DEFAULT_PRIORITY,
+            layout_support=LayoutSupport(profiles=_FINAL_PROFILES, compromise_notes=_FINAL_COMPROMISE),
             dedupe_key=DedupeKey(key),
             payload=payload,
         )

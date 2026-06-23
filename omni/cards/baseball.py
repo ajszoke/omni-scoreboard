@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from omni.cards.base import ScoreboardCard
+from omni.core.enum import HomeAway
 
 # Domain value objects used by the payload fields below (imported for use, not re-exported).
 from omni.domain.baseball import BaseballBaseState, BaseballCount, InningPhase
@@ -15,6 +16,8 @@ __all__ = [
     "LiveBaseballCard",
     "PregameCardPayload",
     "PregameCard",
+    "FinalCardPayload",
+    "FinalCard",
 ]
 
 
@@ -59,3 +62,34 @@ class PregameCardPayload:
 
 # A pregame baseball card is a ScoreboardCard carrying the pregame payload above.
 PregameCard = ScoreboardCard[PregameCardPayload]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class FinalCardPayload:
+    """A completed game's line: final score, with the winner *derived*, not stored.
+
+    Teams come from the contest; `winner` is computed from the scores so it can never
+    contradict them (an equal score — e.g. a weather-shortened tie — yields None).
+    The compressed W/L/S pitching line joins here once the provider parses the game's
+    decisions.
+    """
+
+    away_score: int
+    home_score: int
+
+    def __post_init__(self) -> None:
+        if self.away_score < 0 or self.home_score < 0:
+            raise ValueError("scores cannot be negative")
+
+    @property
+    def winner(self) -> HomeAway | None:
+        """The winning side derived from the score (None on a tie)."""
+        if self.away_score > self.home_score:
+            return HomeAway.AWAY
+        if self.home_score > self.away_score:
+            return HomeAway.HOME
+        return None
+
+
+# A final baseball card is a ScoreboardCard carrying the final payload above.
+FinalCard = ScoreboardCard[FinalCardPayload]

@@ -125,3 +125,30 @@ def test_default_registry_routes_pregame_to_its_renderer() -> None:
     default_registry().render(_pregame_card(), CTX, canvas)
     drawn = {t.text for t in canvas.texts()}
     assert "FIRST PITCH" in drawn  # proof the pregame renderer (not live) handled it
+
+
+def _final_card() -> ScoreboardCard[Any]:
+    game = TeamGame(
+        id=LeagueScopedId(League.MLB, SOURCE, "g1"),
+        league=League.MLB,
+        status=GameStatus.FINAL,
+        scheduled_start=T,
+        away=_REG.resolve(115),
+        home=_REG.resolve(119),
+    )
+    state = BaseballGameState(
+        away_score=3,
+        home_score=5,
+        inning=9,
+        phase=InningPhase.BOTTOM,
+        count=BaseballCount(balls=0, strikes=0, outs=3),
+        bases=BaseballBaseState(),
+    )
+    return CardFactory().final(game, state, now=T)
+
+
+def test_default_registry_routes_final_to_its_renderer() -> None:
+    # A FINAL card dispatches to the FinalRenderer (its "FINAL" marker proves it).
+    canvas = RecordingCanvas(128, 64)
+    default_registry().render(_final_card(), CTX, canvas)
+    assert "FINAL" in {t.text for t in canvas.texts()}
