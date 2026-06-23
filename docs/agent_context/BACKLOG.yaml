@@ -1,5 +1,12 @@
 project: omni-scoreboard
-updated: "2026-06-14"
+updated: "2026-06-18"
+progress:
+  note: "PRs #1-#13 shipped milestones M0, M1, M2, M4. STATUS.md is the living state; this file is the forward backlog."
+  shipped_milestones: [M0, M1, M2, M4]
+  deferred_within_shipped:
+    - "M1-003: non-MLB team subclasses (Football/Basketball/Hockey Team) deferred to their league milestones (M6-M9)."
+    - "M4-005: priority-driven polling cadence deferred to the running-app orchestration loop."
+  next: "M3 (MLB P0/P1 polish) + the running-app orchestration loop (wire provider -> delay -> score -> queue -> render live), then M5-M10."
 principles:
   - friends_and_family_scope
   - no_consumer_saas
@@ -29,6 +36,7 @@ milestones:
   - id: M0
     name: repo_reset_local_foundation
     goal: "New omni-scoreboard repo from current upstream; legacy preserved; emulator running."
+    status: shipped
     tasks:
       - id: M0-001
         title: "Rename old fork to omni-scoreboard-legacy"
@@ -56,6 +64,7 @@ milestones:
   - id: M1
     name: typed_domain_core
     goal: "Typed OOP foundation for leagues, teams, contests, events, cards, display profiles."
+    status: shipped  # non-MLB team subclasses (M1-003) deferred to their league milestones
     tasks:
       - id: M1-001
         title: "Add enum mixins and base enums"
@@ -91,6 +100,7 @@ milestones:
   - id: M2
     name: display_profiles_preview_snapshots
     goal: "All three display profiles are first-class and testable."
+    status: shipped
     tasks:
       - id: M2-001
         title: "Implement DisplayProfile and PanelGeometry mapping"
@@ -168,6 +178,7 @@ milestones:
   - id: M4
     name: event_queue_delay_priority
     goal: "Generic event/card engine for all leagues."
+    status: shipped  # M4-005 (priority-driven polling) deferred to the orchestration loop
     tasks:
       - id: M4-001
         title: "Implement DelayBuffer over source_time + tv delay"

@@ -4,19 +4,18 @@ _Living status doc. Keep it short; update whenever project state changes (branch
 
 ## Now (2026-06-18)
 
-- Revived repo **bootstrapped from upstream MLB-LED-Scoreboard v9.1.5**; `main` = upstream + PRs #1–#12 (agent context, typed core, domain, events, first card+renderer, QC hardening, multi-profile renderer, MLB provider boundary, live-state + CardFactory, on-screen emulator preview, priority scoring, TV-delay buffer).
+- Revived repo **bootstrapped from upstream MLB-LED-Scoreboard v9.1.5**; `main` = upstream + PRs #1–#13 (agent context, typed core, domain, events, first card+renderer, QC hardening, multi-profile renderer, MLB provider boundary, live-state + CardFactory, on-screen emulator preview, priority scoring, TV-delay buffer, interleaved card queue).
 - Remotes: `origin` = `ajszoke/omni-scoreboard` (HTTPS), `upstream` = `MLB-LED-Scoreboard/mlb-led-scoreboard` (branch `master`), `legacy` = `ajszoke/omni-scoreboard-legacy` (pre-revival Omni work: `legacy/master`, `legacy/dev`).
-- **PRs #1–#12 merged and cleaned up.** Feature branches deleted locally and on `origin`.
-- **Interleaved card queue in progress** on branch `agent/interleaved-queue` — the **Phase-4 capstone**. `InterleavedCardQueue` (`omni/queue/scheduler.py`) ingests deduped cards (by `DedupeKey`) and `next_card(now, profile)` picks what to show: "most overdue wins" = time-since-last-shown × per-band weight, so favorite/high-leverage contests get more airtime without burying normal ones; ALERT/STICKY cards take over the screen; eligibility honors `available_at`/`expires_at` and profile support. Pure/deterministic; 10 tests + a pipeline-composition test; `omni/queue` at 100%. Dogfooded a full slate: a favorite high-leverage game took 6/12 slots (others 3 each, none buried), and a walk-off ALERT took over entirely. Pending review/merge.
+- **PRs #1–#13 merged and cleaned up.** Feature branches deleted locally and on `origin`. `main` is green and between feature PRs (a docs-only `agent/handoff-backlog-refresh` branch carries this update).
+- **Phase 4 complete — the typed pipeline is whole:** provider → score → delay → interleave → render, each stage typed, tested, and dogfooded. 269 tests; `omni/` ~99% (queue/providers/factory 100% incl. branch); `mypy`/`black` clean. **Handoff-ready** for an external full review.
 - Dev env: **uv + `.venv`** (Py 3.12); emulator runs headless (`http://localhost:8888/`). `pytest`/`pytest-cov` pinned in `requirements.dev.txt`; `starter_code/` excluded from `mypy`/`black`; `*/__main__.py` omitted from coverage. Coverage: `--cov=omni --cov-branch` (see `test` skill). See `docs/dev_setup.md`.
 - Physical **`quad_128x64` reference board** is live on the LAN running the pre-revival code; reachable from WSL (`ssh omni-board`). Details in `CLAUDE.local.md`. Deploying the revived repo to it is future work.
 
 ## Next
 
-- **Land the interleaved-queue PR** (branch `agent/interleaved-queue`) — completes **Phase 4**. The typed pipeline is then whole: provider → score → delay → interleave → render, each piece tested + dogfooded.
+- **Handoff:** external full review (`/code-review ultra`, user-launched) is the immediate step — `main` is green and the docs are current.
 - **Running-app orchestration:** wire provider → `DelayBuffer` → `PriorityScorer` → `InterleavedCardQueue` → renderer into an actual refresh/render loop (the live equivalent of `omni preview`), with the dwell loop using each card's `min_display`/`max_display`. Priority-bypass of the delay for ALERT-band cards lives here (orchestration decides what skips the buffer).
-- Then **MLB P0/P1 polish** (pregame/final cards, fielder sequences, contrast) and league expansion (NFL via ESPN provider behind the same `Provider` interface).
-- **Handoff:** an external full review is queued — keep `main` green and STATUS current.
+- Then **MLB P0/P1 polish** (M3: pregame/final cards, fielder sequences, contrast) and league expansion (M6 NFL via an ESPN provider behind the same `Provider` interface).
 
 ## Done
 
@@ -35,3 +34,4 @@ _Living status doc. Keep it short; update whenever project state changes (branch
 - **PR #10 merged** — on-screen emulator preview + `MatrixCanvas` (`Canvas` → LED `SetPixel`, pixel-identical to goldens); `python -m omni.preview --profile … --fixture …`; Phase-2 `omni preview` DoD.
 - **PR #11 merged** — `PriorityScorer` (`omni/queue/priority.py`): explainable `CardPriority` (band + score + reasons) from live state; first Phase-4 queue piece.
 - **PR #12 merged** — `DelayBuffer[T]` (`omni/queue/delay_buffer.py`): generic TV-delay holding buffer (`push`/`release`); no score spoilers.
+- **PR #13 merged** — `InterleavedCardQueue` (`omni/queue/scheduler.py`): fair, priority-weighted rotation across contests (dedupe, sticky alerts, profile-aware); **completes Phase 4**.
