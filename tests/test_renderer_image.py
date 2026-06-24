@@ -16,10 +16,10 @@ COL = REG.resolve(115)  # Rockies; tile background is (51, 0, 111)
 
 
 def test_from_png_loads_a_20x20_rgb_grid() -> None:
-    image = LogoImage.from_png("assets/logos/mlb/col.png", key="col")
+    image = LogoImage.from_png("assets/logos/mlb/lad.png", key="lad")
     assert (image.width, image.height) == (20, 20)
     assert len(image.pixels) == 400
-    assert image.pixel(0, 0) == RGBColor(51, 0, 111)  # the flat corner is the team background
+    assert image.pixel(0, 0) == RGBColor(0, 90, 156)  # the flat corner is the team background (Dodger blue)
 
 
 def test_pixel_count_must_match_dimensions() -> None:
