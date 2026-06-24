@@ -15,10 +15,10 @@ from datetime import date, datetime, timezone
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
-from omni.core.enum import DisplayPriority, GameStatus, League, UpdateUrgency
+from omni.core.enum import DisplayPriority, GameStatus, League, UpdateUrgency, try_coerce_enum
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.core.time import local_date
-from omni.domain.baseball import BaseballBaseState, BaseballCount, BaseballGameState, InningPhase
+from omni.domain.baseball import BaseballBaseState, BaseballCount, BaseballGameState, InningPhase, PitchType
 from omni.domain.contest import TeamGame
 from omni.events.base import EventImportance
 from omni.events.baseball import (
@@ -324,6 +324,23 @@ def _event_importance(event_type: BaseballGameEventType) -> EventImportance:
     )
 
 
+def _decisive_pitch_type(play: dict[str, Any]) -> PitchType | None:
+    """The typed pitch type of the at-bat's last pitch — the one that ended it — or None.
+
+    Walks ``playEvents`` from the end to the most recent actual pitch (skipping non-pitch
+    entries like mound visits), then coerces its ``details.type.code``; an absent feed,
+    a typeless pitch, or an unrecognized code all yield None.
+    """
+    events = play.get("playEvents")
+    if not isinstance(events, list):
+        return None
+    for event in reversed(events):
+        if isinstance(event, dict) and event.get("isPitch"):
+            type_info = (event.get("details") or {}).get("type") or {}
+            return try_coerce_enum(PitchType, type_info.get("code"))
+    return None
+
+
 def _parse_one_play(
     play: Any, *, contest: TeamGame, source: SourceRef, observed_at: datetime
 ) -> BaseballGameEvent | None:
@@ -352,6 +369,7 @@ def _parse_one_play(
         rbi=int(result.get("rbi") or 0),
         away_score=_safe_int(result.get("awayScore")),
         home_score=_safe_int(result.get("homeScore")),
+        pitch_type=_decisive_pitch_type(play),
     )
     return BaseballGameEvent(
         id=LeagueScopedId(contest.league, source, f"{contest.id.raw}:ab:{at_bat_index}"),
@@ -395,7 +413,7 @@ def _default_fetch_schedule(game_date: date, sport_ids: str) -> list[dict[str, A
 _GAME_FIELDS = (
     "liveData,linescore,teams,home,away,runs,hits,currentInning,inningState,balls,strikes,outs,offense,first,second,third,"
     "plays,allPlays,result,eventType,description,rbi,awayScore,homeScore,about,inning,halfInning,atBatIndex,"
-    "endTime,startTime,count"
+    "endTime,startTime,count,playEvents,isPitch,details,type,code"
 )
 
 

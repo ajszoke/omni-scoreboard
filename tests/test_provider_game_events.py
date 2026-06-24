@@ -11,11 +11,12 @@ import pytest
 
 from omni.core.enum import DisplayPriority, GameStatus, League
 from omni.core.ids import LeagueScopedId, SourceRef
-from omni.domain.baseball import InningPhase
+from omni.domain.baseball import InningPhase, PitchType
 from omni.domain.contest import TeamGame
 from omni.events.baseball import BaseballGameEventType
 from omni.providers.mlb_statsapi import (
     MlbStatsApiProvider,
+    _decisive_pitch_type,
     _event_importance,
     _parse_game_events,
     _parse_iso,
@@ -91,6 +92,27 @@ def test_home_run_event_payload_and_times() -> None:
     assert p.inning == 3 and p.phase is InningPhase.BOTTOM and p.rbi == 2
     assert "Betts" in p.description
     assert p.count is not None and (p.count.balls, p.count.strikes, p.count.outs) == (1, 1, 1)
+
+
+def test_decisive_pitch_type_is_the_last_pitch_of_the_at_bat() -> None:
+    # The home run was hit on a sweeper — the last pitch, past the mound visit and the fastball.
+    home_run = next(e for e in _events() if e.event_type is BaseballGameEventType.HOME_RUN)
+    assert home_run.payload.pitch_type is PitchType.SWEEPER
+
+
+def test_decisive_pitch_type_is_none_without_pitch_detail() -> None:
+    # The fixture's other plays carry no playEvents, so their pitch type is simply absent.
+    single = next(e for e in _events() if e.event_type is BaseballGameEventType.SINGLE)
+    assert single.payload.pitch_type is None
+
+
+def test_decisive_pitch_type_skips_non_pitch_events_and_handles_gaps() -> None:
+    pitched = {"playEvents": [{"isPitch": True, "details": {"type": {"code": "SL"}}}, {"isPitch": False}]}
+    assert _decisive_pitch_type(pitched) is PitchType.SLIDER  # the mound-visit-style entry is skipped
+    assert _decisive_pitch_type({}) is None  # no playEvents at all
+    assert _decisive_pitch_type({"playEvents": [{"isPitch": False}, {"foo": "bar"}]}) is None  # no pitch among them
+    assert _decisive_pitch_type({"playEvents": [{"isPitch": True, "details": {}}]}) is None  # pitch, no type
+    assert _decisive_pitch_type({"playEvents": [{"isPitch": True, "details": {"type": {"code": "ZZ"}}}]}) is None
 
 
 def test_play_carries_its_post_play_score() -> None:

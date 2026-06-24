@@ -4,8 +4,15 @@ from __future__ import annotations
 
 import pytest
 
-from omni.core.enum import HomeAway
-from omni.domain.baseball import BaseballBaseState, BaseballCount, BaseballGameState, InningPhase, no_hitter_side
+from omni.core.enum import HomeAway, try_coerce_enum
+from omni.domain.baseball import (
+    BaseballBaseState,
+    BaseballCount,
+    BaseballGameState,
+    InningPhase,
+    PitchType,
+    no_hitter_side,
+)
 
 
 def _state(**overrides: object) -> BaseballGameState:
@@ -76,3 +83,24 @@ def test_no_hitter_side_reports_the_away_drought_in_a_double_no_hitter() -> None
 
 def test_no_hitter_side_suppressed_before_the_threshold() -> None:
     assert no_hitter_side(_state(inning=5, away_hits=0, home_hits=4), min_inning=6) is None
+
+
+def test_pitch_type_value_is_the_statsapi_code() -> None:
+    # The enum value is the StatsAPI code, so it doubles as the short display token.
+    assert PitchType.SWEEPER.value == "ST"
+    assert PitchType.FOUR_SEAM_FASTBALL.value == "FF"
+    assert str(PitchType.SLIDER) == "SL"  # StrEnumMixin renders as the code
+
+
+def test_pitch_type_labels_are_complete_and_human() -> None:
+    # Every member has a long label (no member falls through the mapping).
+    assert {p.label for p in PitchType} and all(p.label for p in PitchType)
+    assert PitchType.SWEEPER.label == "Sweeper"
+    assert PitchType.FOUR_SEAM_FASTBALL.label == "Four-Seam Fastball"
+
+
+def test_pitch_type_coerces_from_a_raw_code() -> None:
+    assert try_coerce_enum(PitchType, "ST") is PitchType.SWEEPER  # the sweeper is mapped
+    assert try_coerce_enum(PitchType, "CH") is PitchType.CHANGEUP
+    assert try_coerce_enum(PitchType, "ZZ") is None  # an unrecognized code
+    assert try_coerce_enum(PitchType, None) is None  # absent
