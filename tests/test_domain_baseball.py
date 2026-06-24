@@ -10,6 +10,7 @@ from omni.domain.baseball import (
     BaseballCount,
     BaseballGameState,
     InningPhase,
+    PitchingDecisions,
     PitchType,
     no_hitter_side,
 )
@@ -104,3 +105,17 @@ def test_pitch_type_coerces_from_a_raw_code() -> None:
     assert try_coerce_enum(PitchType, "CH") is PitchType.CHANGEUP
     assert try_coerce_enum(PitchType, "ZZ") is None  # an unrecognized code
     assert try_coerce_enum(PitchType, None) is None  # absent
+
+
+def test_pitching_decisions_carry_the_winner_loser_and_optional_save() -> None:
+    saved = PitchingDecisions(winner="Tarik Skubal", loser="Kevin Gausman", save="Will Vest")
+    assert (saved.winner, saved.loser, saved.save) == ("Tarik Skubal", "Kevin Gausman", "Will Vest")
+    unsaved = PitchingDecisions(winner="Tarik Skubal", loser="Kevin Gausman")
+    assert unsaved.save is None  # most games have no save
+
+
+def test_pitching_decisions_require_a_winner_and_a_loser() -> None:
+    with pytest.raises(ValueError):
+        PitchingDecisions(winner="", loser="Kevin Gausman")
+    with pytest.raises(ValueError):
+        PitchingDecisions(winner="Tarik Skubal", loser="")

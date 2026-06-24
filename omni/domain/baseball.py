@@ -15,6 +15,7 @@ from omni.core.enum import HomeAway, StrEnumMixin
 __all__ = [
     "InningPhase",
     "PitchType",
+    "PitchingDecisions",
     "BaseballCount",
     "BaseballBaseState",
     "BaseballGameState",
@@ -111,6 +112,25 @@ _PITCH_LABELS: dict[PitchType, str] = {
     PitchType.SLURVE: "Slurve",
     PitchType.UNKNOWN: "Unknown",
 }
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class PitchingDecisions:
+    """The winning and losing pitchers of a completed game, and the save if one was earned.
+
+    Names are full names as the feed gives them (a renderer shortens to a last name for a
+    small panel). A game with no decision — one still in progress, a tie, or a feed missing
+    the block — is the *absence* of this object, not a `PitchingDecisions` with blank fields;
+    so `winner` and `loser` are always present and only `save` is optional.
+    """
+
+    winner: str
+    loser: str
+    save: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.winner or not self.loser:
+            raise ValueError("a pitching decision needs both a winner and a loser")
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
