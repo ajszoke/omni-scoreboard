@@ -11,11 +11,12 @@ import pytest
 
 from omni.core.enum import GameStatus, League
 from omni.core.ids import LeagueScopedId, SourceRef
-from omni.domain.baseball import InningPhase
+from omni.domain.baseball import InningPhase, PitchingDecisions
 from omni.domain.contest import TeamGame
 from omni.providers.base import ProviderError
 from omni.providers.mlb_statsapi import (
     MlbStatsApiProvider,
+    _parse_decisions,
     _parse_game_state,
     _phase_from_inning_state,
 )
@@ -65,6 +66,26 @@ def test_fetch_live_feed_uses_injected_fetcher() -> None:
     feed = provider.fetch_live_feed(_game(), now=NOW)
     assert calls == ["700001"]  # fetched by the game's raw id
     assert feed.state.home_score == 5
+
+
+def test_fetch_live_feed_surfaces_the_pitching_decisions() -> None:
+    # The fixture carries a `decisions` block (winner/loser/save) so the whole path is
+    # exercised: the `fields` whitelist keeps it, and the feed surfaces typed decisions.
+    provider = MlbStatsApiProvider(MlbTeamRegistry({}), fetch_game=lambda _pk: _feed())
+    decisions = provider.fetch_live_feed(_game(), now=NOW).decisions
+    assert decisions is not None
+    assert (decisions.winner, decisions.loser, decisions.save) == ("Clayton Kershaw", "German Marquez", "Tanner Scott")
+
+
+def test_parse_decisions_handles_the_block_shapes() -> None:
+    person = lambda name: {"fullName": name}  # noqa: E731 - terse fixture helper
+    full = {"liveData": {"decisions": {"winner": person("W"), "loser": person("L"), "save": person("S")}}}
+    assert _parse_decisions(full) == PitchingDecisions(winner="W", loser="L", save="S")
+    no_save = {"liveData": {"decisions": {"winner": person("W"), "loser": person("L")}}}
+    assert _parse_decisions(no_save) == PitchingDecisions(winner="W", loser="L", save=None)
+    assert _parse_decisions({"liveData": {}}) is None  # no decisions block (game in progress)
+    assert _parse_decisions({"liveData": {"decisions": {"winner": person("W")}}}) is None  # loser missing
+    assert _parse_decisions({"liveData": {"decisions": {"winner": {"fullName": ""}, "loser": person("L")}}}) is None
 
 
 def test_fetch_game_failure_becomes_provider_error() -> None:

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from omni.core.enum import StrEnumMixin
-from omni.domain.baseball import BaseballCount, BaseballGameState, InningPhase, PitchType
+from omni.domain.baseball import BaseballCount, BaseballGameState, InningPhase, PitchingDecisions, PitchType
 from omni.events.base import GameEvent
 
 __all__ = [
@@ -93,7 +93,12 @@ class LiveBaseballFeed:
     events carry the lineage (`BaseballGameEvent.id`) that a bare state snapshot lacks,
     which is what lets a derived big-play card point back at the play that produced it.
     The pipeline consumes `state` for the live card and `events` for big-play cards.
+
+    `decisions` carries the winning/losing/saving pitchers once the game is final (None
+    while it is in progress, a tie, or absent from the feed) — what the final card needs
+    beyond the score.
     """
 
     state: BaseballGameState
     events: tuple[BaseballGameEvent, ...] = ()
+    decisions: PitchingDecisions | None = None

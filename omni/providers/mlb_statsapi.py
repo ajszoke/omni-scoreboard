@@ -18,7 +18,14 @@ from zoneinfo import ZoneInfo
 from omni.core.enum import DisplayPriority, GameStatus, League, UpdateUrgency, try_coerce_enum
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.core.time import local_date
-from omni.domain.baseball import BaseballBaseState, BaseballCount, BaseballGameState, InningPhase, PitchType
+from omni.domain.baseball import (
+    BaseballBaseState,
+    BaseballCount,
+    BaseballGameState,
+    InningPhase,
+    PitchingDecisions,
+    PitchType,
+)
 from omni.domain.contest import TeamGame
 from omni.events.base import EventImportance
 from omni.events.baseball import (
@@ -194,7 +201,7 @@ class MlbStatsApiProvider:
             raise ProviderError(f"MLB game fetch failed for {game.id.raw}: {exc}") from exc
         state = _parse_game_state(raw)
         events = _parse_game_events(raw, contest=game, source=self.source, observed_at=now)
-        return LiveBaseballFeed(state=state, events=events)
+        return LiveBaseballFeed(state=state, events=events, decisions=_parse_decisions(raw))
 
     def _parse_game(self, row: dict[str, Any]) -> TeamGame:
         try:
@@ -398,6 +405,30 @@ def _parse_game_events(
     return tuple(event for event in events if event is not None)
 
 
+def _pitcher_name(person: Any) -> str | None:
+    """The non-empty `fullName` of a `decisions` person block, or None if absent/blank."""
+    if not isinstance(person, dict):
+        return None
+    name = person.get("fullName")
+    return name if isinstance(name, str) and name else None
+
+
+def _parse_decisions(raw: dict[str, Any]) -> PitchingDecisions | None:
+    """Parse `liveData.decisions` into the winning/losing/saving pitchers, or None.
+
+    Returns None unless both a winner and a loser are named — a game still in progress, a
+    tie, or a feed without the block; the save is optional (only a save situation has one).
+    """
+    decisions = raw.get("liveData", {}).get("decisions")
+    if not isinstance(decisions, dict):
+        return None
+    winner = _pitcher_name(decisions.get("winner"))
+    loser = _pitcher_name(decisions.get("loser"))
+    if winner is None or loser is None:
+        return None
+    return PitchingDecisions(winner=winner, loser=loser, save=_pitcher_name(decisions.get("save")))
+
+
 def _default_fetch_schedule(game_date: date, sport_ids: str) -> list[dict[str, Any]]:  # pragma: no cover - real network
     # Lazy import keeps the network library out of `omni` import time and tests.
     import statsapi
@@ -413,7 +444,7 @@ def _default_fetch_schedule(game_date: date, sport_ids: str) -> list[dict[str, A
 _GAME_FIELDS = (
     "liveData,linescore,teams,home,away,runs,hits,currentInning,inningState,balls,strikes,outs,offense,first,second,third,"
     "plays,allPlays,result,eventType,description,rbi,awayScore,homeScore,about,inning,halfInning,atBatIndex,"
-    "endTime,startTime,count,playEvents,isPitch,details,type,code"
+    "endTime,startTime,count,playEvents,isPitch,details,type,code,decisions,winner,loser,save,fullName"
 )
 
 

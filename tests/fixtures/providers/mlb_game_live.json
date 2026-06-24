@@ -23,6 +23,11 @@
         "third": { "id": 500003, "fullName": "R. OnThird" }
       }
     },
+    "decisions": {
+      "winner": { "id": 600001, "fullName": "Clayton Kershaw" },
+      "loser": { "id": 600002, "fullName": "German Marquez" },
+      "save": { "id": 600003, "fullName": "Tanner Scott" }
+    },
     "plays": {
       "allPlays": [
         {
