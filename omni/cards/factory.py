@@ -35,7 +35,7 @@ from omni.cards.baseball import (
 )
 from omni.core.enum import DisplayPriority, HomeAway, PanelProfile
 from omni.core.time import DurationSeconds
-from omni.domain.baseball import BaseballGameState
+from omni.domain.baseball import BaseballGameState, PitchingDecisions
 from omni.domain.contest import TeamGame
 from omni.events.baseball import BaseballGameEvent
 
@@ -48,7 +48,10 @@ _PREGAME_PROFILES = frozenset({PanelProfile.SINGLE_64X32, PanelProfile.STACK_64X
 _PREGAME_COMPROMISE = ("single_64x32: matchup + countdown only — the 'first pitch' label is dropped (no room).",)
 # Final renders natively on all three; the small panel shortens the status label.
 _FINAL_PROFILES = frozenset({PanelProfile.SINGLE_64X32, PanelProfile.STACK_64X64, PanelProfile.QUAD_128X64})
-_FINAL_COMPROMISE = ('single_64x32: the status reads "FIN" — "FINAL" does not fit at 64px wide.',)
+_FINAL_COMPROMISE = (
+    'single_64x32: the status reads "FIN" ("FINAL" does not fit at 64px wide) and the W/L/S pitching line is dropped.',
+    "stack_64x64: the save line is dropped from the pitching line (no vertical room); the winner and loser remain.",
+)
 # A big play flashes on all three; the small panel drops the play description.
 _BIG_PLAY_PROFILES = frozenset({PanelProfile.SINGLE_64X32, PanelProfile.STACK_64X64, PanelProfile.QUAD_128X64})
 _BIG_PLAY_COMPROMISE = ("single_64x32: headline + score only — the play description is dropped (no room).",)
@@ -161,15 +164,17 @@ class CardFactory:
         game: TeamGame,
         state: BaseballGameState,
         *,
+        decisions: PitchingDecisions | None = None,
         now: datetime,
         priority: CardPriority | None = None,
     ) -> ScoreboardCard[FinalCardPayload]:
-        """Build a final MLB card from a completed game's state.
+        """Build a final MLB card from a completed game's state and pitching decisions.
 
-        The winner is derived from the score by the payload; the card lingers for a
-        finite postgame window (``final_postgame_window``), then expires from rotation.
+        The winner is derived from the score by the payload; `decisions` (winner/loser/save,
+        None on a tie or an undecided feed) rides along for the W/L/S line. The card lingers
+        for a finite postgame window (``final_postgame_window``), then expires from rotation.
         """
-        payload = FinalCardPayload(away_score=state.away_score, home_score=state.home_score)
+        payload = FinalCardPayload(away_score=state.away_score, home_score=state.home_score, decisions=decisions)
         key = f"{game.id.raw}:final"
         return ScoreboardCard(
             id=CardId(key),

@@ -9,7 +9,7 @@ from omni.cards.factory import CardFactory
 from omni.core.enum import DisplayPriority, GameStatus, League, PanelProfile, UpdateUrgency
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.core.time import DurationSeconds
-from omni.domain.baseball import BaseballBaseState, BaseballCount, BaseballGameState, InningPhase
+from omni.domain.baseball import BaseballBaseState, BaseballCount, BaseballGameState, InningPhase, PitchingDecisions
 from omni.domain.contest import TeamGame
 from omni.events.base import EventImportance
 from omni.events.baseball import BaseballGameEvent, BaseballGameEventType, BaseballPlayPayload, LiveBaseballFeed
@@ -84,6 +84,7 @@ class _Fetch:
     def __init__(self) -> None:
         self.states: dict[str, BaseballGameState] = {}
         self.events: dict[str, tuple[BaseballGameEvent, ...]] = {}
+        self.decisions: dict[str, PitchingDecisions] = {}
         self.fail: set[str] = set()
 
     def set(self, raw: str, state: BaseballGameState) -> None:
@@ -95,7 +96,11 @@ class _Fetch:
     def __call__(self, game: TeamGame, now: datetime) -> LiveBaseballFeed:
         if game.id.raw in self.fail:
             raise ProviderError("game feed down")
-        return LiveBaseballFeed(state=self.states[game.id.raw], events=self.events.get(game.id.raw, ()))
+        return LiveBaseballFeed(
+            state=self.states[game.id.raw],
+            events=self.events.get(game.id.raw, ()),
+            decisions=self.decisions.get(game.id.raw),
+        )
 
 
 def _setup(lag: int = 30) -> tuple[LiveBaseballPipeline, InterleavedCardQueue]:
@@ -427,6 +432,18 @@ def test_final_isolates_a_fetch_failure() -> None:
     res = pipe.refresh([_game("g1", GameStatus.FINAL)], now=T, fetch_feed=fetch)
     assert any("g1" in warning for warning in res.skipped)
     assert res.finals == () and len(queue) == 0  # no card, but no crash
+
+
+def test_final_card_carries_the_pitching_decisions() -> None:
+    # The feed's W/L/S decisions ride through the pipeline onto the revealed final card.
+    pipe, queue = _setup(lag=0)
+    fetch = _Fetch()
+    fetch.set("g1", _state(away=2, home=5))
+    fetch.decisions["g1"] = PitchingDecisions(winner="Clayton Kershaw", loser="German Marquez", save="Tanner Scott")
+    res = pipe.refresh([_game("g1", GameStatus.FINAL)], now=T, fetch_feed=fetch)
+    assert [c.raw for c in res.finals] == ["g1:final"]
+    card = queue.next_card(T, QUAD)
+    assert card is not None and card.payload.decisions == fetch.decisions["g1"]
 
 
 def test_final_card_dropped_when_the_game_leaves_the_slate() -> None:
