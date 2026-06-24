@@ -139,12 +139,12 @@ def test_shows_lag_old_state_not_the_current_spoiler() -> None:
     assert card.payload.home_score == 0  # the delayed 0-0, never the un-aired 0-1
 
 
-def test_ignores_non_live_games() -> None:
+def test_a_non_carding_status_surfaces_nothing() -> None:
+    # A final game produces no card yet (the pipeline does not build final cards); the result
+    # is empty across every path — exercising the full PipelineResult shape in one assertion.
     pipe, queue = _setup()
-    fetch = _Fetch()
-    fetch.set("g1", _state())
-    res = pipe.refresh([_game("g1", GameStatus.SCHEDULED), _game("g2", GameStatus.FINAL)], now=T, fetch_feed=fetch)
-    assert res == PipelineResult(ingested=(), big_plays=(), no_hitters=(), held=(), removed=(), skipped=())
+    res = pipe.refresh([_game("g2", GameStatus.FINAL)], now=T, fetch_feed=_Fetch())
+    assert res == PipelineResult(pregames=(), ingested=(), big_plays=(), no_hitters=(), held=(), removed=(), skipped=())
     assert len(queue) == 0
 
 
@@ -190,6 +190,53 @@ def test_drops_feed_when_a_game_leaves_before_ever_surfacing() -> None:
     # The feed was dropped: going live again starts buffering afresh.
     res3 = pipe.refresh([_game("g1")], now=T + timedelta(seconds=20), fetch_feed=fetch)
     assert res3.held == (_id("g1"),)
+
+
+# --- pregame path -----------------------------------------------------------------
+
+
+def test_upcoming_game_surfaces_a_pregame_card() -> None:
+    pipe, queue = _setup()
+    res = pipe.refresh([_game("g1", GameStatus.SCHEDULED)], now=T, fetch_feed=_Fetch())
+    assert [c.raw for c in res.pregames] == ["g1:pregame"]
+    assert res.ingested == () and len(queue) == 1
+
+
+def test_both_scheduled_and_pregame_statuses_card() -> None:
+    pipe, queue = _setup()
+    res = pipe.refresh([_game("g1", GameStatus.SCHEDULED), _game("g2", GameStatus.PREGAME)], now=T, fetch_feed=_Fetch())
+    assert sorted(c.raw for c in res.pregames) == ["g1:pregame", "g2:pregame"]
+    assert len(queue) == 2
+
+
+def test_pregame_needs_no_feed_fetch() -> None:
+    # A pregame card is built from the schedule alone, so even a failing feed never blocks it.
+    pipe, queue = _setup()
+    fetch = _Fetch()
+    fetch.fail.add("g1")  # would raise if the pipeline tried to fetch
+    res = pipe.refresh([_game("g1", GameStatus.PREGAME)], now=T, fetch_feed=fetch)
+    assert [c.raw for c in res.pregames] == ["g1:pregame"]
+    assert res.skipped == ()  # never attempted a fetch
+
+
+def test_pregame_card_yields_when_the_game_goes_live() -> None:
+    pipe, queue = _setup(lag=0)
+    fetch = _Fetch()
+    pipe.refresh([_game("g1", GameStatus.PREGAME)], now=T, fetch_feed=fetch)
+    assert _id("g1") in pipe._pregame_keys and len(queue) == 1
+    fetch.set("g1", _state())
+    res = pipe.refresh([_game("g1", GameStatus.LIVE)], now=T + timedelta(seconds=10), fetch_feed=fetch)
+    assert _id("g1") not in pipe._pregame_keys  # pregame card dropped...
+    assert [c.raw for c in res.ingested] == ["g1:live"]  # ...replaced by the live card
+    assert len(queue) == 1  # one card for the game, not two
+
+
+def test_pregame_card_removed_when_the_game_leaves_the_slate() -> None:
+    pipe, queue = _setup()
+    pipe.refresh([_game("g1", GameStatus.PREGAME)], now=T, fetch_feed=_Fetch())
+    assert len(queue) == 1
+    pipe.refresh([], now=T + timedelta(seconds=10), fetch_feed=_Fetch())  # g1 gone from the slate
+    assert _id("g1") not in pipe._pregame_keys and len(queue) == 0
 
 
 # --- big-play event path ----------------------------------------------------------

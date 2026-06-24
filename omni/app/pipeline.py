@@ -1,26 +1,31 @@
-"""LiveBaseballPipeline: turn live games + their feeds into TV-safe queued cards.
+"""LiveBaseballPipeline: turn the day's slate into TV-safe queued cards.
 
 The middle of the orchestration spine. Each tick the loop hands it the current games
-and a way to fetch a game's live feed (state + play-by-play events); for every LIVE
-game the pipeline runs two delay-safe paths:
+and a way to fetch a game's live feed; the pipeline cards each game for its phase:
 
-- **live state** — held in a per-game `DelayedFeed` so what surfaces is lag-old and
-  never spoils the broadcast; scored, built into a live card, ingested.
-- **big plays** — notable events held in a per-game `DelayedEventStream` and flashed,
-  each once, the moment they clear the same TV delay (anchored to when the play
-  happened). The score on a big-play card comes from the event itself, so a delayed
-  flash never reveals a later, un-aired score.
-- **no-hitters** — derived from the same delay-safe state: while the batting side is
-  hitless past a minimum inning a `RECURRING` no-hitter card is surfaced and refreshed,
-  and removed the moment a hit (in the *delayed* state) breaks the bid — so the bid is
-  revealed and un-revealed only as the broadcast would show it.
+- **upcoming** (scheduled / pre-game) — a `pregame` card carrying the matchup and a
+  first-pitch countdown. There is no score to spoil, so it needs no feed fetch and no
+  delay; the renderer derives the live countdown from the render clock.
+- **live** — for each LIVE game, three delay-safe paths off one feed fetch:
+  - **live state** — held in a per-game `DelayedFeed` so what surfaces is lag-old and
+    never spoils the broadcast; scored, built into a live card, ingested.
+  - **big plays** — notable events held in a per-game `DelayedEventStream` and flashed,
+    each once, the moment they clear the same TV delay (anchored to when the play
+    happened). The score on a big-play card comes from the event itself, so a delayed
+    flash never reveals a later, un-aired score.
+  - **no-hitters** — derived from the same delay-safe state: while the batting side is
+    hitless past a minimum inning a `RECURRING` no-hitter card is surfaced and refreshed,
+    and removed the moment a hit (in the *delayed* state) breaks the bid — so the bid is
+    revealed and un-revealed only as the broadcast would show it.
 
-Cards/feeds/streams for games no longer live are removed, so the queue mirrors the
-live slate (a big play's own card lingers out its short window, then self-expires).
-Per-game fetch failures are isolated and reported, never fatal.
+A card is dropped when its game leaves that phase: the pregame card yields when the game
+goes live; the live and no-hitter cards are removed when the game is no longer live (a
+big play's own card lingers out its short window, then self-expires). So the queue
+mirrors the slate. Per-game fetch failures are isolated and reported, never fatal.
 
-Baseball-only for now (it calls `score_live_baseball` / `live_baseball` / `big_play` /
-`no_hitter`), mirroring the per-sport renderer split; a generic pipeline can dispatch later.
+Baseball-only for now (it calls `pregame` / `score_live_baseball` / `live_baseball` /
+`big_play` / `no_hitter`), mirroring the per-sport renderer split; a generic pipeline
+can dispatch later.
 """
 
 from __future__ import annotations
@@ -50,6 +55,10 @@ __all__ = ["FeedFetcher", "PipelineResult", "LiveBaseballPipeline"]
 # per-game fetch): the current state plus the play-by-play events from the same fetch.
 FeedFetcher = Callable[[TeamGame, datetime], LiveBaseballFeed]
 
+# Pre-first-pitch states: both carry a pregame card (a scheduled game later today and one
+# in warmups are both "upcoming"). Mid-game oddities (DELAYED/SUSPENDED) are not pregame.
+_UPCOMING_STATUSES = frozenset({GameStatus.SCHEDULED, GameStatus.PREGAME})
+
 # An event needs at least this intrinsic band to flash as a big play; below it (a single,
 # a walk) the play informs the live card but is not worth a takeover. HR/triple/DP/TP clear it.
 _BIG_PLAY_MIN_BAND = DisplayPriority.HIGH_LEVERAGE
@@ -62,6 +71,7 @@ _NO_HITTER_MIN_INNING = 6
 class PipelineResult:
     """What one pipeline pass did (ids sorted for deterministic traces)."""
 
+    pregames: tuple[CardId, ...]  # pregame cards surfaced/refreshed for upcoming games this pass
     ingested: tuple[CardId, ...]  # live-state cards built/refreshed this pass
     big_plays: tuple[CardId, ...]  # big-play cards surfaced this pass (chronological)
     no_hitters: tuple[CardId, ...]  # active no-hitter cards surfaced/refreshed this pass
@@ -85,21 +95,29 @@ class LiveBaseballPipeline:
         self._delay = delay_policy
         self._factory = factory
         self._queue = queue
+        self._pregame_keys: dict[LeagueScopedId, str] = {}  # contest id -> its pregame card's key
         self._feeds: dict[LeagueScopedId, DelayedFeed[BaseballGameState]] = {}
         self._card_keys: dict[LeagueScopedId, str] = {}  # contest id -> its live card's dedupe key
         self._event_streams: dict[LeagueScopedId, DelayedEventStream[BaseballGameEvent]] = {}
         self._no_hitter_keys: dict[LeagueScopedId, str] = {}  # contest id -> its no-hitter card's key
 
     def refresh(self, games: Iterable[TeamGame], *, now: datetime, fetch_feed: FeedFetcher) -> PipelineResult:
-        """Observe live games, surface lag-safe cards into the queue, drop stale ones."""
+        """Observe the slate, surface each game's phase card into the queue, drop stale ones."""
         live = [game for game in games if game.status is GameStatus.LIVE]
+        upcoming = [game for game in games if game.status in _UPCOMING_STATUSES]
         live_ids = {game.id for game in live}
+        upcoming_ids = {game.id for game in upcoming}
 
+        pregames: list[CardId] = []
         ingested: list[CardId] = []
         big_plays: list[CardId] = []
         no_hitters: list[CardId] = []
         held: list[LeagueScopedId] = []
         skipped: list[str] = []
+
+        # Upcoming games card without a feed fetch — there is no score to spoil, so no delay.
+        for game in upcoming:
+            pregames.append(self._surface_pregame(game, now=now))
 
         for game in live:
             try:
@@ -130,7 +148,9 @@ class LiveBaseballPipeline:
                 no_hitters.append(no_hit)
 
         removed = self._drop_absent(live_ids)
+        self._drop_stale_pregame(upcoming_ids)
         return PipelineResult(
+            pregames=tuple(pregames),
             ingested=tuple(ingested),
             big_plays=tuple(big_plays),
             no_hitters=tuple(no_hitters),
@@ -138,6 +158,13 @@ class LiveBaseballPipeline:
             removed=tuple(removed),
             skipped=tuple(skipped),
         )
+
+    def _surface_pregame(self, game: TeamGame, *, now: datetime) -> CardId:
+        """Surface (or refresh) the pregame card for an upcoming game."""
+        card = self._factory.pregame(game, now=now)
+        self._queue.ingest(card)
+        self._pregame_keys[game.id] = card.dedupe_key.raw
+        return card.id
 
     def _surface_big_plays(
         self, game: TeamGame, events: tuple[BaseballGameEvent, ...], *, now: datetime
@@ -184,6 +211,11 @@ class LiveBaseballPipeline:
         self._queue.ingest(card)
         self._no_hitter_keys[game.id] = card.dedupe_key.raw
         return card.id
+
+    def _drop_stale_pregame(self, upcoming_ids: set[LeagueScopedId]) -> None:
+        """Drop the pregame card for any game no longer upcoming — it went live, ended, or left the slate."""
+        for contest_id in set(self._pregame_keys) - upcoming_ids:
+            self._queue.remove(self._pregame_keys.pop(contest_id))
 
     def _drop_absent(self, live_ids: set[LeagueScopedId]) -> tuple[LeagueScopedId, ...]:
         """Drop cards/feeds/streams for games no longer live; return the carded ones.

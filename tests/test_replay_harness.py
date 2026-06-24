@@ -74,8 +74,9 @@ def test_two_simultaneous_games_both_get_airtime() -> None:
 
 
 def test_lifecycle_transition_enters_and_removes_the_card() -> None:
-    # One game pregame -> live -> final; with no card kinds for pregame/final yet, the
-    # live card enters when the game goes live and is removed when it goes final.
+    # One game pregame -> live -> final: the pregame card shows the upcoming matchup, the
+    # live card takes over at first pitch, and both are gone once the game goes final
+    # (the pipeline does not build a final card).
     timeline = Timeline(
         frames=(
             GameFrame(at=T0, game=_game("g1", GameStatus.PREGAME)),
@@ -84,9 +85,9 @@ def test_lifecycle_transition_enters_and_removes_the_card() -> None:
         )
     )
     shown = _by_offset(replay(timeline, profile=QUAD, tick=DurationSeconds(10), until=T0 + timedelta(seconds=90)))
-    assert shown[0] is None and shown[20] is None  # pregame: no live card
-    assert shown[30] == "g1:live" and shown[50] == "g1:live"  # live: carded
-    assert shown[60] is None and shown[80] is None  # final: card removed
+    assert shown[0] == "g1:pregame" and shown[20] == "g1:pregame"  # pregame: matchup + countdown
+    assert shown[30] == "g1:live" and shown[50] == "g1:live"  # live: the live card takes over
+    assert shown[60] is None and shown[80] is None  # final: pregame/live gone, final card not yet built
 
 
 def test_live_card_persists_through_inning_breaks() -> None:
