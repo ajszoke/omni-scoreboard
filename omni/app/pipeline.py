@@ -21,7 +21,9 @@ and a way to fetch a game's live feed; the pipeline cards each game for its phas
   ultimate spoiler, so the reveal is held until the broadcast lag elapses from when we
   first saw the game final (StatsAPI cannot report FINAL before the last out, so first
   sight + lag never predates the broadcast's ending); the card is then ingested and
-  lives out a finite post-game window.
+  lives out a finite post-game window. A walk-off that ended the game keeps draining from
+  the same delay-safe event stream, so it still flashes at its own release time — at or
+  just before the final — even though the game is already over.
 
 A card is dropped when its game leaves that phase: the pregame card yields when the game
 goes live; the live and no-hitter cards are removed when the game is no longer live (a big
@@ -168,13 +170,17 @@ class LiveBaseballPipeline:
             except ProviderError as exc:
                 skipped.append(f"{game.id.raw}: {exc}")
                 continue
+            # Drain any walk-off held from the live ticks: it clears the delay at its own play
+            # time, which is at or before the final's first-sight anchor — so it flashes, then
+            # the final confirms it. (Surfacing here, before the reveal, keeps the stream alive.)
+            big_plays.extend(self._surface_big_plays(game, feed.events, now=now))
             revealed = self._surface_final(game, feed.state, now=now)
             if revealed is not None:
                 finals.append(revealed)
             else:
                 held.append(game.id)  # ended, but the result is still inside the post-game delay
 
-        removed = self._drop_absent(live_ids)
+        removed = self._drop_absent(live_ids, final_ids)
         self._drop_stale_pregame(upcoming_ids)
         self._drop_stale_finals(final_ids)
         return PipelineResult(
@@ -259,6 +265,8 @@ class LiveBaseballPipeline:
         self._queue.ingest(card)
         self._final_keys[game.id] = card.dedupe_key.raw
         del self._final_pending[game.id]
+        # By the reveal, any walk-off has cleared the same delay and fired, so the stream is drained.
+        self._event_streams.pop(game.id, None)
         return card.id
 
     def _drop_stale_pregame(self, upcoming_ids: set[LeagueScopedId]) -> None:
@@ -277,16 +285,19 @@ class LiveBaseballPipeline:
         for contest_id in set(self._final_keys) - final_ids:
             self._queue.remove(self._final_keys.pop(contest_id))
 
-    def _drop_absent(self, live_ids: set[LeagueScopedId]) -> tuple[LeagueScopedId, ...]:
-        """Drop cards/feeds/streams for games no longer live; return the carded ones.
+    def _drop_absent(self, live_ids: set[LeagueScopedId], final_ids: set[LeagueScopedId]) -> tuple[LeagueScopedId, ...]:
+        """Drop per-game state for games that have moved on; return the carded ones.
 
-        A big-play card is left to expire on its own short window (it may have fired as
-        the game ended); the live and no-hitter cards are actively removed (a no-hitter
-        ends with its game). Only live-card removals are reported in `removed`.
+        Live-scoped state (feed, live card, no-hitter card) is dropped the moment the game
+        leaves the live set — a big-play card is left to expire on its own short window, the
+        live and no-hitter cards are actively removed (a no-hitter ends with its game). The
+        event stream, though, keeps draining through the post-final window (so a held walk-off
+        still fires), so it is dropped only once the game leaves the slate entirely — or earlier,
+        at the final reveal, by which point it has drained. Only live-card removals are reported.
         """
-        tracked = set(self._feeds) | set(self._card_keys) | set(self._event_streams) | set(self._no_hitter_keys)
+        live_scoped = set(self._feeds) | set(self._card_keys) | set(self._no_hitter_keys)
         removed_cards: list[LeagueScopedId] = []
-        for contest_id in tracked - live_ids:
+        for contest_id in live_scoped - live_ids:
             key = self._card_keys.pop(contest_id, None)
             if key is not None:
                 self._queue.remove(key)
@@ -295,5 +306,6 @@ class LiveBaseballPipeline:
             if no_hitter_key is not None:
                 self._queue.remove(no_hitter_key)
             self._feeds.pop(contest_id, None)
+        for contest_id in set(self._event_streams) - (live_ids | final_ids):
             self._event_streams.pop(contest_id, None)
         return tuple(sorted(removed_cards, key=str))

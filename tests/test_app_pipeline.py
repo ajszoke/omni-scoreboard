@@ -290,16 +290,31 @@ def test_backlog_is_suppressed_on_first_sight() -> None:
     assert res.big_plays == ()  # joining mid-game never dumps the earlier plays onto the screen
 
 
-def test_event_stream_is_dropped_when_a_game_leaves() -> None:
+def test_event_stream_drains_through_the_post_final_window() -> None:
     pipe, queue = _setup(lag=30)
     fetch = _Fetch()
     fetch.set("g1", _state())
     pipe.refresh([_game("g1")], now=T, fetch_feed=fetch)
     fetch.set_events("g1", (_event("g1:ab:9", source_time=T + timedelta(seconds=5)),))
-    pipe.refresh([_game("g1")], now=T + timedelta(seconds=5), fetch_feed=fetch)  # an event is held in the stream
-    assert _id("g1") in pipe._event_streams and pipe._event_streams[_id("g1")].pending() == 1
-    pipe.refresh([_game("g1", GameStatus.FINAL)], now=T + timedelta(seconds=10), fetch_feed=fetch)
-    assert _id("g1") not in pipe._event_streams  # cleaned up with the game — no leak
+    pipe.refresh([_game("g1")], now=T + timedelta(seconds=5), fetch_feed=fetch)  # a play is held in the stream
+    # The game ends before that play clears the delay — the stream is kept alive to drain it.
+    fin = pipe.refresh([_game("g1", GameStatus.FINAL)], now=T + timedelta(seconds=10), fetch_feed=fetch)
+    assert fin.big_plays == () and _id("g1") in pipe._event_streams  # still draining, not torn down
+    # Once the play clears the delay it flashes, even though the game is already final.
+    res = pipe.refresh([_game("g1", GameStatus.FINAL)], now=T + timedelta(seconds=35), fetch_feed=fetch)
+    assert len(res.big_plays) == 1 and "bigplay" in res.big_plays[0].raw
+
+
+def test_event_stream_dropped_when_the_game_leaves_the_slate() -> None:
+    pipe, queue = _setup(lag=30)
+    fetch = _Fetch()
+    fetch.set("g1", _state())
+    pipe.refresh([_game("g1")], now=T, fetch_feed=fetch)
+    fetch.set_events("g1", (_event("g1:ab:9", source_time=T + timedelta(seconds=5)),))
+    pipe.refresh([_game("g1")], now=T + timedelta(seconds=5), fetch_feed=fetch)
+    assert _id("g1") in pipe._event_streams
+    pipe.refresh([], now=T + timedelta(seconds=10), fetch_feed=fetch)  # g1 gone from the slate entirely
+    assert _id("g1") not in pipe._event_streams  # dropped with the game — no leak
 
 
 # --- no-hitter path ---------------------------------------------------------------
@@ -434,3 +449,23 @@ def test_pending_final_forgotten_if_the_game_resumes() -> None:
     assert _id("g1") in pipe._final_pending
     pipe.refresh([_game("g1", GameStatus.LIVE)], now=T + timedelta(seconds=5), fetch_feed=fetch)
     assert _id("g1") not in pipe._final_pending  # disarmed — it is live again
+
+
+def test_walk_off_flashes_then_the_final_reveals() -> None:
+    # A walk-off homer ends the game; the flash and the final ride the same delay, so the
+    # walk-off surfaces (no later than the final) and the final confirms it — none of it early.
+    pipe, queue = _setup(lag=30)
+    fetch = _Fetch()
+    fetch.set("g1", _state(away=2, home=3))
+    pipe.refresh([_game("g1")], now=T, fetch_feed=fetch)  # live; first sight primes the backlog
+    walk_off = _event("g1:ab:99", source_time=T + timedelta(seconds=1), away=2, home=3)
+    fetch.set_events("g1", (walk_off,))
+    pipe.refresh([_game("g1")], now=T + timedelta(seconds=2), fetch_feed=fetch)  # walk-off observed, held
+    # The game flips to final right after the walk-off; both are still inside the delay.
+    mid = pipe.refresh([_game("g1", GameStatus.FINAL)], now=T + timedelta(seconds=3), fetch_feed=fetch)
+    assert mid.big_plays == () and mid.finals == ()  # nothing leaks early
+    # First-final-sight (T+3) + 30 = T+33; the walk-off (play at T+1) cleared at T+31.
+    res = pipe.refresh([_game("g1", GameStatus.FINAL)], now=T + timedelta(seconds=33), fetch_feed=fetch)
+    assert len(res.big_plays) == 1  # the walk-off flashes...
+    assert [c.raw for c in res.finals] == ["g1:final"]  # ...and the final confirms it
+    assert _id("g1") not in pipe._event_streams  # stream drained and dropped at the reveal
