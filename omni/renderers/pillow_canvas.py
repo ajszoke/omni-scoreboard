@@ -6,6 +6,7 @@ from PIL import Image
 
 from omni.core.colors import RGBColor
 from omni.renderers.font import rasterize
+from omni.renderers.image import LogoImage
 
 __all__ = ["PillowCanvas"]
 
@@ -51,6 +52,14 @@ class PillowCanvas:
                     px, py = x + rx, y + ry
                     if 0 <= px < self._w and 0 <= py < self._h:
                         self._px[px, py] = rgb
+
+    def draw_image(self, x: int, y: int, image: LogoImage) -> None:
+        for ry in range(image.height):
+            for rx in range(image.width):
+                px, py = x + rx, y + ry
+                if 0 <= px < self._w and 0 <= py < self._h:
+                    c = image.pixel(rx, ry)
+                    self._px[px, py] = (c.r, c.g, c.b)
 
     def image(self) -> Image.Image:
         return self._img

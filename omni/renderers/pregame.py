@@ -27,6 +27,7 @@ from omni.core.enum import PanelProfile
 from omni.domain.contest import TeamGame
 from omni.renderers.canvas import Canvas
 from omni.renderers.context import RenderContext
+from omni.renderers.team_row import draw_team_mark
 from omni.renderers.text import draw_centered, draw_right_aligned
 
 __all__ = ["PregameRenderer", "first_pitch_label"]
@@ -82,29 +83,29 @@ class PregameRenderer:
 
         canvas.fill(_BLACK)
         if profile is PanelProfile.QUAD_128X64:
-            self._render_quad(canvas, game, countdown)
+            self._render_quad(canvas, context, game, countdown)
         elif profile is PanelProfile.STACK_64X64:
-            self._render_stack(canvas, game, countdown)
+            self._render_stack(canvas, context, game, countdown)
         elif profile is PanelProfile.SINGLE_64X32:
             self._render_single(canvas, game, countdown)
         else:  # pragma: no cover - exhaustiveness guard; mypy errors if a profile is unhandled
             assert_never(profile)
 
-    def _render_quad(self, canvas: Canvas, game: TeamGame, countdown: str) -> None:
-        # Team rows on the left (no scores pregame); label + countdown on the right.
-        canvas.fill_rect(0, 0, 4, 32, game.away.primary_color)
-        canvas.fill_rect(0, 32, 4, 32, game.home.primary_color)
-        canvas.text(8, 11, game.away.abbreviation, _WHITE, font=_VALUE_FONT)
-        canvas.text(8, 43, game.home.abbreviation, _WHITE, font=_VALUE_FONT)
+    def _render_quad(self, canvas: Canvas, context: RenderContext, game: TeamGame, countdown: str) -> None:
+        # Team rows on the left (logo or colour bar, no scores pregame); label + countdown on the right.
+        away_x = draw_team_mark(canvas, context, game.away, row_top=0)
+        home_x = draw_team_mark(canvas, context, game.home, row_top=32)
+        canvas.text(away_x, 11, game.away.abbreviation, _WHITE, font=_VALUE_FONT)
+        canvas.text(home_x, 43, game.home.abbreviation, _WHITE, font=_VALUE_FONT)
         canvas.text(66, 16, _FIRST_PITCH, _YELLOW, font=_LABEL_FONT)
         draw_centered(canvas, 64, 128, 34, countdown, _WHITE, _VALUE_FONT)
 
-    def _render_stack(self, canvas: Canvas, game: TeamGame, countdown: str) -> None:
-        # 64x64: two team rows up top, label + countdown below.
-        canvas.fill_rect(0, 0, 3, 20, game.away.primary_color)
-        canvas.fill_rect(0, 22, 3, 20, game.home.primary_color)
-        canvas.text(5, 6, game.away.abbreviation, _WHITE, font=_VALUE_FONT)
-        canvas.text(5, 28, game.home.abbreviation, _WHITE, font=_VALUE_FONT)
+    def _render_stack(self, canvas: Canvas, context: RenderContext, game: TeamGame, countdown: str) -> None:
+        # 64x64: two team rows up top (logo or bar), label + countdown below.
+        away_x = draw_team_mark(canvas, context, game.away, row_top=0)
+        home_x = draw_team_mark(canvas, context, game.home, row_top=22)
+        canvas.text(away_x, 6, game.away.abbreviation, _WHITE, font=_VALUE_FONT)
+        canvas.text(home_x, 28, game.home.abbreviation, _WHITE, font=_VALUE_FONT)
         canvas.text(3, 46, _FIRST_PITCH, _YELLOW, font=_LABEL_FONT)
         draw_centered(canvas, 0, 64, 54, countdown, _WHITE, _VALUE_FONT)
 

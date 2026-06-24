@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import pytest
+
 from omni.cards.factory import CardFactory
 from omni.core.colors import RGBColor
 from omni.core.enum import GameStatus, League, PanelProfile
@@ -18,6 +20,7 @@ from omni.domain.contest import TeamGame
 from omni.panels.geometry import geometry_for
 from omni.providers.mlb_teams import MlbTeamRegistry
 from omni.renderers.context import RenderContext
+from omni.renderers.image import LogoImage, LogoStore
 from omni.renderers.live_baseball import LiveBaseballRenderer
 from omni.renderers.matrix_canvas import MatrixCanvas, MatrixSurface
 from omni.renderers.pillow_canvas import PillowCanvas
@@ -90,17 +93,36 @@ def test_text_draws_some_pixels() -> None:
     assert any(color == (255, 255, 255) for color in fake.pixels.values())
 
 
-def test_matrix_canvas_matches_pillow_pixel_for_pixel() -> None:
+def test_draw_image_blits_each_pixel_and_clips() -> None:
+    fake = FakeMatrix()
+    canvas = MatrixCanvas(fake, 8, 4)
+    tile = LogoImage(
+        key="t",
+        width=2,
+        height=2,
+        pixels=(RGBColor(10, 0, 0), RGBColor(0, 20, 0), RGBColor(0, 0, 30), RGBColor(40, 40, 40)),
+    )
+    canvas.draw_image(2, 1, tile)
+    assert fake.pixels[(2, 1)] == (10, 0, 0)
+    assert fake.pixels[(3, 2)] == (40, 40, 40)
+    canvas.draw_image(7, 3, tile)  # only the top-left pixel is in bounds
+    assert fake.pixels[(7, 3)] == (10, 0, 0)
+    assert (8, 3) not in fake.pixels  # the rest is clipped, no error
+
+
+@pytest.mark.parametrize("logos", [None, LogoStore()], ids=["bar", "logo"])
+def test_matrix_canvas_matches_pillow_pixel_for_pixel(logos: LogoStore | None) -> None:
     card = _card()
     renderer = LiveBaseballRenderer()
     for profile in PanelProfile:
         width, height = geometry_for(profile).size
+        context = RenderContext(profile=profile, now=NOW, logos=logos)
 
         fake = FakeMatrix()
-        renderer.render(card, RenderContext(profile=profile, now=NOW), MatrixCanvas(fake, width, height))  # type: ignore[arg-type]
+        renderer.render(card, context, MatrixCanvas(fake, width, height))  # type: ignore[arg-type]
 
         pillow = PillowCanvas(width, height)
-        renderer.render(card, RenderContext(profile=profile, now=NOW), pillow)  # type: ignore[arg-type]
+        renderer.render(card, context, pillow)  # type: ignore[arg-type]
         image = pillow.image().convert("RGB")
 
         for y in range(height):

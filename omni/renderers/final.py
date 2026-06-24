@@ -25,6 +25,7 @@ from omni.core.enum import HomeAway, PanelProfile
 from omni.domain.contest import TeamGame
 from omni.renderers.canvas import Canvas
 from omni.renderers.context import RenderContext
+from omni.renderers.team_row import draw_team_mark
 from omni.renderers.text import draw_centered, draw_right_aligned
 
 __all__ = ["FinalRenderer"]
@@ -75,21 +76,28 @@ class FinalRenderer:
 
         canvas.fill(_BLACK)
         if context.profile is PanelProfile.QUAD_128X64:
-            self._render_quad(canvas, game, payload, away, home)
+            self._render_quad(canvas, context, game, payload, away, home)
         elif context.profile is PanelProfile.STACK_64X64:
-            self._render_stack(canvas, game, payload, away, home)
+            self._render_stack(canvas, context, game, payload, away, home)
         elif context.profile is PanelProfile.SINGLE_64X32:
             self._render_single(canvas, game, payload, away, home)
         else:  # pragma: no cover - exhaustiveness guard; mypy errors if a profile is unhandled
             assert_never(context.profile)
 
     def _render_quad(
-        self, canvas: Canvas, game: TeamGame, payload: FinalCardPayload, away: RGBColor, home: RGBColor
+        self,
+        canvas: Canvas,
+        context: RenderContext,
+        game: TeamGame,
+        payload: FinalCardPayload,
+        away: RGBColor,
+        home: RGBColor,
     ) -> None:
-        canvas.fill_rect(0, 0, 4, 32, game.away.primary_color)
-        canvas.fill_rect(0, 32, 4, 32, game.home.primary_color)
-        canvas.text(8, 11, game.away.abbreviation, away, font=_SCORE_FONT)
-        canvas.text(8, 43, game.home.abbreviation, home, font=_SCORE_FONT)
+        # The team mark (logo or bar) is full-colour; only the label/score carry the winner/loser dim.
+        away_x = draw_team_mark(canvas, context, game.away, row_top=0)
+        home_x = draw_team_mark(canvas, context, game.home, row_top=32)
+        canvas.text(away_x, 11, game.away.abbreviation, away, font=_SCORE_FONT)
+        canvas.text(home_x, 43, game.home.abbreviation, home, font=_SCORE_FONT)
         draw_right_aligned(canvas, 58, 11, str(payload.away_score), away, _SCORE_FONT)
         draw_right_aligned(canvas, 58, 43, str(payload.home_score), home, _SCORE_FONT)
         draw_centered(canvas, 64, 128, 11, "FINAL", _YELLOW, _LABEL_FONT)
@@ -101,12 +109,18 @@ class FinalRenderer:
                 canvas.text(70, 55, f"S {_last_name(decisions.save)}", _WHITE, font=_LABEL_FONT)
 
     def _render_stack(
-        self, canvas: Canvas, game: TeamGame, payload: FinalCardPayload, away: RGBColor, home: RGBColor
+        self,
+        canvas: Canvas,
+        context: RenderContext,
+        game: TeamGame,
+        payload: FinalCardPayload,
+        away: RGBColor,
+        home: RGBColor,
     ) -> None:
-        canvas.fill_rect(0, 0, 3, 20, game.away.primary_color)
-        canvas.fill_rect(0, 22, 3, 20, game.home.primary_color)
-        canvas.text(5, 6, game.away.abbreviation, away, font=_SCORE_FONT)
-        canvas.text(5, 28, game.home.abbreviation, home, font=_SCORE_FONT)
+        away_x = draw_team_mark(canvas, context, game.away, row_top=0)
+        home_x = draw_team_mark(canvas, context, game.home, row_top=22)
+        canvas.text(away_x, 6, game.away.abbreviation, away, font=_SCORE_FONT)
+        canvas.text(home_x, 28, game.home.abbreviation, home, font=_SCORE_FONT)
         draw_right_aligned(canvas, 62, 6, str(payload.away_score), away, _SCORE_FONT)
         draw_right_aligned(canvas, 62, 28, str(payload.home_score), home, _SCORE_FONT)
         draw_centered(canvas, 0, 64, 43, "FINAL", _YELLOW, _LABEL_FONT)
