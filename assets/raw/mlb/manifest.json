@@ -1,0 +1,622 @@
+{
+  "108": {
+    "abbreviation": "LAA",
+    "sources": {
+      "cap_on_dark.svg": {
+        "sha256": "906c297b3b74eaeff37145700871a5a44253a316081e101ca05cc4126ec6e304",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-dark/108.svg"
+      },
+      "cap_on_light.svg": {
+        "sha256": "4a170c27f5e768076f45a3aefa384d7c2ad21f27f79242f328b326416e321c64",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-light/108.svg"
+      },
+      "primary.svg": {
+        "sha256": "0b73a6c9523ac0a35a817516e13c4e96a7908dc0df389f01f8dba5d6c47d21e6",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/108.svg"
+      }
+    }
+  },
+  "109": {
+    "abbreviation": "AZ",
+    "sources": {
+      "cap_on_dark.svg": {
+        "sha256": "2bdad5827f908aa7e0a3cbd6c984cc750caeaa6c1db5a845068a1e6993a8f089",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-dark/109.svg"
+      },
+      "cap_on_light.svg": {
+        "sha256": "7ccca0f29868a19463f038c02341180b06dbee381f19251fa60290cea3f8ce61",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-light/109.svg"
+      },
+      "primary.svg": {
+        "sha256": "b63b3aaf303ff3bd856c480ef855a0bdab1794e78185e3b791492c860fdf804a",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/109.svg"
+      }
+    }
+  },
+  "110": {
+    "abbreviation": "BAL",
+    "sources": {
+      "cap_on_dark.svg": {
+        "sha256": "293296774061356e92e778d1596d053cc3436f213bb8c5bc305f91ac2573c8a6",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-dark/110.svg"
+      },
+      "cap_on_light.svg": {
+        "sha256": "934dd48c50b92bd6889561aeee47f8227cd218c104e98ccfce862522fe624890",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-light/110.svg"
+      },
+      "primary.svg": {
+        "sha256": "9e6476d34cd2e98e792cb73ef06e99b2c243089b3a7e102465db427ec3d26535",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/110.svg"
+      }
+    }
+  },
+  "111": {
+    "abbreviation": "BOS",
+    "sources": {
+      "cap_on_dark.svg": {
+        "sha256": "2275e66cb2315c624179f456394f55ab7df447cda991dd9e0dfba85437139e4f",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-dark/111.svg"
+      },
+      "cap_on_light.svg": {
+        "sha256": "dd870d01c46f255f855b3403db316312395345e90815d3168f9b652bf113ea52",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-light/111.svg"
+      },
+      "primary.svg": {
+        "sha256": "53eb07384a14fcc54efb807581672b793c75cc1bfdc0c6610345051820cd92af",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/111.svg"
+      },
+      "socks.png": {
+        "sha256": "ca05ae4dbd5b5087bfa5c70e896e8a27eb91f5526e3f349cb6042033d0f2c596",
+        "source": "wikimedia",
+        "url": "https://upload.wikimedia.org/wikipedia/en/thumb/6/6d/RedSoxPrimary_HangingSocks.svg/500px-RedSoxPrimary_HangingSocks.svg.png"
+      }
+    }
+  },
+  "112": {
+    "abbreviation": "CHC",
+    "sources": {
+      "cap_on_dark.svg": {
+        "sha256": "11e8332d76172d5dfda969f4cdfa038c539a2603f4ec1b598b7fa6cc9462a3ec",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-dark/112.svg"
+      },
+      "cap_on_light.svg": {
+        "sha256": "a7d29053e4cb0f03731c243850a4d3903cc9abd0489b7cd6de6eac7c51d85423",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-light/112.svg"
+      },
+      "primary.svg": {
+        "sha256": "8fe99678c053859b50adbbe769aade0011ed6b2349962a9963dcc0b6db162aef",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/112.svg"
+      }
+    }
+  },
+  "113": {
+    "abbreviation": "CIN",
+    "sources": {
+      "cap_on_dark.svg": {
+        "sha256": "cddb4c138ec9242fd1d766e702a29c9c25d028c1eb466666ef666d39104c7bac",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-dark/113.svg"
+      },
+      "cap_on_light.svg": {
+        "sha256": "703396cd16046559b1f201dc84adac1295faaacefc41b174028cd93c72d4afc7",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-light/113.svg"
+      },
+      "primary.svg": {
+        "sha256": "112b22efe0bb3f7352a0630068977526d2fbaf36c67a10683a8b2c9e966c1618",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/113.svg"
+      }
+    }
+  },
+  "114": {
+    "abbreviation": "CLE",
+    "sources": {
+      "cap_on_dark.svg": {
+        "sha256": "57b0ebd9b6921d5bc83cd31be8da7fbca480d1def55686d614576370a2817c14",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-dark/114.svg"
+      },
+      "cap_on_light.svg": {
+        "sha256": "ac47d3d36e0e5e4fb6f4ba9101abaeba164c4eb58a5a74cf55e67c7dc128e0aa",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-light/114.svg"
+      },
+      "primary.svg": {
+        "sha256": "5fada1700c1622777d64d1971e028ea7aca7729a11537736d4e88c6acada763e",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/114.svg"
+      }
+    }
+  },
+  "115": {
+    "abbreviation": "COL",
+    "sources": {
+      "cap_on_dark.svg": {
+        "sha256": "e7bc2012073ce0f1078e9fa8e13e593c2bb15d494b76e98444c5b31f666bd992",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-dark/115.svg"
+      },
+      "cap_on_light.svg": {
+        "sha256": "4b143df8f4b6ca0d7f3cce57208ddbf4fd93e36a8b33763d3bd39a639a654e2e",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-light/115.svg"
+      },
+      "primary.svg": {
+        "sha256": "f4ac929c740e482a4c62127cbb0b04c9aa48848f6481dcabfd66f7c064abdd47",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/115.svg"
+      }
+    }
+  },
+  "116": {
+    "abbreviation": "DET",
+    "sources": {
+      "cap_on_dark.svg": {
+        "sha256": "f249699a3abd342486001cf138f8f13953b878945db4918f4c848153892cef65",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-dark/116.svg"
+      },
+      "cap_on_light.svg": {
+        "sha256": "d1883e2ca94802a58c40bb77cd30048f6b7d47e68ba418df88342417b6918612",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-light/116.svg"
+      },
+      "primary.svg": {
+        "sha256": "90602ddfa5130edf47241fcde4152d7c7421b881af67ed3d66d0b5d700446c39",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/116.svg"
+      }
+    }
+  },
+  "117": {
+    "abbreviation": "HOU",
+    "sources": {
+      "cap_on_dark.svg": {
+        "sha256": "fedddc83aad1ae43e0bd9b5b8e2b5960fd99bbaeedf6c4707a0d603a61766ce7",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-dark/117.svg"
+      },
+      "cap_on_light.svg": {
+        "sha256": "156a1f128fae8080059f3258b6106c9d5c40a5a6af3fb1a1cf1a9e10a76bda44",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-light/117.svg"
+      },
+      "cap_wikimedia.svg": {
+        "sha256": "2a2ae94e812988db8366a70e39a6f053f4e1fc2e25626e1964f87241ed28cc5d",
+        "source": "wikimedia",
+        "url": "https://upload.wikimedia.org/wikipedia/commons/f/f6/Houston_Astros_cap_logo.svg"
+      },
+      "primary.svg": {
+        "sha256": "fd2e9fa1d895e8cb88fb9ee3562acb6a1b9852158aa4793aa3a742097cc5556e",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/117.svg"
+      }
+    }
+  },
+  "118": {
+    "abbreviation": "KC",
+    "sources": {
+      "cap_on_dark.svg": {
+        "sha256": "306838d6325d947ffd91d3a28b0d674f1c1c7eb8164e267b5880e6fa3c3d0659",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-dark/118.svg"
+      },
+      "cap_on_light.svg": {
+        "sha256": "c4229559a588952d8c0ff7dab36c82464f5c86d78bb3a8c3431539111ca5aefb",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-light/118.svg"
+      },
+      "primary.svg": {
+        "sha256": "55678f28a752ec5ac86e290b2481b8a5e3d7de7460a3f469412147dc224eb32c",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/118.svg"
+      }
+    }
+  },
+  "119": {
+    "abbreviation": "LAD",
+    "sources": {
+      "cap_on_dark.svg": {
+        "sha256": "f9ab850f6258ef9294e24066e7d3a19bcda062455efd9d4be3c81c32752d1702",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-dark/119.svg"
+      },
+      "cap_on_light.svg": {
+        "sha256": "da9326eb84559daa09f9bd51a4c4aeb8f3b7e451d70e126c0e99b2ba68554593",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-light/119.svg"
+      },
+      "primary.svg": {
+        "sha256": "9840fd7c20fb4614a1797f1fcf9613586fb54dac49dbe4b894086aa07555280f",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/119.svg"
+      }
+    }
+  },
+  "120": {
+    "abbreviation": "WSH",
+    "sources": {
+      "cap_on_dark.svg": {
+        "sha256": "1861023aa7af93d9e0f043eb119bbb544985cdc95741033ddde69ef7419d58d2",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-dark/120.svg"
+      },
+      "cap_on_light.svg": {
+        "sha256": "b4d02394e498e7da2ce3f056424f04f0c8b76bc8d073d9b97d5d8e262793ff47",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-light/120.svg"
+      },
+      "primary.svg": {
+        "sha256": "69e019986481b7844b548fe2d1cdc88a58815d0b1b8cbf22bd65fcf17f3458d8",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/120.svg"
+      }
+    }
+  },
+  "121": {
+    "abbreviation": "NYM",
+    "sources": {
+      "cap_on_dark.svg": {
+        "sha256": "913103984a647fdbffdf4aa6d4dcc80f5e6a52f6a0f0d9fa7ecc7311406a662d",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-dark/121.svg"
+      },
+      "cap_on_light.svg": {
+        "sha256": "f094dc950ef258bcb74dad1ad7fce9fed86c7248c35e7ac23a1f38996979b557",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-light/121.svg"
+      },
+      "insignia.png": {
+        "sha256": "d3f6c5ef5dddafee56b472fc9bd262996fe278d42644e09c92da09f42718615c",
+        "source": "wikimedia",
+        "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/9/98/New_York_Mets_Insignia.svg/500px-New_York_Mets_Insignia.svg.png"
+      },
+      "primary.svg": {
+        "sha256": "b8214420e8588f91928f45829e9abd8c5ac30df6293a29597b1aa7cc9bc972e0",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/121.svg"
+      }
+    }
+  },
+  "133": {
+    "abbreviation": "ATH",
+    "sources": {
+      "cap_on_dark.svg": {
+        "sha256": "7d78ef3d2b6c8cef10a22021e7ebd901c2141fa3c7b148997037fa72fabe890d",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-dark/133.svg"
+      },
+      "cap_on_light.svg": {
+        "sha256": "897dc50be8811de3d09f2ed6ba2cc1e4beb100f136b66a0d7752840cc159563c",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-light/133.svg"
+      },
+      "primary.svg": {
+        "sha256": "598538b486eef1fc4834f0a88093fc03b26c558e264afc21f5c3c4b2ba209f0c",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/133.svg"
+      }
+    }
+  },
+  "134": {
+    "abbreviation": "PIT",
+    "sources": {
+      "cap_on_dark.svg": {
+        "sha256": "abde92052e68c0c9bfaa46030212a5646b87c72bec76e579c0df6975a4c99d84",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-dark/134.svg"
+      },
+      "cap_on_light.svg": {
+        "sha256": "ee222d2e39f9e6c6f3633ca4262c6d08661c22ad500924a3797f195f904e8d4c",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-light/134.svg"
+      },
+      "primary.svg": {
+        "sha256": "a88e4a6bd86217dd2e1c66f48de97113a7edde01f03d7a9c280b6b05bd0ddaa3",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/134.svg"
+      }
+    }
+  },
+  "135": {
+    "abbreviation": "SD",
+    "sources": {
+      "cap_on_dark.svg": {
+        "sha256": "bb20b1c99dab989ea32e99bde286c119c54dd0c74ef7b89aae0e5ce258c04e19",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-dark/135.svg"
+      },
+      "cap_on_light.svg": {
+        "sha256": "8105baddadd1b9b4a019c12d8a31dc65b2a178ea9e0b908f80f02733d47467b8",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-light/135.svg"
+      },
+      "primary.svg": {
+        "sha256": "c0d5f92ef4a58f097c74aedebb9fd1ff4270217d45b75ef7aa6eeded115131da",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/135.svg"
+      }
+    }
+  },
+  "136": {
+    "abbreviation": "SEA",
+    "sources": {
+      "cap_on_dark.svg": {
+        "sha256": "64c7b674fc6abc0e1115054e11d88f6b98b505edf74a467f41412826d583f608",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-dark/136.svg"
+      },
+      "cap_on_light.svg": {
+        "sha256": "f188c625546aa7ba4003a006eef9b382ef96fc81dfe249a0fb89e9f70e034975",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-light/136.svg"
+      },
+      "primary.svg": {
+        "sha256": "c9508331d23c9a20493210e9cd23d29978fc5e599efeffe6e180118885ff4d06",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/136.svg"
+      }
+    }
+  },
+  "137": {
+    "abbreviation": "SF",
+    "sources": {
+      "cap_on_dark.svg": {
+        "sha256": "02184ee3ac8c18c2c82a7e463e99c268748dd6f6b3030efaf68ad0cc1c8f0793",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-dark/137.svg"
+      },
+      "cap_on_light.svg": {
+        "sha256": "0f1e0235767d461e20522bce114844fbee47a864a504785c158484cf5725d79b",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-light/137.svg"
+      },
+      "primary.svg": {
+        "sha256": "04d8deeb9e7dd172edae9c1a202bf91461d89a973dd243edddb99329cfe99f3c",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/137.svg"
+      }
+    }
+  },
+  "138": {
+    "abbreviation": "STL",
+    "sources": {
+      "cap_on_dark.svg": {
+        "sha256": "32b7d3ef8662860fbdf24e68097f5fe798a44d5b87772987783fc3aeff123a09",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-dark/138.svg"
+      },
+      "cap_on_light.svg": {
+        "sha256": "70eef10d96b5d2c14c735c7a764d1404ce09610e6a5c886b4354e9475e5a9607",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-light/138.svg"
+      },
+      "insignia.png": {
+        "sha256": "dee5b1e5fab2748421c385af73cd97dd718e1504049ddf4ea82456026eb85b8f",
+        "source": "wikimedia",
+        "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/3/39/St._Louis_Cardinals_insignia_logo.svg/500px-St._Louis_Cardinals_insignia_logo.svg.png"
+      },
+      "primary.svg": {
+        "sha256": "c1f1aa692b825d69521a724ca0848b337bd4fe57120daf3760a4e2eb12e3653d",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/138.svg"
+      }
+    }
+  },
+  "139": {
+    "abbreviation": "TB",
+    "sources": {
+      "cap_on_dark.svg": {
+        "sha256": "87a8ef4203d2020846d2c5a37e19365ea8ce483ad7c9a50a562687b1d8a5f825",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-dark/139.svg"
+      },
+      "cap_on_light.svg": {
+        "sha256": "a982ef0f89a7a6e89b9b20afe9b94ec2daefd1b7f19b29b9e62dbc6e6badbb85",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-light/139.svg"
+      },
+      "primary.svg": {
+        "sha256": "b50fd02140a8fe66e57eb5c421fc6847a52abfbc7469bc3099a49d1e09ff77fc",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/139.svg"
+      }
+    }
+  },
+  "140": {
+    "abbreviation": "TEX",
+    "sources": {
+      "cap_on_dark.svg": {
+        "sha256": "d1b512fd9de87ecaa77a35065b8a48004ca4eb78d9c395b93b8e731aae32362e",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-dark/140.svg"
+      },
+      "cap_on_light.svg": {
+        "sha256": "3ef78837a1921d4aef87a4386a655d23a4f0e2b32aaa54cd379cd872a31d913f",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-light/140.svg"
+      },
+      "primary.svg": {
+        "sha256": "775ec1e70b6655e087249f7306c8ea033c2cc5c52bd1da71339df02160190a38",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/140.svg"
+      }
+    }
+  },
+  "141": {
+    "abbreviation": "TOR",
+    "sources": {
+      "cap_on_dark.svg": {
+        "sha256": "c7d244b11f0762c202171b191fef4a246cec36c088d3ee71d376990335f589b1",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-dark/141.svg"
+      },
+      "cap_on_light.svg": {
+        "sha256": "96dd8cbf9a7b1750b3ebae3ee80d663f7c69d97a14077b4c31d38edae6fa4b16",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-light/141.svg"
+      },
+      "primary.svg": {
+        "sha256": "1920a269c4dce0f8f38d338c4a47380144922a7d84f92ad4609188cac0f4d8e3",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/141.svg"
+      }
+    }
+  },
+  "142": {
+    "abbreviation": "MIN",
+    "sources": {
+      "cap_on_dark.svg": {
+        "sha256": "5383afe74feee21f509d8c7d13ba13ba67e197f404231ba8875f50d5d0423c76",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-dark/142.svg"
+      },
+      "cap_on_light.svg": {
+        "sha256": "f99663c80f55f3b6082530168987c7853c27b7214d59f6c487985771382f97f0",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-light/142.svg"
+      },
+      "primary.svg": {
+        "sha256": "9f062b8e0a2626babce4f051f2d3f1bee163fa6d74ff12ff3501be2e2767b090",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/142.svg"
+      }
+    }
+  },
+  "143": {
+    "abbreviation": "PHI",
+    "sources": {
+      "cap_on_dark.svg": {
+        "sha256": "a424d83606ca6fbc24d49d144b55cdb90c1c6a5fabcb066008edea8b8b8482f7",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-dark/143.svg"
+      },
+      "cap_on_light.svg": {
+        "sha256": "f040f1bde9f34c2b2162b41414b3a230f90d67353cd1a413e8ee9f0efb867fc4",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-light/143.svg"
+      },
+      "primary.svg": {
+        "sha256": "465da43739de56c09d5f8ec3328be11e9318f53959cc05979d3ab3d0a547a3bb",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/143.svg"
+      }
+    }
+  },
+  "144": {
+    "abbreviation": "ATL",
+    "sources": {
+      "cap_on_dark.svg": {
+        "sha256": "54f6f179c36ab122e3039803a80907410850395919d886eec9660f721d34751d",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-dark/144.svg"
+      },
+      "cap_on_light.svg": {
+        "sha256": "1ffbddaeec01e3b163d2a3a293ef8a5e7d9e407855576d35fbcefa072bbb1fc3",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-light/144.svg"
+      },
+      "primary.svg": {
+        "sha256": "11162237c379e6e6e54916ee4eebe4407961b4d37293b71b21868077d1bead0d",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/144.svg"
+      }
+    }
+  },
+  "145": {
+    "abbreviation": "CWS",
+    "sources": {
+      "cap_on_dark.svg": {
+        "sha256": "6b7f63131df725ed6d86b12b4784066a38854b5332d71e791a6f9231a0683a0f",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-dark/145.svg"
+      },
+      "cap_on_light.svg": {
+        "sha256": "7b8b99a38a2479bd751c2133341b43aeff18c55d05fec4f9a32012378cfcad18",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-light/145.svg"
+      },
+      "primary.svg": {
+        "sha256": "ca1ee0dc0e5a0f848703d0081ba60a12d44b0364da5c3b146985b6fe33f2e994",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/145.svg"
+      }
+    }
+  },
+  "146": {
+    "abbreviation": "MIA",
+    "sources": {
+      "cap_on_dark.svg": {
+        "sha256": "bf92af516b3c134c709f031610635155eeb7ccdba78d370d88e6881732125672",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-dark/146.svg"
+      },
+      "cap_on_light.svg": {
+        "sha256": "7b8e22d2aaac860723bc072d8e3af712629942facaf6a503282baa8bb50d63aa",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-light/146.svg"
+      },
+      "primary.svg": {
+        "sha256": "6a6e50ca9bad01e65aaeb0557d9e7b4dc94647aea42fdd2549643aca35a767df",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/146.svg"
+      }
+    }
+  },
+  "147": {
+    "abbreviation": "NYY",
+    "sources": {
+      "cap_on_dark.svg": {
+        "sha256": "2af4c1e302403aa44d1249b310f9b12d56f5dd7e0f35164ae7cb8f65c7869424",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-dark/147.svg"
+      },
+      "cap_on_light.svg": {
+        "sha256": "8eb54f40e1d7a997ea3905dac9b7cb67f346991de7600de85c2e63fd04122c70",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-light/147.svg"
+      },
+      "primary.svg": {
+        "sha256": "a9041069f46b033c0ecaa1472fd5a12da22f1f5af53fd8a686687540d5586fdd",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/147.svg"
+      }
+    }
+  },
+  "158": {
+    "abbreviation": "MIL",
+    "sources": {
+      "cap_on_dark.svg": {
+        "sha256": "b8194b87a14eeda12639769980dc0c234fa05f426b70bb5e9d553189662b0d7d",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-dark/158.svg"
+      },
+      "cap_on_light.svg": {
+        "sha256": "0be6d4f2ee9fcc3b2725ec509c505fe88914de7a0d16f1300ff081f73e009ea2",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/team-cap-on-light/158.svg"
+      },
+      "primary.svg": {
+        "sha256": "9271da480f41d07eaa124a20dd4bc2dfaf879c17721b61bef9c45d8e6cc837d4",
+        "source": "mlbstatic",
+        "url": "https://www.mlbstatic.com/team-logos/158.svg"
+      }
+    }
+  }
+}

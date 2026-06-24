@@ -1,0 +1,11 @@
+# Tool-time only — regenerating the committed MLB logo tiles. NOT a runtime/Pi
+# dependency: the app never renders SVG or runs scipy; it loads the finished PNGs.
+#
+#   uv pip install --python .venv/bin/python -r tools/requirements-logos.txt
+#   python tools/fetch_mlb_logos.py          # cache raw SVG/PNG art (stdlib only)
+#   python tools/render_mlb_logo_variants.py # composite the 20x20 base + alt tiles
+#
+# fetch_mlb_logos.py uses only the standard library; the render step needs:
+cairosvg==2.9.0
+scipy==1.18.0
+# (Pillow and numpy are already runtime dependencies.)
