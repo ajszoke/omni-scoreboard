@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from omni.domain.baseball import BaseballBaseState, BaseballCount, BaseballGameState, InningPhase
+from omni.core.enum import HomeAway
+from omni.domain.baseball import BaseballBaseState, BaseballCount, BaseballGameState, InningPhase, no_hitter_side
 
 
 def _state(**overrides: object) -> BaseballGameState:
@@ -49,3 +50,29 @@ def test_game_state_is_frozen() -> None:
 def test_inning_phase_breaks() -> None:
     assert not InningPhase.TOP.is_break and not InningPhase.BOTTOM.is_break  # active halves
     assert InningPhase.MIDDLE.is_break and InningPhase.END.is_break  # between-halves breaks
+
+
+def test_game_state_holds_hits_and_rejects_negative() -> None:
+    assert _state(away_hits=4, home_hits=0).away_hits == 4
+    with pytest.raises(ValueError):
+        _state(away_hits=-1)
+    with pytest.raises(ValueError):
+        _state(home_hits=-1)
+
+
+def test_no_hitter_side_names_the_pitching_team() -> None:
+    # The hitless batting side names who is throwing it: away hitless -> home, and vice versa.
+    assert no_hitter_side(_state(inning=7, away_hits=0, home_hits=3), min_inning=6) is HomeAway.HOME
+    assert no_hitter_side(_state(inning=7, away_hits=3, home_hits=0), min_inning=6) is HomeAway.AWAY
+
+
+def test_no_hitter_side_none_when_both_sides_have_hits() -> None:
+    assert no_hitter_side(_state(inning=8, away_hits=2, home_hits=1), min_inning=6) is None
+
+
+def test_no_hitter_side_reports_the_away_drought_in_a_double_no_hitter() -> None:
+    assert no_hitter_side(_state(inning=7, away_hits=0, home_hits=0), min_inning=6) is HomeAway.HOME
+
+
+def test_no_hitter_side_suppressed_before_the_threshold() -> None:
+    assert no_hitter_side(_state(inning=5, away_hits=0, home_hits=4), min_inning=6) is None

@@ -2,8 +2,7 @@
 
 These are foundation types — a half-inning, a balls/strikes/outs count, base
 occupancy, and the live game-state snapshot a provider observes. Events and
-cards build on them, so they live in `domain`; `omni.events.baseball` and
-`omni.cards.baseball` re-export the value types for back-compat.
+cards build on them, so they live in `domain` and import from here directly.
 """
 
 from __future__ import annotations
@@ -11,9 +10,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
-from omni.core.enum import StrEnumMixin
+from omni.core.enum import HomeAway, StrEnumMixin
 
-__all__ = ["InningPhase", "BaseballCount", "BaseballBaseState", "BaseballGameState"]
+__all__ = ["InningPhase", "BaseballCount", "BaseballBaseState", "BaseballGameState", "no_hitter_side"]
 
 
 class InningPhase(StrEnumMixin, str, Enum):
@@ -81,9 +80,32 @@ class BaseballGameState:
     phase: InningPhase
     count: BaseballCount
     bases: BaseballBaseState
+    away_hits: int = 0
+    home_hits: int = 0
 
     def __post_init__(self) -> None:
         if self.away_score < 0 or self.home_score < 0:
             raise ValueError("scores cannot be negative")
+        if self.away_hits < 0 or self.home_hits < 0:
+            raise ValueError("hits cannot be negative")
         if self.inning < 1:
             raise ValueError("inning must be >= 1")
+
+
+def no_hitter_side(state: BaseballGameState, *, min_inning: int) -> HomeAway | None:
+    """The side throwing an active no-hitter bid in `state`, or None.
+
+    A bid only counts once the game has reached `min_inning` — early hitless innings
+    are routine, not news — and the batting side still has zero hits: a hitless away
+    team means the home pitching staff is throwing the no-hitter, and vice versa. The
+    bid persists across both halves of an inning (it is about hits allowed, not who is
+    batting now) until a hit breaks it. If both sides are hitless (a rare double
+    no-hitter) the away team's drought is the one reported.
+    """
+    if state.inning < min_inning:
+        return None
+    if state.away_hits == 0:
+        return HomeAway.HOME
+    if state.home_hits == 0:
+        return HomeAway.AWAY
+    return None

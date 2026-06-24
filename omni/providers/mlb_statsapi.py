@@ -253,6 +253,8 @@ def _parse_game_state(raw: dict[str, Any]) -> BaseballGameState:
         return BaseballGameState(
             away_score=int(teams.get("away", {}).get("runs", 0) or 0),
             home_score=int(teams.get("home", {}).get("runs", 0) or 0),
+            away_hits=int(teams.get("away", {}).get("hits", 0) or 0),
+            home_hits=int(teams.get("home", {}).get("hits", 0) or 0),
             inning=inning,
             phase=_phase_from_inning_state(str(line.get("inningState", "Top"))),
             count=BaseballCount(
@@ -391,7 +393,7 @@ def _default_fetch_schedule(game_date: date, sport_ids: str) -> list[dict[str, A
 # must be listed for its nested object to survive, so omitting one silently drops that
 # data — keep this in sync with what `_parse_game_state` / `_parse_game_events` read.
 _GAME_FIELDS = (
-    "liveData,linescore,teams,home,away,runs,currentInning,inningState,balls,strikes,outs,offense,first,second,third,"
+    "liveData,linescore,teams,home,away,runs,hits,currentInning,inningState,balls,strikes,outs,offense,first,second,third,"
     "plays,allPlays,result,eventType,description,rbi,awayScore,homeScore,about,inning,halfInning,atBatIndex,"
     "endTime,startTime,count"
 )

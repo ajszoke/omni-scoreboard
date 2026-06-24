@@ -46,6 +46,7 @@ def _game() -> TeamGame:
 def test_parse_game_state_from_fixture() -> None:
     state = _parse_game_state(_feed())
     assert (state.away_score, state.home_score) == (3, 5)
+    assert (state.away_hits, state.home_hits) == (7, 9)  # R/H/E hits, for no-hitter detection
     assert state.inning == 7
     assert state.phase is InningPhase.TOP
     assert (state.count.balls, state.count.strikes, state.count.outs) == (2, 1, 2)
