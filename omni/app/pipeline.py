@@ -47,7 +47,7 @@ from omni.cards.factory import CardFactory
 from omni.core.enum import DisplayPriority, GameStatus
 from omni.core.ids import LeagueScopedId
 from omni.core.observation import Observation
-from omni.domain.baseball import BaseballGameState, no_hitter_side
+from omni.domain.baseball import BaseballGameState, PitchingDecisions, no_hitter_side
 from omni.domain.contest import TeamGame
 from omni.events.baseball import BaseballGameEvent, LiveBaseballFeed
 from omni.providers.base import ProviderError
@@ -109,8 +109,8 @@ class LiveBaseballPipeline:
         self._card_keys: dict[LeagueScopedId, str] = {}  # contest id -> its live card's dedupe key
         self._event_streams: dict[LeagueScopedId, DelayedEventStream[BaseballGameEvent]] = {}
         self._no_hitter_keys: dict[LeagueScopedId, str] = {}  # contest id -> its no-hitter card's key
-        # contest id -> the final state observed when we first saw it final (the reveal's delay anchor)
-        self._final_pending: dict[LeagueScopedId, Observation[BaseballGameState]] = {}
+        # contest id -> when we first saw it final (the reveal's delay anchor; built from current state)
+        self._final_pending: dict[LeagueScopedId, datetime] = {}
         self._final_keys: dict[LeagueScopedId, str] = {}  # contest id -> its (revealed) final card's key
 
     def refresh(self, games: Iterable[TeamGame], *, now: datetime, fetch_feed: FeedFetcher) -> PipelineResult:
@@ -174,7 +174,7 @@ class LiveBaseballPipeline:
             # time, which is at or before the final's first-sight anchor — so it flashes, then
             # the final confirms it. (Surfacing here, before the reveal, keeps the stream alive.)
             big_plays.extend(self._surface_big_plays(game, feed.events, now=now))
-            revealed = self._surface_final(game, feed.state, now=now)
+            revealed = self._surface_final(game, feed.state, feed.decisions, now=now)
             if revealed is not None:
                 finals.append(revealed)
             else:
@@ -247,21 +247,23 @@ class LiveBaseballPipeline:
         self._no_hitter_keys[game.id] = card.dedupe_key.raw
         return card.id
 
-    def _surface_final(self, game: TeamGame, state: BaseballGameState, *, now: datetime) -> CardId | None:
+    def _surface_final(
+        self, game: TeamGame, state: BaseballGameState, decisions: PitchingDecisions | None, *, now: datetime
+    ) -> CardId | None:
         """Reveal the final card once the result clears the post-game delay, or None while it is held.
 
-        The reveal is anchored to when we *first* saw the game final: that observation can
-        only be at or after the real last out, so anchor + lag never reveals the result
-        before the broadcast reaches its ending. Until then the game simply shows nothing
-        (its live card was dropped when it left the live set).
+        The reveal is anchored to when we *first* saw the game final: that instant can only be
+        at or after the real last out, so anchor + lag never reveals the result before the
+        broadcast reaches its ending. Until then the game simply shows nothing (its live card
+        was dropped when it left the live set). The card is built from the *current* state and
+        decisions at reveal — same final score, but the freshest W/L/S if the feed filled the
+        decisions in a touch late.
         """
-        pending = self._final_pending.get(game.id)
-        if pending is None:
-            pending = Observation(subject_id=game.id, source=game.id.source, observed_at=now, value=state)
-            self._final_pending[game.id] = pending
-        if self._delay.eligible_at(pending) > now:
+        seen_at = self._final_pending.setdefault(game.id, now)
+        anchor = Observation(subject_id=game.id, source=game.id.source, observed_at=seen_at, value=state)
+        if self._delay.eligible_at(anchor) > now:
             return None  # inside the post-game delay — revealing the result now would spoil the ending
-        card = self._factory.final(game, pending.value, now=now)
+        card = self._factory.final(game, state, decisions=decisions, now=now)
         self._queue.ingest(card)
         self._final_keys[game.id] = card.dedupe_key.raw
         del self._final_pending[game.id]

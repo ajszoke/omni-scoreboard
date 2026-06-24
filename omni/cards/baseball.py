@@ -9,7 +9,7 @@ from omni.cards.base import ScoreboardCard
 from omni.core.enum import HomeAway
 
 # Domain value objects used by the payload fields below (imported for use, not re-exported).
-from omni.domain.baseball import BaseballBaseState, BaseballCount, InningPhase
+from omni.domain.baseball import BaseballBaseState, BaseballCount, InningPhase, PitchingDecisions
 from omni.events.baseball import BaseballGameEventType
 
 __all__ = [
@@ -75,12 +75,13 @@ class FinalCardPayload:
 
     Teams come from the contest; `winner` is computed from the scores so it can never
     contradict them (an equal score — e.g. a weather-shortened tie — yields None).
-    The compressed W/L/S pitching line joins here once the provider parses the game's
-    decisions.
+    `decisions` is the winning/losing/saving pitchers (None on a tie or a feed without
+    them); a renderer shortens to last names and a small panel may drop it.
     """
 
     away_score: int
     home_score: int
+    decisions: PitchingDecisions | None = None
 
     def __post_init__(self) -> None:
         if self.away_score < 0 or self.home_score < 0:

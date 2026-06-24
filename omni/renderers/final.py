@@ -3,12 +3,15 @@
 The completed game with a **winner-derived treatment**: the winning side is drawn
 bright and the loser dimmed (a tie leaves both bright), with a FINAL marker. Which
 side won is the payload's derivation (`FinalCardPayload.winner`) — never a
-position-based fade of "the home row".
+position-based fade of "the home row". When the payload carries pitching decisions,
+a W/L/S line (last names) accompanies the marker — degrading by profile:
 
-- quad_128x64 : team rows + final scores on the left, "FINAL" on the right.
-- stack_64x64 : team rows + scores up top, "FINAL" below.
-- single_64x32: an explicit COMPROMISE — the status reads "FIN" ("FINAL" does not
-  fit at 64px wide). Asserted by tests so it cannot silently regress.
+- quad_128x64 : team rows + final scores on the left; "FINAL" and the full W/L/S
+  (winner, loser, and save when there is one) stacked on the right.
+- stack_64x64 : team rows + scores up top; "FINAL" then W/L below — the save line
+  is dropped (no vertical room), an explicit, asserted COMPROMISE.
+- single_64x32: the status reads "FIN" ("FINAL" does not fit at 64px wide) and the
+  pitching line is dropped entirely — an explicit, asserted COMPROMISE.
 """
 
 from __future__ import annotations
@@ -38,6 +41,12 @@ _SCORE_FONT = "6x10"
 def _side_color(side: HomeAway, winner: HomeAway | None) -> RGBColor:
     """Bright for the winner (or both, on a tie); dimmed for the loser."""
     return _WHITE if winner is None or side is winner else _LOSER
+
+
+def _last_name(full_name: str) -> str:
+    """The last whitespace-delimited token of a pitcher's name — what fits on a panel."""
+    parts = full_name.split()
+    return parts[-1] if parts else full_name
 
 
 class FinalRenderer:
@@ -83,7 +92,13 @@ class FinalRenderer:
         canvas.text(8, 43, game.home.abbreviation, home, font=_SCORE_FONT)
         draw_right_aligned(canvas, 58, 11, str(payload.away_score), away, _SCORE_FONT)
         draw_right_aligned(canvas, 58, 43, str(payload.home_score), home, _SCORE_FONT)
-        draw_centered(canvas, 64, 128, 28, "FINAL", _YELLOW, _LABEL_FONT)
+        draw_centered(canvas, 64, 128, 11, "FINAL", _YELLOW, _LABEL_FONT)
+        decisions = payload.decisions
+        if decisions is not None:
+            canvas.text(70, 27, f"W {_last_name(decisions.winner)}", _WHITE, font=_LABEL_FONT)
+            canvas.text(70, 41, f"L {_last_name(decisions.loser)}", _LOSER, font=_LABEL_FONT)
+            if decisions.save is not None:
+                canvas.text(70, 55, f"S {_last_name(decisions.save)}", _WHITE, font=_LABEL_FONT)
 
     def _render_stack(
         self, canvas: Canvas, game: TeamGame, payload: FinalCardPayload, away: RGBColor, home: RGBColor
@@ -94,7 +109,12 @@ class FinalRenderer:
         canvas.text(5, 28, game.home.abbreviation, home, font=_SCORE_FONT)
         draw_right_aligned(canvas, 62, 6, str(payload.away_score), away, _SCORE_FONT)
         draw_right_aligned(canvas, 62, 28, str(payload.home_score), home, _SCORE_FONT)
-        draw_centered(canvas, 0, 64, 50, "FINAL", _YELLOW, _LABEL_FONT)
+        draw_centered(canvas, 0, 64, 43, "FINAL", _YELLOW, _LABEL_FONT)
+        decisions = payload.decisions
+        if decisions is not None:
+            # 64x64 compromise: W and L only — there is no vertical room for the save line.
+            canvas.text(4, 51, f"W {_last_name(decisions.winner)}", _WHITE, font=_LABEL_FONT)
+            canvas.text(4, 58, f"L {_last_name(decisions.loser)}", _LOSER, font=_LABEL_FONT)
 
     def _render_single(
         self, canvas: Canvas, game: TeamGame, payload: FinalCardPayload, away: RGBColor, home: RGBColor

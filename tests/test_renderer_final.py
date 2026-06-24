@@ -18,7 +18,7 @@ from omni.cards.factory import CardFactory
 from omni.core.colors import RGBColor
 from omni.core.enum import GameStatus, League, PanelProfile
 from omni.core.ids import LeagueScopedId, SourceRef
-from omni.domain.baseball import BaseballBaseState, BaseballCount, BaseballGameState, InningPhase
+from omni.domain.baseball import BaseballBaseState, BaseballCount, BaseballGameState, InningPhase, PitchingDecisions
 from omni.domain.contest import Contest, TeamGame
 from omni.panels.geometry import geometry_for
 from omni.providers.mlb_teams import MlbTeamRegistry
@@ -36,6 +36,8 @@ AWAY = _REG.resolve(115)
 HOME = _REG.resolve(119)
 WHITE = RGBColor(255, 255, 255)  # winner
 LOSER = RGBColor(110, 110, 110)  # loser (dimmed)
+# Home (LAD) wins the sample, so its pitcher takes the win and the away (COL) pitcher the loss.
+DECISIONS = PitchingDecisions(winner="Clayton Kershaw", loser="German Marquez", save="Tanner Scott")
 
 
 def _game() -> TeamGame:
@@ -49,7 +51,9 @@ def _game() -> TeamGame:
     )
 
 
-def _card(away: int = 3, home: int = 5) -> ScoreboardCard[FinalCardPayload]:
+def _card(
+    away: int = 3, home: int = 5, *, decisions: PitchingDecisions | None = DECISIONS
+) -> ScoreboardCard[FinalCardPayload]:
     state = BaseballGameState(
         away_score=away,
         home_score=home,
@@ -58,7 +62,7 @@ def _card(away: int = 3, home: int = 5) -> ScoreboardCard[FinalCardPayload]:
         count=BaseballCount(balls=0, strikes=0, outs=3),
         bases=BaseballBaseState(),
     )
-    return CardFactory().final(_game(), state, now=NOW)
+    return CardFactory().final(_game(), state, decisions=decisions, now=NOW)
 
 
 def _render(card: ScoreboardCard[FinalCardPayload], profile: PanelProfile) -> RecordingCanvas:
@@ -95,7 +99,7 @@ def test_away_winner_treatment() -> None:
 
 
 def test_tie_leaves_both_sides_bright() -> None:
-    colors = _colors_by_text(_render(_card(away=4, home=4), PanelProfile.QUAD_128X64))
+    colors = _colors_by_text(_render(_card(away=4, home=4, decisions=None), PanelProfile.QUAD_128X64))
     assert colors[AWAY.abbreviation] == WHITE and colors[HOME.abbreviation] == WHITE  # no loser dim
 
 
@@ -105,7 +109,46 @@ def test_single_profile_compromise_shortens_to_fin() -> None:
 
 
 def test_compromise_is_declared_on_the_card() -> None:
-    assert any("single_64x32" in note for note in _card().layout_support.compromise_notes)
+    notes = _card().layout_support.compromise_notes
+    assert any("single_64x32" in note for note in notes)
+    assert any("stack_64x64" in note for note in notes)  # the dropped save line is declared too
+
+
+# --- W/L/S pitching line ----------------------------------------------------------
+
+
+def test_quad_shows_the_full_wls_line() -> None:
+    texts = {t.text for t in _render(_card(), PanelProfile.QUAD_128X64).texts()}
+    assert {"W Kershaw", "L Marquez", "S Scott"} <= texts  # last names only, with W/L/S labels
+
+
+def test_wls_line_marks_the_winner_bright_and_the_loser_dim() -> None:
+    colors = _colors_by_text(_render(_card(), PanelProfile.QUAD_128X64))
+    assert colors["W Kershaw"] == WHITE and colors["L Marquez"] == LOSER  # mirrors the score treatment
+
+
+def test_stack_shows_w_and_l_but_drops_the_save() -> None:
+    texts = {t.text for t in _render(_card(), PanelProfile.STACK_64X64).texts()}
+    assert "W Kershaw" in texts and "L Marquez" in texts
+    assert not any(t.startswith("S ") for t in texts)  # the save line has no room on the 64x64
+
+
+def test_single_drops_the_whole_pitching_line() -> None:
+    texts = {t.text for t in _render(_card(), PanelProfile.SINGLE_64X32).texts()}
+    assert not any(t.startswith(("W ", "L ", "S ")) for t in texts)  # no room at 64px wide
+
+
+def test_a_save_less_game_shows_only_w_and_l() -> None:
+    no_save = PitchingDecisions(winner="Tarik Skubal", loser="Kevin Gausman")
+    texts = {t.text for t in _render(_card(decisions=no_save), PanelProfile.QUAD_128X64).texts()}
+    assert "W Skubal" in texts and "L Gausman" in texts
+    assert not any(t.startswith("S ") for t in texts)
+
+
+@pytest.mark.parametrize("profile", [PanelProfile.QUAD_128X64, PanelProfile.STACK_64X64])
+def test_no_decisions_renders_no_pitching_line(profile: PanelProfile) -> None:
+    texts = {t.text for t in _render(_card(decisions=None), profile).texts()}
+    assert not any(t.startswith(("W ", "L ", "S ")) for t in texts)  # a tie / undecided feed
 
 
 def test_renderer_rejects_non_teamgame_contest() -> None:
