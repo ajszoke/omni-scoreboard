@@ -12,7 +12,14 @@ from enum import Enum
 
 from omni.core.enum import HomeAway, StrEnumMixin
 
-__all__ = ["InningPhase", "BaseballCount", "BaseballBaseState", "BaseballGameState", "no_hitter_side"]
+__all__ = [
+    "InningPhase",
+    "PitchType",
+    "BaseballCount",
+    "BaseballBaseState",
+    "BaseballGameState",
+    "no_hitter_side",
+]
 
 
 class InningPhase(StrEnumMixin, str, Enum):
@@ -35,6 +42,75 @@ class InningPhase(StrEnumMixin, str, Enum):
     def is_break(self) -> bool:
         """True for a between-halves break (`MIDDLE`/`END`) — no active at-bat."""
         return self in (InningPhase.MIDDLE, InningPhase.END)
+
+
+class PitchType(StrEnumMixin, str, Enum):
+    """A pitch type from the StatsAPI `pitchTypes` taxonomy; the value is the StatsAPI code.
+
+    Replaces a raw pitch-code string on a play so a play's decisive pitch is comparable and
+    renderable without stringly-typed checks. The taxonomy is closed and slow-moving — a new
+    pitch like the sweeper (`ST`) is a rare addition — so an enum is the right shape. The enum
+    value doubles as the short display code (`"FF"`, `"SL"`); :attr:`label` is the long name.
+    Coerce a raw code with :func:`omni.core.enum.try_coerce_enum` (None on an unknown code).
+    """
+
+    AUTOMATIC_BALL = "AB"
+    AUTOMATIC_STRIKE = "AS"
+    CHANGEUP = "CH"
+    CURVEBALL = "CU"
+    SLOW_CURVE = "CS"
+    EEPHUS = "EP"
+    CUTTER = "FC"
+    FASTBALL = "FA"
+    FOUR_SEAM_FASTBALL = "FF"
+    FORKBALL = "FO"
+    SPLITTER = "FS"
+    TWO_SEAM_FASTBALL = "FT"
+    GYROBALL = "GY"
+    INTENTIONAL_BALL = "IN"
+    KNUCKLE_CURVE = "KC"
+    KNUCKLEBALL = "KN"
+    NO_PITCH = "NP"
+    PITCHOUT = "PO"
+    SCREWBALL = "SC"
+    SINKER = "SI"
+    SLIDER = "SL"
+    SWEEPER = "ST"
+    SLURVE = "SV"
+    UNKNOWN = "UN"
+
+    @property
+    def label(self) -> str:
+        """The long human name (e.g. ``Four-Seam Fastball``) for a larger panel or a log."""
+        return _PITCH_LABELS[self]
+
+
+_PITCH_LABELS: dict[PitchType, str] = {
+    PitchType.AUTOMATIC_BALL: "Automatic Ball",
+    PitchType.AUTOMATIC_STRIKE: "Automatic Strike",
+    PitchType.CHANGEUP: "Changeup",
+    PitchType.CURVEBALL: "Curveball",
+    PitchType.SLOW_CURVE: "Slow Curve",
+    PitchType.EEPHUS: "Eephus",
+    PitchType.CUTTER: "Cutter",
+    PitchType.FASTBALL: "Fastball",
+    PitchType.FOUR_SEAM_FASTBALL: "Four-Seam Fastball",
+    PitchType.FORKBALL: "Forkball",
+    PitchType.SPLITTER: "Splitter",
+    PitchType.TWO_SEAM_FASTBALL: "Two-Seam Fastball",
+    PitchType.GYROBALL: "Gyroball",
+    PitchType.INTENTIONAL_BALL: "Intentional Ball",
+    PitchType.KNUCKLE_CURVE: "Knuckle Curve",
+    PitchType.KNUCKLEBALL: "Knuckleball",
+    PitchType.NO_PITCH: "No Pitch",
+    PitchType.PITCHOUT: "Pitchout",
+    PitchType.SCREWBALL: "Screwball",
+    PitchType.SINKER: "Sinker",
+    PitchType.SLIDER: "Slider",
+    PitchType.SWEEPER: "Sweeper",
+    PitchType.SLURVE: "Slurve",
+    PitchType.UNKNOWN: "Unknown",
+}
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

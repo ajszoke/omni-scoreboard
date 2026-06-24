@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from omni.core.enum import StrEnumMixin
-from omni.domain.baseball import BaseballCount, BaseballGameState, InningPhase
+from omni.domain.baseball import BaseballCount, BaseballGameState, InningPhase, PitchType
 from omni.events.base import GameEvent
 
 __all__ = [
@@ -61,6 +61,9 @@ class BaseballPlayPayload:
     the live, possibly-spoiler score. They are optional because a non-scoring status
     event (e.g. a no-hitter badge) carries no score; the provider fills them for plays.
 
+    `pitch_type` is the typed `PitchType` of the at-bat's decisive (last) pitch, or None
+    when the feed carries no pitch detail — never a raw code string.
+
     `fielder_sequence` is structured as ints (e.g. ``(9, 6, 4)``), not a string
     like ``"9-6-4-"``; rendering joins it late and avoids dangling delimiters.
     """
@@ -72,7 +75,7 @@ class BaseballPlayPayload:
     rbi: int = 0
     away_score: int | None = None
     home_score: int | None = None
-    pitch_type: str | None = None
+    pitch_type: PitchType | None = None
     fielder_sequence: tuple[int, ...] = ()
 
 

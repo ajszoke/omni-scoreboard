@@ -92,7 +92,12 @@
             "startTime": "2026-06-17T22:44:30.000Z",
             "endTime": "2026-06-17T22:45:10.000Z"
           },
-          "count": { "balls": 1, "strikes": 1, "outs": 1 }
+          "count": { "balls": 1, "strikes": 1, "outs": 1 },
+          "playEvents": [
+            { "isPitch": true, "details": { "type": { "code": "FF", "description": "Four-Seam Fastball" } } },
+            { "isPitch": false, "details": { "description": "Mound Visit" } },
+            { "isPitch": true, "details": { "type": { "code": "ST", "description": "Sweeper" } } }
+          ]
         },
         {
           "atBatIndex": 22,
