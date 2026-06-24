@@ -27,6 +27,7 @@ from omni.domain.baseball import InningPhase
 from omni.domain.contest import TeamGame
 from omni.renderers.canvas import Canvas
 from omni.renderers.context import RenderContext
+from omni.renderers.team_row import draw_team_mark
 from omni.renderers.text import draw_centered, draw_right_aligned
 
 __all__ = ["LiveBaseballRenderer"]
@@ -77,20 +78,22 @@ class LiveBaseballRenderer:
 
         canvas.fill(_BLACK)
         if profile is PanelProfile.QUAD_128X64:
-            self._render_quad(canvas, game, payload)
+            self._render_quad(canvas, context, game, payload)
         elif profile is PanelProfile.STACK_64X64:
-            self._render_stack(canvas, game, payload)
+            self._render_stack(canvas, context, game, payload)
         elif profile is PanelProfile.SINGLE_64X32:
             self._render_single(canvas, game, payload)
         else:  # pragma: no cover - exhaustiveness guard; mypy errors if a profile is unhandled
             assert_never(profile)
 
-    def _render_quad(self, canvas: Canvas, game: TeamGame, payload: LiveBaseballCardPayload) -> None:
-        # Two stacked team rows on the left, a status panel + bases on the right.
-        canvas.fill_rect(0, 0, 4, 32, game.away.primary_color)
-        canvas.fill_rect(0, 32, 4, 32, game.home.primary_color)
-        canvas.text(8, 11, game.away.abbreviation, _WHITE, font=_SCORE_FONT)
-        canvas.text(8, 43, game.home.abbreviation, _WHITE, font=_SCORE_FONT)
+    def _render_quad(
+        self, canvas: Canvas, context: RenderContext, game: TeamGame, payload: LiveBaseballCardPayload
+    ) -> None:
+        # Two stacked team rows on the left (logo or colour bar), a status panel + bases on the right.
+        away_x = draw_team_mark(canvas, context, game.away, row_top=0)
+        home_x = draw_team_mark(canvas, context, game.home, row_top=32)
+        canvas.text(away_x, 11, game.away.abbreviation, _WHITE, font=_SCORE_FONT)
+        canvas.text(home_x, 43, game.home.abbreviation, _WHITE, font=_SCORE_FONT)
         draw_right_aligned(canvas, 58, 11, str(payload.away_score), _WHITE, _SCORE_FONT)
         draw_right_aligned(canvas, 58, 43, str(payload.home_score), _WHITE, _SCORE_FONT)
         label = _phase_label(payload.phase, payload.inning)
@@ -104,12 +107,14 @@ class LiveBaseballRenderer:
         self._base(canvas, 92, 16, 6, payload.bases.third)
         self._base(canvas, 108, 16, 6, payload.bases.first)
 
-    def _render_stack(self, canvas: Canvas, game: TeamGame, payload: LiveBaseballCardPayload) -> None:
-        # 64x64: the full layout compressed — two team rows up top, status + bases below.
-        canvas.fill_rect(0, 0, 3, 20, game.away.primary_color)
-        canvas.fill_rect(0, 22, 3, 20, game.home.primary_color)
-        canvas.text(5, 6, game.away.abbreviation, _WHITE, font=_SCORE_FONT)
-        canvas.text(5, 28, game.home.abbreviation, _WHITE, font=_SCORE_FONT)
+    def _render_stack(
+        self, canvas: Canvas, context: RenderContext, game: TeamGame, payload: LiveBaseballCardPayload
+    ) -> None:
+        # 64x64: the full layout compressed — two team rows up top (logo or bar), status + bases below.
+        away_x = draw_team_mark(canvas, context, game.away, row_top=0)
+        home_x = draw_team_mark(canvas, context, game.home, row_top=22)
+        canvas.text(away_x, 6, game.away.abbreviation, _WHITE, font=_SCORE_FONT)
+        canvas.text(home_x, 28, game.home.abbreviation, _WHITE, font=_SCORE_FONT)
         draw_right_aligned(canvas, 62, 6, str(payload.away_score), _WHITE, _SCORE_FONT)
         draw_right_aligned(canvas, 62, 28, str(payload.home_score), _WHITE, _SCORE_FONT)
         label = _phase_label(payload.phase, payload.inning)

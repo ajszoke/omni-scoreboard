@@ -25,9 +25,11 @@ from omni.providers.mlb_teams import MlbTeamRegistry
 from omni.renderers.canvas import RecordingCanvas
 from omni.renderers.context import RenderContext
 from omni.renderers.final import FinalRenderer
+from omni.renderers.image import LogoStore
 from omni.renderers.pillow_canvas import PillowCanvas
 
 GOLDEN_DIR = Path(__file__).resolve().parent / "golden"
+LOGOS = LogoStore()  # resolves the committed COL/LAD tiles for the logo + golden renders
 ALL_PROFILES = list(PanelProfile)
 SOURCE = SourceRef("mlb_statsapi", "https://statsapi.mlb.com")
 NOW = datetime(2026, 6, 17, 23, 30, tzinfo=timezone.utc)
@@ -65,10 +67,12 @@ def _card(
     return CardFactory().final(_game(), state, decisions=decisions, now=NOW)
 
 
-def _render(card: ScoreboardCard[FinalCardPayload], profile: PanelProfile) -> RecordingCanvas:
+def _render(
+    card: ScoreboardCard[FinalCardPayload], profile: PanelProfile, *, logos: LogoStore | None = None
+) -> RecordingCanvas:
     width, height = geometry_for(profile).size
     canvas = RecordingCanvas(width, height)
-    FinalRenderer().render(card, RenderContext(profile=profile, now=NOW), canvas)
+    FinalRenderer().render(card, RenderContext(profile=profile, now=NOW, logos=logos), canvas)
     return canvas
 
 
@@ -176,6 +180,20 @@ def test_final_card_has_a_finite_postgame_window() -> None:
     assert expires is not None and not card.timing.is_available(expires)  # then rotates out
 
 
+# --- team logos -------------------------------------------------------------------
+
+
+def test_logos_blit_full_colour_on_quad_and_stack_regardless_of_winner() -> None:
+    # The loser's label/score dim, but its logo tile stays full-colour (the tile carries no dim).
+    for profile in (PanelProfile.QUAD_128X64, PanelProfile.STACK_64X64):
+        keys = {i.key for i in _render(_card(away=3, home=5), profile, logos=LOGOS).images()}
+        assert keys == {AWAY.logo.key, HOME.logo.key}
+
+
+def test_single_profile_drops_the_logo_even_with_a_store() -> None:
+    assert _render(_card(), PanelProfile.SINGLE_64X32, logos=LOGOS).images() == []
+
+
 # --- goldens ----------------------------------------------------------------------
 
 
@@ -194,5 +212,5 @@ def _assert_matches_golden(image: Image.Image, name: str) -> None:
 def test_golden_image_per_profile(profile: PanelProfile) -> None:
     width, height = geometry_for(profile).size
     canvas = PillowCanvas(width, height)
-    FinalRenderer().render(_card(away=3, home=5), RenderContext(profile=profile, now=NOW), canvas)
+    FinalRenderer().render(_card(away=3, home=5), RenderContext(profile=profile, now=NOW, logos=LOGOS), canvas)
     _assert_matches_golden(canvas.image(), f"final_{profile.to_json_value()}.png")

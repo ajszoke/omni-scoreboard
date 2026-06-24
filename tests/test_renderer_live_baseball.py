@@ -35,10 +35,12 @@ from omni.panels.geometry import geometry_for
 from omni.renderers.base import Renderer
 from omni.renderers.canvas import RecordingCanvas
 from omni.renderers.context import RenderContext
+from omni.renderers.image import LogoStore
 from omni.renderers.live_baseball import LiveBaseballRenderer
 from omni.renderers.pillow_canvas import PillowCanvas
 
 GOLDEN_DIR = Path(__file__).resolve().parent / "golden"
+LOGOS = LogoStore()  # resolves the committed COL/LAD tiles for the logo + golden renders
 T = datetime(2026, 6, 17, 19, 5, tzinfo=timezone.utc)
 SOURCE = SourceRef("mlb_statsapi")
 ALL_PROFILES = (PanelProfile.QUAD_128X64, PanelProfile.STACK_64X64, PanelProfile.SINGLE_64X32)
@@ -56,7 +58,7 @@ def _team(team_id: str, name: str, abbr: str, color: RGBColor) -> Team:
         abbreviation=abbr,
         primary_color=color,
         secondary_color=RGBColor(196, 206, 212),
-        logo=LogoAsset(key=abbr.lower(), path=f"assets/{abbr.lower()}.png"),
+        logo=LogoAsset(key=abbr.lower(), path=f"assets/logos/mlb/{abbr.lower()}.png"),
     )
 
 
@@ -99,10 +101,12 @@ def make_card(
     )
 
 
-def _render(card: ScoreboardCard[LiveBaseballCardPayload], profile: PanelProfile) -> RecordingCanvas:
+def _render(
+    card: ScoreboardCard[LiveBaseballCardPayload], profile: PanelProfile, *, logos: LogoStore | None = None
+) -> RecordingCanvas:
     width, height = geometry_for(profile).size
     canvas = RecordingCanvas(width, height)
-    LiveBaseballRenderer().render(card, RenderContext(profile=profile, now=T), canvas)
+    LiveBaseballRenderer().render(card, RenderContext(profile=profile, now=T, logos=logos), canvas)
     return canvas
 
 
@@ -205,6 +209,26 @@ def test_draw_op_empty_bases_draw_dim_outlines() -> None:
     assert not any(r.w == 6 and r.h == 6 and r.color == WHITE for r in rects)  # nothing filled white
 
 
+def test_logos_replace_the_team_bar_on_quad_and_stack() -> None:
+    quad = _render(make_card(), PanelProfile.QUAD_128X64, logos=LOGOS)
+    assert {i.key for i in quad.images()} == {"col", "lad"}  # both tiles blitted
+    bars = {(r.x, r.y, r.w, r.h) for r in quad.rects()}
+    assert (0, 0, 4, 32) not in bars and (0, 32, 4, 32) not in bars  # the tile replaces the colour bar
+    texts = {(t.x, t.y, t.text) for t in quad.texts()}
+    assert {(24, 11, "COL"), (24, 43, "LAD")} <= texts  # abbreviations shift right to clear the tile
+
+    stack = _render(make_card(), PanelProfile.STACK_64X64, logos=LOGOS)
+    assert {i.key for i in stack.images()} == {"col", "lad"}
+    assert {(23, 6, "COL"), (23, 28, "LAD")} <= {(t.x, t.y, t.text) for t in stack.texts()}
+
+
+def test_single_profile_drops_the_logo_even_with_a_store() -> None:
+    # An explicit compromise: a 20px tile does not fit a 64x32 row, so the bar identifies the team.
+    canvas = _render(make_card(), PanelProfile.SINGLE_64X32, logos=LOGOS)
+    assert canvas.images() == []
+    assert {(0, 0, 2, 16), (0, 16, 2, 16)} <= {(r.x, r.y, r.w, r.h) for r in canvas.rects()}
+
+
 def _assert_matches_golden(image: Image.Image, name: str) -> None:
     path = GOLDEN_DIR / name
     if os.environ.get("OMNI_REGEN_GOLDEN"):
@@ -220,7 +244,7 @@ def _assert_matches_golden(image: Image.Image, name: str) -> None:
 def test_golden_image_per_profile(profile: PanelProfile) -> None:
     width, height = geometry_for(profile).size
     canvas = PillowCanvas(width, height)
-    LiveBaseballRenderer().render(make_card(), RenderContext(profile=profile, now=T), canvas)
+    LiveBaseballRenderer().render(make_card(), RenderContext(profile=profile, now=T, logos=LOGOS), canvas)
     _assert_matches_golden(canvas.image(), f"live_baseball_{profile.to_json_value()}.png")
 
 
@@ -230,5 +254,5 @@ def test_break_golden_image_per_profile(profile: PanelProfile) -> None:
     width, height = geometry_for(profile).size
     canvas = PillowCanvas(width, height)
     card = make_card(phase=InningPhase.MIDDLE, inning=7)
-    LiveBaseballRenderer().render(card, RenderContext(profile=profile, now=T), canvas)
+    LiveBaseballRenderer().render(card, RenderContext(profile=profile, now=T, logos=LOGOS), canvas)
     _assert_matches_golden(canvas.image(), f"live_baseball_break_{profile.to_json_value()}.png")

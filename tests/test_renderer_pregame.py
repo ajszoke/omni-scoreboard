@@ -21,11 +21,13 @@ from omni.domain.contest import TeamGame
 from omni.panels.geometry import geometry_for
 from omni.providers.mlb_teams import MlbTeamRegistry
 from omni.renderers.context import RenderContext
+from omni.renderers.image import LogoStore
 from omni.renderers.pregame import PregameRenderer, first_pitch_label
 from omni.renderers.canvas import RecordingCanvas
 from omni.renderers.pillow_canvas import PillowCanvas
 
 GOLDEN_DIR = Path(__file__).resolve().parent / "golden"
+LOGOS = LogoStore()  # resolves the committed COL/LAD tiles for the logo + golden renders
 ALL_PROFILES = list(PanelProfile)
 SOURCE = SourceRef("mlb_statsapi", "https://statsapi.mlb.com")
 _REG = MlbTeamRegistry.from_color_file()
@@ -46,11 +48,11 @@ def _game() -> TeamGame:
     )
 
 
-def _render(profile: PanelProfile, *, now: datetime = NOW) -> RecordingCanvas:
+def _render(profile: PanelProfile, *, now: datetime = NOW, logos: LogoStore | None = None) -> RecordingCanvas:
     card = CardFactory().pregame(_game(), now=now)
     width, height = geometry_for(profile).size
     canvas = RecordingCanvas(width, height)
-    PregameRenderer().render(card, RenderContext(profile=profile, now=now), canvas)
+    PregameRenderer().render(card, RenderContext(profile=profile, now=now, logos=logos), canvas)
     return canvas
 
 
@@ -141,6 +143,17 @@ def test_countdown_advances_with_render_clock_without_rebuilding() -> None:
     assert countdown_at(START - timedelta(seconds=30)) == "SOON"
 
 
+# --- team logos -------------------------------------------------------------------
+
+
+def test_logos_blit_on_quad_and_stack_but_not_single() -> None:
+    for profile in (PanelProfile.QUAD_128X64, PanelProfile.STACK_64X64):
+        keys = {i.key for i in _render(profile, logos=LOGOS).images()}
+        assert keys == {AWAY.logo.key, HOME.logo.key}  # both tiles blitted
+    # The 64x32 compromise: no room for a tile, so the matchup keeps the colour bar.
+    assert _render(PanelProfile.SINGLE_64X32, logos=LOGOS).images() == []
+
+
 # --- golden snapshots -------------------------------------------------------------
 
 
@@ -160,5 +173,5 @@ def test_golden_image_per_profile(profile: PanelProfile) -> None:
     width, height = geometry_for(profile).size
     canvas = PillowCanvas(width, height)
     card = CardFactory().pregame(_game(), now=NOW)
-    PregameRenderer().render(card, RenderContext(profile=profile, now=NOW), canvas)
+    PregameRenderer().render(card, RenderContext(profile=profile, now=NOW, logos=LOGOS), canvas)
     _assert_matches_golden(canvas.image(), f"pregame_{profile.to_json_value()}.png")

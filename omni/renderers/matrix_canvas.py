@@ -12,6 +12,7 @@ from typing import Protocol, runtime_checkable
 
 from omni.core.colors import RGBColor
 from omni.renderers.font import rasterize
+from omni.renderers.image import LogoImage
 
 __all__ = ["MatrixCanvas", "MatrixSurface"]
 
@@ -64,3 +65,8 @@ class MatrixCanvas:
             for rx, on in enumerate(row):
                 if on:
                     self.set_pixel(x + rx, y + ry, color)
+
+    def draw_image(self, x: int, y: int, image: LogoImage) -> None:
+        for ry in range(image.height):
+            for rx in range(image.width):
+                self.set_pixel(x + rx, y + ry, image.pixel(rx, ry))
