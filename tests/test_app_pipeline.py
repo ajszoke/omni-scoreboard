@@ -140,11 +140,13 @@ def test_shows_lag_old_state_not_the_current_spoiler() -> None:
 
 
 def test_a_non_carding_status_surfaces_nothing() -> None:
-    # A final game produces no card yet (the pipeline does not build final cards); the result
-    # is empty across every path — exercising the full PipelineResult shape in one assertion.
+    # A postponed game (neither upcoming, live, nor final) produces no card on any path —
+    # exercising the full PipelineResult shape in one assertion.
     pipe, queue = _setup()
-    res = pipe.refresh([_game("g2", GameStatus.FINAL)], now=T, fetch_feed=_Fetch())
-    assert res == PipelineResult(pregames=(), ingested=(), big_plays=(), no_hitters=(), held=(), removed=(), skipped=())
+    res = pipe.refresh([_game("g2", GameStatus.POSTPONED)], now=T, fetch_feed=_Fetch())
+    assert res == PipelineResult(
+        pregames=(), ingested=(), big_plays=(), no_hitters=(), finals=(), held=(), removed=(), skipped=()
+    )
     assert len(queue) == 0
 
 
@@ -158,15 +160,16 @@ def test_isolates_per_game_fetch_failures() -> None:
     assert len(res.ingested) == 1 and len(queue) == 1  # g2 still made it through
 
 
-def test_removes_card_when_a_game_leaves_the_live_set() -> None:
-    pipe, queue = _setup(lag=0)
+def test_live_card_is_swapped_for_the_final_when_the_game_ends() -> None:
+    pipe, queue = _setup(lag=0)  # no delay, so the final reveals as soon as the game is seen final
     fetch = _Fetch()
     fetch.set("g1", _state())
     pipe.refresh([_game("g1")], now=T, fetch_feed=fetch)
-    assert len(queue) == 1
+    assert len(queue) == 1  # the live card
     res = pipe.refresh([_game("g1", GameStatus.FINAL)], now=T + timedelta(seconds=10), fetch_feed=fetch)
-    assert res.removed == (_id("g1"),)
-    assert len(queue) == 0
+    assert res.removed == (_id("g1"),)  # the live card is gone...
+    assert [c.raw for c in res.finals] == ["g1:final"]  # ...replaced by the final card
+    assert len(queue) == 1
 
 
 def test_processes_multiple_live_games() -> None:
@@ -336,5 +339,98 @@ def test_no_hitter_card_dropped_when_its_game_leaves() -> None:
     fetch.set("g1", _state(inning=8, away_hits=0))
     pipe.refresh([_game("g1")], now=T, fetch_feed=fetch)
     assert _id("g1") in pipe._no_hitter_keys
-    pipe.refresh([_game("g1", GameStatus.FINAL)], now=T + timedelta(seconds=10), fetch_feed=fetch)
-    assert _id("g1") not in pipe._no_hitter_keys and len(queue) == 0  # cleaned up with the game
+    res = pipe.refresh([_game("g1", GameStatus.FINAL)], now=T + timedelta(seconds=10), fetch_feed=fetch)
+    assert _id("g1") not in pipe._no_hitter_keys  # the no-hitter card is cleaned up with the live set...
+    assert [c.raw for c in res.finals] == ["g1:final"] and len(queue) == 1  # ...and replaced by the final
+
+
+# --- final path -------------------------------------------------------------------
+
+
+def test_final_is_held_inside_the_post_game_delay() -> None:
+    # The final score is the ultimate spoiler, so a just-ended game shows nothing until the
+    # broadcast lag elapses from when we first saw it final.
+    pipe, queue = _setup(lag=30)
+    fetch = _Fetch()
+    fetch.set("g1", _state(away=2, home=5))
+    res = pipe.refresh([_game("g1", GameStatus.FINAL)], now=T, fetch_feed=fetch)
+    assert res.finals == () and res.held == (_id("g1"),)  # ended, but the result is still embargoed
+    assert len(queue) == 0
+
+
+def test_final_reveals_once_the_delay_elapses() -> None:
+    pipe, queue = _setup(lag=30)
+    fetch = _Fetch()
+    fetch.set("g1", _state(away=2, home=5))
+    pipe.refresh([_game("g1", GameStatus.FINAL)], now=T, fetch_feed=fetch)  # first seen final here
+    res = pipe.refresh([_game("g1", GameStatus.FINAL)], now=T + timedelta(seconds=30), fetch_feed=fetch)
+    assert [c.raw for c in res.finals] == ["g1:final"] and len(queue) == 1
+    card = queue.next_card(T + timedelta(seconds=30), QUAD)
+    assert card is not None and card.payload.away_score == 2 and card.payload.home_score == 5
+
+
+def test_final_is_anchored_to_first_sight_not_to_a_late_poll() -> None:
+    # A slow poll that first sees the game final well after it ended only ever delays the
+    # reveal further (anchor = first sight), so the result can never surface early.
+    pipe, queue = _setup(lag=30)
+    fetch = _Fetch()
+    fetch.set("g1", _state(away=1, home=0))
+    late = T + timedelta(seconds=600)  # we did not poll until ten minutes after the game ended
+    res = pipe.refresh([_game("g1", GameStatus.FINAL)], now=late, fetch_feed=fetch)
+    assert res.finals == () and res.held == (_id("g1"),)  # still embargoed: the clock starts at first sight
+    res2 = pipe.refresh([_game("g1", GameStatus.FINAL)], now=late + timedelta(seconds=30), fetch_feed=fetch)
+    assert [c.raw for c in res2.finals] == ["g1:final"]
+
+
+def test_final_card_is_built_exactly_once() -> None:
+    pipe, queue = _setup(lag=0)  # reveals on first sight
+    fetch = _Fetch()
+    fetch.set("g1", _state(away=2, home=5))
+    r1 = pipe.refresh([_game("g1", GameStatus.FINAL)], now=T, fetch_feed=fetch)
+    r2 = pipe.refresh([_game("g1", GameStatus.FINAL)], now=T + timedelta(seconds=10), fetch_feed=fetch)
+    assert [c.raw for c in r1.finals] == ["g1:final"]
+    assert r2.finals == ()  # already revealed — not rebuilt every tick
+    assert len(queue) == 1
+
+
+def test_final_not_refetched_once_revealed() -> None:
+    # Once the final is shown, a lingering final game is not fetched again (it would otherwise
+    # poll a finished game for its whole post-game window).
+    pipe, queue = _setup(lag=0)
+    fetch = _Fetch()
+    fetch.set("g1", _state(away=2, home=5))
+    pipe.refresh([_game("g1", GameStatus.FINAL)], now=T, fetch_feed=fetch)
+    fetch.fail.add("g1")  # any later fetch would raise
+    res = pipe.refresh([_game("g1", GameStatus.FINAL)], now=T + timedelta(seconds=10), fetch_feed=fetch)
+    assert res.skipped == ()  # never refetched, so the now-failing feed is never touched
+
+
+def test_final_isolates_a_fetch_failure() -> None:
+    pipe, queue = _setup(lag=0)
+    fetch = _Fetch()
+    fetch.fail.add("g1")
+    res = pipe.refresh([_game("g1", GameStatus.FINAL)], now=T, fetch_feed=fetch)
+    assert any("g1" in warning for warning in res.skipped)
+    assert res.finals == () and len(queue) == 0  # no card, but no crash
+
+
+def test_final_card_dropped_when_the_game_leaves_the_slate() -> None:
+    pipe, queue = _setup(lag=0)
+    fetch = _Fetch()
+    fetch.set("g1", _state(away=2, home=5))
+    pipe.refresh([_game("g1", GameStatus.FINAL)], now=T, fetch_feed=fetch)
+    assert _id("g1") in pipe._final_keys and len(queue) == 1
+    pipe.refresh([], now=T + timedelta(seconds=10), fetch_feed=fetch)  # g1 gone from the slate
+    assert _id("g1") not in pipe._final_keys and len(queue) == 0
+
+
+def test_pending_final_forgotten_if_the_game_resumes() -> None:
+    # A game that flickers final -> live (a resumed suspension) drops its pending reveal, so a
+    # stale captured score can never surface later.
+    pipe, queue = _setup(lag=30)
+    fetch = _Fetch()
+    fetch.set("g1", _state(away=2, home=5))
+    pipe.refresh([_game("g1", GameStatus.FINAL)], now=T, fetch_feed=fetch)  # pending reveal armed
+    assert _id("g1") in pipe._final_pending
+    pipe.refresh([_game("g1", GameStatus.LIVE)], now=T + timedelta(seconds=5), fetch_feed=fetch)
+    assert _id("g1") not in pipe._final_pending  # disarmed — it is live again

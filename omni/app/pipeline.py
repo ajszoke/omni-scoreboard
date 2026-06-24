@@ -17,15 +17,21 @@ and a way to fetch a game's live feed; the pipeline cards each game for its phas
     hitless past a minimum inning a `RECURRING` no-hitter card is surfaced and refreshed,
     and removed the moment a hit (in the *delayed* state) breaks the bid — so the bid is
     revealed and un-revealed only as the broadcast would show it.
+- **final** — once a game ends, a `final` card with the box score. The result is the
+  ultimate spoiler, so the reveal is held until the broadcast lag elapses from when we
+  first saw the game final (StatsAPI cannot report FINAL before the last out, so first
+  sight + lag never predates the broadcast's ending); the card is then ingested and
+  lives out a finite post-game window.
 
 A card is dropped when its game leaves that phase: the pregame card yields when the game
-goes live; the live and no-hitter cards are removed when the game is no longer live (a
-big play's own card lingers out its short window, then self-expires). So the queue
-mirrors the slate. Per-game fetch failures are isolated and reported, never fatal.
+goes live; the live and no-hitter cards are removed when the game is no longer live (a big
+play's own card lingers out its short window, then self-expires); the final card lingers
+its post-game window. So the queue mirrors the slate. Per-game fetch failures are isolated
+and reported, never fatal.
 
 Baseball-only for now (it calls `pregame` / `score_live_baseball` / `live_baseball` /
-`big_play` / `no_hitter`), mirroring the per-sport renderer split; a generic pipeline
-can dispatch later.
+`big_play` / `no_hitter` / `final`), mirroring the per-sport renderer split; a generic
+pipeline can dispatch later.
 """
 
 from __future__ import annotations
@@ -75,7 +81,8 @@ class PipelineResult:
     ingested: tuple[CardId, ...]  # live-state cards built/refreshed this pass
     big_plays: tuple[CardId, ...]  # big-play cards surfaced this pass (chronological)
     no_hitters: tuple[CardId, ...]  # active no-hitter cards surfaced/refreshed this pass
-    held: tuple[LeagueScopedId, ...]  # live games still buffering — no TV-safe state yet
+    finals: tuple[CardId, ...]  # final cards revealed this pass (their post-game delay elapsed)
+    held: tuple[LeagueScopedId, ...]  # games whose card is still inside the TV delay (live buffering / final reveal)
     removed: tuple[LeagueScopedId, ...]  # games no longer live whose card was dropped
     skipped: tuple[str, ...]  # per-game fetch failures (warnings)
 
@@ -100,18 +107,24 @@ class LiveBaseballPipeline:
         self._card_keys: dict[LeagueScopedId, str] = {}  # contest id -> its live card's dedupe key
         self._event_streams: dict[LeagueScopedId, DelayedEventStream[BaseballGameEvent]] = {}
         self._no_hitter_keys: dict[LeagueScopedId, str] = {}  # contest id -> its no-hitter card's key
+        # contest id -> the final state observed when we first saw it final (the reveal's delay anchor)
+        self._final_pending: dict[LeagueScopedId, Observation[BaseballGameState]] = {}
+        self._final_keys: dict[LeagueScopedId, str] = {}  # contest id -> its (revealed) final card's key
 
     def refresh(self, games: Iterable[TeamGame], *, now: datetime, fetch_feed: FeedFetcher) -> PipelineResult:
         """Observe the slate, surface each game's phase card into the queue, drop stale ones."""
         live = [game for game in games if game.status is GameStatus.LIVE]
         upcoming = [game for game in games if game.status in _UPCOMING_STATUSES]
+        final = [game for game in games if game.status is GameStatus.FINAL]
         live_ids = {game.id for game in live}
         upcoming_ids = {game.id for game in upcoming}
+        final_ids = {game.id for game in final}
 
         pregames: list[CardId] = []
         ingested: list[CardId] = []
         big_plays: list[CardId] = []
         no_hitters: list[CardId] = []
+        finals: list[CardId] = []
         held: list[LeagueScopedId] = []
         skipped: list[str] = []
 
@@ -147,13 +160,29 @@ class LiveBaseballPipeline:
             if no_hit is not None:
                 no_hitters.append(no_hit)
 
+        for game in final:
+            if game.id in self._final_keys:
+                continue  # already revealed — the card lives out its post-game window on its own
+            try:
+                feed = fetch_feed(game, now)
+            except ProviderError as exc:
+                skipped.append(f"{game.id.raw}: {exc}")
+                continue
+            revealed = self._surface_final(game, feed.state, now=now)
+            if revealed is not None:
+                finals.append(revealed)
+            else:
+                held.append(game.id)  # ended, but the result is still inside the post-game delay
+
         removed = self._drop_absent(live_ids)
         self._drop_stale_pregame(upcoming_ids)
+        self._drop_stale_finals(final_ids)
         return PipelineResult(
             pregames=tuple(pregames),
             ingested=tuple(ingested),
             big_plays=tuple(big_plays),
             no_hitters=tuple(no_hitters),
+            finals=tuple(finals),
             held=tuple(sorted(held, key=str)),
             removed=tuple(removed),
             skipped=tuple(skipped),
@@ -212,10 +241,41 @@ class LiveBaseballPipeline:
         self._no_hitter_keys[game.id] = card.dedupe_key.raw
         return card.id
 
+    def _surface_final(self, game: TeamGame, state: BaseballGameState, *, now: datetime) -> CardId | None:
+        """Reveal the final card once the result clears the post-game delay, or None while it is held.
+
+        The reveal is anchored to when we *first* saw the game final: that observation can
+        only be at or after the real last out, so anchor + lag never reveals the result
+        before the broadcast reaches its ending. Until then the game simply shows nothing
+        (its live card was dropped when it left the live set).
+        """
+        pending = self._final_pending.get(game.id)
+        if pending is None:
+            pending = Observation(subject_id=game.id, source=game.id.source, observed_at=now, value=state)
+            self._final_pending[game.id] = pending
+        if self._delay.eligible_at(pending) > now:
+            return None  # inside the post-game delay — revealing the result now would spoil the ending
+        card = self._factory.final(game, pending.value, now=now)
+        self._queue.ingest(card)
+        self._final_keys[game.id] = card.dedupe_key.raw
+        del self._final_pending[game.id]
+        return card.id
+
     def _drop_stale_pregame(self, upcoming_ids: set[LeagueScopedId]) -> None:
         """Drop the pregame card for any game no longer upcoming — it went live, ended, or left the slate."""
         for contest_id in set(self._pregame_keys) - upcoming_ids:
             self._queue.remove(self._pregame_keys.pop(contest_id))
+
+    def _drop_stale_finals(self, final_ids: set[LeagueScopedId]) -> None:
+        """Drop final tracking for any game no longer final — it left the slate (or, rarely, resumed).
+
+        A pending reveal is simply forgotten; a revealed card is pulled (it would otherwise
+        expire on its own post-game window, but its game is gone).
+        """
+        for contest_id in set(self._final_pending) - final_ids:
+            del self._final_pending[contest_id]
+        for contest_id in set(self._final_keys) - final_ids:
+            self._queue.remove(self._final_keys.pop(contest_id))
 
     def _drop_absent(self, live_ids: set[LeagueScopedId]) -> tuple[LeagueScopedId, ...]:
         """Drop cards/feeds/streams for games no longer live; return the carded ones.
