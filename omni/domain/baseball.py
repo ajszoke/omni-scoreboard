@@ -16,6 +16,7 @@ __all__ = [
     "InningPhase",
     "PitchType",
     "PitchingDecisions",
+    "WinProbability",
     "BaseballCount",
     "BaseballBaseState",
     "BaseballGameState",
@@ -131,6 +132,39 @@ class PitchingDecisions:
     def __post_init__(self) -> None:
         if not self.winner or not self.loser:
             raise ValueError("a pitching decision needs both a winner and a loser")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class WinProbability:
+    """Live in-game win probability for the two sides, as percentages.
+
+    Sourced from the feed (MLB StatsAPI `game_contextMetrics`); the two normally sum to
+    ~100. The *absence* of this object means no probability is available yet (a game not
+    started, or a feed without the block) — never a 50/50 placeholder. `favored` is the
+    leading side, or None at an exact tie. General to any home/away contest, not baseball-
+    specific, but lives here with the other live-game values the MLB feed produces.
+    """
+
+    home: float
+    away: float
+
+    def __post_init__(self) -> None:
+        for pct in (self.home, self.away):
+            if not 0.0 <= pct <= 100.0:
+                raise ValueError("win probability percentages must be in 0..100")
+
+    @property
+    def favored(self) -> HomeAway | None:
+        """The leading side, or None when the two are exactly even."""
+        if self.home > self.away:
+            return HomeAway.HOME
+        if self.away > self.home:
+            return HomeAway.AWAY
+        return None
+
+    def percent_for(self, side: HomeAway) -> float:
+        """This side's win-probability percentage."""
+        return self.home if side is HomeAway.HOME else self.away
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

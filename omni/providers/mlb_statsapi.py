@@ -25,6 +25,7 @@ from omni.domain.baseball import (
     InningPhase,
     PitchingDecisions,
     PitchType,
+    WinProbability,
 )
 from omni.domain.contest import TeamGame
 from omni.events.base import EventImportance
@@ -37,12 +38,14 @@ from omni.events.baseball import (
 from omni.providers.base import ProviderError, ProviderUpdate
 from omni.providers.mlb_teams import MlbTeamRegistry
 
-__all__ = ["MlbStatsApiProvider", "ScheduleFetcher", "GameFetcher", "map_game_status"]
+__all__ = ["MlbStatsApiProvider", "ScheduleFetcher", "GameFetcher", "ContextMetricsFetcher", "map_game_status"]
 
 # (game_date, sport_ids) -> the list of flat schedule rows.
 ScheduleFetcher = Callable[[date, str], list[dict[str, Any]]]
 # game_pk -> the raw nested game feed (statsapi.get("game", ...)).
 GameFetcher = Callable[[Any], dict[str, Any]]
+# game_pk -> the raw game_contextMetrics payload (carries win probability).
+ContextMetricsFetcher = Callable[[Any], dict[str, Any]]
 
 # StatsAPI `inningState` -> our typed phase; the breaks (Middle/End) are kept distinct.
 _INNING_STATE_PHASE: dict[str, InningPhase] = {
@@ -153,6 +156,7 @@ class MlbStatsApiProvider:
         fetch_schedule: ScheduleFetcher | None = None,
         *,
         fetch_game: GameFetcher | None = None,
+        fetch_context_metrics: ContextMetricsFetcher | None = None,
         source: SourceRef | None = None,
         sport_ids: str = "1,51",  # 1 = MLB, 51 = WBC (mirrors upstream)
         schedule_timezone: ZoneInfo | None = None,
@@ -160,6 +164,9 @@ class MlbStatsApiProvider:
         self._registry = registry
         self._fetch = fetch_schedule if fetch_schedule is not None else _default_fetch_schedule
         self._fetch_game = fetch_game if fetch_game is not None else _default_fetch_game
+        self._fetch_context_metrics = (
+            fetch_context_metrics if fetch_context_metrics is not None else _default_fetch_context_metrics
+        )
         self.source = source if source is not None else _SOURCE
         self._sport_ids = sport_ids
         self._tz = schedule_timezone if schedule_timezone is not None else _DEFAULT_SCHEDULE_TZ
@@ -202,6 +209,20 @@ class MlbStatsApiProvider:
         state = _parse_game_state(raw)
         events = _parse_game_events(raw, contest=game, source=self.source, observed_at=now)
         return LiveBaseballFeed(state=state, events=events, decisions=_parse_decisions(raw))
+
+    def fetch_win_probability(self, game: TeamGame) -> WinProbability | None:
+        """Fetch one game's live win probability, or None when none is available.
+
+        A separate, cheap `game_contextMetrics` call — distinct from the feed fetch so the
+        caller can poll it on its own (slower) cadence and only for games it is showing.
+        Returns None when the feed carries no probability (a game not yet started, or a
+        payload without the fields); raises `ProviderError` only if the fetch itself fails.
+        """
+        try:
+            raw = self._fetch_context_metrics(game.id.raw)
+        except Exception as exc:
+            raise ProviderError(f"MLB win-probability fetch failed for {game.id.raw}: {exc}") from exc
+        return _parse_win_probability(raw)
 
     def _parse_game(self, row: dict[str, Any]) -> TeamGame:
         try:
@@ -429,6 +450,24 @@ def _parse_decisions(raw: dict[str, Any]) -> PitchingDecisions | None:
     return PitchingDecisions(winner=winner, loser=loser, save=_pitcher_name(decisions.get("save")))
 
 
+def _parse_win_probability(raw: dict[str, Any]) -> WinProbability | None:
+    """Parse `homeWinProbability`/`awayWinProbability` (0..100) into a typed value, or None.
+
+    Returns None unless both are present and numeric (a game not yet started, or a payload
+    without the block). `bool` is excluded — it is an `int` subclass and never a real percentage.
+    """
+    home = raw.get("homeWinProbability")
+    away = raw.get("awayWinProbability")
+    if isinstance(home, bool) or isinstance(away, bool):
+        return None
+    if not isinstance(home, (int, float)) or not isinstance(away, (int, float)):
+        return None
+    try:
+        return WinProbability(home=float(home), away=float(away))
+    except ValueError:
+        return None  # out-of-range percentages from a malformed payload
+
+
 def _default_fetch_schedule(game_date: date, sport_ids: str) -> list[dict[str, Any]]:  # pragma: no cover - real network
     # Lazy import keeps the network library out of `omni` import time and tests.
     import statsapi
@@ -452,4 +491,11 @@ def _default_fetch_game(game_pk: Any) -> dict[str, Any]:  # pragma: no cover - r
     import statsapi
 
     result: dict[str, Any] = statsapi.get("game", {"gamePk": game_pk, "fields": _GAME_FIELDS})
+    return result
+
+
+def _default_fetch_context_metrics(game_pk: Any) -> dict[str, Any]:  # pragma: no cover - real network
+    import statsapi
+
+    result: dict[str, Any] = statsapi.get("game_contextMetrics", {"gamePk": game_pk})
     return result
