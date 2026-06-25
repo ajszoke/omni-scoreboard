@@ -96,6 +96,39 @@ def test_baseball_game_event_is_typed_and_derives_league() -> None:
     assert event.importance.combined_score() > 0
 
 
+def _event(
+    *,
+    event_id: LeagueScopedId | None = None,
+    source_time: datetime = T,
+    observed_at: datetime = T,
+) -> BaseballGameEvent:
+    return BaseballGameEvent(
+        id=event_id if event_id is not None else LeagueScopedId(League.MLB, SOURCE, "e1"),
+        contest=CONTEST,
+        event_type=BaseballGameEventType.HOME_RUN,
+        source=SOURCE,
+        source_time=source_time,
+        observed_at=observed_at,
+        importance=make_importance(),
+        payload=BaseballPlayPayload(inning=9, phase=InningPhase.TOP, description="homer"),
+    )
+
+
+def test_event_rejects_naive_timestamps() -> None:
+    # The delay math mixes source_time/observed_at, so a naive one must fail at construction.
+    naive = datetime(2026, 6, 17, 19, 5)
+    with pytest.raises(ValueError, match="source_time must be timezone-aware"):
+        _event(source_time=naive)
+    with pytest.raises(ValueError, match="observed_at must be timezone-aware"):
+        _event(observed_at=naive)
+
+
+def test_event_rejects_an_empty_lineage_id() -> None:
+    # The id is the dedupe/replay key; an empty one would collide with another event's.
+    with pytest.raises(ValueError, match="non-empty id"):
+        _event(event_id=LeagueScopedId(League.MLB, SOURCE, ""))
+
+
 def test_importance_accepts_inclusive_0_and_1_boundaries() -> None:
     imp = make_importance(leverage=0.0, rarity=1.0, favorite_relevance=0.0)
     assert imp.leverage == 0.0 and imp.rarity == 1.0
