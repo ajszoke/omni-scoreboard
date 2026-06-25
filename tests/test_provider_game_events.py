@@ -11,7 +11,7 @@ import pytest
 
 from omni.core.enum import DisplayPriority, GameStatus, League
 from omni.core.ids import LeagueScopedId, SourceRef
-from omni.domain.baseball import InningPhase, PitchType
+from omni.domain.baseball import BaseballScoringImpact, InningPhase, PitchType, scoring_impact
 from omni.domain.contest import TeamGame
 from omni.events.baseball import BaseballGameEventType
 from omni.providers.mlb_statsapi import (
@@ -138,7 +138,7 @@ def test_importance_ranks_home_run_above_single() -> None:
     single = events[BaseballGameEventType.SINGLE].importance
     assert hr.priority is DisplayPriority.ALERT
     assert hr.combined_score() > single.combined_score()
-    assert hr.reasons == ("home_run",)  # explainable, not a bare float
+    assert hr.reasons == ("home_run", "go_ahead")  # type + scoring context, not a bare float
 
 
 def test_fetch_live_feed_returns_state_and_events_together() -> None:
@@ -260,5 +260,43 @@ def test_safe_count_handles_missing_and_bad() -> None:
 
 def test_event_importance_default_for_untabled_type() -> None:
     # A mapped type always has a table entry; an off-table type takes the modest default.
-    imp = _event_importance(BaseballGameEventType.PITCH)
+    imp = _event_importance(BaseballGameEventType.PITCH, BaseballScoringImpact(rbi=0))
     assert imp.priority is DisplayPriority.NORMAL and imp.rarity == pytest.approx(0.1)
+
+
+def test_scoring_context_lifts_a_walk_off_single_to_alert() -> None:
+    # The headline H3 fix: a walk-off single is intrinsically NORMAL but, in context, an ALERT
+    # that clears the big-play bar — so it flashes like the dramatic play it is.
+    walk_off = scoring_impact(phase=InningPhase.BOTTOM, inning=9, rbi=1, away_score=3, home_score=4)
+    imp = _event_importance(BaseballGameEventType.SINGLE, walk_off)
+    assert imp.priority is DisplayPriority.ALERT and "walk_off" in imp.reasons and imp.leverage == 1.0
+
+
+def test_scoring_context_makes_a_go_ahead_single_eligible() -> None:
+    # A go-ahead RBI single (intrinsically NORMAL) reaches the HIGH_LEVERAGE big-play floor.
+    go_ahead = scoring_impact(phase=InningPhase.TOP, inning=7, rbi=1, away_score=4, home_score=3)
+    imp = _event_importance(BaseballGameEventType.SINGLE, go_ahead)
+    assert imp.priority is DisplayPriority.HIGH_LEVERAGE and "go_ahead" in imp.reasons
+
+
+def test_a_non_scoring_single_stays_normal() -> None:
+    # No RBI, no context: a routine single informs the live card but never takes over.
+    routine = scoring_impact(phase=InningPhase.TOP, inning=2, rbi=0, away_score=0, home_score=0)
+    imp = _event_importance(BaseballGameEventType.SINGLE, routine)
+    assert imp.priority is DisplayPriority.NORMAL and imp.reasons == ("single",)
+
+
+def test_tying_and_plain_scoring_runs_clear_the_big_play_floor() -> None:
+    tying = scoring_impact(phase=InningPhase.TOP, inning=8, rbi=1, away_score=3, home_score=3)
+    tying_imp = _event_importance(BaseballGameEventType.SINGLE, tying)
+    assert tying_imp.priority is DisplayPriority.HIGH_LEVERAGE and "tying" in tying_imp.reasons
+    plain = scoring_impact(phase=InningPhase.BOTTOM, inning=6, rbi=1, away_score=1, home_score=6)
+    plain_imp = _event_importance(BaseballGameEventType.SINGLE, plain)
+    assert plain_imp.priority is DisplayPriority.HIGH_LEVERAGE and "scored" in plain_imp.reasons
+
+
+def test_parsed_play_carries_its_scoring_impact() -> None:
+    # The impact rides on the payload (for a card/badge later), computed once at parse.
+    hr = next(e for e in _events() if e.event_type is BaseballGameEventType.HOME_RUN)
+    impact = hr.payload.scoring_impact
+    assert impact is not None and impact.rbi == 2 and impact.go_ahead and not impact.walk_off

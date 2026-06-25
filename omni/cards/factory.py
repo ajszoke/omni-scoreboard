@@ -55,9 +55,6 @@ _FINAL_COMPROMISE = (
 # A big play flashes on all three; the small panel drops the play description.
 _BIG_PLAY_PROFILES = frozenset({PanelProfile.SINGLE_64X32, PanelProfile.STACK_64X64, PanelProfile.QUAD_128X64})
 _BIG_PLAY_COMPROMISE = ("single_64x32: headline + score only — the play description is dropped (no room).",)
-# A scoring play takes the screen with a bounded BURST, then yields (never permanent).
-_BIG_PLAY_ATTENTION = AttentionPolicy(mode=AttentionMode.BURST, takeover_for=DurationSeconds(8))
-_BIG_PLAY_PRIORITY = CardPriority(band=DisplayPriority.ALERT, score=0.0)
 # A no-hitter renders natively on all three; the small panel drops the "through N" inning.
 _NO_HITTER_PROFILES = frozenset({PanelProfile.SINGLE_64X32, PanelProfile.STACK_64X64, PanelProfile.QUAD_128X64})
 _NO_HITTER_COMPROMISE = ("single_64x32: headline + team only — the 'through N' inning is dropped (no room).",)
@@ -74,6 +71,26 @@ def _no_hitter_priority(perfect: bool) -> CardPriority:
         score=1.0 if perfect else 0.0,
         reasons=("perfect game",) if perfect else ("no-hitter",),
     )
+
+
+def _big_play_priority(event: BaseballGameEvent) -> CardPriority:
+    """The big-play card's priority from the event's *contextual* importance.
+
+    Carrying the event's band/leverage/reasons (which now reflect what the play did —
+    walk-off, go-ahead, tying — not just its bare type) is what lets a walk-off single
+    outrank a routine RBI in the queue instead of every scoring play looking identical.
+    """
+    return CardPriority(
+        band=event.importance.priority,
+        score=event.importance.leverage,
+        reasons=event.importance.reasons,
+    )
+
+
+def _big_play_attention(band: DisplayPriority) -> AttentionPolicy:
+    """A bounded BURST takeover; a bigger play (an ALERT walk-off / home run) holds a touch longer."""
+    takeover = DurationSeconds(12) if band >= DisplayPriority.ALERT else DurationSeconds(8)
+    return AttentionPolicy(mode=AttentionMode.BURST, takeover_for=takeover)
 
 
 @dataclass(frozen=True, slots=True)
@@ -218,6 +235,7 @@ class CardFactory:
             away_score=away_score,
             home_score=home_score,
         )
+        resolved_priority = priority if priority is not None else _big_play_priority(event)
         key = f"{game.id.raw}:bigplay:{event.id.raw}"
         return ScoreboardCard(
             id=CardId(key),
@@ -229,11 +247,11 @@ class CardFactory:
                 max_display=self.big_play_max_display,
                 expires_at=now + self.big_play_window.as_timedelta(),
             ),
-            priority=priority if priority is not None else _BIG_PLAY_PRIORITY,
+            priority=resolved_priority,
             layout_support=LayoutSupport(profiles=_BIG_PLAY_PROFILES, compromise_notes=_BIG_PLAY_COMPROMISE),
             dedupe_key=DedupeKey(key),
             source_event_ids=(event.id,),
-            attention=_BIG_PLAY_ATTENTION,
+            attention=_big_play_attention(resolved_priority.band),
             payload=payload,
         )
 

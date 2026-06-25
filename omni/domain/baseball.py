@@ -19,8 +19,10 @@ __all__ = [
     "WinProbability",
     "BaseballCount",
     "BaseballBaseState",
+    "BaseballScoringImpact",
     "BaseballGameState",
     "no_hitter_side",
+    "scoring_impact",
 ]
 
 
@@ -168,6 +170,37 @@ class WinProbability:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class BaseballScoringImpact:
+    """How a play changed the score and the game's competitive state.
+
+    Lets a play's drama be judged by what it *did* — drove in the go-ahead run —
+    rather than its bare type (a single). `rbi` is the runs the batter is credited
+    with: the free, reliable signal on a mapped play. A rare run without an RBI (a
+    batter reaching on an error) is not counted as scoring here.
+    """
+
+    rbi: int
+    tying: bool = False  # the play levelled the score
+    go_ahead: bool = False  # the play put the batting side ahead
+    walk_off: bool = False  # a go-ahead run that ended the game (home, bottom of the 9th or later)
+
+    def __post_init__(self) -> None:
+        if self.rbi < 0:
+            raise ValueError("rbi cannot be negative")
+        if self.walk_off and not self.go_ahead:
+            raise ValueError("a walk-off is a kind of go-ahead")
+        if (self.go_ahead or self.tying) and not self.scored:
+            raise ValueError("tying/go-ahead require a run to have scored")
+        if self.go_ahead and self.tying:
+            raise ValueError("a play cannot both tie the game and take the lead")
+
+    @property
+    def scored(self) -> bool:
+        """Whether the play drove in at least one run."""
+        return self.rbi > 0
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class BaseballCount:
     """Balls/strikes/outs at the moment of a play."""
 
@@ -239,3 +272,30 @@ def no_hitter_side(state: BaseballGameState, *, min_inning: int) -> HomeAway | N
     if state.home_hits == 0:
         return HomeAway.AWAY
     return None
+
+
+_WALK_OFF_MIN_INNING = 9  # a game cannot end on a home run before the bottom of the 9th
+
+
+def scoring_impact(
+    *, phase: InningPhase, inning: int, rbi: int, away_score: int | None, home_score: int | None
+) -> BaseballScoringImpact:
+    """Classify a play's scoring impact from its RBI and the resulting score.
+
+    The impact is empty unless the play drove in a run (`rbi > 0`) and the resulting
+    score is known. The batting side is read from the half (`BOTTOM` -> home bats);
+    `tying`/`go_ahead`/`walk_off` follow from the resulting lead and the runs the play is
+    credited with. A walk-off is the home side taking the lead in the bottom of the 9th
+    or later — the run that ends the game.
+    """
+    if rbi <= 0 or away_score is None or home_score is None:
+        return BaseballScoringImpact(rbi=max(rbi, 0))
+    batting_home = phase is InningPhase.BOTTOM
+    lead = (home_score - away_score) if batting_home else (away_score - home_score)
+    go_ahead = 0 < lead <= rbi  # the play moved the batting side from not-ahead to ahead
+    return BaseballScoringImpact(
+        rbi=rbi,
+        tying=away_score == home_score,
+        go_ahead=go_ahead,
+        walk_off=go_ahead and batting_home and inning >= _WALK_OFF_MIN_INNING,
+    )

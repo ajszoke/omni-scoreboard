@@ -22,10 +22,12 @@ from omni.domain.baseball import (
     BaseballBaseState,
     BaseballCount,
     BaseballGameState,
+    BaseballScoringImpact,
     InningPhase,
     PitchingDecisions,
     PitchType,
     WinProbability,
+    scoring_impact,
 )
 from omni.domain.contest import TeamGame
 from omni.events.base import EventImportance
@@ -341,16 +343,45 @@ def _safe_count(count: Any) -> BaseballCount | None:
         return None
 
 
-def _event_importance(event_type: BaseballGameEventType) -> EventImportance:
-    """Intrinsic importance of a play from its type alone (context added later)."""
+def _scoring_priority(impact: BaseballScoringImpact) -> tuple[DisplayPriority, float, str] | None:
+    """The band, leverage, and reason a scoring play earns from context, or None if it did not score.
+
+    A scoring play is at least big-play-eligible (HIGH_LEVERAGE) regardless of its bare type;
+    a walk-off is an outright ALERT. Leverage grades the drama within that for ranking.
+    """
+    if not impact.scored:
+        return None
+    if impact.walk_off:
+        return DisplayPriority.ALERT, 1.0, "walk_off"
+    if impact.go_ahead:
+        return DisplayPriority.HIGH_LEVERAGE, 0.8, "go_ahead"
+    if impact.tying:
+        return DisplayPriority.HIGH_LEVERAGE, 0.7, "tying"
+    return DisplayPriority.HIGH_LEVERAGE, 0.4, "scored"
+
+
+def _event_importance(event_type: BaseballGameEventType, impact: BaseballScoringImpact) -> EventImportance:
+    """Importance of a play from its type *and* its scoring context.
+
+    The intrinsic type sets a base band + rarity (a home run is rare on its own); the scoring
+    context can only *raise* the band — so a walk-off single (intrinsically routine) clears the
+    big-play bar, while a non-scoring single stays NORMAL and merely informs the live card.
+    """
     band, rarity = _EVENT_BAND_RARITY.get(event_type, (DisplayPriority.NORMAL, 0.1))
+    leverage = 0.0
+    reasons: tuple[str, ...] = (event_type.value,)
+    scoring = _scoring_priority(impact)
+    if scoring is not None:
+        scoring_band, leverage, reason = scoring
+        band = max(band, scoring_band)
+        reasons = reasons + (reason,)
     return EventImportance(
         priority=band,
         urgency=_BAND_URGENCY.get(band, UpdateUrgency.NORMAL),
-        leverage=0.0,
+        leverage=leverage,
         rarity=rarity,
         favorite_relevance=0.0,
-        reasons=(event_type.value,),
+        reasons=reasons,
     )
 
 
@@ -391,15 +422,22 @@ def _parse_one_play(
         return None  # no stable lineage key — cannot dedupe across polls; skip
     # Anchor the TV-delay to when the play happened; fall back to receipt time.
     source_time = _parse_iso(about.get("endTime")) or _parse_iso(about.get("startTime")) or observed_at
+    inning = int(about.get("inning") or 1)
+    phase = _HALF_INNING_PHASE.get(str(about.get("halfInning", "")), InningPhase.TOP)
+    rbi = int(result.get("rbi") or 0)
+    away_score = _safe_int(result.get("awayScore"))
+    home_score = _safe_int(result.get("homeScore"))
+    impact = scoring_impact(phase=phase, inning=inning, rbi=rbi, away_score=away_score, home_score=home_score)
     payload = BaseballPlayPayload(
-        inning=int(about.get("inning") or 1),
-        phase=_HALF_INNING_PHASE.get(str(about.get("halfInning", "")), InningPhase.TOP),
+        inning=inning,
+        phase=phase,
         description=str(result.get("description", "")),
         count=_safe_count(play.get("count")),
-        rbi=int(result.get("rbi") or 0),
-        away_score=_safe_int(result.get("awayScore")),
-        home_score=_safe_int(result.get("homeScore")),
+        rbi=rbi,
+        away_score=away_score,
+        home_score=home_score,
         pitch_type=_decisive_pitch_type(play),
+        scoring_impact=impact,
     )
     return BaseballGameEvent(
         id=LeagueScopedId(contest.league, source, f"{contest.id.raw}:ab:{at_bat_index}"),
@@ -408,7 +446,7 @@ def _parse_one_play(
         source=source,
         source_time=source_time,
         observed_at=observed_at,
-        importance=_event_importance(event_type),
+        importance=_event_importance(event_type, impact),
         payload=payload,
     )
 
