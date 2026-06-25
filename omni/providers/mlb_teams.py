@@ -21,6 +21,7 @@ from omni.core.enum import League
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.domain.base import LogoAsset
 from omni.domain.teams import BaseballTeam
+from omni.providers.mlb_palette import LOGO_ALT_COLOR, LOGO_BASE_COLOR
 
 __all__ = ["MlbTeamRegistry"]
 
@@ -96,7 +97,16 @@ class MlbTeamRegistry:
                 abbreviation=abbr,
                 primary_color=primary,
                 secondary_color=secondary,
-                logo=LogoAsset(key=abbr.lower(), path=f"assets/logos/mlb/{abbr.lower()}.png"),
+                logo=LogoAsset(
+                    key=abbr.lower(),
+                    path=f"assets/logos/mlb/{abbr.lower()}.png",
+                    preferred_background=LOGO_BASE_COLOR.get(team_id),
+                ),
+                logo_alt=LogoAsset(
+                    key=f"{abbr.lower()}-alt",
+                    path=f"assets/logos/mlb/{abbr.lower()}-alt.png",
+                    preferred_background=LOGO_ALT_COLOR.get(team_id),
+                ),
             )
         return cls(teams)
 

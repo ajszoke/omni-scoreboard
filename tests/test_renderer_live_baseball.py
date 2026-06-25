@@ -32,6 +32,7 @@ from omni.domain.contest import Contest, TeamGame
 from omni.domain.teams import Team
 from omni.domain.baseball import BaseballBaseState, BaseballCount, InningPhase
 from omni.panels.geometry import geometry_for
+from omni.providers.mlb_teams import MlbTeamRegistry
 from omni.renderers.base import Renderer
 from omni.renderers.canvas import RecordingCanvas
 from omni.renderers.context import RenderContext
@@ -99,6 +100,22 @@ def make_card(
         dedupe_key=DedupeKey("g1:live"),
         payload=payload,
     )
+
+
+REGISTRY = MlbTeamRegistry.from_color_file()  # real teams carry the base/alt backgrounds the clash reads
+
+
+def _clash_card() -> ScoreboardCard[LiveBaseballCardPayload]:
+    # NYY @ DET: both render on an identical cap navy, so the home side must flip to its alt.
+    game = TeamGame(
+        id=LeagueScopedId(League.MLB, SOURCE, "g2"),
+        league=League.MLB,
+        status=GameStatus.LIVE,
+        scheduled_start=T,
+        away=REGISTRY.resolve(147),  # Yankees
+        home=REGISTRY.resolve(116),  # Tigers
+    )
+    return dataclasses.replace(make_card(away_score=4, home_score=2, inning=6), contest=game)
 
 
 def _render(
@@ -246,6 +263,22 @@ def test_golden_image_per_profile(profile: PanelProfile) -> None:
     canvas = PillowCanvas(width, height)
     LiveBaseballRenderer().render(make_card(), RenderContext(profile=profile, now=T, logos=LOGOS), canvas)
     _assert_matches_golden(canvas.image(), f"live_baseball_{profile.to_json_value()}.png")
+
+
+def test_clash_blits_the_home_alt_tile() -> None:
+    # The renderer routes both marks through the clash resolver: NYY keeps its base tile,
+    # DET flips to its alt so the two navy caps don't merge on the panel.
+    canvas = _render(_clash_card(), PanelProfile.QUAD_128X64, logos=LOGOS)
+    assert {i.key for i in canvas.images()} == {"nyy", "det-alt"}
+
+
+def test_clash_golden_image_quad() -> None:
+    width, height = geometry_for(PanelProfile.QUAD_128X64).size
+    canvas = PillowCanvas(width, height)
+    LiveBaseballRenderer().render(
+        _clash_card(), RenderContext(profile=PanelProfile.QUAD_128X64, now=T, logos=LOGOS), canvas
+    )
+    _assert_matches_golden(canvas.image(), "live_baseball_clash_quad_128x64.png")
 
 
 @pytest.mark.parametrize("profile", ALL_PROFILES)

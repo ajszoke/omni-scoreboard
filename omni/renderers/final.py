@@ -25,7 +25,7 @@ from omni.core.enum import HomeAway, PanelProfile
 from omni.domain.contest import TeamGame
 from omni.renderers.canvas import Canvas
 from omni.renderers.context import RenderContext
-from omni.renderers.team_row import draw_team_mark
+from omni.renderers.team_row import draw_matchup_marks
 from omni.renderers.text import draw_centered, draw_right_aligned
 
 __all__ = ["FinalRenderer"]
@@ -94,8 +94,7 @@ class FinalRenderer:
         home: RGBColor,
     ) -> None:
         # The team mark (logo or bar) is full-colour; only the label/score carry the winner/loser dim.
-        away_x = draw_team_mark(canvas, context, game.away, row_top=0)
-        home_x = draw_team_mark(canvas, context, game.home, row_top=32)
+        away_x, home_x = draw_matchup_marks(canvas, context, game.away, game.home, away_top=0, home_top=32)
         canvas.text(away_x, 11, game.away.abbreviation, away, font=_SCORE_FONT)
         canvas.text(home_x, 43, game.home.abbreviation, home, font=_SCORE_FONT)
         draw_right_aligned(canvas, 58, 11, str(payload.away_score), away, _SCORE_FONT)
@@ -117,8 +116,7 @@ class FinalRenderer:
         away: RGBColor,
         home: RGBColor,
     ) -> None:
-        away_x = draw_team_mark(canvas, context, game.away, row_top=0)
-        home_x = draw_team_mark(canvas, context, game.home, row_top=22)
+        away_x, home_x = draw_matchup_marks(canvas, context, game.away, game.home, away_top=0, home_top=22)
         canvas.text(away_x, 6, game.away.abbreviation, away, font=_SCORE_FONT)
         canvas.text(home_x, 28, game.home.abbreviation, home, font=_SCORE_FONT)
         draw_right_aligned(canvas, 62, 6, str(payload.away_score), away, _SCORE_FONT)

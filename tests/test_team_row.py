@@ -8,14 +8,16 @@ from pathlib import Path
 import pytest
 
 from omni.core.enum import PanelProfile
+from omni.domain.logos import LogoVariant
 from omni.providers.mlb_teams import MlbTeamRegistry
 from omni.renderers.canvas import RecordingCanvas
 from omni.renderers.context import RenderContext
 from omni.renderers.image import LogoStore
-from omni.renderers.team_row import draw_team_mark
+from omni.renderers.team_row import draw_matchup_marks, draw_team_mark
 
 NOW = datetime(2026, 6, 17, 23, 30, tzinfo=timezone.utc)
-COL = MlbTeamRegistry.from_color_file().resolve(115)  # tile: assets/logos/mlb/col.png
+REG = MlbTeamRegistry.from_color_file()
+COL = REG.resolve(115)  # tile: assets/logos/mlb/col.png
 
 
 def _ctx(profile: PanelProfile, logos: LogoStore | None) -> RenderContext:
@@ -65,6 +67,30 @@ def test_missing_tile_falls_back_to_the_bar(tmp_path: Path) -> None:
     canvas = RecordingCanvas(128, 64)
     returned = draw_team_mark(canvas, _ctx(PanelProfile.QUAD_128X64, LogoStore(root=tmp_path)), COL, row_top=0)
     assert returned == 8 and canvas.rects() and not canvas.images()
+
+
+def test_alt_variant_blits_the_alt_tile() -> None:
+    canvas = RecordingCanvas(128, 64)
+    draw_team_mark(canvas, _ctx(PanelProfile.QUAD_128X64, LogoStore()), COL, row_top=0, variant=LogoVariant.ALT)
+    assert canvas.images()[0].key == "col-alt"  # the alt request resolves the -alt tile
+
+
+def test_matchup_flips_the_clashing_side() -> None:
+    # NYY and DET share an identical cap navy, so the home side renders its alt tile.
+    canvas = RecordingCanvas(128, 64)
+    nyy, det = REG.resolve(147), REG.resolve(116)
+    away_x, home_x = draw_matchup_marks(
+        canvas, _ctx(PanelProfile.QUAD_128X64, LogoStore()), nyy, det, away_top=0, home_top=32
+    )
+    assert {i.key for i in canvas.images()} == {"nyy", "det-alt"}  # home flipped, away did not
+    assert away_x == home_x == 24  # both rows still place the label after a tile
+
+
+def test_matchup_keeps_distinct_bases_on_their_base_tiles() -> None:
+    canvas = RecordingCanvas(128, 64)
+    col, lad = REG.resolve(115), REG.resolve(119)  # black vs Dodger blue: no clash
+    draw_matchup_marks(canvas, _ctx(PanelProfile.QUAD_128X64, LogoStore()), col, lad, away_top=0, home_top=32)
+    assert {i.key for i in canvas.images()} == {"col", "lad"}  # neither side flipped
 
 
 def _size(profile: PanelProfile) -> tuple[int, int]:

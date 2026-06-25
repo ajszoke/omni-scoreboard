@@ -27,7 +27,7 @@ from omni.core.enum import PanelProfile
 from omni.domain.contest import TeamGame
 from omni.renderers.canvas import Canvas
 from omni.renderers.context import RenderContext
-from omni.renderers.team_row import draw_team_mark
+from omni.renderers.team_row import draw_matchup_marks
 from omni.renderers.text import draw_centered, draw_right_aligned
 
 __all__ = ["PregameRenderer", "first_pitch_label"]
@@ -93,8 +93,7 @@ class PregameRenderer:
 
     def _render_quad(self, canvas: Canvas, context: RenderContext, game: TeamGame, countdown: str) -> None:
         # Team rows on the left (logo or colour bar, no scores pregame); label + countdown on the right.
-        away_x = draw_team_mark(canvas, context, game.away, row_top=0)
-        home_x = draw_team_mark(canvas, context, game.home, row_top=32)
+        away_x, home_x = draw_matchup_marks(canvas, context, game.away, game.home, away_top=0, home_top=32)
         canvas.text(away_x, 11, game.away.abbreviation, _WHITE, font=_VALUE_FONT)
         canvas.text(home_x, 43, game.home.abbreviation, _WHITE, font=_VALUE_FONT)
         canvas.text(66, 16, _FIRST_PITCH, _YELLOW, font=_LABEL_FONT)
@@ -102,8 +101,7 @@ class PregameRenderer:
 
     def _render_stack(self, canvas: Canvas, context: RenderContext, game: TeamGame, countdown: str) -> None:
         # 64x64: two team rows up top (logo or bar), label + countdown below.
-        away_x = draw_team_mark(canvas, context, game.away, row_top=0)
-        home_x = draw_team_mark(canvas, context, game.home, row_top=22)
+        away_x, home_x = draw_matchup_marks(canvas, context, game.away, game.home, away_top=0, home_top=22)
         canvas.text(away_x, 6, game.away.abbreviation, _WHITE, font=_VALUE_FONT)
         canvas.text(home_x, 28, game.home.abbreviation, _WHITE, font=_VALUE_FONT)
         canvas.text(3, 46, _FIRST_PITCH, _YELLOW, font=_LABEL_FONT)
