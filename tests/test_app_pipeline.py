@@ -40,16 +40,28 @@ def _game(raw: str, status: GameStatus = GameStatus.LIVE) -> TeamGame:
     )
 
 
-def _state(away: int = 0, home: int = 0, inning: int = 3, away_hits: int = 5, home_hits: int = 5) -> BaseballGameState:
+def _state(
+    away: int = 0,
+    home: int = 0,
+    inning: int = 3,
+    away_hits: int = 5,
+    home_hits: int = 5,
+    *,
+    phase: InningPhase = InningPhase.TOP,
+    away_reached_base: bool | None = None,
+    home_reached_base: bool | None = None,
+) -> BaseballGameState:
     return BaseballGameState(
         away_score=away,
         home_score=home,
         inning=inning,
-        phase=InningPhase.TOP,
+        phase=phase,
         count=BaseballCount(balls=0, strikes=0, outs=0),
         bases=BaseballBaseState(),
         away_hits=away_hits,
         home_hits=home_hits,
+        away_reached_base=away_reached_base,
+        home_reached_base=home_reached_base,
     )
 
 
@@ -376,6 +388,27 @@ def test_no_hitter_card_not_surfaced_before_the_min_inning() -> None:
     fetch.set("g1", _state(inning=3, away_hits=0))  # hitless, but only the 3rd — routine
     res = pipe.refresh([_game("g1")], now=T, fetch_feed=fetch)
     assert res.no_hitters == () and len(queue) == 1
+
+
+def test_no_hitter_card_not_surfaced_at_the_top_of_the_sixth() -> None:
+    # In the top of the 6th the pitching side has finished only five innings — not yet news.
+    pipe, queue = _setup(lag=0)
+    fetch = _Fetch()
+    fetch.set("g1", _state(inning=6, phase=InningPhase.TOP, away_hits=0))
+    res = pipe.refresh([_game("g1")], now=T, fetch_feed=fetch)
+    assert res.no_hitters == () and len(queue) == 1  # just the live card — the bid is "through 5"
+
+
+def test_perfect_game_surfaces_with_the_perfect_flag_and_finished_innings() -> None:
+    pipe, queue = _setup(lag=0)
+    fetch = _Fetch()
+    # Away hitless in the top of the 7th (home has finished six) with a confirmed clean sheet.
+    fetch.set("g1", _state(inning=7, phase=InningPhase.TOP, away_hits=0, away_reached_base=False))
+    res = pipe.refresh([_game("g1")], now=T, fetch_feed=fetch)
+    assert [c.raw for c in res.no_hitters] == ["g1:nohitter"]
+    card = queue.next_card(T, QUAD)
+    assert card is not None and card.dedupe_key.raw == "g1:nohitter"
+    assert card.payload.perfect is True and card.payload.through_inning == 6  # finished innings, not current
 
 
 def test_no_hitter_card_dropped_when_its_game_leaves() -> None:

@@ -132,9 +132,10 @@ class NoHitterCardPayload:
     The feat belongs to the *defending* team, so `pitching_side` says which side of the
     contest that is and the renderer names the team from the contest (never a stored
     string). `perfect` distinguishes a perfect game (no baserunner has reached at all)
-    from a plain no-hitter; `through_inning` is how deep it has carried. Unlike a big
-    play this is a standing condition, not a one-shot event — it carries no lineage and
-    lives (recurring) until it is broken.
+    from a plain no-hitter; `through_inning` is how deep it has carried — the pitching
+    side's *completed* innings, so 6 means through six full innings, not the current
+    inning number. Unlike a big play this is a standing condition, not a one-shot event —
+    it carries no lineage and lives (recurring) until it is broken.
     """
 
     pitching_side: HomeAway

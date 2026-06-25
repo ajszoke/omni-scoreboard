@@ -47,7 +47,7 @@ from omni.cards.factory import CardFactory
 from omni.core.enum import DisplayPriority, GameStatus
 from omni.core.ids import LeagueScopedId
 from omni.core.observation import Observation
-from omni.domain.baseball import BaseballGameState, PitchingDecisions, no_hitter_side
+from omni.domain.baseball import BaseballGameState, PitchingDecisions, pitching_feat_progress
 from omni.domain.contest import TeamGame
 from omni.events.baseball import BaseballGameEvent, LiveBaseballFeed
 from omni.providers.base import ProviderError
@@ -71,8 +71,9 @@ _UPCOMING_STATUSES = frozenset({GameStatus.SCHEDULED, GameStatus.PREGAME})
 # a walk) the play informs the live card but is not worth a takeover. HR/triple/DP/TP clear it.
 _BIG_PLAY_MIN_BAND = DisplayPriority.HIGH_LEVERAGE
 
-# A no-hitter only becomes news once the game is this deep — earlier hitless innings are routine.
-_NO_HITTER_MIN_INNING = 6
+# A no-hitter only becomes news once the pitching side has *finished* this many hitless innings;
+# earlier hitless innings are routine. Counted per side so it never triggers a half-inning early.
+_NO_HITTER_MIN_COMPLETED_INNINGS = 6
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -239,15 +240,22 @@ class LiveBaseballPipeline:
         return surfaced
 
     def _surface_no_hitter(self, game: TeamGame, state: BaseballGameState, *, now: datetime) -> CardId | None:
-        """Surface (or refresh) an active no-hitter card, or remove it once the bid is broken."""
-        side = no_hitter_side(state, min_inning=_NO_HITTER_MIN_INNING)
-        if side is None:
+        """Surface (or refresh) an active no-hitter / perfect-game card, or remove it once broken.
+
+        The depth shown is the pitching side's *finished* innings (not the raw current inning),
+        and a confirmed clean sheet promotes the card to a perfect game — both off the same
+        delay-safe state, so the feat is revealed and un-revealed only as the broadcast would show.
+        """
+        feat = pitching_feat_progress(state, min_completed_innings=_NO_HITTER_MIN_COMPLETED_INNINGS)
+        if feat is None:
             # No (longer) a bid — drop the card if this game had one.
             stale = self._no_hitter_keys.pop(game.id, None)
             if stale is not None:
                 self._queue.remove(stale)
             return None
-        card = self._factory.no_hitter(game, pitching_side=side, through_inning=state.inning, now=now)
+        card = self._factory.no_hitter(
+            game, pitching_side=feat.side, through_inning=feat.completed_innings, perfect=feat.perfect, now=now
+        )
         self._queue.ingest(card)
         self._no_hitter_keys[game.id] = card.dedupe_key.raw
         return card.id
