@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from omni.app.contest_store import ContestStore
 from omni.app.display import RecordingDisplaySink
 from omni.app.loop import AppLoop
 from omni.app.pipeline import LiveBaseballPipeline
 from omni.app.supervisor import ProviderStatus, ProviderSupervisor
+from omni.cards.base import ScoreboardCard
 from omni.cards.factory import CardFactory
 from omni.core.enum import GameStatus, League, PanelProfile
 from omni.core.ids import LeagueScopedId, SourceRef
@@ -21,6 +23,9 @@ from omni.providers.mlb_teams import MlbTeamRegistry
 from omni.queue.delay_policy import DelayPolicy
 from omni.queue.priority import PriorityScorer
 from omni.queue.scheduler import InterleavedCardQueue
+from omni.renderers.canvas import Canvas
+from omni.renderers.context import RenderContext
+from omni.renderers.image import LogoStore
 from omni.renderers.registry import RendererRegistry, default_registry
 
 _REG = MlbTeamRegistry.from_color_file()
@@ -71,8 +76,25 @@ def _fetch_feed(game: TeamGame, now: datetime) -> LiveBaseballFeed:
     return LiveBaseballFeed(state=_state())
 
 
+class _CapturingRegistry(RendererRegistry):
+    """Wraps a real registry, recording the RenderContext the loop hands each render."""
+
+    def __init__(self, inner: RendererRegistry) -> None:
+        super().__init__()
+        self._inner = inner
+        self.last_context: RenderContext | None = None
+
+    def render(self, card: ScoreboardCard[Any], context: RenderContext, canvas: Canvas) -> None:
+        self.last_context = context
+        self._inner.render(card, context, canvas)
+
+
 def _build(
-    *, lag: int = 0, registry: RendererRegistry | None = None, provider: _Provider | None = None
+    *,
+    lag: int = 0,
+    registry: RendererRegistry | None = None,
+    provider: _Provider | None = None,
+    logos: LogoStore | None = None,
 ) -> tuple[AppLoop, RecordingDisplaySink, _Provider]:
     queue = InterleavedCardQueue()
     pipeline = LiveBaseballPipeline(
@@ -91,6 +113,7 @@ def _build(
         registry=registry if registry is not None else default_registry(),
         sink=sink,
         fetch_feed=_fetch_feed,
+        logos=logos,
     )
     return loop, sink, provider
 
@@ -141,3 +164,22 @@ def test_run_once_isolates_a_render_failure() -> None:
     assert res.shown is None
     assert sink.committed == 0  # nothing committed on failure
     assert res.pipeline.ingested  # but the pipeline still built + ingested the card
+
+
+def test_run_once_threads_the_logo_store_into_the_render_context() -> None:
+    # The running app's logo store must reach the renderer as ambient RenderContext.
+    capturing = _CapturingRegistry(default_registry())
+    store = LogoStore()
+    loop, _, _ = _build(lag=0, registry=capturing, logos=store)
+    loop.run_once(T)
+    assert capturing.last_context is not None
+    assert capturing.last_context.logos is store
+
+
+def test_run_once_defaults_to_no_logo_store() -> None:
+    # A loop built without logos (a test/replay) renders with the colour-bar fallback.
+    capturing = _CapturingRegistry(default_registry())
+    loop, _, _ = _build(lag=0, registry=capturing)
+    loop.run_once(T)
+    assert capturing.last_context is not None
+    assert capturing.last_context.logos is None

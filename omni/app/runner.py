@@ -24,6 +24,7 @@ from omni.providers.base import Provider
 from omni.queue.delay_policy import DelayPolicy
 from omni.queue.priority import PriorityScorer
 from omni.queue.scheduler import InterleavedCardQueue
+from omni.renderers.image import LogoStore
 from omni.renderers.registry import default_registry
 
 __all__ = ["build_loop", "run_forever"]
@@ -38,8 +39,13 @@ def build_loop(
     broadcast_lag: DurationSeconds = DurationSeconds(45),
     max_age: DurationSeconds = DurationSeconds(120),
     backoff: BackoffPolicy | None = None,
+    logos: LogoStore | None = None,
 ) -> AppLoop:
-    """Wire the standard spine into an `AppLoop` (deterministic; no I/O performed here)."""
+    """Wire the standard spine into an `AppLoop` (deterministic; no I/O performed here).
+
+    `logos`, when given, is the ambient tile store every render uses; left None (a
+    test/replay that doesn't care) the renderers fall back to a plain colour bar.
+    """
     queue = InterleavedCardQueue()
     pipeline = LiveBaseballPipeline(
         scorer=PriorityScorer(favorites=favorites),
@@ -55,6 +61,7 @@ def build_loop(
         registry=default_registry(),
         sink=sink,
         fetch_feed=fetch_feed,
+        logos=logos,
     )
 
 

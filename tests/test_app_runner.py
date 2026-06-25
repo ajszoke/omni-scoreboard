@@ -15,6 +15,8 @@ from omni.domain.contest import TeamGame
 from omni.events.baseball import LiveBaseballFeed
 from omni.providers.base import ProviderUpdate
 from omni.providers.mlb_teams import MlbTeamRegistry
+from omni.renderers.canvas import RecordingCanvas
+from omni.renderers.image import LogoStore
 
 _REG = MlbTeamRegistry.from_color_file()
 SOURCE = SourceRef("mlb_statsapi", "https://statsapi.mlb.com")
@@ -49,6 +51,8 @@ def _fetch_feed(game: TeamGame, now: datetime) -> LiveBaseballFeed:
             phase=InningPhase.BOTTOM,
             count=BaseballCount(balls=2, strikes=1, outs=1),
             bases=BaseballBaseState(first=True),
+            away_hits=5,  # a normal mid-game state — hits present, so no no-hitter card pre-empts the live card
+            home_hits=7,
         )
     )
 
@@ -67,6 +71,26 @@ def test_build_loop_wires_the_broadcast_delay() -> None:
     assert loop.run_once(T).shown is None  # inside the delay — nothing shown yet
     assert loop.run_once(T + timedelta(seconds=30)).shown is not None
     assert sink.committed == 1
+
+
+def test_build_loop_threads_logos_through_to_the_rendered_frame() -> None:
+    # A LogoStore handed to build_loop must reach rendering: the quad live card blits team tiles.
+    sink = RecordingDisplaySink(PanelProfile.QUAD_128X64)
+    loop = build_loop(_Provider(), _fetch_feed, sink, broadcast_lag=DurationSeconds(0), logos=LogoStore())
+    loop.run_once(T)
+    frame = sink.frames[-1]
+    assert isinstance(frame, RecordingCanvas)
+    assert frame.images()  # tiles blitted — the store reached the renderer end to end
+
+
+def test_build_loop_without_logos_falls_back_to_colour_bars() -> None:
+    # No store wired (a test/replay) → the renderer draws colour bars, never a tile blit.
+    sink = RecordingDisplaySink(PanelProfile.QUAD_128X64)
+    loop = build_loop(_Provider(), _fetch_feed, sink, broadcast_lag=DurationSeconds(0))
+    loop.run_once(T)
+    frame = sink.frames[-1]
+    assert isinstance(frame, RecordingCanvas)
+    assert not frame.images()  # colour-bar fallback, no blits
 
 
 def test_parse_args_defaults() -> None:
