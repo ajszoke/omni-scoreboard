@@ -1,12 +1,12 @@
 project: omni-scoreboard
-updated: "2026-06-18"
+updated: "2026-06-24"
 progress:
-  note: "PRs #1-#13 shipped milestones M0, M1, M2, M4. STATUS.md is the living state; this file is the forward backlog."
+  note: "STATUS.md is the living state (authoritative); this file is the forward backlog. As of PRs #1-#56 (A0 orchestration spine + B1 lifecycle cards; round-2 signed off as architecture + lifecycle breadth) much of M3 and the running-app orchestration loop has shipped - see STATUS 'Delivered'. Current work is sequenced round-based (B1.5a -> B1.5b -> A1), not by raw milestone order."
   shipped_milestones: [M0, M1, M2, M4]
   deferred_within_shipped:
     - "M1-003: non-MLB team subclasses (Football/Basketball/Hockey Team) deferred to their league milestones (M6-M9)."
-    - "M4-005: priority-driven polling cadence deferred to the running-app orchestration loop."
-  next: "M3 (MLB P0/P1 polish) + the running-app orchestration loop (wire provider -> delay -> score -> queue -> render live), then M5-M10."
+    - "M4-005: priority-driven polling cadence deferred to A1 (typed PollPlan)."
+  next: "B1.5a (correctness + lifecycle hardening) -> B1.5b (live-dashboard density + visual integration) -> A1 (appliance cutover); see STATUS 'Next'. Remaining M3 polish folds into B1.5a/b; M5 device UX into A1; M6+ leagues stay deferred (NFL, then PGA before NCAA)."
 principles:
   - friends_and_family_scope
   - no_consumer_saas
@@ -138,6 +138,10 @@ milestones:
       - id: M3-005
         title: "Map SWPR pitch type"
         labels: [mlb, data, bug, p1]
+        status: resolved_in_revival
+        notes:
+          - "omni PitchType.SWEEPER = 'ST' (the real StatsAPI/Statcast code) maps it; dogfooded live (9 sweepers, zero unknowns)."
+          - "The legacy board's on-device data/pitches.py 'SW' edit was wrong-code and never rendered - preserved in the L0 capture as evidence, not a carry-forward."
       - id: M3-006
         title: "Stat line debounce and anchor stabilization"
         labels: [rendering, mlb, p1]
@@ -174,6 +178,13 @@ milestones:
       - id: M3-017
         title: "HR stats/arcs experimental card"
         labels: [mlb, fun, p4]
+      - id: M3-018
+        title: "Leverage-aware preferred-team upranking"
+        labels: [mlb, priority, attention, p2]
+        notes:
+          - "Grade preferred-team games by late-season race leverage (divisional/wildcard) instead of a binary preferred flag: uprank on a sliding per-matchup curve, muffled when the team is out of contention (eliminationNumber 0 => amplitude 0)."
+          - "A season/race-leverage input to AttentionPolicy/PriorityScorer (round-2 M6), distinct from the in-game win-probability meter. Established metric = championship Leverage Index (cLI). Free path (data policy: no required paid odds API) = StatsAPI standings (gamesBack, magicNumber, eliminationNumber); optional self-computed playoff-odds Monte Carlo over the remaining schedule."
+          - "Origin: the user added the Mets only for a late-2025 Mets+Braves playoff race; the captured legacy config.json hand-encodes preferred.divisions [NL East, NL Wild Card] - the manual version of this. Local memory: leverage-aware-upranking, user-team-prefs."
 
   - id: M4
     name: event_queue_delay_priority
