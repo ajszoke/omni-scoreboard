@@ -32,21 +32,52 @@ def test_policy_defaults_are_inert() -> None:
 
 
 def test_bounded_burst_policy() -> None:
-    policy = AttentionPolicy(
-        mode=AttentionMode.BURST,
-        takeover_for=DurationSeconds(8),
-        cooldown=DurationSeconds(30),
-        max_repeats=1,
-    )
+    policy = AttentionPolicy(mode=AttentionMode.BURST, takeover_for=DurationSeconds(8))
     assert policy.mode is AttentionMode.BURST
     assert policy.takeover_for == DurationSeconds(8)
-    assert policy.max_repeats == 1
 
 
-def test_max_repeats_cannot_be_negative() -> None:
+def test_bounded_recurring_policy() -> None:
+    policy = AttentionPolicy(mode=AttentionMode.RECURRING, cooldown=DurationSeconds(60), max_repeats=3)
+    assert (policy.cooldown, policy.max_repeats) == (DurationSeconds(60), 3)
+    # A zero cap is allowed (capped at zero resurfacings); only negatives are rejected.
+    assert AttentionPolicy(mode=AttentionMode.RECURRING, cooldown=DurationSeconds(60), max_repeats=0).max_repeats == 0
+
+
+def test_burst_needs_a_positive_takeover() -> None:
+    with pytest.raises(ValueError, match="must take over for a positive duration"):
+        AttentionPolicy(mode=AttentionMode.BURST)  # takeover_for defaults to 0 — a no-op burst
+
+
+def test_recurring_needs_a_positive_cooldown() -> None:
+    with pytest.raises(ValueError, match="needs a positive cooldown"):
+        AttentionPolicy(mode=AttentionMode.RECURRING)  # cooldown defaults to 0 — would resurface every tick
+
+
+def test_recurring_max_repeats_cannot_be_negative() -> None:
     with pytest.raises(ValueError, match="max_repeats cannot be negative"):
-        AttentionPolicy(mode=AttentionMode.RECURRING, max_repeats=-1)
-    assert AttentionPolicy(mode=AttentionMode.RECURRING, max_repeats=0).max_repeats == 0  # zero is allowed
+        AttentionPolicy(mode=AttentionMode.RECURRING, cooldown=DurationSeconds(60), max_repeats=-1)
+
+
+@pytest.mark.parametrize("mode", [AttentionMode.NORMAL, AttentionMode.RECURRING, AttentionMode.BADGE])
+def test_takeover_for_rejected_off_burst(mode: AttentionMode) -> None:
+    with pytest.raises(ValueError, match="takeover_for is only meaningful for a BURST"):
+        AttentionPolicy(mode=mode, takeover_for=DurationSeconds(5))
+
+
+@pytest.mark.parametrize("mode", [AttentionMode.NORMAL, AttentionMode.BURST, AttentionMode.BADGE])
+def test_cooldown_rejected_off_recurring(mode: AttentionMode) -> None:
+    # A BURST carries a real takeover so it clears its own invariant; the cooldown is the violation.
+    takeover = DurationSeconds(8) if mode is AttentionMode.BURST else DurationSeconds(0)
+    with pytest.raises(ValueError, match="cooldown is only meaningful for a RECURRING"):
+        AttentionPolicy(mode=mode, takeover_for=takeover, cooldown=DurationSeconds(5))
+
+
+@pytest.mark.parametrize("mode", [AttentionMode.NORMAL, AttentionMode.BURST, AttentionMode.BADGE])
+def test_max_repeats_rejected_off_recurring(mode: AttentionMode) -> None:
+    takeover = DurationSeconds(8) if mode is AttentionMode.BURST else DurationSeconds(0)
+    with pytest.raises(ValueError, match="max_repeats is only meaningful for a RECURRING"):
+        AttentionPolicy(mode=mode, takeover_for=takeover, max_repeats=1)
 
 
 def test_normal_attention_constant() -> None:
