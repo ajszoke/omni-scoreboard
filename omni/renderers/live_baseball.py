@@ -28,6 +28,7 @@ from omni.domain.contest import TeamGame
 from omni.renderers.canvas import Canvas
 from omni.renderers.context import RenderContext
 from omni.renderers.team_row import draw_matchup_marks
+from omni.renderers.win_meter import draw_win_meter
 from omni.renderers.text import draw_centered, draw_right_aligned
 
 __all__ = ["LiveBaseballRenderer"]
@@ -91,6 +92,8 @@ class LiveBaseballRenderer:
     ) -> None:
         # Two stacked team rows on the left (logo or colour bar), a status panel + bases on the right.
         away_x, home_x = draw_matchup_marks(canvas, context, game.away, game.home, away_top=0, home_top=32)
+        if payload.win_probability is not None:
+            draw_win_meter(canvas, context, game.away, game.home, payload.win_probability, away_top=0, home_top=32)
         canvas.text(away_x, 11, game.away.abbreviation, _WHITE, font=_SCORE_FONT)
         canvas.text(home_x, 43, game.home.abbreviation, _WHITE, font=_SCORE_FONT)
         draw_right_aligned(canvas, 58, 11, str(payload.away_score), _WHITE, _SCORE_FONT)
@@ -111,6 +114,8 @@ class LiveBaseballRenderer:
     ) -> None:
         # 64x64: the full layout compressed — two team rows up top (logo or bar), status + bases below.
         away_x, home_x = draw_matchup_marks(canvas, context, game.away, game.home, away_top=0, home_top=22)
+        if payload.win_probability is not None:
+            draw_win_meter(canvas, context, game.away, game.home, payload.win_probability, away_top=0, home_top=22)
         canvas.text(away_x, 6, game.away.abbreviation, _WHITE, font=_SCORE_FONT)
         canvas.text(home_x, 28, game.home.abbreviation, _WHITE, font=_SCORE_FONT)
         draw_right_aligned(canvas, 62, 6, str(payload.away_score), _WHITE, _SCORE_FONT)

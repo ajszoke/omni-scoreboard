@@ -30,7 +30,7 @@ from omni.core.time import DurationSeconds
 from omni.domain.base import LogoAsset
 from omni.domain.contest import Contest, TeamGame
 from omni.domain.teams import Team
-from omni.domain.baseball import BaseballBaseState, BaseballCount, InningPhase
+from omni.domain.baseball import BaseballBaseState, BaseballCount, InningPhase, WinProbability
 from omni.panels.geometry import geometry_for
 from omni.providers.mlb_teams import MlbTeamRegistry
 from omni.renderers.base import Renderer
@@ -81,6 +81,7 @@ def make_card(
     home_score: int = 5,
     inning: int = 7,
     bases: BaseballBaseState = BaseballBaseState(first=True),
+    win_probability: WinProbability | None = None,
 ) -> ScoreboardCard[LiveBaseballCardPayload]:
     payload = LiveBaseballCardPayload(
         away_score=away_score,
@@ -89,6 +90,7 @@ def make_card(
         phase=phase,
         count=BaseballCount(balls=2, strikes=1, outs=2),
         bases=bases,
+        win_probability=win_probability,
     )
     return ScoreboardCard(
         id=CardId("g1:live"),
@@ -270,6 +272,25 @@ def test_clash_blits_the_home_alt_tile() -> None:
     # DET flips to its alt so the two navy caps don't merge on the panel.
     canvas = _render(_clash_card(), PanelProfile.QUAD_128X64, logos=LOGOS)
     assert {i.key for i in canvas.images()} == {"nyy", "det-alt"}
+
+
+def test_win_meter_blits_gauges_on_quad_and_stack() -> None:
+    wp = WinProbability(home=26.0, away=74.0)
+    for profile, home_top in ((PanelProfile.QUAD_128X64, 32), (PanelProfile.STACK_64X64, 22)):
+        canvas = _render(make_card(win_probability=wp), profile, logos=LOGOS)
+        gauges = [r for r in canvas.rects() if r.w == 2 and r.x in (21, 22)]  # the two meter slivers
+        assert len(gauges) == 2, profile
+        away, home = sorted(gauges, key=lambda r: r.y)
+        assert away.h == 15 and home.h == 5  # round(74%/26% * 20px), filled from the bottom
+
+
+@pytest.mark.parametrize("profile", (PanelProfile.QUAD_128X64, PanelProfile.STACK_64X64))
+def test_win_meter_golden(profile: PanelProfile) -> None:
+    width, height = geometry_for(profile).size
+    canvas = PillowCanvas(width, height)
+    card = make_card(win_probability=WinProbability(home=26.0, away=74.0))
+    LiveBaseballRenderer().render(card, RenderContext(profile=profile, now=T, logos=LOGOS), canvas)
+    _assert_matches_golden(canvas.image(), f"live_baseball_win_meter_{profile.to_json_value()}.png")
 
 
 def test_clash_golden_image_quad() -> None:
