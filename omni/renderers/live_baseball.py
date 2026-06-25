@@ -3,12 +3,16 @@
 Each profile gets its OWN layout, never a crop of another (AGENTS.md forbids
 "cropping 128x64 cards down to 64x32"):
 
-- quad_128x64 : full layout — team rows, scores, inning/count/outs, bases diamond.
+- quad_128x64 : full layout — team rows, scores + a compact H/E line, inning/count/outs,
+  bases diamond.
 - stack_64x64 : the full layout compressed to 64px wide (same fields, smaller).
 - single_64x32: an explicit COMPROMISE — team abbreviations, scores, and the
-  inning-phase label only. Count, outs, and the bases diamond are omitted (not
-  legible at 64x32). The compromise is asserted by tests so it cannot silently
-  regress into a crop.
+  inning-phase label only. Count, outs, the bases diamond, and the H/E detail are
+  omitted (not legible at 64x32). The compromise is asserted by tests so it cannot
+  silently regress into a crop.
+
+The run score is the big bright number; each side's hit and error totals ride a dim
+``H{h} E{e}`` line beneath it (a running line score, so it shows during breaks too).
 
 During a between-halves break (`InningPhase.MIDDLE`/`END`) there is no active
 at-bat, so the larger profiles show the phase label alone and suppress the count,
@@ -23,7 +27,7 @@ from omni.cards.base import ScoreboardCard
 from omni.cards.baseball import LiveBaseballCardPayload
 from omni.core.colors import RGBColor
 from omni.core.enum import PanelProfile
-from omni.domain.baseball import InningPhase
+from omni.domain.baseball import InningPhase, TeamLinescore
 from omni.domain.contest import TeamGame
 from omni.renderers.canvas import Canvas
 from omni.renderers.context import RenderContext
@@ -37,6 +41,7 @@ _BLACK = RGBColor(0, 0, 0)
 _WHITE = RGBColor(255, 255, 255)
 _YELLOW = RGBColor(255, 215, 0)
 _DIM = RGBColor(60, 60, 60)
+_HE = RGBColor(160, 160, 160)  # hits/errors line — legible but secondary to the bright run score
 
 _LABEL_FONT = "4x6"
 _SCORE_FONT = "6x10"
@@ -96,8 +101,10 @@ class LiveBaseballRenderer:
             draw_win_meter(canvas, context, game.away, game.home, payload.win_probability, away_top=0, home_top=32)
         canvas.text(away_x, 11, game.away.abbreviation, _WHITE, font=_SCORE_FONT)
         canvas.text(home_x, 43, game.home.abbreviation, _WHITE, font=_SCORE_FONT)
-        draw_right_aligned(canvas, 58, 11, str(payload.away_score), _WHITE, _SCORE_FONT)
-        draw_right_aligned(canvas, 58, 43, str(payload.home_score), _WHITE, _SCORE_FONT)
+        draw_right_aligned(canvas, 58, 11, str(payload.away_line.runs), _WHITE, _SCORE_FONT)
+        draw_right_aligned(canvas, 58, 43, str(payload.home_line.runs), _WHITE, _SCORE_FONT)
+        self._hits_errors(canvas, 58, 23, payload.away_line)  # H/E beneath the away run score
+        self._hits_errors(canvas, 58, 55, payload.home_line)  # H/E beneath the home run score
         label = _phase_label(payload.phase, payload.inning)
         if payload.phase.is_break:
             draw_centered(canvas, 64, 128, 28, label, _YELLOW, _LABEL_FONT)  # break: no live at-bat
@@ -118,8 +125,10 @@ class LiveBaseballRenderer:
             draw_win_meter(canvas, context, game.away, game.home, payload.win_probability, away_top=0, home_top=22)
         canvas.text(away_x, 6, game.away.abbreviation, _WHITE, font=_SCORE_FONT)
         canvas.text(home_x, 28, game.home.abbreviation, _WHITE, font=_SCORE_FONT)
-        draw_right_aligned(canvas, 62, 6, str(payload.away_score), _WHITE, _SCORE_FONT)
-        draw_right_aligned(canvas, 62, 28, str(payload.home_score), _WHITE, _SCORE_FONT)
+        draw_right_aligned(canvas, 62, 6, str(payload.away_line.runs), _WHITE, _SCORE_FONT)
+        draw_right_aligned(canvas, 62, 28, str(payload.home_line.runs), _WHITE, _SCORE_FONT)
+        self._hits_errors(canvas, 62, 16, payload.away_line)  # H/E beneath the away run score
+        self._hits_errors(canvas, 62, 38, payload.home_line)  # H/E beneath the home run score
         label = _phase_label(payload.phase, payload.inning)
         if payload.phase.is_break:
             draw_centered(canvas, 0, 64, 50, label, _YELLOW, _LABEL_FONT)  # break: no live at-bat
@@ -137,10 +146,15 @@ class LiveBaseballRenderer:
         canvas.fill_rect(0, 16, 2, 16, game.home.primary_color)
         canvas.text(4, 5, game.away.abbreviation, _WHITE, font=_LABEL_FONT)
         canvas.text(4, 21, game.home.abbreviation, _WHITE, font=_LABEL_FONT)
-        draw_right_aligned(canvas, 42, 3, str(payload.away_score), _WHITE, _SCORE_FONT)
-        draw_right_aligned(canvas, 42, 19, str(payload.home_score), _WHITE, _SCORE_FONT)
-        # The phase label (T7/MID7/B7/END7) already conveys the break; no count/bases here anyway.
+        draw_right_aligned(canvas, 42, 3, str(payload.away_line.runs), _WHITE, _SCORE_FONT)
+        draw_right_aligned(canvas, 42, 19, str(payload.home_line.runs), _WHITE, _SCORE_FONT)
+        # The phase label (T7/MID7/B7/END7) already conveys the break; no count/bases/H-E here anyway.
         canvas.text(46, 13, _phase_label(payload.phase, payload.inning), _YELLOW, font=_LABEL_FONT)
+
+    @staticmethod
+    def _hits_errors(canvas: Canvas, right_x: int, y: int, line: TeamLinescore) -> None:
+        """Draw a side's ``H{hits} E{errors}`` totals, right-aligned to ``right_x``."""
+        draw_right_aligned(canvas, right_x, y, f"H{line.hits} E{line.errors}", _HE, _LABEL_FONT)
 
     @staticmethod
     def _base(canvas: Canvas, x: int, y: int, size: int, occupied: bool) -> None:

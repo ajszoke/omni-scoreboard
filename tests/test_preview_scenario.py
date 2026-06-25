@@ -25,7 +25,7 @@ def test_build_card_from_close_game_scenario() -> None:
     assert card.contest.home.abbreviation == "BOS"  # type: ignore[attr-defined]
 
     p = card.payload
-    assert (p.away_score, p.home_score) == (5, 5)
+    assert (p.away_line.runs, p.home_line.runs) == (5, 5)
     assert p.inning == 9 and p.phase is InningPhase.BOTTOM
     assert (p.count.balls, p.count.strikes, p.count.outs) == (3, 2, 2)
     assert p.bases.first and p.bases.second and p.bases.third  # bases loaded

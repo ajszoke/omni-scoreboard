@@ -177,7 +177,7 @@ def test_shows_lag_old_state_not_the_current_spoiler() -> None:
     pipe.refresh([_game("g1")], now=T + timedelta(seconds=30), fetch_feed=fetch)  # ...but it's fresh
     card = queue.next_card(T + timedelta(seconds=30), QUAD)
     assert card is not None
-    assert card.payload.home_score == 0  # the delayed 0-0, never the un-aired 0-1
+    assert card.payload.home_line.runs == 0  # the delayed 0-0, never the un-aired 0-1
 
 
 def test_win_probability_is_delay_safe_never_leads_the_score() -> None:

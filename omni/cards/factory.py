@@ -36,7 +36,7 @@ from omni.cards.baseball import (
 )
 from omni.core.enum import DisplayPriority, GameStatus, HomeAway, PanelProfile
 from omni.core.time import DurationSeconds
-from omni.domain.baseball import BaseballGameState, PitchingDecisions, WinProbability
+from omni.domain.baseball import BaseballGameState, PitchingDecisions, TeamLinescore, WinProbability
 from omni.domain.contest import TeamGame
 from omni.events.baseball import BaseballGameEvent
 
@@ -135,8 +135,8 @@ class CardFactory:
         state), never a fresh reading — see the pipeline's win-probability path.
         """
         payload = LiveBaseballCardPayload(
-            away_score=state.away_score,
-            home_score=state.home_score,
+            away_line=TeamLinescore(runs=state.away_score, hits=state.away_hits, errors=state.away_errors),
+            home_line=TeamLinescore(runs=state.home_score, hits=state.home_hits, errors=state.home_errors),
             inning=state.inning,
             phase=state.phase,
             count=state.count,

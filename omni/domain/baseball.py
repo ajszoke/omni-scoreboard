@@ -20,6 +20,7 @@ __all__ = [
     "BaseballCount",
     "BaseballBaseState",
     "BaseballScoringImpact",
+    "TeamLinescore",
     "BaseballGameState",
     "PitchingFeatKind",
     "PitchingFeatProgress",
@@ -228,6 +229,26 @@ class BaseballBaseState:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class TeamLinescore:
+    """One side's running line score — the classic R / H / E triple.
+
+    Runs are the team's score; hits and errors are the box-score totals a dense card
+    shows beside it. A render-time grouping (the live `BaseballGameState` keeps the three
+    as flat per-side fields, mirroring the raw feed); a `CardFactory` composes them here so
+    the renderer draws one coherent value rather than juggling three loose integers.
+    """
+
+    runs: int
+    hits: int
+    errors: int
+
+    def __post_init__(self) -> None:
+        for name, value in (("runs", self.runs), ("hits", self.hits), ("errors", self.errors)):
+            if value < 0:
+                raise ValueError(f"{name} cannot be negative")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class BaseballGameState:
     """A live baseball game's observed state: score/inning/phase/count/bases.
 
@@ -247,6 +268,8 @@ class BaseballGameState:
     bases: BaseballBaseState
     away_hits: int = 0
     home_hits: int = 0
+    away_errors: int = 0
+    home_errors: int = 0
     # Whether each side has reached base at all this game: True (a baserunner is confirmed),
     # False (confirmed none — a perfect game in the making), or None (the feed does not say).
     # It only matters for a side being no-hit, where it is what separates a perfect game from
@@ -259,6 +282,8 @@ class BaseballGameState:
             raise ValueError("scores cannot be negative")
         if self.away_hits < 0 or self.home_hits < 0:
             raise ValueError("hits cannot be negative")
+        if self.away_errors < 0 or self.home_errors < 0:
+            raise ValueError("errors cannot be negative")
         if self.inning < 1:
             raise ValueError("inning must be >= 1")
 

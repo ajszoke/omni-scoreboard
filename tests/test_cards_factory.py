@@ -34,6 +34,10 @@ def _state() -> BaseballGameState:
     return BaseballGameState(
         away_score=3,
         home_score=5,
+        away_hits=7,
+        home_hits=9,
+        away_errors=1,
+        home_errors=0,
         inning=7,
         phase=InningPhase.TOP,
         count=BaseballCount(balls=2, strikes=1, outs=2),
@@ -51,7 +55,9 @@ def test_live_baseball_card_carries_state_and_metadata() -> None:
     assert card.dedupe_key.raw == "700001:live"
 
     p = card.payload
-    assert (p.away_score, p.home_score) == (3, 5)
+    assert (p.away_line.runs, p.home_line.runs) == (3, 5)  # runs flow from the state's scores
+    assert (p.away_line.hits, p.away_line.errors) == (7, 1)  # and the H/E totals compose into the linescore
+    assert (p.home_line.hits, p.home_line.errors) == (9, 0)
     assert p.inning == 7 and p.phase is InningPhase.TOP
     assert (p.count.balls, p.count.strikes, p.count.outs) == (2, 1, 2)
     assert p.bases.first and p.bases.third and not p.bases.second

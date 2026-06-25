@@ -323,6 +323,8 @@ def _parse_game_state(raw: dict[str, Any]) -> BaseballGameState:
             home_score=int(home_team.get("runs", 0) or 0),
             away_hits=away_hits,
             home_hits=home_hits,
+            away_errors=away_errors,
+            home_errors=home_errors,
             # A side's reached-base read needs the *fielding* side's errors: an away batter
             # reaching on error is charged to the home defense, and vice versa.
             away_reached_base=_reached_base(raw, side="away", hits=away_hits, fielding_errors=home_errors),

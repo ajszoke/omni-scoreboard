@@ -15,6 +15,7 @@ from omni.domain.baseball import (
     PitchingFeatKind,
     PitchingFeatProgress,
     PitchType,
+    TeamLinescore,
     WinProbability,
     pitching_feat_progress,
     scoring_impact,
@@ -71,6 +72,26 @@ def test_game_state_holds_hits_and_rejects_negative() -> None:
         _state(away_hits=-1)
     with pytest.raises(ValueError):
         _state(home_hits=-1)
+
+
+def test_game_state_holds_errors_and_rejects_negative() -> None:
+    assert _state(away_errors=2, home_errors=0).away_errors == 2
+    with pytest.raises(ValueError):
+        _state(away_errors=-1)
+    with pytest.raises(ValueError):
+        _state(home_errors=-1)
+
+
+def test_team_linescore_holds_the_rhe_triple() -> None:
+    line = TeamLinescore(runs=4, hits=9, errors=1)
+    assert (line.runs, line.hits, line.errors) == (4, 9, 1)
+
+
+@pytest.mark.parametrize("field", ["runs", "hits", "errors"])
+def test_team_linescore_rejects_negative_values(field: str) -> None:
+    values = {"runs": 0, "hits": 0, "errors": 0, field: -1}
+    with pytest.raises(ValueError, match=f"{field} cannot be negative"):
+        TeamLinescore(**values)
 
 
 def test_pitching_feat_names_the_pitching_side() -> None:

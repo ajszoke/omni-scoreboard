@@ -30,7 +30,7 @@ from omni.core.time import DurationSeconds
 from omni.domain.base import LogoAsset
 from omni.domain.contest import Contest, TeamGame
 from omni.domain.teams import Team
-from omni.domain.baseball import BaseballBaseState, BaseballCount, InningPhase, WinProbability
+from omni.domain.baseball import BaseballBaseState, BaseballCount, InningPhase, TeamLinescore, WinProbability
 from omni.panels.geometry import geometry_for
 from omni.providers.mlb_teams import MlbTeamRegistry
 from omni.renderers.base import Renderer
@@ -79,13 +79,17 @@ def make_card(
     phase: InningPhase = InningPhase.TOP,
     away_score: int = 3,
     home_score: int = 5,
+    away_hits: int = 7,
+    home_hits: int = 9,
+    away_errors: int = 0,
+    home_errors: int = 1,
     inning: int = 7,
     bases: BaseballBaseState = BaseballBaseState(first=True),
     win_probability: WinProbability | None = None,
 ) -> ScoreboardCard[LiveBaseballCardPayload]:
     payload = LiveBaseballCardPayload(
-        away_score=away_score,
-        home_score=home_score,
+        away_line=TeamLinescore(runs=away_score, hits=away_hits, errors=away_errors),
+        home_line=TeamLinescore(runs=home_score, hits=home_hits, errors=home_errors),
         inning=inning,
         phase=phase,
         count=BaseballCount(balls=2, strikes=1, outs=2),
@@ -158,6 +162,7 @@ def test_draw_op_quad_128x64() -> None:
     texts = {(t.x, t.y, t.text) for t in canvas.texts()}
     assert {(8, 11, "COL"), (8, 43, "LAD")} <= texts
     assert {(52, 11, "3"), (52, 43, "5")} <= texts
+    assert {(38, 23, "H7 E0"), (38, 55, "H9 E1")} <= texts  # R/H/E detail beneath each run score
     assert {(68, 6, "T7"), (68, 14, "2-1"), (68, 22, "2 OUT")} <= texts
 
 
@@ -170,6 +175,7 @@ def test_draw_op_stack_64x64_keeps_full_status() -> None:
     texts = {(t.x, t.y, t.text) for t in canvas.texts()}
     assert {(5, 6, "COL"), (5, 28, "LAD")} <= texts
     assert {(56, 6, "3"), (56, 28, "5")} <= texts  # right-aligned at 62 - 6
+    assert {(42, 16, "H7 E0"), (42, 38, "H9 E1")} <= texts  # R/H/E detail beneath each run score
     assert {(3, 46, "T7"), (20, 46, "2-1"), (3, 55, "2 OUT")} <= texts  # full status retained
 
 
@@ -180,9 +186,10 @@ def test_draw_op_single_64x32_is_an_explicit_compromise() -> None:
     assert {(4, 5, "COL"), (4, 21, "LAD")} <= texts
     assert {(36, 3, "3"), (36, 19, "5")} <= texts
     assert (46, 13, "T7") in texts
-    # Compromise: count, outs, and the bases diamond are omitted at 64x32.
+    # Compromise: count, outs, the bases diamond, and the H/E detail are omitted at 64x32.
     joined = " ".join(t.text for t in canvas.texts())
     assert "OUT" not in joined and "-" not in joined
+    assert "H7 E0" not in joined and "H9 E1" not in joined  # no R/H/E detail at 64x32
     # Only the two team stripes are drawn (no base markers).
     assert {(r.x, r.y, r.w, r.h) for r in canvas.rects()} == {(0, 0, 2, 16), (0, 16, 2, 16)}
 
@@ -219,6 +226,12 @@ def test_draw_op_two_digit_score_right_aligns() -> None:
     # "10" is two 6px glyphs, so its left edge is 58 - 12 = 46 on quad.
     canvas = _render(make_card(away_score=10), PanelProfile.QUAD_128X64)
     assert (46, 11, "10") in {(t.x, t.y, t.text) for t in canvas.texts()}
+
+
+def test_draw_op_double_digit_hits_errors_right_align() -> None:
+    # "H12 E3" is six 4px glyphs, so its left edge is 58 - 24 = 34 on quad — still clear of the score.
+    canvas = _render(make_card(away_hits=12, away_errors=3), PanelProfile.QUAD_128X64)
+    assert (34, 23, "H12 E3") in {(t.x, t.y, t.text) for t in canvas.texts()}
 
 
 def test_draw_op_empty_bases_draw_dim_outlines() -> None:
