@@ -10,12 +10,12 @@ deterministic `AppLoop`; everything testable lives in `runner.py` / `loop.py`.
 from __future__ import annotations
 
 import argparse
-from typing import Sequence
+from typing import Sequence, cast
 
 from datetime import datetime
 
 from omni.app.clock import SystemClock
-from omni.app.display import MatrixDisplaySink
+from omni.app.display import MatrixDevice, MatrixDisplaySink
 from omni.app.runner import build_loop, run_forever
 from omni.core.enum import PanelProfile
 from omni.core.time import DurationSeconds
@@ -72,9 +72,10 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
     options.parallel = 1
     matrix = RGBMatrix(options=options)
 
-    # The emulator's RGBMatrix satisfies MatrixDevice at runtime; its typed signature
-    # is broader than our minimal protocol, so the structural match needs a nudge.
-    sink = MatrixDisplaySink(matrix, profile)  # type: ignore[arg-type]
+    # The emulator's RGBMatrix is the matrix API at runtime, but its SwapOnVSync is typed with
+    # the emulator's own canvas type and extra args — broader than our minimal MatrixDevice
+    # protocol. Assert the boundary match precisely instead of blanket-ignoring the whole call.
+    sink = MatrixDisplaySink(cast(MatrixDevice, matrix), profile)
     loop = build_loop(
         provider,
         fetch_feed,
