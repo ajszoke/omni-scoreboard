@@ -71,18 +71,22 @@ class EnumMixin:
         value: Any
 
     def to_json_value(self) -> str | int:
+        # The canonical serialization for every string-valued enum: the value already
+        # *is* its JSON identity, so those enums inherit this unchanged. Only
+        # ``IntEnumMixin`` overrides it — an int member's identity is its name, never
+        # the backing number — which is why this base must stay concrete, not abstract.
         value = self.value
         assert isinstance(value, (str, int))  # always true for Omni enums
         return value
 
 
 class StrEnumMixin(EnumMixin):
-    """String-valued enum: ``str(member)`` / ``to_json_value()`` return the value."""
+    """String-valued enum: ``str(member)`` and ``to_json_value()`` return the value.
+
+    Only ``__str__`` is overridden; ``to_json_value`` is inherited from ``EnumMixin``
+    (the string value is already the canonical JSON form)."""
 
     def __str__(self) -> str:
-        return str(self.value)
-
-    def to_json_value(self) -> str:
         return str(self.value)
 
 

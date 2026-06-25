@@ -53,6 +53,7 @@ def test_pillow_canvas_blits_image_pixels_and_clips() -> None:
 def test_pillow_canvas_draws_pixels_and_satisfies_protocol() -> None:
     canvas = PillowCanvas(8, 4)
     assert isinstance(canvas, Canvas)
+    assert (canvas.width, canvas.height) == (8, 4)  # the protocol's dimension accessors
     canvas.fill(RGBColor(0, 0, 0))
     canvas.fill_rect(2, 1, 3, 2, RGBColor(255, 0, 0))
     image = canvas.image()

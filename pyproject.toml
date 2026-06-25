@@ -11,10 +11,30 @@ warn_unused_ignores = true
 warn_redundant_casts = true
 no_implicit_reexport = true
 ignore_missing_imports = true
+# `omni/` is fully annotated, so this note never fires there; it only silenced the
+# "bodies of untyped functions are not checked" note from vendored upstream helpers
+# (e.g. `data/`) that we intentionally do not type.
+disable_error_code = ["annotation-unchecked"]
 
 [[tool.mypy.overrides]]
 module = "RGBMatrixEmulator.*"
 no_implicit_reexport = false
 
 [tool.coverage.run]
+branch = true  # gate on branch coverage too, independent of the --cov-branch CLI flag
 omit = ["*/__main__.py"]  # `python -m` entry shims; not unit-tested
+
+[tool.coverage.report]
+# `omni/` is held at full line+branch coverage; genuinely unreachable lines carry an
+# explicit `# pragma: no cover`. The gate makes a drop fail CI instead of drifting.
+fail_under = 100
+show_missing = true
+
+[tool.pytest.ini_options]
+# Treat warnings as errors so a new one can't slip in unnoticed, with targeted
+# allowances for known-benign third-party noise we don't control.
+filterwarnings = [
+    "error",
+    # RGBMatrixEmulator's browser adapter sets a deprecated asyncio policy at import.
+    "ignore:.*AnyThreadEventLoopPolicy is deprecated",
+]
