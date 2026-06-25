@@ -27,6 +27,7 @@ from omni.cards.base import CardId
 from omni.domain.contest import TeamGame
 from omni.queue.scheduler import InterleavedCardQueue
 from omni.renderers.context import RenderContext
+from omni.renderers.image import LogoStore
 from omni.renderers.registry import RendererRegistry
 
 __all__ = ["TickResult", "AppLoop"]
@@ -56,6 +57,7 @@ class AppLoop:
         registry: RendererRegistry,
         sink: DisplaySink,
         fetch_feed: FeedFetcher,
+        logos: LogoStore | None = None,
     ) -> None:
         self._supervisor = supervisor
         self._store = store
@@ -64,6 +66,7 @@ class AppLoop:
         self._registry = registry
         self._sink = sink
         self._fetch_feed = fetch_feed
+        self._logos = logos  # ambient tile store handed to every RenderContext; None -> colour-bar fallback
 
     def run_once(self, now: datetime) -> TickResult:
         """One full pass of the appliance as of ``now``."""
@@ -79,7 +82,7 @@ class AppLoop:
         if card is not None:
             try:
                 frame = self._sink.new_frame()
-                context = RenderContext(profile=self._sink.profile, now=now)
+                context = RenderContext(profile=self._sink.profile, now=now, logos=self._logos)
                 self._registry.render(card, context, frame)
                 self._sink.commit(frame)
                 shown = card.id

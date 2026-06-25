@@ -22,6 +22,7 @@ from omni.core.time import DurationSeconds
 from omni.domain.contest import TeamGame
 from omni.events.baseball import LiveBaseballFeed
 from omni.panels.geometry import geometry_for
+from omni.renderers.image import LogoStore
 
 __all__ = ["main"]
 
@@ -82,6 +83,7 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
         sink,
         favorites=frozenset(args.favorite),
         broadcast_lag=DurationSeconds(args.delay),
+        logos=LogoStore(),  # resolve committed team tiles from assets/ (lazy, cached)
     )
     print(f"omni.app: {profile.value}, delay {args.delay}s, favorites {sorted(args.favorite)} — http://localhost:8888/")
     run_forever(loop, SystemClock(), tick=DurationSeconds(args.tick))
