@@ -9,11 +9,13 @@ from omni.domain.baseball import (
     BaseballBaseState,
     BaseballCount,
     BaseballGameState,
+    BaseballScoringImpact,
     InningPhase,
     PitchingDecisions,
     PitchType,
     WinProbability,
     no_hitter_side,
+    scoring_impact,
 )
 
 
@@ -139,3 +141,58 @@ def test_win_probability_rejects_out_of_range_percentages() -> None:
         WinProbability(home=120.0, away=0.0)
     with pytest.raises(ValueError):
         WinProbability(home=-1.0, away=101.0)
+
+
+# --- scoring impact -------------------------------------------------------------
+
+
+def test_scoring_impact_empty_without_a_run() -> None:
+    impact = scoring_impact(phase=InningPhase.TOP, inning=3, rbi=0, away_score=2, home_score=2)
+    assert not impact.scored and impact.rbi == 0
+    assert not (impact.tying or impact.go_ahead or impact.walk_off)
+
+
+def test_scoring_impact_records_rbi_even_without_a_known_score() -> None:
+    # A run scored (rbi>0) but the resulting score is absent: count the run, classify nothing.
+    impact = scoring_impact(phase=InningPhase.TOP, inning=3, rbi=2, away_score=None, home_score=None)
+    assert impact.scored and impact.rbi == 2
+    assert not (impact.tying or impact.go_ahead or impact.walk_off)
+
+
+def test_scoring_impact_detects_a_tying_run() -> None:
+    impact = scoring_impact(phase=InningPhase.TOP, inning=8, rbi=1, away_score=3, home_score=3)
+    assert impact.tying and not impact.go_ahead and not impact.walk_off
+
+
+def test_scoring_impact_detects_a_go_ahead_run_for_either_side() -> None:
+    away = scoring_impact(phase=InningPhase.TOP, inning=7, rbi=2, away_score=5, home_score=4)
+    assert away.go_ahead and not away.walk_off  # away leads by 1 (<= 2 rbi) -> go-ahead
+    home = scoring_impact(phase=InningPhase.BOTTOM, inning=7, rbi=1, away_score=4, home_score=5)
+    assert home.go_ahead and not home.walk_off  # not the 9th yet -> not a walk-off
+
+
+def test_scoring_impact_insurance_run_is_not_go_ahead() -> None:
+    # Home already led 5-1; a 1-RBI single makes it 6-1 — scored, but not tying/go-ahead.
+    impact = scoring_impact(phase=InningPhase.BOTTOM, inning=6, rbi=1, away_score=1, home_score=6)
+    assert impact.scored and not impact.go_ahead and not impact.tying
+
+
+def test_scoring_impact_detects_a_walk_off() -> None:
+    ninth = scoring_impact(phase=InningPhase.BOTTOM, inning=9, rbi=1, away_score=3, home_score=4)
+    assert ninth.walk_off and ninth.go_ahead
+    extras = scoring_impact(phase=InningPhase.BOTTOM, inning=11, rbi=1, away_score=2, home_score=3)
+    assert extras.walk_off
+
+
+def test_scoring_impact_rejects_contradictions() -> None:
+    assert BaseballScoringImpact(rbi=1, tying=True).scored  # a valid tying run
+    with pytest.raises(ValueError):
+        BaseballScoringImpact(rbi=-1)
+    with pytest.raises(ValueError):
+        BaseballScoringImpact(rbi=1, walk_off=True)  # a walk-off must be a go-ahead
+    with pytest.raises(ValueError):
+        BaseballScoringImpact(rbi=0, go_ahead=True)  # go-ahead needs a run
+    with pytest.raises(ValueError):
+        BaseballScoringImpact(rbi=0, tying=True)  # tying needs a run
+    with pytest.raises(ValueError):
+        BaseballScoringImpact(rbi=1, tying=True, go_ahead=True)  # cannot both tie and lead
