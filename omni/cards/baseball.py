@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from omni.cards.base import ScoreboardCard
-from omni.core.enum import HomeAway
+from omni.core.enum import GameStatus, HomeAway
 
 # Domain value objects used by the payload fields below (imported for use, not re-exported).
 from omni.domain.baseball import BaseballBaseState, BaseballCount, InningPhase, PitchingDecisions, WinProbability
@@ -23,6 +23,9 @@ __all__ = [
     "BigPlayCard",
     "NoHitterCardPayload",
     "NoHitterCard",
+    "STATUS_CARD_STATUSES",
+    "StatusCardPayload",
+    "StatusCard",
 ]
 
 
@@ -149,3 +152,31 @@ class NoHitterCardPayload:
 
 # A no-hitter baseball card is a ScoreboardCard carrying the no-hitter payload above.
 NoHitterCard = ScoreboardCard[NoHitterCardPayload]
+
+
+# The irregular, mid-life statuses a status card stands in for — a game that is paused but not
+# over, so it belongs to none of the pregame/live/final phases. The pipeline cards exactly these,
+# and the payload accepts exactly these, so the two never drift.
+STATUS_CARD_STATUSES = frozenset({GameStatus.DELAYED, GameStatus.SUSPENDED})
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class StatusCardPayload:
+    """An irregular game status held open on the board: a delay, or a suspension.
+
+    A game paused mid-life (a rain `DELAYED`, or a `SUSPENDED` game to be resumed later)
+    is in none of the pregame/live/final phases, so without a card of its own it would
+    silently drop off the board. This names the matchup (teams from the contest) and the
+    `status` a renderer turns into a banner. It carries *no score*: the result is not yet
+    known, and a paused live score is a spoiler the TV-delay machinery owns, not this card.
+    """
+
+    status: GameStatus
+
+    def __post_init__(self) -> None:
+        if self.status not in STATUS_CARD_STATUSES:
+            raise ValueError(f"a status card stands in for a delay/suspension, not {self.status}")
+
+
+# A status baseball card is a ScoreboardCard carrying the status payload above.
+StatusCard = ScoreboardCard[StatusCardPayload]

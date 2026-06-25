@@ -31,6 +31,7 @@ class CardKind(StrEnumMixin, str, Enum):
     FINAL = "final"
     BIG_PLAY = "big_play"
     NO_HITTER = "no_hitter"
+    STATUS = "status"  # an irregular mid-life state (a delay / a suspension)
     ALERT = "alert"
     LEADERBOARD = "leaderboard"
     OFFDAY = "offday"

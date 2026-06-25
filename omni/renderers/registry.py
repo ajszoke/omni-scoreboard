@@ -27,6 +27,7 @@ from omni.renderers.final import FinalRenderer
 from omni.renderers.live_baseball import LiveBaseballRenderer
 from omni.renderers.no_hitter import NoHitterRenderer
 from omni.renderers.pregame import PregameRenderer
+from omni.renderers.status import StatusRenderer
 
 __all__ = ["RenderDispatchError", "RendererRegistry", "default_registry"]
 
@@ -71,11 +72,12 @@ class RendererRegistry:
 
 
 def default_registry() -> RendererRegistry:
-    """A registry wired with the renderers shipped today (baseball live + pregame + final + big play + no-hitter)."""
+    """A registry wired with today's renderers (baseball live + pregame + final + big play + no-hitter + status)."""
     registry = RendererRegistry()
     registry.register(Sport.BASEBALL, CardKind.LIVE_GAME, LiveBaseballRenderer())
     registry.register(Sport.BASEBALL, CardKind.PREGAME, PregameRenderer())
     registry.register(Sport.BASEBALL, CardKind.FINAL, FinalRenderer())
     registry.register(Sport.BASEBALL, CardKind.BIG_PLAY, BigPlayRenderer())
     registry.register(Sport.BASEBALL, CardKind.NO_HITTER, NoHitterRenderer())
+    registry.register(Sport.BASEBALL, CardKind.STATUS, StatusRenderer())
     return registry
