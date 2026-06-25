@@ -32,8 +32,9 @@ from omni.cards.baseball import (
     LiveBaseballCardPayload,
     NoHitterCardPayload,
     PregameCardPayload,
+    StatusCardPayload,
 )
-from omni.core.enum import DisplayPriority, HomeAway, PanelProfile
+from omni.core.enum import DisplayPriority, GameStatus, HomeAway, PanelProfile
 from omni.core.time import DurationSeconds
 from omni.domain.baseball import BaseballGameState, PitchingDecisions
 from omni.domain.contest import TeamGame
@@ -58,6 +59,8 @@ _BIG_PLAY_COMPROMISE = ("single_64x32: headline + score only — the play descri
 # A no-hitter renders natively on all three; the small panel drops the "through N" inning.
 _NO_HITTER_PROFILES = frozenset({PanelProfile.SINGLE_64X32, PanelProfile.STACK_64X64, PanelProfile.QUAD_128X64})
 _NO_HITTER_COMPROMISE = ("single_64x32: headline + team only — the 'through N' inning is dropped (no room).",)
+# A status (delay/suspension) card carries only a matchup + banner, so it fits all three natively.
+_STATUS_PROFILES = frozenset({PanelProfile.SINGLE_64X32, PanelProfile.STACK_64X64, PanelProfile.QUAD_128X64})
 # An active no-hitter resurfaces periodically (not constantly) while the bid is alive; it
 # has no max_repeats — the pipeline removes the card when the no-hitter is broken or ends.
 _NO_HITTER_ATTENTION = AttentionPolicy(mode=AttentionMode.RECURRING, cooldown=DurationSeconds(60))
@@ -113,6 +116,8 @@ class CardFactory:
     big_play_window: DurationSeconds = DurationSeconds(120)  # how long a big play stays in rotation
     no_hitter_min_display: DurationSeconds = DurationSeconds(8)
     no_hitter_max_display: DurationSeconds = DurationSeconds(20)
+    status_min_display: DurationSeconds = DurationSeconds(8)
+    status_max_display: DurationSeconds = DurationSeconds(20)
 
     def live_baseball(
         self,
@@ -287,5 +292,38 @@ class CardFactory:
             layout_support=LayoutSupport(profiles=_NO_HITTER_PROFILES, compromise_notes=_NO_HITTER_COMPROMISE),
             dedupe_key=DedupeKey(key),
             attention=_NO_HITTER_ATTENTION,
+            payload=payload,
+        )
+
+    def status(
+        self,
+        game: TeamGame,
+        *,
+        status: GameStatus,
+        now: datetime,
+        priority: CardPriority | None = None,
+    ) -> ScoreboardCard[StatusCardPayload]:
+        """Build a status card for a game paused mid-life (a delay or a suspension).
+
+        It keeps a paused game on the board — matchup + a status banner, no score — instead
+        of letting it fall out of every lifecycle phase. It needs no feed fetch and no TV
+        delay (it reveals no score), and sits in normal rotation; the pipeline replaces it
+        with the live card on resume, or the final card once the game ends. One card per game
+        (keyed `:status`), refreshed while the game stays paused.
+        """
+        payload = StatusCardPayload(status=status)
+        key = f"{game.id.raw}:status"
+        return ScoreboardCard(
+            id=CardId(key),
+            kind=CardKind.STATUS,
+            contest=game,
+            timing=DisplayTiming(
+                available_at=now,
+                min_display=self.status_min_display,
+                max_display=self.status_max_display,
+            ),
+            priority=priority if priority is not None else _DEFAULT_PRIORITY,
+            layout_support=LayoutSupport(profiles=_STATUS_PROFILES),
+            dedupe_key=DedupeKey(key),
             payload=payload,
         )

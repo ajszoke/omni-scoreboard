@@ -159,12 +159,21 @@ def test_shows_lag_old_state_not_the_current_spoiler() -> None:
 
 
 def test_a_non_carding_status_surfaces_nothing() -> None:
-    # A postponed game (neither upcoming, live, nor final) produces no card on any path —
+    # A postponed game (not upcoming, live, paused, nor final) produces no card on any path —
     # exercising the full PipelineResult shape in one assertion.
     pipe, queue = _setup()
     res = pipe.refresh([_game("g2", GameStatus.POSTPONED)], now=T, fetch_feed=_Fetch())
     assert res == PipelineResult(
-        pregames=(), ingested=(), big_plays=(), no_hitters=(), finals=(), held=(), removed=(), skipped=(), warnings=()
+        pregames=(),
+        statuses=(),
+        ingested=(),
+        big_plays=(),
+        no_hitters=(),
+        finals=(),
+        held=(),
+        removed=(),
+        skipped=(),
+        warnings=(),
     )
     assert len(queue) == 0
 
@@ -420,6 +429,67 @@ def test_no_hitter_card_dropped_when_its_game_leaves() -> None:
     res = pipe.refresh([_game("g1", GameStatus.FINAL)], now=T + timedelta(seconds=10), fetch_feed=fetch)
     assert _id("g1") not in pipe._no_hitter_keys  # the no-hitter card is cleaned up with the live set...
     assert [c.raw for c in res.finals] == ["g1:final"] and len(queue) == 1  # ...and replaced by the final
+
+
+# --- status (delay / suspension) path ---------------------------------------------
+
+
+def test_status_card_surfaces_for_a_delayed_game() -> None:
+    pipe, queue = _setup(lag=0)
+    res = pipe.refresh([_game("g1", GameStatus.DELAYED)], now=T, fetch_feed=_Fetch())
+    assert [c.raw for c in res.statuses] == ["g1:status"]
+    assert len(queue) == 1
+
+
+def test_status_card_surfaces_for_a_suspended_game() -> None:
+    pipe, queue = _setup(lag=0)
+    res = pipe.refresh([_game("g1", GameStatus.SUSPENDED)], now=T, fetch_feed=_Fetch())
+    assert [c.raw for c in res.statuses] == ["g1:status"]
+
+
+def test_status_card_needs_no_feed_fetch() -> None:
+    # A paused game reveals no score, so the pipeline never fetches its feed — a dead feed
+    # during a long rain delay must not cost the card.
+    pipe, _ = _setup(lag=0)
+    fetch = _Fetch()
+    fetch.fail.add("g1")  # any fetch would raise -> a skip; there must be none
+    res = pipe.refresh([_game("g1", GameStatus.DELAYED)], now=T, fetch_feed=fetch)
+    assert [c.raw for c in res.statuses] == ["g1:status"] and res.skipped == ()
+
+
+def test_live_game_pausing_swaps_the_live_card_for_a_status_card() -> None:
+    pipe, queue = _setup(lag=0)
+    fetch = _Fetch()
+    fetch.set("g1", _state(inning=4))
+    pipe.refresh([_game("g1")], now=T, fetch_feed=fetch)  # live
+    assert _id("g1") in pipe._card_keys and len(queue) == 1
+    res = pipe.refresh([_game("g1", GameStatus.DELAYED)], now=T + timedelta(seconds=5), fetch_feed=fetch)
+    assert [c.raw for c in res.statuses] == ["g1:status"]
+    assert _id("g1") in res.removed  # the live card was pulled...
+    assert _id("g1") not in pipe._card_keys and _id("g1") not in pipe._feeds  # ...and its live state torn down
+    assert len(queue) == 1  # just the status card now
+
+
+def test_paused_game_resuming_swaps_back_to_the_live_card() -> None:
+    pipe, queue = _setup(lag=0)
+    fetch = _Fetch()
+    pipe.refresh([_game("g1", GameStatus.DELAYED)], now=T, fetch_feed=fetch)  # paused
+    assert _id("g1") in pipe._status_keys and len(queue) == 1
+    fetch.set("g1", _state(inning=4))
+    res = pipe.refresh([_game("g1")], now=T + timedelta(seconds=5), fetch_feed=fetch)  # resumes live
+    assert res.statuses == () and _id("g1") not in pipe._status_keys  # status card gone
+    assert [c.raw for c in res.ingested] == ["g1:live"] and len(queue) == 1  # live card back
+
+
+def test_status_card_dropped_when_the_game_ends() -> None:
+    pipe, queue = _setup(lag=0)
+    fetch = _Fetch()
+    pipe.refresh([_game("g1", GameStatus.SUSPENDED)], now=T, fetch_feed=fetch)
+    assert _id("g1") in pipe._status_keys
+    fetch.set("g1", _state(inning=9))
+    res = pipe.refresh([_game("g1", GameStatus.FINAL)], now=T + timedelta(seconds=5), fetch_feed=fetch)
+    assert _id("g1") not in pipe._status_keys  # status card cleaned up...
+    assert [c.raw for c in res.finals] == ["g1:final"] and len(queue) == 1  # ...replaced by the final
 
 
 # --- final path -------------------------------------------------------------------

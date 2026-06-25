@@ -12,8 +12,9 @@ from omni.cards.baseball import (
     LiveBaseballCardPayload,
     NoHitterCardPayload,
     PregameCardPayload,
+    StatusCardPayload,
 )
-from omni.core.enum import HomeAway
+from omni.core.enum import GameStatus, HomeAway
 from omni.domain.baseball import BaseballBaseState, BaseballCount, InningPhase
 from omni.events.baseball import BaseballGameEventType
 
@@ -84,3 +85,15 @@ def test_no_hitter_payload_defaults_to_not_perfect() -> None:
 def test_no_hitter_payload_rejects_inning_below_one() -> None:
     with pytest.raises(ValueError):
         NoHitterCardPayload(pitching_side=HomeAway.HOME, through_inning=0)
+
+
+def test_status_payload_holds_a_paused_status() -> None:
+    assert StatusCardPayload(status=GameStatus.DELAYED).status is GameStatus.DELAYED
+    assert StatusCardPayload(status=GameStatus.SUSPENDED).status is GameStatus.SUSPENDED
+
+
+def test_status_payload_rejects_a_non_paused_status() -> None:
+    # The card stands in only for a paused game; a live/final/postponed status is a misuse.
+    for bad in (GameStatus.LIVE, GameStatus.FINAL, GameStatus.POSTPONED):
+        with pytest.raises(ValueError):
+            StatusCardPayload(status=bad)

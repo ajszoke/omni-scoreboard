@@ -6,6 +6,10 @@ and a way to fetch a game's live feed; the pipeline cards each game for its phas
 - **upcoming** (scheduled / pre-game) — a `pregame` card carrying the matchup and a
   first-pitch countdown. There is no score to spoil, so it needs no feed fetch and no
   delay; the renderer derives the live countdown from the render clock.
+- **paused** (delayed / suspended) — a `status` card carrying the matchup and a banner, so a
+  game in a rain delay or suspension stays on the board instead of falling out of every phase.
+  It reveals no score, so (like the pregame card) it needs no feed fetch and no delay; it is
+  replaced by the live card on resume or the final card once the game ends.
 - **live** — for each LIVE game, three delay-safe paths off one feed fetch:
   - **live state** — held in a per-game `DelayedFeed` so what surfaces is lag-old and
     never spoils the broadcast; scored, built into a live card, ingested.
@@ -43,6 +47,7 @@ from datetime import datetime
 from typing import Callable, Iterable
 
 from omni.cards.base import CardId
+from omni.cards.baseball import STATUS_CARD_STATUSES
 from omni.cards.factory import CardFactory
 from omni.core.enum import DisplayPriority, GameStatus
 from omni.core.ids import LeagueScopedId
@@ -81,6 +86,7 @@ class PipelineResult:
     """What one pipeline pass did (ids sorted for deterministic traces)."""
 
     pregames: tuple[CardId, ...]  # pregame cards surfaced/refreshed for upcoming games this pass
+    statuses: tuple[CardId, ...]  # status cards surfaced/refreshed for paused (delayed/suspended) games
     ingested: tuple[CardId, ...]  # live-state cards built/refreshed this pass
     big_plays: tuple[CardId, ...]  # big-play cards surfaced this pass (chronological)
     no_hitters: tuple[CardId, ...]  # active no-hitter cards surfaced/refreshed this pass
@@ -107,6 +113,7 @@ class LiveBaseballPipeline:
         self._factory = factory
         self._queue = queue
         self._pregame_keys: dict[LeagueScopedId, str] = {}  # contest id -> its pregame card's key
+        self._status_keys: dict[LeagueScopedId, str] = {}  # contest id -> its (delay/suspension) status card's key
         self._feeds: dict[LeagueScopedId, DelayedFeed[BaseballGameState]] = {}
         self._card_keys: dict[LeagueScopedId, str] = {}  # contest id -> its live card's dedupe key
         self._event_streams: dict[LeagueScopedId, DelayedEventStream[BaseballGameEvent]] = {}
@@ -119,12 +126,15 @@ class LiveBaseballPipeline:
         """Observe the slate, surface each game's phase card into the queue, drop stale ones."""
         live = [game for game in games if game.status is GameStatus.LIVE]
         upcoming = [game for game in games if game.status in _UPCOMING_STATUSES]
+        irregular = [game for game in games if game.status in STATUS_CARD_STATUSES]
         final = [game for game in games if game.status is GameStatus.FINAL]
         live_ids = {game.id for game in live}
         upcoming_ids = {game.id for game in upcoming}
+        irregular_ids = {game.id for game in irregular}
         final_ids = {game.id for game in final}
 
         pregames: list[CardId] = []
+        statuses: list[CardId] = []
         ingested: list[CardId] = []
         big_plays: list[CardId] = []
         no_hitters: list[CardId] = []
@@ -136,6 +146,11 @@ class LiveBaseballPipeline:
         # Upcoming games card without a feed fetch — there is no score to spoil, so no delay.
         for game in upcoming:
             pregames.append(self._surface_pregame(game, now=now))
+
+        # Paused (delayed/suspended) games also card without a fetch — the banner reveals no score,
+        # so a long rain delay never hammers the per-game feed.
+        for game in irregular:
+            statuses.append(self._surface_status(game, now=now))
 
         for game in live:
             try:
@@ -187,9 +202,11 @@ class LiveBaseballPipeline:
 
         removed = self._drop_absent(live_ids, final_ids)
         self._drop_stale_pregame(upcoming_ids)
+        self._drop_stale_status(irregular_ids)
         self._drop_stale_finals(final_ids)
         return PipelineResult(
             pregames=tuple(pregames),
+            statuses=tuple(statuses),
             ingested=tuple(ingested),
             big_plays=tuple(big_plays),
             no_hitters=tuple(no_hitters),
@@ -205,6 +222,13 @@ class LiveBaseballPipeline:
         card = self._factory.pregame(game, now=now)
         self._queue.ingest(card)
         self._pregame_keys[game.id] = card.dedupe_key.raw
+        return card.id
+
+    def _surface_status(self, game: TeamGame, *, now: datetime) -> CardId:
+        """Surface (or refresh) the status card for a paused (delayed/suspended) game."""
+        card = self._factory.status(game, status=game.status, now=now)
+        self._queue.ingest(card)
+        self._status_keys[game.id] = card.dedupe_key.raw
         return card.id
 
     def _surface_big_plays(
@@ -288,6 +312,15 @@ class LiveBaseballPipeline:
         """Drop the pregame card for any game no longer upcoming — it went live, ended, or left the slate."""
         for contest_id in set(self._pregame_keys) - upcoming_ids:
             self._queue.remove(self._pregame_keys.pop(contest_id))
+
+    def _drop_stale_status(self, irregular_ids: set[LeagueScopedId]) -> None:
+        """Drop the status card for any game no longer paused — it resumed, ended, or left the slate.
+
+        On resume the live card takes over; once final the final card does. The status card holds
+        no live-scoped state of its own (no feed/stream), so dropping its key here is the whole teardown.
+        """
+        for contest_id in set(self._status_keys) - irregular_ids:
+            self._queue.remove(self._status_keys.pop(contest_id))
 
     def _drop_stale_finals(self, final_ids: set[LeagueScopedId]) -> None:
         """Drop final tracking for any game no longer final — it left the slate (or, rarely, resumed).
