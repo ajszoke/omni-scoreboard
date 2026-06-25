@@ -49,7 +49,8 @@ def _game() -> TeamGame:
 
 
 def _events() -> tuple[Any, ...]:
-    return _parse_game_events(_feed(), contest=_game(), source=SOURCE, observed_at=NOW)
+    events, _warnings = _parse_game_events(_feed(), contest=_game(), source=SOURCE, observed_at=NOW)
+    return events
 
 
 def _play(**about: Any) -> dict[str, Any]:
@@ -148,12 +149,39 @@ def test_fetch_live_feed_returns_state_and_events_together() -> None:
 
 
 def test_no_plays_yields_no_events() -> None:
-    assert _parse_game_events({"liveData": {"linescore": {}}}, contest=_game(), source=SOURCE, observed_at=NOW) == ()
+    feed: dict[str, Any] = {"liveData": {"linescore": {}}}
+    assert _parse_game_events(feed, contest=_game(), source=SOURCE, observed_at=NOW) == ((), ())
 
 
 def test_non_list_allplays_yields_no_events() -> None:
     feed = {"liveData": {"plays": {"allPlays": "nope"}}}
-    assert _parse_game_events(feed, contest=_game(), source=SOURCE, observed_at=NOW) == ()
+    assert _parse_game_events(feed, contest=_game(), source=SOURCE, observed_at=NOW) == ((), ())
+
+
+@pytest.mark.parametrize(
+    "bad_play, exc_name",
+    [
+        ({"atBatIndex": 6, "result": None, "about": {}, "count": {}}, "AttributeError"),  # null result
+        ({"atBatIndex": 6, "result": {"eventType": "home_run"}, "about": None, "count": {}}, "AttributeError"),  # about
+        ({"atBatIndex": 6, "result": {"eventType": "home_run", "rbi": "lots"}, "about": {}, "count": {}}, "ValueError"),
+    ],
+)
+def test_malformed_play_is_isolated_with_a_warning(bad_play: dict[str, Any], exc_name: str) -> None:
+    # A malformed play must not sink the parse or escape the boundary: drop it, warn, keep the rest.
+    feed = {"liveData": {"plays": {"allPlays": [_play(atBatIndex=5), bad_play]}}}
+    events, warnings = _parse_game_events(feed, contest=_game(), source=SOURCE, observed_at=NOW)
+    assert len(events) == 1 and events[0].event_type is BaseballGameEventType.HOME_RUN  # the good play survived
+    assert len(warnings) == 1 and "play 1" in warnings[0] and exc_name in warnings[0]
+
+
+def test_fetch_live_feed_isolates_a_malformed_play_as_a_feed_warning() -> None:
+    # End to end: one bad play in an otherwise-good feed surfaces as a feed warning, not a crash.
+    raw = _feed()
+    raw["liveData"]["plays"]["allPlays"].append({"atBatIndex": 99, "result": None, "about": {}, "count": {}})
+    provider = MlbStatsApiProvider(MlbTeamRegistry({}), fetch_game=lambda _pk: raw)
+    feed = provider.fetch_live_feed(_game(), now=NOW)
+    assert len(feed.events) == 4  # the four good events still parse
+    assert len(feed.warnings) == 1 and "AttributeError" in feed.warnings[0]
 
 
 def test_unmapped_event_type_is_skipped() -> None:

@@ -85,6 +85,7 @@ class _Fetch:
         self.states: dict[str, BaseballGameState] = {}
         self.events: dict[str, tuple[BaseballGameEvent, ...]] = {}
         self.decisions: dict[str, PitchingDecisions] = {}
+        self.warnings: dict[str, tuple[str, ...]] = {}
         self.fail: set[str] = set()
 
     def set(self, raw: str, state: BaseballGameState) -> None:
@@ -100,6 +101,7 @@ class _Fetch:
             state=self.states[game.id.raw],
             events=self.events.get(game.id.raw, ()),
             decisions=self.decisions.get(game.id.raw),
+            warnings=self.warnings.get(game.id.raw, ()),
         )
 
 
@@ -150,7 +152,7 @@ def test_a_non_carding_status_surfaces_nothing() -> None:
     pipe, queue = _setup()
     res = pipe.refresh([_game("g2", GameStatus.POSTPONED)], now=T, fetch_feed=_Fetch())
     assert res == PipelineResult(
-        pregames=(), ingested=(), big_plays=(), no_hitters=(), finals=(), held=(), removed=(), skipped=()
+        pregames=(), ingested=(), big_plays=(), no_hitters=(), finals=(), held=(), removed=(), skipped=(), warnings=()
     )
     assert len(queue) == 0
 
@@ -163,6 +165,29 @@ def test_isolates_per_game_fetch_failures() -> None:
     res = pipe.refresh([_game("g1"), _game("g2")], now=T, fetch_feed=fetch)
     assert any("g1" in warning for warning in res.skipped)
     assert len(res.ingested) == 1 and len(queue) == 1  # g2 still made it through
+
+
+def test_surfaces_per_play_warnings_without_dropping_the_game() -> None:
+    # A malformed play is isolated in the provider; the pipeline surfaces it as a warning, but
+    # the live card still ingests — a per-play drop is not a per-game failure.
+    pipe, queue = _setup(lag=0)  # eligible immediately
+    fetch = _Fetch()
+    fetch.set("g1", _state(away=1, home=2))
+    fetch.warnings["g1"] = ("play 4: ValueError: bad rbi",)
+    res = pipe.refresh([_game("g1")], now=T, fetch_feed=fetch)
+    assert res.warnings == ("g1: play 4: ValueError: bad rbi",)
+    assert len(res.ingested) == 1 and len(queue) == 1  # the game still shows
+    assert res.skipped == ()  # not a dropped-game failure
+
+
+def test_surfaces_per_play_warnings_for_a_final_game() -> None:
+    # The final path collects feed warnings too (off the same per-game fetch).
+    pipe, _queue = _setup(lag=0)  # final reveals as soon as the game is seen final
+    fetch = _Fetch()
+    fetch.set("g1", _state(away=2, home=1))
+    fetch.warnings["g1"] = ("play 7: AttributeError: null about",)
+    res = pipe.refresh([_game("g1", GameStatus.FINAL)], now=T, fetch_feed=fetch)
+    assert res.warnings == ("g1: play 7: AttributeError: null about",)
 
 
 def test_live_card_is_swapped_for_the_final_when_the_game_ends() -> None:

@@ -207,8 +207,8 @@ class MlbStatsApiProvider:
         except Exception as exc:
             raise ProviderError(f"MLB game fetch failed for {game.id.raw}: {exc}") from exc
         state = _parse_game_state(raw)
-        events = _parse_game_events(raw, contest=game, source=self.source, observed_at=now)
-        return LiveBaseballFeed(state=state, events=events, decisions=_parse_decisions(raw))
+        events, warnings = _parse_game_events(raw, contest=game, source=self.source, observed_at=now)
+        return LiveBaseballFeed(state=state, events=events, decisions=_parse_decisions(raw), warnings=warnings)
 
     def fetch_win_probability(self, game: TeamGame) -> WinProbability | None:
         """Fetch one game's live win probability, or None when none is available.
@@ -296,7 +296,9 @@ def _parse_game_state(raw: dict[str, Any]) -> BaseballGameState:
                 third="third" in offense,
             ),
         )
-    except (KeyError, TypeError, ValueError) as exc:
+    except (KeyError, TypeError, ValueError, AttributeError) as exc:
+        # AttributeError covers a null nested object (e.g. `"teams": null` -> None.get(...)),
+        # so a malformed linescore becomes a typed error, never a raw escape.
         raise ProviderError(f"could not parse game state: {exc}") from exc
 
 
@@ -413,17 +415,28 @@ def _parse_one_play(
 
 def _parse_game_events(
     raw: dict[str, Any], *, contest: TeamGame, source: SourceRef, observed_at: datetime
-) -> tuple[BaseballGameEvent, ...]:
-    """Parse a game feed's `liveData.plays.allPlays` into typed, mapped events.
+) -> tuple[tuple[BaseballGameEvent, ...], tuple[str, ...]]:
+    """Parse `liveData.plays.allPlays` into typed events, plus warnings for any it had to drop.
 
-    Robust by design: a feed with no plays yields ``()``; routine and unmapped plays
-    are skipped (see `_parse_one_play`) so one odd entry never sinks the whole parse.
+    Per-play isolation: a feed with no plays yields ``((), ())``; routine and unmapped plays
+    are skipped silently (see `_parse_one_play`), and a *malformed* play — one that raises
+    while parsing — is dropped with a warning instead of sinking the whole parse or escaping
+    the provider boundary. So one odd entry never costs more than that one entry.
     """
     plays = raw.get("liveData", {}).get("plays", {}).get("allPlays", [])
     if not isinstance(plays, list):
-        return ()
-    events = [_parse_one_play(p, contest=contest, source=source, observed_at=observed_at) for p in plays]
-    return tuple(event for event in events if event is not None)
+        return (), ()
+    events: list[BaseballGameEvent] = []
+    warnings: list[str] = []
+    for index, play in enumerate(plays):
+        try:
+            event = _parse_one_play(play, contest=contest, source=source, observed_at=observed_at)
+        except Exception as exc:
+            warnings.append(f"play {index}: {type(exc).__name__}: {exc}")
+            continue
+        if event is not None:
+            events.append(event)
+    return tuple(events), tuple(warnings)
 
 
 def _pitcher_name(person: Any) -> str | None:

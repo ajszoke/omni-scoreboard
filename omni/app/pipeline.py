@@ -86,7 +86,8 @@ class PipelineResult:
     finals: tuple[CardId, ...]  # final cards revealed this pass (their post-game delay elapsed)
     held: tuple[LeagueScopedId, ...]  # games whose card is still inside the TV delay (live buffering / final reveal)
     removed: tuple[LeagueScopedId, ...]  # games no longer live whose card was dropped
-    skipped: tuple[str, ...]  # per-game fetch failures (warnings)
+    skipped: tuple[str, ...]  # per-game fetch failures — the game is dropped this pass
+    warnings: tuple[str, ...] = ()  # non-fatal per-play parse drops — the game still shows
 
 
 class LiveBaseballPipeline:
@@ -129,6 +130,7 @@ class LiveBaseballPipeline:
         finals: list[CardId] = []
         held: list[LeagueScopedId] = []
         skipped: list[str] = []
+        warnings: list[str] = []
 
         # Upcoming games card without a feed fetch — there is no score to spoil, so no delay.
         for game in upcoming:
@@ -140,6 +142,7 @@ class LiveBaseballPipeline:
             except ProviderError as exc:
                 skipped.append(f"{game.id.raw}: {exc}")
                 continue
+            warnings.extend(f"{game.id.raw}: {warning}" for warning in feed.warnings)
 
             # Big-play path first, so it runs even when the state is still delay-held.
             big_plays.extend(self._surface_big_plays(game, feed.events, now=now))
@@ -170,6 +173,7 @@ class LiveBaseballPipeline:
             except ProviderError as exc:
                 skipped.append(f"{game.id.raw}: {exc}")
                 continue
+            warnings.extend(f"{game.id.raw}: {warning}" for warning in feed.warnings)
             # Drain any walk-off held from the live ticks: it clears the delay at its own play
             # time, which is at or before the final's first-sight anchor — so it flashes, then
             # the final confirms it. (Surfacing here, before the reveal, keeps the stream alive.)
@@ -192,6 +196,7 @@ class LiveBaseballPipeline:
             held=tuple(sorted(held, key=str)),
             removed=tuple(removed),
             skipped=tuple(skipped),
+            warnings=tuple(warnings),
         )
 
     def _surface_pregame(self, game: TeamGame, *, now: datetime) -> CardId:
