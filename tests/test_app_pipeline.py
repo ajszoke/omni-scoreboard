@@ -584,6 +584,29 @@ def test_final_card_dropped_when_the_game_leaves_the_slate() -> None:
     assert _id("g1") not in pipe._final_keys and len(queue) == 0
 
 
+def test_last_live_frame_is_held_across_the_final_embargo() -> None:
+    # H1-adjacent: a just-ended game keeps its last delay-safe live frame on screen — never
+    # blank — through the post-game embargo, then the final card replaces it.
+    pipe, queue = _setup(lag=30)
+    fetch = _Fetch()
+    fetch.set("g1", _state(away=2, home=5, inning=9))
+    pipe.refresh([_game("g1")], now=T, fetch_feed=fetch)  # live tick 1: observed, still inside the delay
+    live = pipe.refresh([_game("g1")], now=T + timedelta(seconds=30), fetch_feed=fetch)  # delay elapsed
+    assert [c.raw for c in live.ingested] == ["g1:live"]  # the last delay-safe frame is on screen
+
+    # The game ends; the final is embargoed (first sight + 30s), but the live frame is held.
+    held = pipe.refresh([_game("g1", GameStatus.FINAL)], now=T + timedelta(seconds=35), fetch_feed=fetch)
+    assert held.finals == () and _id("g1") in held.held
+    assert _id("g1") in pipe._card_keys and _id("g1") not in held.removed  # live card not torn down
+    card = queue.next_card(T + timedelta(seconds=35), QUAD)
+    assert card is not None and card.dedupe_key.raw == "g1:live"  # the last live frame, not blank
+
+    # Once the embargo elapses, the final reveals and the held frame is dropped in the same pass.
+    reveal = pipe.refresh([_game("g1", GameStatus.FINAL)], now=T + timedelta(seconds=65), fetch_feed=fetch)
+    assert [c.raw for c in reveal.finals] == ["g1:final"] and _id("g1") in reveal.removed
+    assert _id("g1") not in pipe._card_keys and len(queue) == 1  # the final replaced the held frame
+
+
 def test_pending_final_forgotten_if_the_game_resumes() -> None:
     # A game that flickers final -> live (a resumed suspension) drops its pending reveal, so a
     # stale captured score can never surface later.
