@@ -72,6 +72,17 @@ class GameEvent(Generic[EventTypeT, PayloadT]):
     payload: PayloadT
     competitors: tuple[Competitor, ...] = ()
 
+    def __post_init__(self) -> None:
+        # Mirror Observation's time invariants — the TV-delay math mixes these two datetimes,
+        # so a naive one would raise mid-run — and require a real lineage id: an event's `id` is
+        # its dedupe/replay key (e.g. ``<gamePk>:ab:<atBatIndex>``), so an empty one would collide.
+        if not self.id.raw:
+            raise ValueError("a game event needs a non-empty id (its lineage key)")
+        if self.source_time.tzinfo is None:
+            raise ValueError("source_time must be timezone-aware")
+        if self.observed_at.tzinfo is None:
+            raise ValueError("observed_at must be timezone-aware")
+
     @property
     def league(self) -> League:
         return self.contest.league
