@@ -31,16 +31,38 @@ class AttentionMode(StrEnumMixin, str, Enum):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class AttentionPolicy:
-    """A card's surfacing behavior — bounded so it can never monopolize forever."""
+    """A card's surfacing behavior — bounded so it can never monopolize forever.
+
+    Each knob belongs to exactly one mode (`takeover_for` to BURST, `cooldown`/`max_repeats`
+    to RECURRING); a knob set on any other mode would be silently ignored by the queue, so it
+    is rejected here rather than read as a working setting. A BURST must take over for a
+    positive duration (a zero-length burst never bursts) and a RECURRING needs a positive
+    cooldown (or it would resurface every tick, defeating the point) — both invariants the
+    queue then trusts instead of re-checking.
+    """
 
     mode: AttentionMode
-    takeover_for: DurationSeconds = DurationSeconds(0)  # how long a BURST holds the screen
-    cooldown: DurationSeconds = DurationSeconds(0)  # min gap before it may burst/recur again
-    max_repeats: int | None = None  # cap on RECURRING resurfacings (None = unbounded count)
+    takeover_for: DurationSeconds = DurationSeconds(0)  # how long a BURST holds the screen (BURST only)
+    cooldown: DurationSeconds = DurationSeconds(0)  # min gap before a RECURRING may resurface (RECURRING only)
+    max_repeats: int | None = None  # cap on RECURRING resurfacings (RECURRING only; None = unbounded count)
 
     def __post_init__(self) -> None:
-        if self.max_repeats is not None and self.max_repeats < 0:
-            raise ValueError("max_repeats cannot be negative")
+        if self.mode is AttentionMode.BURST:
+            if self.takeover_for.value <= 0:
+                raise ValueError("a BURST attention must take over for a positive duration")
+        elif self.takeover_for.value != 0:
+            raise ValueError("takeover_for is only meaningful for a BURST attention")
+
+        if self.mode is AttentionMode.RECURRING:
+            if self.cooldown.value <= 0:
+                raise ValueError("a RECURRING attention needs a positive cooldown")
+            if self.max_repeats is not None and self.max_repeats < 0:
+                raise ValueError("max_repeats cannot be negative")
+        else:
+            if self.cooldown.value != 0:
+                raise ValueError("cooldown is only meaningful for a RECURRING attention")
+            if self.max_repeats is not None:
+                raise ValueError("max_repeats is only meaningful for a RECURRING attention")
 
 
 # The default for a card that just wants fair rotation.

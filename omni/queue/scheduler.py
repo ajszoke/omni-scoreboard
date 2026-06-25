@@ -131,8 +131,9 @@ class InterleavedCardQueue:
 
     def _is_bursting(self, card: ScoreboardCard[Any], now: datetime) -> bool:
         policy = card.attention
-        if policy.mode is not AttentionMode.BURST or policy.takeover_for.value <= 0:
+        if policy.mode is not AttentionMode.BURST:
             return False
+        # AttentionPolicy guarantees a BURST takes over for a positive duration, so this window is real.
         end = card.timing.available_at + policy.takeover_for.as_timedelta()
         return card.timing.available_at <= now < end
 
