@@ -54,7 +54,7 @@ def test_pipeline_produces_a_renderable_mlb_card() -> None:
     assert card.league is League.MLB
     assert card.contest.away.abbreviation == "COL"
     assert card.contest.home.abbreviation == "LAD"
-    assert card.payload.away_score == 3 and card.payload.home_score == 5
+    assert card.payload.away_line.runs == 3 and card.payload.home_line.runs == 5
     assert card.payload.bases.first and card.payload.bases.third
 
 

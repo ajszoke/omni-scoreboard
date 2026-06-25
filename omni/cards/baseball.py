@@ -9,7 +9,14 @@ from omni.cards.base import ScoreboardCard
 from omni.core.enum import GameStatus, HomeAway
 
 # Domain value objects used by the payload fields below (imported for use, not re-exported).
-from omni.domain.baseball import BaseballBaseState, BaseballCount, InningPhase, PitchingDecisions, WinProbability
+from omni.domain.baseball import (
+    BaseballBaseState,
+    BaseballCount,
+    InningPhase,
+    PitchingDecisions,
+    TeamLinescore,
+    WinProbability,
+)
 from omni.events.baseball import BaseballGameEventType
 
 __all__ = [
@@ -31,10 +38,14 @@ __all__ = [
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class LiveBaseballCardPayload:
-    """The live state a baseball card needs to render; teams come from the contest."""
+    """The live state a baseball card needs to render; teams come from the contest.
 
-    away_score: int
-    home_score: int
+    Each side's score arrives as a `TeamLinescore` (R/H/E), so a dense card can show the
+    hit/error totals beside the run score; the run is `away_line.runs` / `home_line.runs`.
+    """
+
+    away_line: TeamLinescore
+    home_line: TeamLinescore
     inning: int
     phase: InningPhase
     count: BaseballCount
@@ -43,8 +54,7 @@ class LiveBaseballCardPayload:
     win_probability: WinProbability | None = None  # drives the per-team meter; None hides it
 
     def __post_init__(self) -> None:
-        if self.away_score < 0 or self.home_score < 0:
-            raise ValueError("scores cannot be negative")
+        # Run/hit/error non-negativity is enforced by TeamLinescore itself.
         if self.inning < 1:
             raise ValueError("inning must be >= 1")
 

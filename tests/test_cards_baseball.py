@@ -15,10 +15,12 @@ from omni.cards.baseball import (
     StatusCardPayload,
 )
 from omni.core.enum import GameStatus, HomeAway
-from omni.domain.baseball import BaseballBaseState, BaseballCount, InningPhase
+from omni.domain.baseball import BaseballBaseState, BaseballCount, InningPhase, TeamLinescore
 from omni.events.baseball import BaseballGameEventType
 
 _COUNT = BaseballCount(balls=2, strikes=1, outs=2)
+_AWAY_LINE = TeamLinescore(runs=1, hits=4, errors=0)
+_HOME_LINE = TeamLinescore(runs=0, hits=2, errors=1)
 
 
 def test_base_state_defaults_to_empty() -> None:
@@ -28,22 +30,26 @@ def test_base_state_defaults_to_empty() -> None:
 
 def test_live_payload_uses_inning_phase_enum() -> None:
     payload = LiveBaseballCardPayload(
-        away_score=1, home_score=0, inning=3, phase=InningPhase.BOTTOM, count=_COUNT, bases=BaseballBaseState()
+        away_line=_AWAY_LINE,
+        home_line=_HOME_LINE,
+        inning=3,
+        phase=InningPhase.BOTTOM,
+        count=_COUNT,
+        bases=BaseballBaseState(),
     )
     assert payload.phase is InningPhase.BOTTOM
-
-
-def test_live_payload_rejects_negative_scores() -> None:
-    with pytest.raises(ValueError):
-        LiveBaseballCardPayload(
-            away_score=-1, home_score=0, inning=1, phase=InningPhase.TOP, count=_COUNT, bases=BaseballBaseState()
-        )
+    assert (payload.away_line.runs, payload.away_line.hits, payload.away_line.errors) == (1, 4, 0)
 
 
 def test_live_payload_rejects_inning_below_one() -> None:
     with pytest.raises(ValueError):
         LiveBaseballCardPayload(
-            away_score=0, home_score=0, inning=0, phase=InningPhase.TOP, count=_COUNT, bases=BaseballBaseState()
+            away_line=_AWAY_LINE,
+            home_line=_HOME_LINE,
+            inning=0,
+            phase=InningPhase.TOP,
+            count=_COUNT,
+            bases=BaseballBaseState(),
         )
 
 
