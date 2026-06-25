@@ -12,6 +12,7 @@ from omni.domain.baseball import (
     InningPhase,
     PitchingDecisions,
     PitchType,
+    WinProbability,
     no_hitter_side,
 )
 
@@ -119,3 +120,22 @@ def test_pitching_decisions_require_a_winner_and_a_loser() -> None:
         PitchingDecisions(winner="", loser="Kevin Gausman")
     with pytest.raises(ValueError):
         PitchingDecisions(winner="Tarik Skubal", loser="")
+
+
+def test_win_probability_reports_the_favoured_side_and_each_percentage() -> None:
+    wp = WinProbability(home=26.0, away=74.0)
+    assert wp.favored is HomeAway.AWAY
+    assert wp.percent_for(HomeAway.HOME) == 26.0
+    assert wp.percent_for(HomeAway.AWAY) == 74.0
+    assert WinProbability(home=63.0, away=37.0).favored is HomeAway.HOME  # the other way too
+
+
+def test_win_probability_is_none_favoured_at_an_exact_tie() -> None:
+    assert WinProbability(home=50.0, away=50.0).favored is None
+
+
+def test_win_probability_rejects_out_of_range_percentages() -> None:
+    with pytest.raises(ValueError):
+        WinProbability(home=120.0, away=0.0)
+    with pytest.raises(ValueError):
+        WinProbability(home=-1.0, away=101.0)
