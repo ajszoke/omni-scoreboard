@@ -25,15 +25,18 @@ and a way to fetch a game's live feed; the pipeline cards each game for its phas
   ultimate spoiler, so the reveal is held until the broadcast lag elapses from when we
   first saw the game final (StatsAPI cannot report FINAL before the last out, so first
   sight + lag never predates the broadcast's ending); the card is then ingested and
-  lives out a finite post-game window. A walk-off that ended the game keeps draining from
-  the same delay-safe event stream, so it still flashes at its own release time — at or
-  just before the final — even though the game is already over.
+  lives out a finite post-game window. Through that embargo the game's **last delay-safe
+  live frame is held on screen** (its live card is not torn down until the final reveals),
+  so the board shows the last-aired state rather than going blank. A walk-off that ended
+  the game keeps draining from the same delay-safe event stream, so it still flashes at
+  its own release time — at or just before the final — even though the game is already over.
 
 A card is dropped when its game leaves that phase: the pregame card yields when the game
-goes live; the live and no-hitter cards are removed when the game is no longer live (a big
-play's own card lingers out its short window, then self-expires); the final card lingers
-its post-game window. So the queue mirrors the slate. Per-game fetch failures are isolated
-and reported, never fatal.
+goes live; the no-hitter card is removed when the game is no longer live; the live card is
+removed too, except a just-ended game holds its last delay-safe live frame through the final
+embargo, then swaps to the final (a big play's own card lingers out its short window, then
+self-expires); the final card lingers its post-game window. So the queue mirrors the slate.
+Per-game fetch failures are isolated and reported, never fatal.
 
 Baseball-only for now (it calls `pregame` / `score_live_baseball` / `live_baseball` /
 `big_play` / `no_hitter` / `final`), mirroring the per-sport renderer split; a generic
@@ -337,23 +340,28 @@ class LiveBaseballPipeline:
         """Drop per-game state for games that have moved on; return the carded ones.
 
         Live-scoped state (feed, live card, no-hitter card) is dropped the moment the game
-        leaves the live set — a big-play card is left to expire on its own short window, the
-        live and no-hitter cards are actively removed (a no-hitter ends with its game). The
-        event stream, though, keeps draining through the post-final window (so a held walk-off
-        still fires), so it is dropped only once the game leaves the slate entirely — or earlier,
-        at the final reveal, by which point it has drained. Only live-card removals are reported.
+        leaves the live set, with one exception: a *just-ended* game whose final reveal is still
+        embargoed keeps its last delay-safe live frame (card + feed) on screen — so the board
+        holds that frame instead of going blank through the post-game delay — until the final
+        card reveals (then the next pass, no longer pending, tears it down). The no-hitter card,
+        by contrast, is removed as soon as the game leaves the live set, embargo or not (an
+        in-progress bid is over once the game ends). A big-play card is left to expire on its own
+        short window; the event stream keeps draining through the post-final window (so a held
+        walk-off still fires), so it is dropped only once the game leaves the slate entirely — or
+        earlier, at the final reveal, by which point it has drained. Only live-card removals are reported.
         """
         live_scoped = set(self._feeds) | set(self._card_keys) | set(self._no_hitter_keys)
         removed_cards: list[LeagueScopedId] = []
         for contest_id in live_scoped - live_ids:
-            key = self._card_keys.pop(contest_id, None)
-            if key is not None:
-                self._queue.remove(key)
-                removed_cards.append(contest_id)
+            if contest_id not in self._final_pending:  # an embargoed final holds its last frame; do not tear down
+                key = self._card_keys.pop(contest_id, None)
+                if key is not None:
+                    self._queue.remove(key)
+                    removed_cards.append(contest_id)
+                self._feeds.pop(contest_id, None)
             no_hitter_key = self._no_hitter_keys.pop(contest_id, None)
             if no_hitter_key is not None:
                 self._queue.remove(no_hitter_key)
-            self._feeds.pop(contest_id, None)
         for contest_id in set(self._event_streams) - (live_ids | final_ids):
             self._event_streams.pop(contest_id, None)
         return tuple(sorted(removed_cards, key=str))
