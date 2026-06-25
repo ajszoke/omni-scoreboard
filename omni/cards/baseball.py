@@ -9,7 +9,7 @@ from omni.cards.base import ScoreboardCard
 from omni.core.enum import HomeAway
 
 # Domain value objects used by the payload fields below (imported for use, not re-exported).
-from omni.domain.baseball import BaseballBaseState, BaseballCount, InningPhase, PitchingDecisions
+from omni.domain.baseball import BaseballBaseState, BaseballCount, InningPhase, PitchingDecisions, WinProbability
 from omni.events.baseball import BaseballGameEventType
 
 __all__ = [
@@ -37,6 +37,7 @@ class LiveBaseballCardPayload:
     count: BaseballCount
     bases: BaseballBaseState
     last_play: str | None = None
+    win_probability: WinProbability | None = None  # drives the per-team meter; None hides it
 
     def __post_init__(self) -> None:
         if self.away_score < 0 or self.home_score < 0:
