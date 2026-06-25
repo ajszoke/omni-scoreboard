@@ -24,6 +24,7 @@ class Team:
     primary_color: RGBColor
     secondary_color: RGBColor
     logo: LogoAsset
+    logo_alt: LogoAsset | None = None  # the distinct second tile, shown to break a same-colour clash
 
     def __post_init__(self) -> None:
         # `league` is also carried by `id`; they must never disagree.

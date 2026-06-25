@@ -13,7 +13,7 @@ from enum import Enum
 
 from omni.core.enum import StrEnumMixin
 
-__all__ = ["LogoKind", "LogoSurface", "LogoSource"]
+__all__ = ["LogoKind", "LogoSurface", "LogoSource", "LogoVariant"]
 
 
 class LogoKind(StrEnumMixin, str, Enum):
@@ -36,3 +36,14 @@ class LogoSource(StrEnumMixin, str, Enum):
 
     MLBSTATIC = "mlbstatic"  # MLB's static CDN (edit-quality, team-id keyed)
     WIKIMEDIA = "wikimedia"  # a club mark the CDN lacks (HOU's bare cap, the BOS socks)
+
+
+class LogoVariant(StrEnumMixin, str, Enum):
+    """Which committed tile a club shows in a given matchup.
+
+    Every club has both; the base is its primary colour and the alt a distinct second
+    one. A club shows its alt only to break a clash — when its base background reads as
+    the same colour as the opponent's on a small panel (see `renderers.logo_clash`)."""
+
+    BASE = "base"  # the primary tile, `<abbr>.png`
+    ALT = "alt"  # the distinct second tile, `<abbr>-alt.png`

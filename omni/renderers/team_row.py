@@ -10,6 +10,11 @@ the thin primary-colour bar the cards drew before logos existed.
 stack) and returns the x where the abbreviation should start, which differs between
 the two paths (a tile pushes the label further right than a bar). The single 64x32
 profile never fits a tile and keeps the colour bar — an explicit, tested compromise.
+
+A team carries two tiles (a base and a distinct alt); which one a side shows depends
+on the *other* side, so `draw_matchup_marks` resolves the pair together — flipping one
+club to its alt when their backgrounds would otherwise blur — and is what the cards
+call. `draw_team_mark` stays the per-side primitive it delegates to.
 """
 
 from __future__ import annotations
@@ -17,11 +22,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from omni.core.enum import PanelProfile
+from omni.domain.logos import LogoVariant
 from omni.domain.teams import Team
 from omni.renderers.canvas import Canvas
 from omni.renderers.context import RenderContext
+from omni.renderers.logo_clash import resolve_logo_variants
 
-__all__ = ["LOGO_SIZE", "draw_team_mark"]
+__all__ = ["LOGO_SIZE", "draw_team_mark", "draw_matchup_marks"]
 
 LOGO_SIZE = 20  # the committed tiles are 20x20
 
@@ -45,16 +52,36 @@ _GEOM: dict[PanelProfile, _RowGeom] = {
 }
 
 
-def draw_team_mark(canvas: Canvas, context: RenderContext, team: Team, *, row_top: int) -> int:
+def draw_team_mark(
+    canvas: Canvas, context: RenderContext, team: Team, *, row_top: int, variant: LogoVariant = LogoVariant.BASE
+) -> int:
     """Draw the team's left mark for `context.profile`; return the abbreviation's x.
 
-    Blits the logo tile when the store resolves one, else draws the colour bar. Only
-    quad and stack are supported here (a 20px tile does not fit the single profile).
+    Blits the logo tile when the store resolves one, else draws the colour bar. `variant`
+    selects the base or the alt tile; an alt request with no alt tile falls back to the
+    base. Only quad and stack are supported here (a 20px tile does not fit the single
+    profile).
     """
     geom = _GEOM[context.profile]
-    logo = context.logos.resolve(team.logo) if context.logos is not None else None
+    asset = team.logo_alt if variant is LogoVariant.ALT and team.logo_alt is not None else team.logo
+    logo = context.logos.resolve(asset) if context.logos is not None else None
     if logo is not None:
         canvas.draw_image(geom.logo_x, row_top + geom.logo_inset_y, logo)
         return geom.logo_label_x
     canvas.fill_rect(0, row_top, geom.bar_w, geom.bar_h, team.primary_color)
     return geom.bar_label_x
+
+
+def draw_matchup_marks(
+    canvas: Canvas, context: RenderContext, away: Team, home: Team, *, away_top: int, home_top: int
+) -> tuple[int, int]:
+    """Draw both teams' marks, flipping one to its alt tile when their tiles would clash.
+
+    Resolves the variant pair once (so the two sides never disagree on who flipped) and
+    returns the two abbreviation x-positions. The colour-bar fallback is unaffected: a
+    bar always uses the team's primary colour, clash or not.
+    """
+    variants = resolve_logo_variants(away, home)
+    away_x = draw_team_mark(canvas, context, away, row_top=away_top, variant=variants.away)
+    home_x = draw_team_mark(canvas, context, home, row_top=home_top, variant=variants.home)
+    return away_x, home_x
