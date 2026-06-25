@@ -23,7 +23,9 @@ from omni.domain.baseball import (
     BaseballCount,
     BaseballGameState,
     BaseballScoringImpact,
+    BatterGameLine,
     InningPhase,
+    PitcherGameLine,
     PitchingDecisions,
     PitchType,
     WinProbability,
@@ -299,6 +301,67 @@ def _reached_base(raw: dict[str, Any], *, side: str, hits: int, fielding_errors:
     return walks_hbp > 0
 
 
+_NAME_SUFFIXES = frozenset({"jr", "sr", "ii", "iii", "iv", "v"})
+
+
+def _last_name(full_name: str) -> str:
+    """A panel-sized last name from a ``"First Last"`` string, skipping a Jr./Sr./III suffix."""
+    parts = full_name.split()
+    if len(parts) >= 2 and parts[-1].lower().strip(".") in _NAME_SUFFIXES:
+        return parts[-2]
+    return parts[-1] if parts else full_name
+
+
+def _boxscore_stats(raw: dict[str, Any], player_id: int, group: str) -> dict[str, Any] | None:
+    """A player's ``stats.{group}`` block from either team's boxscore, or None if not on a roster.
+
+    The boxscore keys players as ``ID<personId>`` under each side; a player is on exactly one,
+    so search both. An empty stats block (a sub just entered) still resolves — to ``{}``, not None.
+    """
+    teams = ((raw.get("liveData") or {}).get("boxscore") or {}).get("teams") or {}
+    key = f"ID{player_id}"
+    for side in ("away", "home"):
+        player = ((teams.get(side) or {}).get("players") or {}).get(key)
+        if isinstance(player, dict):
+            return ((player.get("stats") or {}).get(group)) or {}
+    return None
+
+
+def _current_batter(raw: dict[str, Any]) -> BatterGameLine | None:
+    """The batter at the plate with their game line, or None if the feed names none."""
+    batter = ((raw.get("liveData") or {}).get("linescore") or {}).get("offense", {}).get("batter") or {}
+    player_id, name = batter.get("id"), batter.get("fullName")
+    if not isinstance(player_id, int) or not isinstance(name, str) or not name:
+        return None
+    stats = _boxscore_stats(raw, player_id, "batting")
+    if stats is None:
+        return None
+    return BatterGameLine(
+        name=_last_name(name),
+        at_bats=int(stats.get("atBats", 0) or 0),
+        hits=int(stats.get("hits", 0) or 0),
+        rbi=int(stats.get("rbi", 0) or 0),
+        home_runs=int(stats.get("homeRuns", 0) or 0),
+    )
+
+
+def _current_pitcher(raw: dict[str, Any]) -> PitcherGameLine | None:
+    """The pitcher on the mound with their game line, or None if the feed names none."""
+    pitcher = ((raw.get("liveData") or {}).get("linescore") or {}).get("defense", {}).get("pitcher") or {}
+    player_id, name = pitcher.get("id"), pitcher.get("fullName")
+    if not isinstance(player_id, int) or not isinstance(name, str) or not name:
+        return None
+    stats = _boxscore_stats(raw, player_id, "pitching")
+    if stats is None:
+        return None
+    return PitcherGameLine(
+        name=_last_name(name),
+        innings_pitched=str(stats.get("inningsPitched", "0.0") or "0.0"),
+        pitches=int(stats.get("numberOfPitches", 0) or 0),
+        strikeouts=int(stats.get("strikeOuts", 0) or 0),
+    )
+
+
 def _parse_game_state(raw: dict[str, Any]) -> BaseballGameState:
     """Parse a StatsAPI game feed's linescore into typed `BaseballGameState`.
 
@@ -329,6 +392,8 @@ def _parse_game_state(raw: dict[str, Any]) -> BaseballGameState:
             # reaching on error is charged to the home defense, and vice versa.
             away_reached_base=_reached_base(raw, side="away", hits=away_hits, fielding_errors=home_errors),
             home_reached_base=_reached_base(raw, side="home", hits=home_hits, fielding_errors=away_errors),
+            batter=_current_batter(raw),
+            pitcher=_current_pitcher(raw),
             inning=inning,
             phase=_phase_from_inning_state(str(line.get("inningState", "Top"))),
             count=BaseballCount(
@@ -578,8 +643,9 @@ def _default_fetch_schedule(game_date: date, sport_ids: str) -> list[dict[str, A
 # `_parse_game_events` read.
 _GAME_FIELDS = (
     "liveData,linescore,teams,home,away,runs,hits,errors,currentInning,inningState,balls,strikes,outs,"
-    "offense,first,second,third,"
+    "offense,defense,first,second,third,batter,pitcher,id,"  # current batter/pitcher (their game lines below)
     "boxscore,teamStats,batting,baseOnBalls,hitByPitch,"  # per-side walks/HBP -> perfect-game detection
+    "players,stats,pitching,atBats,homeRuns,strikeOuts,numberOfPitches,inningsPitched,"  # batter/pitcher game lines
     "plays,allPlays,result,eventType,description,rbi,awayScore,homeScore,about,inning,halfInning,atBatIndex,"
     "endTime,startTime,count,playEvents,isPitch,details,type,code,decisions,winner,loser,save,fullName"
 )

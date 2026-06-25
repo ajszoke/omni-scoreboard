@@ -30,7 +30,15 @@ from omni.core.time import DurationSeconds
 from omni.domain.base import LogoAsset
 from omni.domain.contest import Contest, TeamGame
 from omni.domain.teams import Team
-from omni.domain.baseball import BaseballBaseState, BaseballCount, InningPhase, TeamLinescore, WinProbability
+from omni.domain.baseball import (
+    BaseballBaseState,
+    BaseballCount,
+    BatterGameLine,
+    InningPhase,
+    PitcherGameLine,
+    TeamLinescore,
+    WinProbability,
+)
 from omni.panels.geometry import geometry_for
 from omni.providers.mlb_teams import MlbTeamRegistry
 from omni.renderers.base import Renderer
@@ -86,6 +94,8 @@ def make_card(
     inning: int = 7,
     bases: BaseballBaseState = BaseballBaseState(first=True),
     win_probability: WinProbability | None = None,
+    batter: BatterGameLine | None = BatterGameLine(name="Betts", at_bats=4, hits=2, rbi=1),
+    pitcher: PitcherGameLine | None = PitcherGameLine(name="Kershaw", innings_pitched="6.1", pitches=95, strikeouts=7),
 ) -> ScoreboardCard[LiveBaseballCardPayload]:
     payload = LiveBaseballCardPayload(
         away_line=TeamLinescore(runs=away_score, hits=away_hits, errors=away_errors),
@@ -95,6 +105,8 @@ def make_card(
         count=BaseballCount(balls=2, strikes=1, outs=2),
         bases=bases,
         win_probability=win_probability,
+        batter=batter,
+        pitcher=pitcher,
     )
     return ScoreboardCard(
         id=CardId("g1:live"),
@@ -164,6 +176,7 @@ def test_draw_op_quad_128x64() -> None:
     assert {(52, 11, "3"), (52, 43, "5")} <= texts
     assert {(38, 23, "H7 E0"), (38, 55, "H9 E1")} <= texts  # R/H/E detail beneath each run score
     assert {(68, 6, "T7"), (68, 14, "2-1"), (68, 22, "2 OUT")} <= texts
+    assert {(64, 38, "P: Kershaw 95P"), (64, 48, "#. Betts 2-4")} <= texts  # current pitcher + batter lines
 
 
 def test_draw_op_stack_64x64_keeps_full_status() -> None:
@@ -177,6 +190,8 @@ def test_draw_op_stack_64x64_keeps_full_status() -> None:
     assert {(56, 6, "3"), (56, 28, "5")} <= texts  # right-aligned at 62 - 6
     assert {(42, 16, "H7 E0"), (42, 38, "H9 E1")} <= texts  # R/H/E detail beneath each run score
     assert {(3, 46, "T7"), (20, 46, "2-1"), (3, 55, "2 OUT")} <= texts  # full status retained
+    # Compromise: the pitcher/batter lines do not fit at 64px wide — omitted on stack.
+    assert not any(t.text.startswith(("P: Kershaw", "#. Betts")) for t in canvas.texts())
 
 
 def test_draw_op_single_64x32_is_an_explicit_compromise() -> None:
@@ -190,6 +205,7 @@ def test_draw_op_single_64x32_is_an_explicit_compromise() -> None:
     joined = " ".join(t.text for t in canvas.texts())
     assert "OUT" not in joined and "-" not in joined
     assert "H7 E0" not in joined and "H9 E1" not in joined  # no R/H/E detail at 64x32
+    assert "Kershaw" not in joined and "Betts" not in joined  # no pitcher/batter lines at 64x32
     # Only the two team stripes are drawn (no base markers).
     assert {(r.x, r.y, r.w, r.h) for r in canvas.rects()} == {(0, 0, 2, 16), (0, 16, 2, 16)}
 
@@ -208,6 +224,7 @@ def test_draw_op_middle_break_shows_label_and_suppresses_at_bat() -> None:
         texts = [t.text for t in canvas.texts()]
         assert "MID7" in texts
         assert "2-1" not in texts and not any("OUT" in t for t in texts)  # at-bat suppressed
+        assert not any(t.startswith(("P: Kershaw", "#. Betts")) for t in texts)  # no live at-bat -> no pitcher/batter
         assert not any(r.color == WHITE and r.w == r.h for r in canvas.rects())  # no bases drawn
 
 

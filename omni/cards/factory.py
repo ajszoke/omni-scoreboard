@@ -142,6 +142,8 @@ class CardFactory:
             count=state.count,
             bases=state.bases,
             win_probability=win_probability,
+            batter=state.batter,
+            pitcher=state.pitcher,
         )
         key = f"{game.id.raw}:live"
         return ScoreboardCard(

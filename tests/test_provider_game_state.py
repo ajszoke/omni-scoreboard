@@ -11,12 +11,16 @@ import pytest
 
 from omni.core.enum import GameStatus, League
 from omni.core.ids import LeagueScopedId, SourceRef
-from omni.domain.baseball import InningPhase, PitchingDecisions
+from omni.domain.baseball import BatterGameLine, InningPhase, PitcherGameLine, PitchingDecisions
 from omni.domain.contest import TeamGame
 from omni.providers.base import ProviderError
 from omni.providers.mlb_statsapi import (
     MlbStatsApiProvider,
     _batting_walks_hbp,
+    _boxscore_stats,
+    _current_batter,
+    _current_pitcher,
+    _last_name,
     _parse_decisions,
     _parse_game_state,
     _phase_from_inning_state,
@@ -57,6 +61,33 @@ def test_parse_game_state_from_fixture() -> None:
     assert state.bases.first and state.bases.third and not state.bases.second
     # both sides have hits, so both have plainly reached base.
     assert state.away_reached_base is True and state.home_reached_base is True
+    # current batter / pitcher with their game lines, looked up from the boxscore.
+    assert state.batter == BatterGameLine(name="Batter", at_bats=4, hits=2, rbi=1, home_runs=0)
+    assert state.pitcher == PitcherGameLine(name="Miller", innings_pitched="6.1", pitches=95, strikeouts=7)
+
+
+def test_last_name_takes_the_surname_and_skips_a_suffix() -> None:
+    assert _last_name("Caleb Kilian") == "Kilian"
+    assert _last_name("Vladimir Guerrero Jr.") == "Guerrero"  # the suffix is skipped
+    assert _last_name("Cedric") == "Cedric"  # a single token degrades to itself
+
+
+def test_boxscore_stats_finds_either_side_and_none_when_absent() -> None:
+    raw = {
+        "liveData": {"boxscore": {"teams": {"home": {"players": {"ID7": {"stats": {"pitching": {"strikeOuts": 9}}}}}}}}
+    }
+    assert _boxscore_stats(raw, 7, "pitching") == {"strikeOuts": 9}
+    assert _boxscore_stats(raw, 7, "batting") == {}  # player present, but no batting group -> empty, not None
+    assert _boxscore_stats(raw, 999, "pitching") is None  # player on no roster -> None
+
+
+def test_current_batter_and_pitcher_are_none_when_unnamed() -> None:
+    # No offense/defense block at all (between innings, or a thin feed) -> no batter/pitcher line.
+    assert _current_batter({"liveData": {"linescore": {}}}) is None
+    assert _current_pitcher({"liveData": {"linescore": {}}}) is None
+    # Named, but not on any boxscore roster -> still None (no game line to show).
+    named = {"liveData": {"linescore": {"offense": {"batter": {"id": 1, "fullName": "A. B"}}}}}
+    assert _current_batter(named) is None
 
 
 def _boxscore(side_stats: dict[str, dict[str, int]]) -> dict[str, Any]:

@@ -21,6 +21,8 @@ __all__ = [
     "BaseballBaseState",
     "BaseballScoringImpact",
     "TeamLinescore",
+    "BatterGameLine",
+    "PitcherGameLine",
     "BaseballGameState",
     "PitchingFeatKind",
     "PitchingFeatProgress",
@@ -249,6 +251,58 @@ class TeamLinescore:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class BatterGameLine:
+    """The batter at the plate and how they have done in this game so far.
+
+    `name` is a short (last) name sized for the panel. `hits`/`at_bats` give the familiar
+    "2-4" line; `rbi`/`home_runs` are the day's run production. A dense card shows the at-bat
+    so the viewer knows who is up without the broadcast.
+    """
+
+    name: str
+    at_bats: int
+    hits: int
+    rbi: int = 0
+    home_runs: int = 0
+
+    def __post_init__(self) -> None:
+        if not self.name:
+            raise ValueError("a batter line needs a name")
+        for field_name, value in (
+            ("at_bats", self.at_bats),
+            ("hits", self.hits),
+            ("rbi", self.rbi),
+            ("home_runs", self.home_runs),
+        ):
+            if value < 0:
+                raise ValueError(f"{field_name} cannot be negative")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class PitcherGameLine:
+    """The pitcher on the mound and their line in this game so far.
+
+    `name` is a short (last) name. `innings_pitched` is kept as the feed's baseball notation
+    string (``"6.1"`` = six innings and one out), which is also exactly how it is displayed.
+    `pitches` (the outing's depth) and `strikeouts` are the at-a-glance dashboard stats.
+    """
+
+    name: str
+    innings_pitched: str
+    pitches: int
+    strikeouts: int
+
+    def __post_init__(self) -> None:
+        if not self.name:
+            raise ValueError("a pitcher line needs a name")
+        if not self.innings_pitched:
+            raise ValueError("a pitcher line needs an innings-pitched value")
+        for field_name, value in (("pitches", self.pitches), ("strikeouts", self.strikeouts)):
+            if value < 0:
+                raise ValueError(f"{field_name} cannot be negative")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class BaseballGameState:
     """A live baseball game's observed state: score/inning/phase/count/bases.
 
@@ -276,6 +330,10 @@ class BaseballGameState:
     # a plain no-hitter; None keeps the safe default of never claiming perfection unproven.
     away_reached_base: bool | None = None
     home_reached_base: bool | None = None
+    # Who is at the plate / on the mound right now, with their game line; None when the feed
+    # does not name one (between innings, or a payload without the boxscore detail).
+    batter: BatterGameLine | None = None
+    pitcher: PitcherGameLine | None = None
 
     def __post_init__(self) -> None:
         if self.away_score < 0 or self.home_score < 0:

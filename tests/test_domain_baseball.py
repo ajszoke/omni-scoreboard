@@ -13,6 +13,8 @@ from omni.domain.baseball import (
     InningPhase,
     PitchingDecisions,
     PitchingFeatKind,
+    BatterGameLine,
+    PitcherGameLine,
     PitchingFeatProgress,
     PitchType,
     TeamLinescore,
@@ -92,6 +94,32 @@ def test_team_linescore_rejects_negative_values(field: str) -> None:
     values = {"runs": 0, "hits": 0, "errors": 0, field: -1}
     with pytest.raises(ValueError, match=f"{field} cannot be negative"):
         TeamLinescore(**values)
+
+
+def test_batter_game_line_holds_the_at_bat() -> None:
+    line = BatterGameLine(name="Betts", at_bats=4, hits=2, rbi=1, home_runs=1)
+    assert (line.name, line.hits, line.at_bats, line.rbi, line.home_runs) == ("Betts", 2, 4, 1, 1)
+
+
+def test_batter_game_line_validates() -> None:
+    with pytest.raises(ValueError, match="needs a name"):
+        BatterGameLine(name="", at_bats=0, hits=0)
+    with pytest.raises(ValueError, match="hits cannot be negative"):
+        BatterGameLine(name="x", at_bats=0, hits=-1)
+
+
+def test_pitcher_game_line_holds_the_outing() -> None:
+    line = PitcherGameLine(name="Kershaw", innings_pitched="6.1", pitches=95, strikeouts=7)
+    assert (line.name, line.innings_pitched, line.pitches, line.strikeouts) == ("Kershaw", "6.1", 95, 7)
+
+
+def test_pitcher_game_line_validates() -> None:
+    with pytest.raises(ValueError, match="needs a name"):
+        PitcherGameLine(name="", innings_pitched="0.0", pitches=0, strikeouts=0)
+    with pytest.raises(ValueError, match="innings-pitched"):
+        PitcherGameLine(name="x", innings_pitched="", pitches=0, strikeouts=0)
+    with pytest.raises(ValueError, match="pitches cannot be negative"):
+        PitcherGameLine(name="x", innings_pitched="0.0", pitches=-1, strikeouts=0)
 
 
 def test_pitching_feat_names_the_pitching_side() -> None:

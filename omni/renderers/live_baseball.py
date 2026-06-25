@@ -4,8 +4,9 @@ Each profile gets its OWN layout, never a crop of another (AGENTS.md forbids
 "cropping 128x64 cards down to 64x32"):
 
 - quad_128x64 : full layout — team rows, scores + a compact H/E line, inning/count/outs,
-  bases diamond.
-- stack_64x64 : the full layout compressed to 64px wide (same fields, smaller).
+  bases diamond, and the current pitcher/batter lines (lower-right, during a live at-bat).
+- stack_64x64 : the full layout compressed to 64px wide (same fields minus the pitcher/batter
+  lines, which do not fit — an explicit, tested compromise).
 - single_64x32: an explicit COMPROMISE — team abbreviations, scores, and the
   inning-phase label only. Count, outs, the bases diamond, and the H/E detail are
   omitted (not legible at 64x32). The compromise is asserted by tests so it cannot
@@ -115,6 +116,7 @@ class LiveBaseballRenderer:
         self._base(canvas, 100, 6, 6, payload.bases.second)
         self._base(canvas, 92, 16, 6, payload.bases.third)
         self._base(canvas, 108, 16, 6, payload.bases.first)
+        self._batter_pitcher(canvas, payload)  # lower-right; quad has the room, the smaller profiles do not
 
     def _render_stack(
         self, canvas: Canvas, context: RenderContext, game: TeamGame, payload: LiveBaseballCardPayload
@@ -155,6 +157,24 @@ class LiveBaseballRenderer:
     def _hits_errors(canvas: Canvas, right_x: int, y: int, line: TeamLinescore) -> None:
         """Draw a side's ``H{hits} E{errors}`` totals, right-aligned to ``right_x``."""
         draw_right_aligned(canvas, right_x, y, f"H{line.hits} E{line.errors}", _HE, _LABEL_FONT)
+
+    @staticmethod
+    def _batter_pitcher(canvas: Canvas, payload: LiveBaseballCardPayload) -> None:
+        """Draw the current pitcher and batter lines in the quad's lower-right.
+
+        A ``P:`` leader marks the pitcher and ``#.`` the batter, so the following token reads as
+        a role line rather than initials or a jersey number. One stat each so even a long last
+        name fits the ~64px column: the pitcher's pitch count (the live outing-depth number) and
+        the batter's hits-for-at-bats. The names are capped to keep the line inside the panel.
+        Drawn only on the active at-bat (the caller skips it on a break) and only on quad (the
+        smaller profiles have no room — an asserted compromise).
+        """
+        pitcher = payload.pitcher
+        if pitcher is not None:
+            canvas.text(64, 38, f"P: {pitcher.name[:8]} {pitcher.pitches}P", _HE, font=_LABEL_FONT)
+        batter = payload.batter
+        if batter is not None:
+            canvas.text(64, 48, f"#. {batter.name[:8]} {batter.hits}-{batter.at_bats}", _HE, font=_LABEL_FONT)
 
     @staticmethod
     def _base(canvas: Canvas, x: int, y: int, size: int, occupied: bool) -> None:
