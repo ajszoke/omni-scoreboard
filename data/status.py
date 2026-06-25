@@ -63,6 +63,7 @@ DELAYED_START_VENUE = "Delayed Start: Venue"  # Preview
 DELAYED_START_AIR_QUALITY = "Delayed Start: Air Quality"  # Preview
 DELAYED_START_WET_GROUNDS = "Delayed Start: Wet Grounds"  # Preview
 DELAYED_START_WIND = "Delayed Start: Wind"  # Preview
+DELAYED_TIEBREAKER = "Delayed: Tiebreaker"  # Live
 DELAYED_TRAGEDY = "Delayed: Tragedy"  # Live
 DELAYED_VENUE = "Delayed: Venue"  # Live
 DELAYED_WET_GROUNDS = "Delayed: Wet Grounds"  # Live
@@ -298,6 +299,7 @@ GAME_STATE_IRREGULAR = [
     DELAYED_START_VENUE,
     DELAYED_START_WET_GROUNDS,
     DELAYED_START_WIND,
+    DELAYED_TIEBREAKER,
     DELAYED_TRAGEDY,
     DELAYED_VENUE,
     DELAYED_WET_GROUNDS,
