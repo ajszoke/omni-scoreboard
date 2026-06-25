@@ -136,3 +136,12 @@ def test_impossible_count_raises_provider_error() -> None:
     feed["liveData"]["linescore"]["outs"] = 5  # past the terminal maximum
     with pytest.raises(ProviderError):
         _parse_game_state(feed)
+
+
+def test_null_nested_object_raises_provider_error() -> None:
+    # A null `linescore` (or `teams`) makes a nested `.get` hit None; that AttributeError is
+    # caught as a typed ProviderError, never escaping the provider boundary as a raw error.
+    with pytest.raises(ProviderError):
+        _parse_game_state({"liveData": {"linescore": None}})
+    with pytest.raises(ProviderError):
+        _parse_game_state({"liveData": {"linescore": {"currentInning": 7, "teams": None}}})

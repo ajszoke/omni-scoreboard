@@ -96,9 +96,11 @@ class LiveBaseballFeed:
 
     `decisions` carries the winning/losing/saving pitchers once the game is final (None
     while it is in progress, a tie, or absent from the feed) — what the final card needs
-    beyond the score.
+    beyond the score. `warnings` lists any plays the parse had to drop (a malformed entry,
+    isolated per-play) so a degraded feed is observable, not silently thinned.
     """
 
     state: BaseballGameState
     events: tuple[BaseballGameEvent, ...] = ()
     decisions: PitchingDecisions | None = None
+    warnings: tuple[str, ...] = ()
