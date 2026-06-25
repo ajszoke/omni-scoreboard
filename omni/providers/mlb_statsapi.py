@@ -267,6 +267,38 @@ def _phase_from_inning_state(inning_state: str) -> InningPhase:
     return _INNING_STATE_PHASE.get(inning_state, InningPhase.TOP)
 
 
+def _batting_walks_hbp(raw: dict[str, Any], side: str) -> int | None:
+    """Walks + hit-by-pitch for `side` from the boxscore batting line, or None if absent.
+
+    These are the on-base events a no-hit line still allows — a walk is the classic blemish on a
+    no-hitter — and the linescore omits them, so they come from the boxscore. ``or {}`` tolerates
+    a null node at any level; None (no batting block) means the count is *unknown*, not zero.
+    """
+    boxscore = (raw.get("liveData") or {}).get("boxscore") or {}
+    batting = ((boxscore.get("teams") or {}).get(side) or {}).get("teamStats") or {}
+    line = batting.get("batting")
+    if not isinstance(line, dict):
+        return None
+    return int(line.get("baseOnBalls", 0) or 0) + int(line.get("hitByPitch", 0) or 0)
+
+
+def _reached_base(raw: dict[str, Any], *, side: str, hits: int, fielding_errors: int) -> bool | None:
+    """Whether `side` has reached base at all this game: True / False / None (unknown).
+
+    A hit, or an error by the defense, is a definite baserunner. Otherwise the call needs the
+    boxscore walks/HBP: present -> a clean sheet (False) unless a walk/HBP put a man on; absent ->
+    None, so a perfect game is never claimed without the data to rule a baserunner out. Counting a
+    fielding error as a baserunner can only ever err toward a plain no-hitter (a muffed foul that
+    let no one reach), never toward a false perfect game.
+    """
+    if hits > 0 or fielding_errors > 0:
+        return True
+    walks_hbp = _batting_walks_hbp(raw, side)
+    if walks_hbp is None:
+        return None
+    return walks_hbp > 0
+
+
 def _parse_game_state(raw: dict[str, Any]) -> BaseballGameState:
     """Parse a StatsAPI game feed's linescore into typed `BaseballGameState`.
 
@@ -280,11 +312,21 @@ def _parse_game_state(raw: dict[str, Any]) -> BaseballGameState:
             raise ValueError("game feed has no current inning (not live yet?)")
         teams = line.get("teams", {})
         offense = line.get("offense", {})
+        away_team = teams.get("away", {})
+        home_team = teams.get("home", {})
+        away_hits = int(away_team.get("hits", 0) or 0)
+        home_hits = int(home_team.get("hits", 0) or 0)
+        away_errors = int(away_team.get("errors", 0) or 0)
+        home_errors = int(home_team.get("errors", 0) or 0)
         return BaseballGameState(
-            away_score=int(teams.get("away", {}).get("runs", 0) or 0),
-            home_score=int(teams.get("home", {}).get("runs", 0) or 0),
-            away_hits=int(teams.get("away", {}).get("hits", 0) or 0),
-            home_hits=int(teams.get("home", {}).get("hits", 0) or 0),
+            away_score=int(away_team.get("runs", 0) or 0),
+            home_score=int(home_team.get("runs", 0) or 0),
+            away_hits=away_hits,
+            home_hits=home_hits,
+            # A side's reached-base read needs the *fielding* side's errors: an away batter
+            # reaching on error is charged to the home defense, and vice versa.
+            away_reached_base=_reached_base(raw, side="away", hits=away_hits, fielding_errors=home_errors),
+            home_reached_base=_reached_base(raw, side="home", hits=home_hits, fielding_errors=away_errors),
             inning=inning,
             phase=_phase_from_inning_state(str(line.get("inningState", "Top"))),
             count=BaseballCount(
@@ -527,12 +569,15 @@ def _default_fetch_schedule(game_date: date, sport_ids: str) -> list[dict[str, A
     return result
 
 
-# StatsAPI `fields` is a hierarchical key-name whitelist. The first group keeps the
-# linescore (-> BaseballGameState); the second keeps play-by-play (-> events). A name
-# must be listed for its nested object to survive, so omitting one silently drops that
-# data — keep this in sync with what `_parse_game_state` / `_parse_game_events` read.
+# StatsAPI `fields` is a hierarchical key-name whitelist. The first group keeps the linescore
+# and a slice of the boxscore (-> BaseballGameState, including reached-base); the second keeps
+# play-by-play (-> events). A name must be listed for its nested object to survive, so omitting
+# one silently drops that data — keep this in sync with what `_parse_game_state` /
+# `_parse_game_events` read.
 _GAME_FIELDS = (
-    "liveData,linescore,teams,home,away,runs,hits,currentInning,inningState,balls,strikes,outs,offense,first,second,third,"
+    "liveData,linescore,teams,home,away,runs,hits,errors,currentInning,inningState,balls,strikes,outs,"
+    "offense,first,second,third,"
+    "boxscore,teamStats,batting,baseOnBalls,hitByPitch,"  # per-side walks/HBP -> perfect-game detection
     "plays,allPlays,result,eventType,description,rbi,awayScore,homeScore,about,inning,halfInning,atBatIndex,"
     "endTime,startTime,count,playEvents,isPitch,details,type,code,decisions,winner,loser,save,fullName"
 )

@@ -12,9 +12,11 @@ from omni.domain.baseball import (
     BaseballScoringImpact,
     InningPhase,
     PitchingDecisions,
+    PitchingFeatKind,
+    PitchingFeatProgress,
     PitchType,
     WinProbability,
-    no_hitter_side,
+    pitching_feat_progress,
     scoring_impact,
 )
 
@@ -71,22 +73,96 @@ def test_game_state_holds_hits_and_rejects_negative() -> None:
         _state(home_hits=-1)
 
 
-def test_no_hitter_side_names_the_pitching_team() -> None:
+def test_pitching_feat_names_the_pitching_side() -> None:
     # The hitless batting side names who is throwing it: away hitless -> home, and vice versa.
-    assert no_hitter_side(_state(inning=7, away_hits=0, home_hits=3), min_inning=6) is HomeAway.HOME
-    assert no_hitter_side(_state(inning=7, away_hits=3, home_hits=0), min_inning=6) is HomeAway.AWAY
+    home = pitching_feat_progress(
+        _state(inning=7, phase=InningPhase.TOP, away_hits=0, home_hits=3), min_completed_innings=6
+    )
+    assert home is not None and home.side is HomeAway.HOME
+    # The away side pitches the bottom, so it finishes its 6th only at the End break.
+    away = pitching_feat_progress(
+        _state(inning=7, phase=InningPhase.END, away_hits=3, home_hits=0), min_completed_innings=6
+    )
+    assert away is not None and away.side is HomeAway.AWAY
 
 
-def test_no_hitter_side_none_when_both_sides_have_hits() -> None:
-    assert no_hitter_side(_state(inning=8, away_hits=2, home_hits=1), min_inning=6) is None
+@pytest.mark.parametrize(
+    "phase, expected",
+    [
+        (InningPhase.TOP, 6),  # top of the 7th in progress -> only six finished (the off-by-one)
+        (InningPhase.MIDDLE, 7),  # the top is done
+        (InningPhase.BOTTOM, 7),
+        (InningPhase.END, 7),
+    ],
+)
+def test_home_feat_counts_finished_tops(phase: InningPhase, expected: int) -> None:
+    feat = pitching_feat_progress(_state(inning=7, phase=phase, away_hits=0, home_hits=3), min_completed_innings=1)
+    assert feat is not None and feat.side is HomeAway.HOME and feat.completed_innings == expected
 
 
-def test_no_hitter_side_reports_the_away_drought_in_a_double_no_hitter() -> None:
-    assert no_hitter_side(_state(inning=7, away_hits=0, home_hits=0), min_inning=6) is HomeAway.HOME
+@pytest.mark.parametrize(
+    "phase, expected",
+    [
+        (InningPhase.TOP, 6),
+        (InningPhase.MIDDLE, 6),
+        (InningPhase.BOTTOM, 6),  # bottom of the 7th in progress -> still six finished
+        (InningPhase.END, 7),  # the bottom is done
+    ],
+)
+def test_away_feat_counts_finished_bottoms(phase: InningPhase, expected: int) -> None:
+    feat = pitching_feat_progress(_state(inning=7, phase=phase, away_hits=3, home_hits=0), min_completed_innings=1)
+    assert feat is not None and feat.side is HomeAway.AWAY and feat.completed_innings == expected
 
 
-def test_no_hitter_side_suppressed_before_the_threshold() -> None:
-    assert no_hitter_side(_state(inning=5, away_hits=0, home_hits=4), min_inning=6) is None
+def test_pitching_feat_not_news_until_min_completed_innings() -> None:
+    # The top of the 6th is only five finished innings — the bug that surfaced it a half-inning early.
+    assert pitching_feat_progress(_state(inning=6, phase=InningPhase.TOP, away_hits=0), min_completed_innings=6) is None
+    # The same top *done* (Middle) is the sixth finished inning — now it is news.
+    feat = pitching_feat_progress(_state(inning=6, phase=InningPhase.MIDDLE, away_hits=0), min_completed_innings=6)
+    assert feat is not None and feat.completed_innings == 6
+
+
+def test_pitching_feat_none_when_both_sides_have_hits() -> None:
+    assert pitching_feat_progress(_state(inning=8, away_hits=2, home_hits=1), min_completed_innings=6) is None
+
+
+def test_double_no_hitter_reports_the_home_side_as_the_deeper_bid() -> None:
+    feat = pitching_feat_progress(
+        _state(inning=7, phase=InningPhase.MIDDLE, away_hits=0, home_hits=0), min_completed_innings=6
+    )
+    assert feat is not None and feat.side is HomeAway.HOME
+
+
+def test_perfect_game_needs_a_confirmed_clean_sheet() -> None:
+    common: dict[str, object] = dict(inning=7, phase=InningPhase.TOP, away_hits=0, home_hits=3)
+    # The batting side is confirmed not to have reached -> perfect game.
+    perfect = pitching_feat_progress(_state(**common, away_reached_base=False), min_completed_innings=6)
+    assert perfect is not None and perfect.kind is PitchingFeatKind.PERFECT_GAME and perfect.perfect is True
+    # A confirmed baserunner -> plain no-hitter.
+    blemished = pitching_feat_progress(_state(**common, away_reached_base=True), min_completed_innings=6)
+    assert blemished is not None and blemished.kind is PitchingFeatKind.NO_HITTER and blemished.perfect is False
+    # Unknown (None) -> stay a plain no-hitter; never claim perfection without evidence.
+    unknown = pitching_feat_progress(_state(**common, away_reached_base=None), min_completed_innings=6)
+    assert unknown is not None and unknown.kind is PitchingFeatKind.NO_HITTER
+
+
+def test_perfect_game_reads_the_batting_side_for_an_away_pitcher() -> None:
+    # Home is hitless (away pitching); the relevant clean sheet is the *home* batting side's.
+    feat = pitching_feat_progress(
+        _state(inning=7, phase=InningPhase.END, away_hits=3, home_hits=0, home_reached_base=False),
+        min_completed_innings=6,
+    )
+    assert feat is not None and feat.side is HomeAway.AWAY and feat.perfect is True
+
+
+def test_pitching_feat_progress_rejects_zero_completed_innings() -> None:
+    with pytest.raises(ValueError):
+        PitchingFeatProgress(side=HomeAway.HOME, kind=PitchingFeatKind.NO_HITTER, completed_innings=0)
+
+
+def test_pitching_feat_kind_value_is_the_token() -> None:
+    assert PitchingFeatKind.PERFECT_GAME.value == "perfect_game"
+    assert PitchingFeatKind.NO_HITTER.value == "no_hitter"
 
 
 def test_pitch_type_value_is_the_statsapi_code() -> None:

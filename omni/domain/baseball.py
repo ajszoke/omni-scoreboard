@@ -21,7 +21,9 @@ __all__ = [
     "BaseballBaseState",
     "BaseballScoringImpact",
     "BaseballGameState",
-    "no_hitter_side",
+    "PitchingFeatKind",
+    "PitchingFeatProgress",
+    "pitching_feat_progress",
     "scoring_impact",
 ]
 
@@ -245,6 +247,12 @@ class BaseballGameState:
     bases: BaseballBaseState
     away_hits: int = 0
     home_hits: int = 0
+    # Whether each side has reached base at all this game: True (a baserunner is confirmed),
+    # False (confirmed none — a perfect game in the making), or None (the feed does not say).
+    # It only matters for a side being no-hit, where it is what separates a perfect game from
+    # a plain no-hitter; None keeps the safe default of never claiming perfection unproven.
+    away_reached_base: bool | None = None
+    home_reached_base: bool | None = None
 
     def __post_init__(self) -> None:
         if self.away_score < 0 or self.home_score < 0:
@@ -255,23 +263,89 @@ class BaseballGameState:
             raise ValueError("inning must be >= 1")
 
 
-def no_hitter_side(state: BaseballGameState, *, min_inning: int) -> HomeAway | None:
-    """The side throwing an active no-hitter bid in `state`, or None.
+class PitchingFeatKind(StrEnumMixin, str, Enum):
+    """A no-hit pitching feat in progress: a plain no-hitter, or a perfect game.
 
-    A bid only counts once the game has reached `min_inning` — early hitless innings
-    are routine, not news — and the batting side still has zero hits: a hitless away
-    team means the home pitching staff is throwing the no-hitter, and vice versa. The
-    bid persists across both halves of an inning (it is about hits allowed, not who is
-    batting now) until a hit breaks it. If both sides are hitless (a rare double
-    no-hitter) the away team's drought is the one reported.
+    A perfect game is a no-hitter with no baserunner allowed at all, so it strictly
+    outranks one — the same card, a stronger headline.
     """
-    if state.inning < min_inning:
-        return None
+
+    NO_HITTER = "no_hitter"
+    PERFECT_GAME = "perfect_game"
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class PitchingFeatProgress:
+    """How far a no-hit pitching feat has carried, and which side is throwing it.
+
+    `side` is the *pitching* (defending) side — the away team being hitless means the home
+    staff is throwing it. `completed_innings` counts that side's *finished* defensive half-
+    innings, so a bid in the top of the 6th is "through 5", not 6; it is what a card shows as
+    "through N". `kind` distinguishes a perfect game from a plain no-hitter.
+    """
+
+    side: HomeAway
+    kind: PitchingFeatKind
+    completed_innings: int
+
+    def __post_init__(self) -> None:
+        if self.completed_innings < 1:
+            raise ValueError("a pitching feat must have at least one completed inning")
+
+    @property
+    def perfect(self) -> bool:
+        """True for a perfect game (no baserunner allowed), False for a plain no-hitter."""
+        return self.kind is PitchingFeatKind.PERFECT_GAME
+
+
+def _no_hit_pitching_side(state: BaseballGameState) -> HomeAway | None:
+    """The side throwing a no-hit bid (the hitless side's opponent), or None if both have hit.
+
+    A hitless away team means the home staff is throwing it, and vice versa. The bid is about
+    hits *allowed*, so it persists across both halves of an inning until a hit breaks it. If
+    both sides are hitless — a rare double no-hitter — the home side is reported: it pitches the
+    top of each inning, so it has always finished at least as many innings as the away side,
+    making it the deeper (or equal) of the two bids.
+    """
     if state.away_hits == 0:
         return HomeAway.HOME
     if state.home_hits == 0:
         return HomeAway.AWAY
     return None
+
+
+def _completed_defensive_innings(*, pitching: HomeAway, inning: int, phase: InningPhase) -> int:
+    """How many defensive half-innings `pitching` has *finished* at `inning`/`phase`.
+
+    The home side pitches the top of each inning, the away side the bottom; a half-inning
+    counts as finished only once play has moved past it. So in the top of the 6th the home
+    pitcher has finished 5 (not 6), and the away pitcher finishes its 6th only at the End break.
+    """
+    if pitching is HomeAway.HOME:
+        # The top is still in progress during TOP (one fewer finished); past it by Middle/Bottom/End.
+        return inning - 1 if phase is InningPhase.TOP else inning
+    # The bottom is finished only at the End break; before that the away pitcher is mid- or pre-inning.
+    return inning if phase is InningPhase.END else inning - 1
+
+
+def pitching_feat_progress(state: BaseballGameState, *, min_completed_innings: int) -> PitchingFeatProgress | None:
+    """The no-hit feat `state` shows once it is deep enough to be news, or None.
+
+    A bid is surfaced only once the pitching side has *finished* `min_completed_innings`
+    hitless innings — counted per side, so the bid can't surface a half-inning early. It is a
+    perfect game only when the batting side is *confirmed* not to have reached base
+    (`reached_base is False`); an unknown reached-base state (None) stays a plain no-hitter, so
+    the rarer claim is never made without evidence.
+    """
+    pitching = _no_hit_pitching_side(state)
+    if pitching is None:
+        return None
+    completed = _completed_defensive_innings(pitching=pitching, inning=state.inning, phase=state.phase)
+    if completed < min_completed_innings:
+        return None
+    reached = state.away_reached_base if pitching is HomeAway.HOME else state.home_reached_base
+    kind = PitchingFeatKind.PERFECT_GAME if reached is False else PitchingFeatKind.NO_HITTER
+    return PitchingFeatProgress(side=pitching, kind=kind, completed_innings=completed)
 
 
 _WALK_OFF_MIN_INNING = 9  # a game cannot end on a home run before the bottom of the 9th

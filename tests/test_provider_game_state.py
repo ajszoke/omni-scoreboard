@@ -16,9 +16,11 @@ from omni.domain.contest import TeamGame
 from omni.providers.base import ProviderError
 from omni.providers.mlb_statsapi import (
     MlbStatsApiProvider,
+    _batting_walks_hbp,
     _parse_decisions,
     _parse_game_state,
     _phase_from_inning_state,
+    _reached_base,
 )
 from omni.providers.mlb_teams import MlbTeamRegistry
 
@@ -53,6 +55,49 @@ def test_parse_game_state_from_fixture() -> None:
     assert (state.count.balls, state.count.strikes, state.count.outs) == (2, 1, 2)
     # offense had first + third occupied; second empty.
     assert state.bases.first and state.bases.third and not state.bases.second
+    # both sides have hits, so both have plainly reached base.
+    assert state.away_reached_base is True and state.home_reached_base is True
+
+
+def _boxscore(side_stats: dict[str, dict[str, int]]) -> dict[str, Any]:
+    teams = {side: {"teamStats": {"batting": stats}} for side, stats in side_stats.items()}
+    return {"liveData": {"boxscore": {"teams": teams}}}
+
+
+def test_batting_walks_hbp_sums_from_the_boxscore() -> None:
+    assert _batting_walks_hbp(_boxscore({"away": {"baseOnBalls": 2, "hitByPitch": 1}}), "away") == 3
+
+
+def test_batting_walks_hbp_none_when_absent_or_null() -> None:
+    assert _batting_walks_hbp({"liveData": {}}, "away") is None  # no boxscore block
+    assert _batting_walks_hbp({"liveData": {"boxscore": None}}, "home") is None  # a null node degrades, never raises
+
+
+def test_reached_base_true_on_a_hit_or_a_defensive_error() -> None:
+    assert _reached_base({}, side="away", hits=1, fielding_errors=0) is True
+    assert _reached_base({}, side="away", hits=0, fielding_errors=1) is True  # reached on the defense's error
+
+
+def test_reached_base_unknown_without_the_boxscore() -> None:
+    # Hitless and errorless, but no walk/HBP data — unknown, so a perfect game is never claimed.
+    assert _reached_base({"liveData": {}}, side="away", hits=0, fielding_errors=0) is None
+
+
+def test_reached_base_clean_sheet_versus_a_walk() -> None:
+    clean = _boxscore({"home": {"baseOnBalls": 0, "hitByPitch": 0}})
+    assert _reached_base(clean, side="home", hits=0, fielding_errors=0) is False
+    walked = _boxscore({"home": {"baseOnBalls": 1, "hitByPitch": 0}})
+    assert _reached_base(walked, side="home", hits=0, fielding_errors=0) is True
+
+
+def test_parse_game_state_reads_a_clean_sheet_for_a_no_hit_side() -> None:
+    feed = _feed()
+    line = feed["liveData"]["linescore"]
+    line["teams"]["away"]["hits"] = 0  # away hitless...
+    line["teams"]["home"]["errors"] = 0  # ...and no away batter reached on a home error
+    feed["liveData"]["boxscore"] = {"teams": {"away": {"teamStats": {"batting": {"baseOnBalls": 0, "hitByPitch": 0}}}}}
+    state = _parse_game_state(feed)
+    assert state.away_hits == 0 and state.away_reached_base is False  # a clean sheet -> perfect-game eligible
 
 
 def test_fetch_live_feed_uses_injected_fetcher() -> None:
