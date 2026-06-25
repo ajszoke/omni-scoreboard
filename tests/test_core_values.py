@@ -90,3 +90,42 @@ def test_delta_e_flags_clashing_navies_but_not_real_accents() -> None:
     # A real accent is unambiguously distinct — the basis for an alt background.
     assert navy.delta_e(RGBColor(250, 70, 22)) > 20  # DET orange
     assert navy.delta_e(RGBColor(196, 206, 212)) > 20  # silver
+
+
+def test_value_lift_leaves_already_legible_colours_untouched() -> None:
+    # Anything that already clears the floor on black is returned unchanged (same object).
+    for c in (RGBColor(190, 10, 20), RGBColor(255, 199, 44), RGBColor(255, 255, 255)):
+        assert c.value_lifted() is c
+
+
+def test_value_lift_brightens_a_dim_navy_to_the_floor_keeping_hue() -> None:
+    navy = RGBColor(0, 50, 99)  # the Angels' dim navy: 1.64:1 on black, washes out
+    assert navy.contrast_ratio(RGBColor(0, 0, 0)) < 3.0
+    lifted = navy.value_lifted()
+    assert lifted.contrast_ratio(RGBColor(0, 0, 0)) >= 3.0  # now legible
+    # Pure value raise: the hue is untouched (no red channel introduced; still b > g > r).
+    assert lifted.r == 0 and lifted.b > lifted.g > lifted.r
+
+
+def test_value_lift_desaturates_only_when_brightness_alone_is_not_enough() -> None:
+    blue = RGBColor(0, 0, 255)  # already max value, yet only 2.44:1 on black
+    lifted = blue.value_lifted()
+    assert lifted.contrast_ratio(RGBColor(0, 0, 0)) >= 3.0
+    assert lifted.b == 255 and lifted.r > 0 and lifted.g > 0  # value maxed, then desaturated
+
+
+def test_value_lift_respects_a_custom_floor() -> None:
+    red = RGBColor(190, 10, 20)  # 3.24:1 — legible at the default floor, not at 5:1
+    assert red.value_lifted() is red
+    lifted = red.value_lifted(min_contrast=5.0)
+    assert lifted is not red and lifted.contrast_ratio(RGBColor(0, 0, 0)) >= 5.0
+
+
+def test_value_lift_is_idempotent() -> None:
+    once = RGBColor(19, 39, 79).value_lifted()  # ATL navy
+    assert once.value_lifted() is once  # a lifted colour already clears the floor
+
+
+def test_value_lift_settles_at_white_when_the_floor_is_unreachable() -> None:
+    # Nothing clears 25:1 on black (white is only 21:1); best effort returns white.
+    assert RGBColor(0, 0, 255).value_lifted(min_contrast=25.0) == RGBColor(255, 255, 255)

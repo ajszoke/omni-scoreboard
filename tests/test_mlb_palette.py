@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from omni.core.colors import RGBColor
 from omni.providers.mlb_palette import LOGO_ALT_COLOR, LOGO_BASE_COLOR
 from omni.providers.mlb_teams import _TEAM_ID_INFO
 from omni.renderers.image import LogoImage
@@ -40,6 +41,17 @@ def test_every_team_has_20x20_base_and_alt_tiles() -> None:
         for suffix in ("", "-alt"):
             tile = _corner(abbr, suffix)
             assert (tile.width, tile.height) == (20, 20)
+
+
+def test_every_meter_colour_value_lifts_to_legibility_on_black() -> None:
+    # The win-probability meter paints a team's freed colour (its base or its alt,
+    # whichever isn't the logo background) onto the black panel. However dim the brand
+    # colour — the Angels' navy, a deep red — value-lift must clear the legibility floor.
+    black = RGBColor(0, 0, 0)
+    for palette in (LOGO_BASE_COLOR, LOGO_ALT_COLOR):
+        for team_id, colour in palette.items():
+            lifted = colour.value_lifted()
+            assert lifted.contrast_ratio(black) >= 3.0, f"{_TEAM_ID_INFO[team_id][0]} {colour} did not lift"
 
 
 def test_detrademark_kept_the_twins_c_and_the_athletics_apostrophe() -> None:
