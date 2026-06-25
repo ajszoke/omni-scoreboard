@@ -36,7 +36,7 @@ from omni.cards.baseball import (
 )
 from omni.core.enum import DisplayPriority, GameStatus, HomeAway, PanelProfile
 from omni.core.time import DurationSeconds
-from omni.domain.baseball import BaseballGameState, PitchingDecisions
+from omni.domain.baseball import BaseballGameState, PitchingDecisions, WinProbability
 from omni.domain.contest import TeamGame
 from omni.events.baseball import BaseballGameEvent
 
@@ -126,8 +126,14 @@ class CardFactory:
         *,
         now: datetime,
         priority: CardPriority | None = None,
+        win_probability: WinProbability | None = None,
     ) -> ScoreboardCard[LiveBaseballCardPayload]:
-        """Build a live MLB card from a matchup + its observed game state."""
+        """Build a live MLB card from a matchup + its observed game state.
+
+        `win_probability`, when given, drives the per-team meter; the caller is
+        responsible for handing in a *delay-safe* sample (one matching the lag-old
+        state), never a fresh reading — see the pipeline's win-probability path.
+        """
         payload = LiveBaseballCardPayload(
             away_score=state.away_score,
             home_score=state.home_score,
@@ -135,6 +141,7 @@ class CardFactory:
             phase=state.phase,
             count=state.count,
             bases=state.bases,
+            win_probability=win_probability,
         )
         key = f"{game.id.raw}:live"
         return ScoreboardCard(

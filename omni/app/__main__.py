@@ -19,6 +19,7 @@ from omni.app.display import MatrixDevice, MatrixDisplaySink
 from omni.app.runner import build_loop, run_forever
 from omni.core.enum import PanelProfile
 from omni.core.time import DurationSeconds
+from omni.domain.baseball import WinProbability
 from omni.domain.contest import TeamGame
 from omni.events.baseball import LiveBaseballFeed
 from omni.panels.geometry import geometry_for
@@ -64,6 +65,9 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
     def fetch_feed(game: TeamGame, now: datetime) -> LiveBaseballFeed:
         return provider.fetch_live_feed(game, now=now)
 
+    def fetch_win_probability(game: TeamGame) -> WinProbability | None:
+        return provider.fetch_win_probability(game)
+
     from RGBMatrixEmulator import RGBMatrix, RGBMatrixOptions
 
     options = RGBMatrixOptions()
@@ -83,6 +87,7 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
         sink,
         favorites=frozenset(args.favorite),
         broadcast_lag=DurationSeconds(args.delay),
+        fetch_win_probability=fetch_win_probability,  # per-team meter, delayed in lockstep with the score
         logos=LogoStore(),  # resolve committed team tiles from assets/ (lazy, cached)
     )
     print(f"omni.app: {profile.value}, delay {args.delay}s, favorites {sorted(args.favorite)} — http://localhost:8888/")

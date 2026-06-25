@@ -9,7 +9,14 @@ from omni.cards.factory import CardFactory
 from omni.core.enum import DisplayPriority, GameStatus, League, PanelProfile, UpdateUrgency
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.core.time import DurationSeconds
-from omni.domain.baseball import BaseballBaseState, BaseballCount, BaseballGameState, InningPhase, PitchingDecisions
+from omni.domain.baseball import (
+    BaseballBaseState,
+    BaseballCount,
+    BaseballGameState,
+    InningPhase,
+    PitchingDecisions,
+    WinProbability,
+)
 from omni.domain.contest import TeamGame
 from omni.events.base import EventImportance
 from omni.events.baseball import BaseballGameEvent, BaseballGameEventType, BaseballPlayPayload, LiveBaseballFeed
@@ -117,6 +124,21 @@ class _Fetch:
         )
 
 
+class _WinProb:
+    """A configurable win-probability fetcher; can be set per refresh and made to fail."""
+
+    def __init__(self) -> None:
+        self.value: WinProbability | None = None
+        self.calls: list[str] = []
+        self.fail: set[str] = set()
+
+    def __call__(self, game: TeamGame) -> WinProbability | None:
+        self.calls.append(game.id.raw)
+        if game.id.raw in self.fail:
+            raise ProviderError("win-probability feed down")
+        return self.value
+
+
 def _setup(lag: int = 30) -> tuple[LiveBaseballPipeline, InterleavedCardQueue]:
     queue = InterleavedCardQueue()
     pipe = LiveBaseballPipeline(
@@ -156,6 +178,80 @@ def test_shows_lag_old_state_not_the_current_spoiler() -> None:
     card = queue.next_card(T + timedelta(seconds=30), QUAD)
     assert card is not None
     assert card.payload.home_score == 0  # the delayed 0-0, never the un-aired 0-1
+
+
+def test_win_probability_is_delay_safe_never_leads_the_score() -> None:
+    # The meter must show the reading from the same lag-old moment as the score, never a fresher one.
+    pipe, queue = _setup(lag=30)
+    fetch = _Fetch()
+    fetch.set("g1", _state())
+    wp = _WinProb()
+    early = WinProbability(home=60.0, away=40.0)
+    later = WinProbability(home=95.0, away=5.0)
+
+    pipe.refresh([_game("g1")], now=T, fetch_feed=fetch, fetch_win_probability=wp)  # state held; no win-prob yet
+    assert wp.calls == []  # nothing fetched while the state is still buffering
+
+    wp.value = early
+    at30 = T + timedelta(seconds=30)
+    pipe.refresh([_game("g1")], now=at30, fetch_feed=fetch, fetch_win_probability=wp)  # state surfaces; early pushed
+    c1 = queue.next_card(at30, QUAD)
+    assert c1 is not None and c1.payload.win_probability is None  # warm-up: early has not cleared the lag yet
+
+    wp.value = later  # a fresher reading arrives...
+    at60 = T + timedelta(seconds=60)
+    pipe.refresh([_game("g1")], now=at60, fetch_feed=fetch, fetch_win_probability=wp)
+    c2 = queue.next_card(at60, QUAD)
+    assert c2 is not None and c2.payload.win_probability == early  # ...but the meter shows the delayed `early`
+
+
+def test_win_probability_surfaces_once_clear_of_a_zero_lag() -> None:
+    # With no delay the happy path attaches the current reading immediately.
+    pipe, queue = _setup(lag=0)
+    fetch = _Fetch()
+    fetch.set("g1", _state(away=1, home=2))
+    wp = _WinProb()
+    wp.value = WinProbability(home=70.0, away=30.0)
+    pipe.refresh([_game("g1")], now=T, fetch_feed=fetch, fetch_win_probability=wp)
+    card = queue.next_card(T, QUAD)
+    assert card is not None and card.payload.win_probability == WinProbability(home=70.0, away=30.0)
+
+
+def test_no_win_probability_fetcher_means_no_meter() -> None:
+    # Omitting the fetcher (the meter disabled) leaves the live card's win_probability None.
+    pipe, queue = _setup(lag=0)
+    fetch = _Fetch()
+    fetch.set("g1", _state(away=1, home=2))
+    pipe.refresh([_game("g1")], now=T, fetch_feed=fetch)
+    card = queue.next_card(T, QUAD)
+    assert card is not None and card.payload.win_probability is None
+
+
+def test_win_probability_fetch_failure_is_a_nonfatal_warning() -> None:
+    # A win-prob fetch failure must not drop the live card — it shows without a meter, plus a warning.
+    pipe, queue = _setup(lag=0)
+    fetch = _Fetch()
+    fetch.set("g1", _state(away=1, home=2))
+    wp = _WinProb()
+    wp.fail.add("g1")
+    res = pipe.refresh([_game("g1")], now=T, fetch_feed=fetch, fetch_win_probability=wp)
+    assert len(res.ingested) == 1 and res.skipped == ()  # the live card still shows; not a game drop
+    assert any("win-probability" in warning for warning in res.warnings)
+    card = queue.next_card(T, QUAD)
+    assert card is not None and card.payload.win_probability is None  # no meter on a failed fetch
+
+
+def test_win_probability_buffer_is_released_when_the_game_leaves() -> None:
+    # The per-game win-prob buffer rides the state feed's lifecycle — dropped with the game, no leak.
+    pipe, _queue = _setup(lag=0)
+    fetch = _Fetch()
+    fetch.set("g1", _state(away=1, home=2))
+    wp = _WinProb()
+    wp.value = WinProbability(home=70.0, away=30.0)
+    pipe.refresh([_game("g1")], now=T, fetch_feed=fetch, fetch_win_probability=wp)
+    assert _id("g1") in pipe._win_prob_feeds  # a buffer exists while the game is live
+    pipe.refresh([], now=T + timedelta(seconds=1), fetch_feed=fetch, fetch_win_probability=wp)
+    assert _id("g1") not in pipe._win_prob_feeds  # gone with the game
 
 
 def test_a_non_carding_status_surfaces_nothing() -> None:

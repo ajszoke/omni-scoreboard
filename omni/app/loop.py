@@ -21,7 +21,7 @@ from datetime import datetime
 
 from omni.app.contest_store import ContestStore, Reconciliation
 from omni.app.display import DisplaySink
-from omni.app.pipeline import FeedFetcher, LiveBaseballPipeline, PipelineResult
+from omni.app.pipeline import FeedFetcher, LiveBaseballPipeline, PipelineResult, WinProbFetcher
 from omni.app.supervisor import ProviderStatus, ProviderSupervisor
 from omni.cards.base import CardId
 from omni.domain.contest import TeamGame
@@ -57,6 +57,7 @@ class AppLoop:
         registry: RendererRegistry,
         sink: DisplaySink,
         fetch_feed: FeedFetcher,
+        fetch_win_probability: WinProbFetcher | None = None,
         logos: LogoStore | None = None,
     ) -> None:
         self._supervisor = supervisor
@@ -66,6 +67,7 @@ class AppLoop:
         self._registry = registry
         self._sink = sink
         self._fetch_feed = fetch_feed
+        self._fetch_win_probability = fetch_win_probability  # optional per-game win-prob fetch; None -> no meter
         self._logos = logos  # ambient tile store handed to every RenderContext; None -> colour-bar fallback
 
     def run_once(self, now: datetime) -> TickResult:
@@ -74,7 +76,12 @@ class AppLoop:
         reconciliation = self._store.apply(snapshot.update) if snapshot.update is not None else None
 
         team_games = [contest for contest in self._store.contests if isinstance(contest, TeamGame)]
-        pipeline_result = self._pipeline.refresh(team_games, now=now, fetch_feed=self._fetch_feed)
+        pipeline_result = self._pipeline.refresh(
+            team_games,
+            now=now,
+            fetch_feed=self._fetch_feed,
+            fetch_win_probability=self._fetch_win_probability,
+        )
 
         card = self._queue.next_card(now, self._sink.profile)
         shown: CardId | None = None

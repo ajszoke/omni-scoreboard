@@ -10,7 +10,7 @@ from omni.app.runner import build_loop
 from omni.core.enum import GameStatus, League, PanelProfile
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.core.time import DurationSeconds
-from omni.domain.baseball import BaseballBaseState, BaseballCount, BaseballGameState, InningPhase
+from omni.domain.baseball import BaseballBaseState, BaseballCount, BaseballGameState, InningPhase, WinProbability
 from omni.domain.contest import TeamGame
 from omni.events.baseball import LiveBaseballFeed
 from omni.providers.base import ProviderUpdate
@@ -91,6 +91,20 @@ def test_build_loop_without_logos_falls_back_to_colour_bars() -> None:
     frame = sink.frames[-1]
     assert isinstance(frame, RecordingCanvas)
     assert not frame.images()  # colour-bar fallback, no blits
+
+
+def test_build_loop_threads_the_win_probability_fetcher() -> None:
+    # A win-prob fetcher handed to build_loop must reach the pipeline's live path.
+    sink = RecordingDisplaySink(PanelProfile.QUAD_128X64)
+    calls: list[str] = []
+
+    def fetch_wp(game: TeamGame) -> WinProbability | None:
+        calls.append(game.id.raw)
+        return WinProbability(home=70.0, away=30.0)
+
+    loop = build_loop(_Provider(), _fetch_feed, sink, broadcast_lag=DurationSeconds(0), fetch_win_probability=fetch_wp)
+    loop.run_once(T)
+    assert calls == ["g1"]  # the pipeline fetched win-prob for the live game
 
 
 def test_parse_args_defaults() -> None:

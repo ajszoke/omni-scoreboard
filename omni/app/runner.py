@@ -16,7 +16,7 @@ from omni.app.clock import Clock
 from omni.app.contest_store import ContestStore
 from omni.app.display import DisplaySink
 from omni.app.loop import AppLoop
-from omni.app.pipeline import FeedFetcher, LiveBaseballPipeline
+from omni.app.pipeline import FeedFetcher, LiveBaseballPipeline, WinProbFetcher
 from omni.app.supervisor import BackoffPolicy, ProviderSupervisor
 from omni.cards.factory import CardFactory
 from omni.core.time import DurationSeconds
@@ -39,10 +39,13 @@ def build_loop(
     broadcast_lag: DurationSeconds = DurationSeconds(45),
     max_age: DurationSeconds = DurationSeconds(120),
     backoff: BackoffPolicy | None = None,
+    fetch_win_probability: WinProbFetcher | None = None,
     logos: LogoStore | None = None,
 ) -> AppLoop:
     """Wire the standard spine into an `AppLoop` (deterministic; no I/O performed here).
 
+    `fetch_win_probability`, when given, feeds each live game's win-prob meter (delayed in
+    the pipeline so it never leads the shown score); omitted, the live card carries no meter.
     `logos`, when given, is the ambient tile store every render uses; left None (a
     test/replay that doesn't care) the renderers fall back to a plain colour bar.
     """
@@ -61,6 +64,7 @@ def build_loop(
         registry=default_registry(),
         sink=sink,
         fetch_feed=fetch_feed,
+        fetch_win_probability=fetch_win_probability,
         logos=logos,
     )
 
