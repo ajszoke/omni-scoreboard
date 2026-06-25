@@ -21,6 +21,11 @@ and a way to fetch a game's live feed; the pipeline cards each game for its phas
     hitless past a minimum inning a `RECURRING` no-hitter card is surfaced and refreshed,
     and removed the moment a hit (in the *delayed* state) breaks the bid — so the bid is
     revealed and un-revealed only as the broadcast would show it.
+  - **win probability** — the live card's per-team meter. A separate, cheaper fetch whose
+    *current* reading is pushed into a per-game delay feed on the same ticks as the state, so
+    the surfaced reading is from the same lag-old moment as the shown score — stale-safe, never
+    leading it. A fetch failure is non-fatal (the card shows without a meter); absent until the
+    game has run long enough for a reading to clear the lag.
 - **final** — once a game ends, a `final` card with the box score. The result is the
   ultimate spoiler, so the reveal is held until the broadcast lag elapses from when we
   first saw the game final (StatsAPI cannot report FINAL before the last out, so first
@@ -55,7 +60,7 @@ from omni.cards.factory import CardFactory
 from omni.core.enum import DisplayPriority, GameStatus
 from omni.core.ids import LeagueScopedId
 from omni.core.observation import Observation
-from omni.domain.baseball import BaseballGameState, PitchingDecisions, pitching_feat_progress
+from omni.domain.baseball import BaseballGameState, PitchingDecisions, WinProbability, pitching_feat_progress
 from omni.domain.contest import TeamGame
 from omni.events.baseball import BaseballGameEvent, LiveBaseballFeed
 from omni.providers.base import ProviderError
@@ -65,11 +70,16 @@ from omni.queue.delayed_feed import DelayedFeed
 from omni.queue.priority import PriorityScorer
 from omni.queue.scheduler import InterleavedCardQueue
 
-__all__ = ["FeedFetcher", "PipelineResult", "LiveBaseballPipeline"]
+__all__ = ["FeedFetcher", "WinProbFetcher", "PipelineResult", "LiveBaseballPipeline"]
 
 # How the pipeline pulls one game's live feed as of `now` (wraps the provider's
 # per-game fetch): the current state plus the play-by-play events from the same fetch.
 FeedFetcher = Callable[[TeamGame, datetime], LiveBaseballFeed]
+
+# How the pipeline pulls one game's current win probability (a separate, cheaper call than
+# the feed). Returns None when none is available yet (pregame / a payload without it). The
+# *current* reading — the pipeline delays it itself so the meter never leads the shown score.
+WinProbFetcher = Callable[[TeamGame], WinProbability | None]
 
 # Pre-first-pitch states: both carry a pregame card (a scheduled game later today and one
 # in warmups are both "upcoming"). Mid-game oddities (DELAYED/SUSPENDED) are not pregame.
@@ -118,6 +128,9 @@ class LiveBaseballPipeline:
         self._pregame_keys: dict[LeagueScopedId, str] = {}  # contest id -> its pregame card's key
         self._status_keys: dict[LeagueScopedId, str] = {}  # contest id -> its (delay/suspension) status card's key
         self._feeds: dict[LeagueScopedId, DelayedFeed[BaseballGameState]] = {}
+        # contest id -> its win-probability timeline; delayed in lockstep with the state feed so the
+        # meter shows the reading from the same lag-old moment as the score (never a fresher one).
+        self._win_prob_feeds: dict[LeagueScopedId, DelayedFeed[WinProbability]] = {}
         self._card_keys: dict[LeagueScopedId, str] = {}  # contest id -> its live card's dedupe key
         self._event_streams: dict[LeagueScopedId, DelayedEventStream[BaseballGameEvent]] = {}
         self._no_hitter_keys: dict[LeagueScopedId, str] = {}  # contest id -> its no-hitter card's key
@@ -125,8 +138,20 @@ class LiveBaseballPipeline:
         self._final_pending: dict[LeagueScopedId, datetime] = {}
         self._final_keys: dict[LeagueScopedId, str] = {}  # contest id -> its (revealed) final card's key
 
-    def refresh(self, games: Iterable[TeamGame], *, now: datetime, fetch_feed: FeedFetcher) -> PipelineResult:
-        """Observe the slate, surface each game's phase card into the queue, drop stale ones."""
+    def refresh(
+        self,
+        games: Iterable[TeamGame],
+        *,
+        now: datetime,
+        fetch_feed: FeedFetcher,
+        fetch_win_probability: WinProbFetcher | None = None,
+    ) -> PipelineResult:
+        """Observe the slate, surface each game's phase card into the queue, drop stale ones.
+
+        `fetch_win_probability`, when given, supplies each live game's current win probability;
+        the pipeline buffers it through the same TV delay as the state so the meter never leads
+        the shown score. Omitted (a test, or the meter disabled) the live card carries no meter.
+        """
         live = [game for game in games if game.status is GameStatus.LIVE]
         upcoming = [game for game in games if game.status in _UPCOMING_STATUSES]
         irregular = [game for game in games if game.status in STATUS_CARD_STATUSES]
@@ -173,8 +198,13 @@ class LiveBaseballPipeline:
             if safe is None:
                 held.append(game.id)  # still inside the TV delay — nothing safe to show yet
                 continue
+            # Win probability rides its own delay buffer, pushed on the same ticks as the state, so
+            # the surfaced reading is from the same lag-old moment as the score — never a fresher one.
+            win_prob, wp_warning = self._safe_win_probability(game, fetch_win_probability, now=now)
+            if wp_warning is not None:
+                warnings.append(f"{game.id.raw}: {wp_warning}")
             priority = self._scorer.score_live_baseball(game, safe.value)
-            card = self._factory.live_baseball(game, safe.value, now=now, priority=priority)
+            card = self._factory.live_baseball(game, safe.value, now=now, priority=priority, win_probability=win_prob)
             self._queue.ingest(card)
             self._card_keys[game.id] = card.dedupe_key.raw
             ingested.append(card.id)
@@ -233,6 +263,31 @@ class LiveBaseballPipeline:
         self._queue.ingest(card)
         self._status_keys[game.id] = card.dedupe_key.raw
         return card.id
+
+    def _safe_win_probability(
+        self, game: TeamGame, fetcher: WinProbFetcher | None, *, now: datetime
+    ) -> tuple[WinProbability | None, str | None]:
+        """The TV-safe win probability for this game's live card, plus any fetch-failure warning.
+
+        Fetches the *current* reading and pushes it into a per-game delay feed at ``now``, then
+        returns the newest reading that has cleared the broadcast lag — i.e. the one from the same
+        ``now - lag`` moment as the lag-old state the card shows. So the meter can be a touch stale
+        but never leads the score. With no fetcher (the meter disabled) it is a no-op returning None;
+        a fetch failure is non-fatal (the live card still shows) and surfaced as a warning.
+        """
+        if fetcher is None:
+            return None, None
+        warning: str | None = None
+        try:
+            current = fetcher(game)
+        except ProviderError as exc:
+            current = None
+            warning = f"win-probability fetch failed: {exc}"
+        feed = self._win_prob_feeds.setdefault(game.id, DelayedFeed(self._delay))
+        if current is not None:
+            feed.push(Observation(subject_id=game.id, source=game.id.source, observed_at=now, value=current))
+        eligible = feed.latest_eligible(now)
+        return (eligible.value if eligible is not None else None), warning
 
     def _surface_big_plays(
         self, game: TeamGame, events: tuple[BaseballGameEvent, ...], *, now: datetime
@@ -359,6 +414,7 @@ class LiveBaseballPipeline:
                     self._queue.remove(key)
                     removed_cards.append(contest_id)
                 self._feeds.pop(contest_id, None)
+                self._win_prob_feeds.pop(contest_id, None)  # win-prob buffer rides the state feed's lifecycle
             no_hitter_key = self._no_hitter_keys.pop(contest_id, None)
             if no_hitter_key is not None:
                 self._queue.remove(no_hitter_key)
