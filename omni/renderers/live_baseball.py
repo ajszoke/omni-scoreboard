@@ -5,8 +5,9 @@ Each profile gets its OWN layout, never a crop of another (AGENTS.md forbids
 
 - quad_128x64 : a 40px top block — two team rows (logo tile + an inline ``R H E`` line score;
   the abbreviation is dropped when a tile resolves, since the logo names the team) beside a
-  compact 3-row state module (inning + 2nd base / 1st + 3rd base / count + out-dots) — over a
-  24px full-width pitcher/batter strip.
+  compact 3-row state module (inning + 2nd base / 1st + 3rd base / count + out-dots), with a
+  standalone pitch line (the game pitch count + the live pitch) tucked in the band below them —
+  over a 24px full-width pitcher/batter strip.
 - stack_64x64 : a compressed layout — two team rows (logo or bar, run score + a dim ``H E``
   line) up top, status + bases below.
 - single_64x32: an explicit COMPROMISE — team abbreviations, scores, and the
@@ -38,7 +39,7 @@ from omni.renderers.team_row import draw_matchup_marks
 from omni.renderers.visual_treatment import MarkTreatment, resolve_matchup_treatment
 from omni.renderers.win_meter import draw_win_meter
 from omni.renderers.text import draw_centered, draw_right_aligned, text_width
-from omni.renderers.text_lane import LaneAnchor, TextLane, draw_text_lane
+from omni.renderers.text_lane import TextLane, draw_text_lane
 
 __all__ = ["LiveBaseballRenderer"]
 
@@ -62,12 +63,16 @@ _THIN = "\N{THIN SPACE}"  # U+2009, a 2px space in 4x6 — packs dense statlines
 _ARROW_UP, _ARROW_DOWN = "↑", "↓"  # stack/single (4x6)
 _TRIANGLE_UP, _TRIANGLE_DOWN = "▲", "▼"  # quad (6x10)
 
-# Quad strip geometry: roster text runs from x=2 to _STRIP_RIGHT. The live pitch is the
-# pitcher's own action, so it gets a reserved lane on the right of the pitcher row; the pitcher's
-# stat line stops short of it, marqueeing within what's left rather than colliding with the token.
+# Quad strip geometry: the pitcher/batter roster lines run the full width from x=2 to _STRIP_RIGHT.
 _STRIP_RIGHT = 126  # right inset for the strip's text lanes (a 2px margin off the 128 edge)
-_PITCH_LANE_X = 93  # the pitch's reserved lane spans [_PITCH_LANE_X, _STRIP_RIGHT) on the pitcher row
 _STATS_GAP = 3  # the gap between a roster name and the stat line that trails it
+
+# The live pitch gets its own lane in the band below the state module — between the count above and
+# the pitcher line below, clear of the line score on its left. The game pitch count anchors the
+# lane's left end and the current pitch (speed + 4-char type) its right end, each growing inward
+# from its own edge so the gap between them only narrows and the two never meet.
+_PITCH_LINE_Y = 35
+_PITCH_LINE_LEFT = 65  # sits clear of the line score (error column right edge x=61), left of the count
 
 
 def _phase_label(phase: InningPhase, inning: int, *, up: str, down: str) -> str:
@@ -134,6 +139,7 @@ class LiveBaseballRenderer:
             draw_centered(canvas, 60, 128, 14, label, _YELLOW, _SCORE_FONT)
             return
         self._state_module(canvas, payload)
+        self._pitch_line(canvas, payload)
         self._batter_pitcher_strip(canvas, payload, now=context.now)
 
     def _draw_mark(self, canvas: Canvas, context: RenderContext, team: Team, side: MarkTreatment) -> None:
@@ -195,30 +201,36 @@ class LiveBaseballRenderer:
         canvas.text(72, 24, f"{payload.count.balls}-{payload.count.strikes}", _WHITE, font=_SCORE_FONT)  # count
         self._out_dots(canvas, 105, 26, payload.count.outs)  # outs, below the diamond cluster
 
+    def _pitch_line(self, canvas: Canvas, payload: LiveBaseballCardPayload) -> None:
+        """The standalone pitch lane: the game pitch count anchored left, the live pitch anchored right.
+
+        ``P:<n>`` (the pitcher's pitches so far this game) sits at the lane's left edge; the current
+        pitch — its speed, ``mph``, and the 4-char type, e.g. ``94mph SNKR`` — is right-anchored to
+        the board's right margin. Each grows inward from its own end, so the gap between them only
+        narrows and the two never meet. Thin spaces keep each side compact. Either is drawn only when
+        present, and the whole line only on a live at-bat (the caller skips it on a break).
+        """
+        pitcher = payload.pitcher
+        if pitcher is not None:
+            canvas.text(_PITCH_LINE_LEFT, _PITCH_LINE_Y, f"P:{_THIN}{pitcher.pitches}", _WHITE, font=_LABEL_FONT)
+        pitch = payload.last_pitch
+        if pitch is not None:
+            token = f"{pitch.velocity_mph}mph{_THIN}{pitch.pitch_type.short}"
+            draw_right_aligned(canvas, _STRIP_RIGHT, _PITCH_LINE_Y, token, _WHITE, _LABEL_FONT)
+
     def _batter_pitcher_strip(self, canvas: Canvas, payload: LiveBaseballCardPayload, *, now: datetime) -> None:
-        """The bottom strip: the pitcher, the batter, and the at-bat's live pitch.
+        """The bottom strip: the pitcher's line, then the batter's, each running the full width.
 
         ``P:`` leads the pitcher and the lineup spot (``4.``) the batter; the leader + name is the
         big (score) font, drawn still, the stat line a size smaller and dimmer beside it. The live
-        pitch token (velocity + 4-char type, e.g. ``99 SWPR``) takes a reserved lane on the right of
-        the *pitcher* row — it is the pitcher's own throw — so the pitcher's stats stop short of it
-        and the batter row stays clear of it entirely. Drawn only on a live at-bat (the caller skips
-        the whole strip on a break).
+        pitch has its own lane in the band above the strip, so neither row reserves room for it and
+        each spans to the right margin. Drawn only on a live at-bat (the caller skips the whole strip
+        on a break).
         """
-        pitcher_right = _STRIP_RIGHT
-        pitch = payload.last_pitch
-        if pitch is not None:
-            # The live pitch shows bright (not the dim stat gray) and the 4-char type names it; its
-            # own lane right-anchors the token and keeps the pitcher's stat line from running under it.
-            lane = TextLane(
-                x=_PITCH_LANE_X, y=44, width=_STRIP_RIGHT - _PITCH_LANE_X, font=_LABEL_FONT, anchor=LaneAnchor.RIGHT
-            )
-            draw_text_lane(canvas, lane, pitch.token, _WHITE, now=now)
-            pitcher_right = _PITCH_LANE_X - 2  # the pitcher's stats stop a hair before the pitch lane
         pitcher = payload.pitcher
         if pitcher is not None:
-            stats = f"{pitcher.innings_pitched}IP{_THIN}{pitcher.strikeouts}K{_THIN}{pitcher.pitches}P"
-            self._roster_line(canvas, f"P: {pitcher.name}", stats, y=41, right=pitcher_right, now=now)
+            stats = f"{pitcher.innings_pitched}IP{_THIN}{pitcher.strikeouts}K"
+            self._roster_line(canvas, f"P: {pitcher.name}", stats, y=41, right=_STRIP_RIGHT, now=now)
         batter = payload.batter
         if batter is not None:
             leader = f"{batter.order}." if batter.order is not None else "#."

@@ -47,7 +47,7 @@ from omni.renderers.base import Renderer
 from omni.renderers.canvas import RecordingCanvas
 from omni.renderers.context import RenderContext
 from omni.renderers.image import LogoStore
-from omni.renderers.live_baseball import LiveBaseballRenderer, _PITCH_LANE_X
+from omni.renderers.live_baseball import LiveBaseballRenderer, _PITCH_LINE_LEFT, _PITCH_LINE_Y, _STRIP_RIGHT
 from omni.renderers.pillow_canvas import PillowCanvas
 from omni.renderers.text import text_width
 
@@ -182,14 +182,16 @@ def test_draw_op_quad_128x64() -> None:
     assert {(24, 1, "3"), (38, 1, "7"), (52, 1, "0")} <= texts  # away runs / hits / errors (cols flush left)
     assert {(24, 21, "5"), (38, 21, "9"), (52, 21, "1")} <= texts  # home
     assert {(72, 2, "▲7"), (72, 24, "2-1")} <= texts  # inning + count, in the middle beside the bases
-    # Pitcher row: the name is drawn still, then the stat line takes a lane that marquees when it
-    # overflows the space left of the pitch lane — so only a clipped run of the full statline shows.
+    # Pitcher row: the name is drawn still, then the IP/K stat line beside it. The game pitch count
+    # moved to the standalone pitch line above, so it is no longer repeated within these stats.
     assert (2, 41, "P: Kershaw") in texts
-    full_pitcher_stats = f"6.1IP{THIN}7K{THIN}95P"
-    stat_op = next(t for t in canvas.texts() if t.y == 44 and 65 <= t.x < _PITCH_LANE_X)
-    assert stat_op.text in full_pitcher_stats  # a contiguous run of the statline, clipped to its lane
+    stat_op = next(t for t in canvas.texts() if t.y == 44 and t.x >= 65)
+    assert stat_op.text == f"6.1IP{THIN}7K"  # IP + K only, drawn whole beside the name
     assert {(2, 52, "3. Betts"), (53, 55, f"2-4{THIN}RBI")} <= texts  # batter line: name + a fitting statline
-    assert (98, 44, "84 SWPR") in texts  # live pitch token in its reserved lane on the pitcher row (SWPR)
+    # Standalone pitch line below the state module: pitch count anchored left, live pitch right-anchored.
+    assert (_PITCH_LINE_LEFT, _PITCH_LINE_Y, f"P:{THIN}95") in texts
+    pitch_token = f"84mph{THIN}SWPR"
+    assert (_STRIP_RIGHT - text_width(pitch_token, "4x6"), _PITCH_LINE_Y, pitch_token) in texts  # right-anchored
     # 1st base is occupied -> a filled white diamond spanning its center (120, 15)
     assert any(o.op == "fill_rect" and o.color == WHITE and o.y == 15 and o.x <= 120 <= o.x + o.w for o in canvas.ops)
 
@@ -211,20 +213,20 @@ def test_batter_line_cribs_the_legacy_order_and_singular_convention(home_runs: i
 def test_quad_strip_shows_the_pitch_token_only_with_a_snapshot() -> None:
     card = make_card(last_pitch=PitchSnapshot(velocity_mph=88, pitch_type=PitchType.SINKER))
     shown = _render(card, PanelProfile.QUAD_128X64)
-    assert any(t.text == "88 SNKR" for t in shown.texts())  # velocity + the 4-char abbreviation
+    assert any(t.text == f"88mph{THIN}SNKR" for t in shown.texts())  # speed + mph + the 4-char type
     hidden = _render(make_card(last_pitch=None), PanelProfile.QUAD_128X64)
     assert not any("SNKR" in t.text for t in hidden.texts())  # no snapshot -> no token
 
 
 def test_quad_overflowing_pitcher_name_claims_the_row_and_drops_stats() -> None:
     # A name wide enough to crowd out its own stats takes the whole line as a marquee lane, so it
-    # stays readable and never overruns the pitch lane — and there is no room left for a stat line.
-    long_name = "Featherstonhaugh"  # far wider than the strip leaves for a name beside stats + the pitch
+    # stays readable and never overruns the strip's right margin — and there is no room for a stat line.
+    long_name = "Featherstonhaughington"  # wider than the full strip leaves for a name beside stats
     card = make_card(pitcher=PitcherGameLine(name=long_name, innings_pitched="6.1", pitches=95, strikeouts=7))
     texts = _render(card, PanelProfile.QUAD_128X64).texts()
     name_ops = [t for t in texts if t.y == 41]  # the name claims the pitcher row's own font baseline
     assert name_ops and name_ops[0].text in f"P: {long_name}"  # a clipped run of the name (it marquees)
-    assert all(t.x + text_width(t.text, "6x10") <= _PITCH_LANE_X for t in name_ops)  # never into the pitch lane
+    assert all(t.x + text_width(t.text, "6x10") <= _STRIP_RIGHT for t in name_ops)  # never past the strip margin
     assert not any(t.y == 44 and "IP" in t.text for t in texts)  # the stat line is dropped — no space for it
 
 

@@ -69,7 +69,10 @@ def test_pipeline_renders_fixture_state_on_quad() -> None:
     assert {(24, 1, "3"), (38, 1, "7"), (52, 1, "0")} <= texts  # big R H E columns (away runs/hits/errors)
     assert {(24, 21, "5"), (38, 21, "9"), (52, 21, "1")} <= texts  # home
     assert {(72, 2, "▲7"), (72, 24, "2-1")} <= texts  # inning + count, in the middle beside the bases
-    assert (98, 44, "87 SWPR") in texts  # the current-play sweeper -> the live pitch token's reserved pitcher-row lane
+    all_text = {t.text for t in canvas.texts()}
+    thin = "\N{THIN SPACE}"
+    assert f"87mph{thin}SWPR" in all_text  # the current-play sweeper -> the standalone pitch line, right-anchored
+    assert f"P:{thin}95" in all_text  # the pitcher's game pitch count anchors the pitch line's left end
 
     # First (center 120,15) and third (106,15) occupied -> filled white diamonds; second (113,7) empty.
     assert any(o.op == "fill_rect" and o.color == WHITE and o.y == 15 and o.x <= 120 <= o.x + o.w for o in canvas.ops)
