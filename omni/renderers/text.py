@@ -7,22 +7,28 @@ alignment" primitives the build calls for (B1 P0/P1), factored out of the indivi
 renderers now that more than one needs them (the rule from the renderer-axis review:
 shared profile-layout primitives only once at least two renderers use them).
 
-Fonts here are fixed-width, so a string's pixel width is just ``cell_width * len``.
+Width sums each glyph's real advance: these fonts are fixed-width for ordinary glyphs
+but carry a few deliberately narrower ones (the thin space U+2009 advances 2px in 4x6),
+so a string is not simply ``cell_width * len``.
 """
 
 from __future__ import annotations
 
 from omni.core.colors import RGBColor
 from omni.renderers.canvas import Canvas
-from omni.renderers.font import char_size
+from omni.renderers.font import advance
 
 __all__ = ["text_width", "draw_right_aligned", "draw_centered"]
 
 
 def text_width(s: str, font: str) -> int:
-    """The pixel width of ``s`` rendered in fixed-width ``font``."""
-    char_w, _ = char_size(font)
-    return char_w * len(s)
+    """The pixel width of ``s`` in ``font``, summing each glyph's advance.
+
+    Matches exactly what the rasterizer lays down (it advances by ``DWIDTH`` per
+    glyph), so anchored layout stays in lockstep with the drawn pixels even when a
+    string mixes full-cell glyphs with a narrow one like the thin space.
+    """
+    return sum(advance(font, ch) for ch in s)
 
 
 def draw_right_aligned(canvas: Canvas, right_x: int, y: int, s: str, color: RGBColor, font: str) -> None:

@@ -14,7 +14,7 @@ from typing import Any
 
 import bdfparser
 
-__all__ = ["FontSpec", "FONTS", "char_size", "rasterize"]
+__all__ = ["FontSpec", "FONTS", "char_size", "advance", "rasterize"]
 
 _FONT_DIR = Path(__file__).resolve().parents[2] / "assets" / "fonts" / "patched"
 
@@ -42,6 +42,25 @@ def char_size(name: str) -> tuple[int, int]:
     """The fixed (width, height) cell of a registered font, in pixels."""
     spec = FONTS[name]
     return spec.width, spec.height
+
+
+@lru_cache(maxsize=None)
+def _advances(name: str) -> dict[int, int]:
+    """Map of codepoint -> horizontal advance (DWIDTH) for every glyph in `name`."""
+    font = _load(name)
+    return {cp: font.glyphbycp(cp).meta["dwx0"] for cp in font.glyphs}
+
+
+def advance(name: str, char: str) -> int:
+    """The horizontal advance of `char` in `name`, in pixels.
+
+    Almost every glyph in these fixed-width fonts advances by the full cell, but a
+    few are deliberately narrower — the thin space U+2009 advances 2px in 4x6 — so
+    anchored layout must sum real advances rather than assume a constant cell. A
+    char with no glyph falls back to the cell width.
+    """
+    width, _ = char_size(name)
+    return _advances(name).get(ord(char), width)
 
 
 def rasterize(name: str, text: str) -> list[list[int]]:
