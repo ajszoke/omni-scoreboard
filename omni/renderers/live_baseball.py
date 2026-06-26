@@ -33,6 +33,7 @@ from omni.domain.logos import LogoVariant
 from omni.domain.teams import Team
 from omni.renderers.canvas import Canvas
 from omni.renderers.context import RenderContext
+from omni.renderers.font import char_size
 from omni.renderers.team_row import draw_matchup_marks
 from omni.renderers.visual_treatment import MarkTreatment, resolve_matchup_treatment
 from omni.renderers.win_meter import draw_win_meter
@@ -49,6 +50,9 @@ _HE = RGBColor(160, 160, 160)  # hits/errors line — legible but secondary to t
 
 _LABEL_FONT = "4x6"
 _SCORE_FONT = "6x10"
+_RHE_BIG_FONT = "9x18B"  # the headline quad line score — the largest face we carry
+_RHE_SMALL_FONT = "6x13B"  # stepped down to once a run or hit reaches two digits, to keep the columns fitting
+_RHE_COLS = (34, 48, 62)  # right edges of the runs / hits / errors columns; right-aligned, so they hold steady
 _THIN = "\N{THIN SPACE}"  # U+2009, a 2px space in 4x6 — packs dense statlines tighter than a full cell
 
 # Active halves point in the batting team's direction (broadcast convention): up = top of the
@@ -124,8 +128,7 @@ class LiveBaseballRenderer:
         self._draw_mark(canvas, context, game.home, treatment.home)
         if payload.win_probability is not None:
             draw_win_meter(canvas, treatment, payload.win_probability)
-        self._line_score(canvas, game.away, payload.away_line, has_logo=treatment.away.is_tile, y=5)
-        self._line_score(canvas, game.home, payload.home_line, has_logo=treatment.home.is_tile, y=25)
+        self._line_scores(canvas, game, payload, away_logo=treatment.away.is_tile, home_logo=treatment.home.is_tile)
         if payload.phase.is_break:  # between halves: no at-bat, no bases — just the inning
             label = _phase_label(payload.phase, payload.inning, up=_TRIANGLE_UP, down=_TRIANGLE_DOWN)
             draw_centered(canvas, 60, 128, 14, label, _YELLOW, _SCORE_FONT)
@@ -148,14 +151,32 @@ class LiveBaseballRenderer:
         else:
             canvas.fill_rect(side.mark.x, side.mark.y, side.mark.width, side.mark.height, team.primary_color)
 
-    def _line_score(self, canvas: Canvas, team: Team, line: TeamLinescore, *, has_logo: bool, y: int) -> None:
-        """Draw a team's ``R H E`` as three equal numbers; prepend the abbr only without a logo."""
-        rhe = f"{line.runs} {line.hits} {line.errors}"
-        if has_logo:
-            canvas.text(26, y, rhe, _WHITE, font=_SCORE_FONT)
-        else:
-            canvas.text(8, y, team.abbreviation, _WHITE, font=_SCORE_FONT)
-            canvas.text(8 + len(team.abbreviation) * 6 + 4, y, rhe, _WHITE, font=_SCORE_FONT)
+    def _line_scores(
+        self, canvas: Canvas, game: TeamGame, payload: LiveBaseballCardPayload, *, away_logo: bool, home_logo: bool
+    ) -> None:
+        """Draw both rows' ``R H E`` as a big right-aligned line score; abbr prepended only without a logo.
+
+        Both rows share one font so their three columns line up: the headline 9x18B, stepping down to
+        the bold 13 the moment any run or hit reaches two digits, so the columns still clear the
+        state module on the right.
+        """
+        away, home = payload.away_line, payload.home_line
+        # If ANY of the six R/H/E values is two digits, both rows step down to the tighter bold 13 so
+        # the wide number still fits its column — a double-digit 9x18B would spill into its neighbor.
+        values = (away.runs, away.hits, away.errors, home.runs, home.hits, home.errors)
+        font = _RHE_SMALL_FONT if max(values) >= 10 else _RHE_BIG_FONT
+        self._rhe_row(canvas, game.away, away, has_logo=away_logo, font=font, row_top=0)
+        self._rhe_row(canvas, game.home, home, has_logo=home_logo, font=font, row_top=20)
+
+    def _rhe_row(
+        self, canvas: Canvas, team: Team, line: TeamLinescore, *, has_logo: bool, font: str, row_top: int
+    ) -> None:
+        """One team's run/hit/error columns, right-aligned and vertically centered in its 20px row."""
+        top = row_top + (20 - char_size(font)[1]) // 2
+        if not has_logo:  # only the color bar drew, so the abbreviation has to name the team
+            canvas.text(5, row_top + 5, team.abbreviation, _WHITE, font=_SCORE_FONT)
+        for value, right_x in zip((line.runs, line.hits, line.errors), _RHE_COLS):
+            draw_right_aligned(canvas, right_x, top, str(value), _WHITE, font)
 
     def _state_module(self, canvas: Canvas, payload: LiveBaseballCardPayload) -> None:
         """The compact 3-row game-state cluster on the right: inning+2B / 1B+3B / count+outs.
