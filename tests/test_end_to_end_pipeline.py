@@ -65,8 +65,9 @@ def test_pipeline_renders_fixture_state_on_quad() -> None:
     LiveBaseballRenderer().render(card, RenderContext(profile=PanelProfile.QUAD_128X64, now=NOW), canvas)
 
     texts = {(t.x, t.y, t.text) for t in canvas.texts()}
-    assert {(8, 5, "COL"), (8, 25, "LAD")} <= texts  # abbr only as the no-logo fallback
-    assert {(30, 5, "3 7 0"), (30, 25, "5 9 1")} <= texts  # inline R H E
+    assert {(5, 5, "COL"), (5, 25, "LAD")} <= texts  # abbr names the team when only the 4px bar drew
+    assert {(25, 1, "3"), (39, 1, "7"), (53, 1, "0")} <= texts  # big R H E columns (away runs/hits/errors)
+    assert {(25, 21, "5"), (39, 21, "9"), (53, 21, "1")} <= texts  # home
     assert {(64, 2, "▲7"), (64, 28, "2-1")} <= texts  # inning (filled triangle) + count, big font
     assert (98, 44, "87 SWPR") in texts  # the current-play sweeper -> the live pitch token's reserved pitcher-row lane
 
