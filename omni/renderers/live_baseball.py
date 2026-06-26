@@ -101,7 +101,7 @@ class LiveBaseballRenderer:
     ) -> None:
         # Top 40px: two team rows (logo + inline R/H/E) on the left, the game-state module on the
         # right. Bottom 24px: the pitcher/batter strip. The logo identifies the team, so the
-        # abbreviation is dropped whenever a tile resolves (kept only as the colour-bar fallback).
+        # abbreviation is dropped whenever a tile resolves (kept only as the color-bar fallback).
         treatment = resolve_matchup_treatment(
             game.away,
             game.home,
@@ -125,7 +125,7 @@ class LiveBaseballRenderer:
         self._batter_pitcher_strip(canvas, payload)
 
     def _draw_mark(self, canvas: Canvas, context: RenderContext, team: Team, side: MarkTreatment) -> None:
-        """Draw the team's mark from its resolved treatment: the logo tile, or the colour-bar fallback.
+        """Draw the team's mark from its resolved treatment: the logo tile, or the color-bar fallback.
 
         The bounds come from the treatment — the same source the win meter derives from — so the tile
         and its gauge are guaranteed to agree, never the 6px drift a separate meter geometry once had.
@@ -180,7 +180,7 @@ class LiveBaseballRenderer:
         pitch = payload.last_pitch
         if pitch is not None:
             # The live pitch rides the right of the batter row — it is what this at-bat is seeing
-            # right now, so it shows bright (not the dim stat grey) and the 4-char type names it.
+            # right now, so it shows bright (not the dim stat gray) and the 4-char type names it.
             draw_right_aligned(canvas, 126, 55, pitch.token, _WHITE, _LABEL_FONT)
 
     @staticmethod

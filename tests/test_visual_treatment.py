@@ -53,7 +53,7 @@ def test_a_resolved_tile_puts_the_meter_at_the_tiles_right_edge(
 
 
 def test_no_store_falls_back_to_the_bar_and_the_meter_hugs_it() -> None:
-    # Without a logo store the mark is the colour bar, and the meter hugs the *bar* — not the old
+    # Without a logo store the mark is the color bar, and the meter hugs the *bar* — not the old
     # hardcoded tile x=22 that left the gauge floating when only a bar drew.
     t = _treat(COL, LAD, PanelProfile.QUAD_128X64, logos=None, away_top=0, home_top=20)
     assert not t.away.is_tile and (t.away.mark.x, t.away.mark.width) == (0, 4)
@@ -73,20 +73,20 @@ def test_the_meter_stays_within_its_mark_so_a_full_gauge_cannot_clip_the_strip()
     assert t.home.meter.y + t.home.meter.height <= 41
 
 
-def test_each_side_meters_in_its_freed_colour_lifted() -> None:
+def test_each_side_meters_in_its_freed_color_lifted() -> None:
     t = _treat(COL, LAD, PanelProfile.QUAD_128X64, logos=LOGOS, away_top=0, home_top=20)
-    # Neither clashed -> each shows its base tile -> the meter uses its freed (alt) colour, value-lifted.
-    assert t.away.meter_colour == LOGO_ALT_COLOR[115].value_lifted()
-    assert t.home.meter_colour == LOGO_ALT_COLOR[119].value_lifted()
+    # Neither clashed -> each shows its base tile -> the meter uses its freed (alt) color, value-lifted.
+    assert t.away.meter_color == LOGO_ALT_COLOR[115].value_lifted()
+    assert t.home.meter_color == LOGO_ALT_COLOR[119].value_lifted()
 
 
-def test_a_clash_flips_one_side_and_frees_its_base_colour() -> None:
-    # NYY/DET share a cap navy: DET flips to its alt, so its freed colour is its BASE (navy);
+def test_a_clash_flips_one_side_and_frees_its_base_color() -> None:
+    # NYY/DET share a cap navy: DET flips to its alt, so its freed color is its BASE (navy);
     # NYY keeps base, freeing its alt (silver). The two sides agree (one resolve).
     t = _treat(NYY, DET, PanelProfile.QUAD_128X64, logos=LOGOS, away_top=0, home_top=20)
     assert (t.away.variant, t.home.variant) == (LogoVariant.BASE, LogoVariant.ALT)
-    assert t.away.meter_colour == LOGO_ALT_COLOR[147].value_lifted()
-    assert t.home.meter_colour == LOGO_BASE_COLOR[116].value_lifted()
+    assert t.away.meter_color == LOGO_ALT_COLOR[147].value_lifted()
+    assert t.home.meter_color == LOGO_BASE_COLOR[116].value_lifted()
 
 
 @pytest.mark.parametrize("gap, width", [(0, 1), (1, 1), (2, 2), (5, 2)])

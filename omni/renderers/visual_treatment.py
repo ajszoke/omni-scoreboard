@@ -1,6 +1,6 @@
 """The unified visual treatment for a matchup: one source of truth for marks + meter.
 
-A live card draws two team rows, each with a left **mark** (a logo tile or a colour-bar
+A live card draws two team rows, each with a left **mark** (a logo tile or a color-bar
 fallback) and a thin win-probability **meter** hugging that mark. Historically those two
 decisions lived in three places — the clash resolver, the mark renderer, and the meter
 renderer — each re-deriving geometry. They drifted: the meter assumed a tile inset the
@@ -9,7 +9,7 @@ mark renderer didn't use, so a full home gauge could spill into the strip below.
 `MatchupVisualTreatment` resolves the pair **once** per render: each side's logo variant
 (clash-resolved), whether a tile or a bar actually draws, the mark's bounds, and the
 meter's bounds *derived from the mark* (same vertical span, hugging its right edge — so a
-full gauge can never exceed the mark it belongs to). The meter colour is value-lifted
+full gauge can never exceed the mark it belongs to). The meter color is value-lifted
 through a `VisualContrastPolicy`, the one hardware-tunable knob for panel legibility, so a
 brighter diffuser or a dimmer build can raise the floor without touching renderer code.
 """
@@ -44,21 +44,21 @@ _MIN_METER_WIDTH = 1
 
 @dataclass(frozen=True, slots=True)
 class VisualContrastPolicy:
-    """Hardware-tunable legibility thresholds for a matchup's colours on the black panel.
+    """Hardware-tunable legibility thresholds for a matchup's colors on the black panel.
 
     One policy per `DisplaySink`/device (with optional per-profile overrides): a brighter
     diffuser, a dimmer brightness, or a particular matrix batch path can want a higher floor.
-    `min_contrast` is the WCAG ratio a dim brand colour is value-lifted to before it paints a
-    meter; `clash_delta_e` is the CIE76 distance below which two team tiles read as one colour
-    and one side flips to its alt. Defaults reproduce the pre-policy hardcoded behaviour.
+    `min_contrast` is the WCAG ratio a dim brand color is value-lifted to before it paints a
+    meter; `clash_delta_e` is the CIE76 distance below which two team tiles read as one color
+    and one side flips to its alt. Defaults reproduce the pre-policy hardcoded behavior.
     """
 
     min_contrast: float = 3.0
     clash_delta_e: float = 25.0
 
-    def lift(self, colour: RGBColor) -> RGBColor:
-        """Value-lift `colour` to this policy's contrast floor against the black panel."""
-        return colour.value_lifted(min_contrast=self.min_contrast)
+    def lift(self, color: RGBColor) -> RGBColor:
+        """Value-lift `color` to this policy's contrast floor against the black panel."""
+        return color.value_lifted(min_contrast=self.min_contrast)
 
 
 DEFAULT_CONTRAST_POLICY = VisualContrastPolicy()
@@ -84,8 +84,8 @@ class MarkTreatment:
     """One team's resolved treatment: variant, whether a tile draws, and the mark + meter bounds.
 
     `mark` and `meter` come from one derivation — the meter hugs the mark's right edge and shares
-    its vertical span — so a full gauge can never drift past the mark it belongs to. `meter_colour`
-    is the team's *freed* colour (the palette colour of the variant it is NOT showing), already
+    its vertical span — so a full gauge can never drift past the mark it belongs to. `meter_color`
+    is the team's *freed* color (the palette color of the variant it is NOT showing), already
     value-lifted through the contrast policy.
     """
 
@@ -93,7 +93,7 @@ class MarkTreatment:
     is_tile: bool
     mark: Rect
     meter: Rect
-    meter_colour: RGBColor
+    meter_color: RGBColor
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,7 +109,7 @@ class _ProfileGeom:
     """Where a live-card team mark sits for one profile — the single geometry the meter derives from.
 
     `tiles_fit` is False for the single profile, whose 16px rows never fit a 20px tile (it always
-    draws the colour bar). `label_x` is where the score/abbreviation begins; the meter fills the gap
+    draws the color bar). `label_x` is where the score/abbreviation begins; the meter fills the gap
     between the mark's right edge and it.
     """
 
@@ -137,9 +137,9 @@ def _meter_width(gap: int) -> int:
     return max(_MIN_METER_WIDTH, min(_IDEAL_METER_WIDTH, gap))
 
 
-def _freed_colour(team: Team, shown: LogoVariant, policy: VisualContrastPolicy) -> RGBColor:
-    """The value-lifted meter colour for `team`: its *freed* colour (the palette colour of the logo
-    variant it is NOT showing), or its primary when no freed colour is known — lifted via `policy`."""
+def _freed_color(team: Team, shown: LogoVariant, policy: VisualContrastPolicy) -> RGBColor:
+    """The value-lifted meter color for `team`: its *freed* color (the palette color of the logo
+    variant it is NOT showing), or its primary when no freed color is known — lifted via `policy`."""
     freed = team.logo if shown is LogoVariant.ALT else team.logo_alt
     background = freed.preferred_background if freed is not None else None
     return policy.lift(background if background is not None else team.primary_color)
@@ -163,7 +163,7 @@ def _mark_treatment(
         mark = Rect(geom.bar_x, row_top, geom.bar_width, geom.height)
     meter = Rect(mark.right, row_top, _meter_width(geom.label_x - mark.right), geom.height)
     return MarkTreatment(
-        variant=variant, is_tile=is_tile, mark=mark, meter=meter, meter_colour=_freed_colour(team, variant, policy)
+        variant=variant, is_tile=is_tile, mark=mark, meter=meter, meter_color=_freed_color(team, variant, policy)
     )
 
 

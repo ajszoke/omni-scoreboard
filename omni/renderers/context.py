@@ -13,11 +13,11 @@ the displayed value advances every tick without the card being rebuilt.
 
 `logos` is the optional tile store. When present a renderer blits the team logo;
 when absent (a unit test that doesn't care, a profile too small to fit one) it falls
-back to a plain colour bar — so adding it broke no existing call site.
+back to a plain color bar — so adding it broke no existing call site.
 
-`contrast` is the hardware-tunable legibility policy (the WCAG floor a dim brand colour
+`contrast` is the hardware-tunable legibility policy (the WCAG floor a dim brand color
 is value-lifted to, and the clash distance two tiles must keep). It defaults to the
-pre-policy behaviour, so it too is a transparent addition; a device tunes it per sink.
+pre-policy behavior, so it too is a transparent addition; a device tunes it per sink.
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ class RenderContext:
 
     profile: PanelProfile
     now: datetime  # render time; renderers derive live values (e.g. countdowns) from this
-    logos: LogoStore | None = None  # ambient tile store; None -> renderers fall back to a colour bar
+    logos: LogoStore | None = None  # ambient tile store; None -> renderers fall back to a color bar
     contrast: VisualContrastPolicy = DEFAULT_CONTRAST_POLICY  # hw-tunable legibility floor + clash threshold
 
     def __post_init__(self) -> None:
