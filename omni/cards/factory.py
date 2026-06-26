@@ -42,8 +42,12 @@ from omni.events.baseball import BaseballGameEvent
 
 __all__ = ["CardFactory"]
 
-# The live-baseball renderer natively supports all three profiles.
+# The live-baseball renderer natively supports all three profiles, each at its own density.
 _LIVE_BASEBALL_PROFILES = frozenset({PanelProfile.SINGLE_64X32, PanelProfile.STACK_64X64, PanelProfile.QUAD_128X64})
+_LIVE_BASEBALL_COMPROMISE = (
+    "single_64x32: team identity + run score + inning-phase label only — count, outs, bases, and H/E are dropped (not legible at 64x32).",
+    "stack_64x64: run score + live status (count/outs/bases) — the inline H/E and the full pitcher/batter strip are dropped (no room at 64px wide).",
+)
 # Pregame renders natively on all three; the small panel drops the "first pitch" label.
 _PREGAME_PROFILES = frozenset({PanelProfile.SINGLE_64X32, PanelProfile.STACK_64X64, PanelProfile.QUAD_128X64})
 _PREGAME_COMPROMISE = ("single_64x32: matchup + countdown only — the 'first pitch' label is dropped (no room).",)
@@ -157,7 +161,7 @@ class CardFactory:
                 max_display=self.live_max_display,
             ),
             priority=priority if priority is not None else _DEFAULT_PRIORITY,
-            layout_support=LayoutSupport(profiles=_LIVE_BASEBALL_PROFILES),
+            layout_support=LayoutSupport(profiles=_LIVE_BASEBALL_PROFILES, compromise_notes=_LIVE_BASEBALL_COMPROMISE),
             dedupe_key=DedupeKey(key),
             payload=payload,
         )
