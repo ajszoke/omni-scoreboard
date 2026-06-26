@@ -56,6 +56,7 @@ ALL_PROFILES = (PanelProfile.QUAD_128X64, PanelProfile.STACK_64X64, PanelProfile
 AWAY_COLOR = RGBColor(51, 0, 111)
 HOME_COLOR = RGBColor(0, 90, 156)
 WHITE = RGBColor(255, 255, 255)
+THIN = "\N{THIN SPACE}"  # U+2009, the 2px statline separator
 
 
 def _team(team_id: str, name: str, abbr: str, color: RGBColor) -> Team:
@@ -174,7 +175,7 @@ def test_draw_op_quad_128x64() -> None:
     assert {(8, 5, "COL"), (8, 25, "LAD")} <= texts  # abbr only as the colour-bar fallback
     assert {(30, 5, "3 7 0"), (30, 25, "5 9 1")} <= texts  # inline R H E (three equal numbers)
     assert {(64, 2, "▲7"), (64, 28, "2-1")} <= texts  # inning (filled triangle) + count, big font
-    assert {(2, 41, "P: Kershaw"), (65, 44, "6.1IP 7K 95P")} <= texts  # strip: big name + smaller statline
+    assert {(2, 41, "P: Kershaw"), (65, 44, f"6.1IP{THIN}7K{THIN}95P")} <= texts  # strip: thin-spaced statline
     assert {(2, 52, "3. Betts"), (53, 55, "2-4")} <= texts  # batter strip line
     # 1st base is occupied -> a filled white diamond spanning its centre (108, 20)
     assert any(o.op == "fill_rect" and o.color == WHITE and o.y == 20 and o.x <= 108 <= o.x + o.w for o in canvas.ops)
@@ -190,7 +191,7 @@ def test_draw_op_stack_64x64_keeps_full_status() -> None:
     assert {(5, 6, "COL"), (5, 28, "LAD")} <= texts
     assert {(56, 6, "3"), (56, 28, "5")} <= texts  # right-aligned at 62 - 6
     assert {(50, 16, "7 0"), (50, 38, "9 1")} <= texts  # hits/errors as bare numbers beneath each run score
-    assert {(3, 46, "↑7"), (20, 46, "2-1"), (3, 55, "2 OUT")} <= texts  # full status retained
+    assert {(3, 46, "↑7"), (20, 46, "2-1"), (3, 55, f"2{THIN}OUT")} <= texts  # full status, thin-spaced outs
     # Compromise: the pitcher/batter lines do not fit at 64px wide — omitted on stack.
     assert not any(t.text.startswith(("P: Kershaw", "3. Betts")) for t in canvas.texts())
 

@@ -47,6 +47,7 @@ _HE = RGBColor(160, 160, 160)  # hits/errors line — legible but secondary to t
 
 _LABEL_FONT = "4x6"
 _SCORE_FONT = "6x10"
+_THIN = "\N{THIN SPACE}"  # U+2009, a 2px space in 4x6 — packs dense statlines tighter than a full cell
 
 # Active halves point in the batting team's direction (broadcast convention): up = top of the
 # inning (visitor batting), down = bottom (home batting); a break keeps a short word. The quad's
@@ -156,7 +157,7 @@ class LiveBaseballRenderer:
         """
         pitcher = payload.pitcher
         if pitcher is not None:
-            stats = f"{pitcher.innings_pitched}IP {pitcher.strikeouts}K {pitcher.pitches}P"
+            stats = f"{pitcher.innings_pitched}IP{_THIN}{pitcher.strikeouts}K{_THIN}{pitcher.pitches}P"
             self._roster_line(canvas, f"P: {pitcher.name}", stats, y=41)
         batter = payload.batter
         if batter is not None:
@@ -187,7 +188,7 @@ class LiveBaseballRenderer:
             return
         canvas.text(3, 46, label, _YELLOW, font=_LABEL_FONT)
         canvas.text(20, 46, f"{payload.count.balls}-{payload.count.strikes}", _WHITE, font=_LABEL_FONT)
-        canvas.text(3, 55, f"{payload.count.outs} OUT", _WHITE, font=_LABEL_FONT)
+        canvas.text(3, 55, f"{payload.count.outs}{_THIN}OUT", _WHITE, font=_LABEL_FONT)
         self._base(canvas, 49, 45, 5, payload.bases.second)
         self._base(canvas, 43, 52, 5, payload.bases.third)
         self._base(canvas, 55, 52, 5, payload.bases.first)
