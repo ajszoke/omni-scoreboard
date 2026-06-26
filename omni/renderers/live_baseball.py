@@ -92,7 +92,7 @@ class LiveBaseballRenderer:
         elif profile is PanelProfile.STACK_64X64:
             self._render_stack(canvas, context, game, payload)
         elif profile is PanelProfile.SINGLE_64X32:
-            self._render_single(canvas, game, payload)
+            self._render_single(canvas, context, game, payload)
         else:  # pragma: no cover - exhaustiveness guard; mypy errors if a profile is unhandled
             assert_never(profile)
 
@@ -195,8 +195,6 @@ class LiveBaseballRenderer:
         canvas.text(home_x, 28, game.home.abbreviation, _WHITE, font=_SCORE_FONT)
         draw_right_aligned(canvas, 62, 6, str(payload.away_line.runs), _WHITE, _SCORE_FONT)
         draw_right_aligned(canvas, 62, 28, str(payload.home_line.runs), _WHITE, _SCORE_FONT)
-        self._hits_errors(canvas, 62, 16, payload.away_line)  # H/E beneath the away run score
-        self._hits_errors(canvas, 62, 38, payload.home_line)  # H/E beneath the home run score
         label = _phase_label(payload.phase, payload.inning, up=_ARROW_UP, down=_ARROW_DOWN)
         if payload.phase.is_break:
             draw_centered(canvas, 0, 64, 50, label, _YELLOW, _LABEL_FONT)  # break: no live at-bat
@@ -208,22 +206,21 @@ class LiveBaseballRenderer:
         self._base(canvas, 43, 52, 5, payload.bases.third)
         self._base(canvas, 55, 52, 5, payload.bases.first)
 
-    def _render_single(self, canvas: Canvas, game: TeamGame, payload: LiveBaseballCardPayload) -> None:
-        # 64x32 compromise: abbreviations + scores + the inning-phase label only.
+    def _render_single(
+        self, canvas: Canvas, context: RenderContext, game: TeamGame, payload: LiveBaseballCardPayload
+    ) -> None:
+        # 64x32 compromise: team identity + scores + the inning-phase label, plus a slim win meter.
         canvas.fill_rect(0, 0, 2, 16, game.away.primary_color)
         canvas.fill_rect(0, 16, 2, 16, game.home.primary_color)
+        if payload.win_probability is not None:
+            draw_win_meter(canvas, context, game.away, game.home, payload.win_probability, away_top=0, home_top=16)
         canvas.text(4, 5, game.away.abbreviation, _WHITE, font=_LABEL_FONT)
         canvas.text(4, 21, game.home.abbreviation, _WHITE, font=_LABEL_FONT)
         draw_right_aligned(canvas, 42, 3, str(payload.away_line.runs), _WHITE, _SCORE_FONT)
         draw_right_aligned(canvas, 42, 19, str(payload.home_line.runs), _WHITE, _SCORE_FONT)
-        # The phase label (↑7/MID7/↓7/END7) already conveys the break; no count/bases/H-E here anyway.
+        # The phase label (↑7/MID7/↓7/END7) already conveys the break; no count/bases here anyway.
         label = _phase_label(payload.phase, payload.inning, up=_ARROW_UP, down=_ARROW_DOWN)
         canvas.text(46, 13, label, _YELLOW, font=_LABEL_FONT)
-
-    @staticmethod
-    def _hits_errors(canvas: Canvas, right_x: int, y: int, line: TeamLinescore) -> None:
-        """Draw a side's hits and errors as bare numbers (the run score above is the R of R/H/E)."""
-        draw_right_aligned(canvas, right_x, y, f"{line.hits} {line.errors}", _HE, _LABEL_FONT)
 
     @staticmethod
     def _diamond(canvas: Canvas, cx: int, cy: int, r: int, occupied: bool) -> None:
