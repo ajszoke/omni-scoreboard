@@ -254,20 +254,23 @@ class TeamLinescore:
 class BatterGameLine:
     """The batter at the plate and how they have done in this game so far.
 
-    `name` is a short (last) name sized for the panel. `hits`/`at_bats` give the familiar
-    "2-4" line; `rbi`/`home_runs` are the day's run production. A dense card shows the at-bat
-    so the viewer knows who is up without the broadcast.
+    `name` is a short (last) name sized for the panel. `order` is the lineup spot (1-9), which
+    a card shows as a ``"4."`` leader so the name reads as the batter, not initials. `hits`/
+    `at_bats` give the familiar "2-4" line; `rbi`/`home_runs` are the day's run production.
     """
 
     name: str
     at_bats: int
     hits: int
+    order: int | None = None
     rbi: int = 0
     home_runs: int = 0
 
     def __post_init__(self) -> None:
         if not self.name:
             raise ValueError("a batter line needs a name")
+        if self.order is not None and not 1 <= self.order <= 9:
+            raise ValueError("a batting-order spot is 1..9")
         for field_name, value in (
             ("at_bats", self.at_bats),
             ("hits", self.hits),

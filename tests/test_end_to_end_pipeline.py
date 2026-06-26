@@ -65,16 +65,16 @@ def test_pipeline_renders_fixture_state_on_quad() -> None:
     LiveBaseballRenderer().render(card, RenderContext(profile=PanelProfile.QUAD_128X64, now=NOW), canvas)
 
     texts = {(t.x, t.y, t.text) for t in canvas.texts()}
-    assert {(8, 11, "COL"), (8, 43, "LAD")} <= texts
-    assert {(52, 11, "3"), (52, 43, "5")} <= texts
-    assert {(68, 6, "T7"), (68, 14, "2-1"), (68, 22, "2 OUT")} <= texts
+    assert {(8, 5, "COL"), (8, 25, "LAD")} <= texts  # abbr only as the no-logo fallback
+    assert {(30, 5, "3 7 0"), (30, 25, "5 9 1")} <= texts  # inline R H E
+    assert {(64, 2, "↑7"), (64, 28, "2-1")} <= texts  # inning + count in the state module (big font)
 
-    rects = canvas.rects()
-    # First and third occupied -> solid white; second empty -> dim outline, not filled.
-    assert any((r.x, r.y, r.w, r.h) == (108, 16, 6, 6) and r.color == WHITE for r in rects)
-    assert any((r.x, r.y, r.w, r.h) == (92, 16, 6, 6) and r.color == WHITE for r in rects)
-    assert not any((r.x, r.y, r.w, r.h) == (100, 6, 6, 6) and r.color == WHITE for r in rects)
-    assert any((r.x, r.y, r.w, r.h) == (100, 6, 6, 1) and r.color == DIM for r in rects)
+    # First (centre 108,20) and third (96,20) occupied -> filled white diamonds; second (102,9) empty.
+    assert any(o.op == "fill_rect" and o.color == WHITE and o.y == 20 and o.x <= 108 <= o.x + o.w for o in canvas.ops)
+    assert any(o.op == "fill_rect" and o.color == WHITE and o.y == 20 and o.x <= 96 <= o.x + o.w for o in canvas.ops)
+    assert not any(
+        o.op == "fill_rect" and o.color == WHITE and o.y == 9 and o.x <= 102 <= o.x + o.w for o in canvas.ops
+    )
 
 
 def test_pipeline_renders_on_all_three_profiles() -> None:
@@ -85,4 +85,4 @@ def test_pipeline_renders_on_all_three_profiles() -> None:
         LiveBaseballRenderer().render(card, RenderContext(profile=profile, now=NOW), canvas)
         joined = " ".join(t.text for t in canvas.texts())
         # Team abbreviations and the inning label appear on every profile.
-        assert "COL" in joined and "LAD" in joined and "T7" in joined
+        assert "COL" in joined and "LAD" in joined and "↑7" in joined

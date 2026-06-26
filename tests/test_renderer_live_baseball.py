@@ -94,7 +94,7 @@ def make_card(
     inning: int = 7,
     bases: BaseballBaseState = BaseballBaseState(first=True),
     win_probability: WinProbability | None = None,
-    batter: BatterGameLine | None = BatterGameLine(name="Betts", at_bats=4, hits=2, rbi=1),
+    batter: BatterGameLine | None = BatterGameLine(name="Betts", at_bats=4, hits=2, rbi=1, order=3),
     pitcher: PitcherGameLine | None = PitcherGameLine(name="Kershaw", innings_pitched="6.1", pitches=95, strikeouts=7),
 ) -> ScoreboardCard[LiveBaseballCardPayload]:
     payload = LiveBaseballCardPayload(
@@ -165,18 +165,19 @@ def test_renderer_rejects_non_teamgame_contest() -> None:
 
 
 def test_draw_op_quad_128x64() -> None:
-    canvas = _render(make_card(), PanelProfile.QUAD_128X64)
+    canvas = _render(make_card(), PanelProfile.QUAD_128X64)  # no logos -> colour bars + abbr fallback
     assert canvas.ops[0].op == "fill" and canvas.ops[0].color == RGBColor(0, 0, 0)
     rects = canvas.rects()
-    assert any((r.x, r.y, r.w, r.h) == (0, 0, 4, 32) and r.color == AWAY_COLOR for r in rects)
-    assert any((r.x, r.y, r.w, r.h) == (0, 32, 4, 32) and r.color == HOME_COLOR for r in rects)
-    assert any((r.x, r.y, r.w, r.h) == (108, 16, 6, 6) and r.color == WHITE for r in rects)  # 1B filled
+    assert any((r.x, r.y, r.w, r.h) == (0, 0, 4, 20) and r.color == AWAY_COLOR for r in rects)  # away bar
+    assert any((r.x, r.y, r.w, r.h) == (0, 20, 4, 20) and r.color == HOME_COLOR for r in rects)  # home bar
     texts = {(t.x, t.y, t.text) for t in canvas.texts()}
-    assert {(8, 11, "COL"), (8, 43, "LAD")} <= texts
-    assert {(52, 11, "3"), (52, 43, "5")} <= texts
-    assert {(38, 23, "H7 E0"), (38, 55, "H9 E1")} <= texts  # R/H/E detail beneath each run score
-    assert {(68, 6, "T7"), (68, 14, "2-1"), (68, 22, "2 OUT")} <= texts
-    assert {(64, 38, "P: Kershaw 95P"), (64, 48, "#. Betts 2-4")} <= texts  # current pitcher + batter lines
+    assert {(8, 5, "COL"), (8, 25, "LAD")} <= texts  # abbr only as the colour-bar fallback
+    assert {(30, 5, "3 7 0"), (30, 25, "5 9 1")} <= texts  # inline R H E (three equal numbers)
+    assert {(64, 2, "↑7"), (64, 28, "2-1")} <= texts  # inning + count in the state module (big font)
+    assert {(2, 41, "P: Kershaw"), (65, 44, "6.1IP 7K 95P")} <= texts  # strip: big name + smaller statline
+    assert {(2, 52, "3. Betts"), (53, 55, "2-4")} <= texts  # batter strip line
+    # 1st base is occupied -> a filled white diamond spanning its centre (108, 20)
+    assert any(o.op == "fill_rect" and o.color == WHITE and o.y == 20 and o.x <= 108 <= o.x + o.w for o in canvas.ops)
 
 
 def test_draw_op_stack_64x64_keeps_full_status() -> None:
@@ -188,10 +189,10 @@ def test_draw_op_stack_64x64_keeps_full_status() -> None:
     texts = {(t.x, t.y, t.text) for t in canvas.texts()}
     assert {(5, 6, "COL"), (5, 28, "LAD")} <= texts
     assert {(56, 6, "3"), (56, 28, "5")} <= texts  # right-aligned at 62 - 6
-    assert {(42, 16, "H7 E0"), (42, 38, "H9 E1")} <= texts  # R/H/E detail beneath each run score
-    assert {(3, 46, "T7"), (20, 46, "2-1"), (3, 55, "2 OUT")} <= texts  # full status retained
+    assert {(50, 16, "7 0"), (50, 38, "9 1")} <= texts  # hits/errors as bare numbers beneath each run score
+    assert {(3, 46, "↑7"), (20, 46, "2-1"), (3, 55, "2 OUT")} <= texts  # full status retained
     # Compromise: the pitcher/batter lines do not fit at 64px wide — omitted on stack.
-    assert not any(t.text.startswith(("P: Kershaw", "#. Betts")) for t in canvas.texts())
+    assert not any(t.text.startswith(("P: Kershaw", "3. Betts")) for t in canvas.texts())
 
 
 def test_draw_op_single_64x32_is_an_explicit_compromise() -> None:
@@ -200,20 +201,20 @@ def test_draw_op_single_64x32_is_an_explicit_compromise() -> None:
     # Essentials shown: abbreviations, scores, inning phase.
     assert {(4, 5, "COL"), (4, 21, "LAD")} <= texts
     assert {(36, 3, "3"), (36, 19, "5")} <= texts
-    assert (46, 13, "T7") in texts
+    assert (46, 13, "↑7") in texts
     # Compromise: count, outs, the bases diamond, and the H/E detail are omitted at 64x32.
     joined = " ".join(t.text for t in canvas.texts())
     assert "OUT" not in joined and "-" not in joined
-    assert "H7 E0" not in joined and "H9 E1" not in joined  # no R/H/E detail at 64x32
+    assert "7 0" not in joined and "9 1" not in joined  # no hits/errors detail at 64x32
     assert "Kershaw" not in joined and "Betts" not in joined  # no pitcher/batter lines at 64x32
     # Only the two team stripes are drawn (no base markers).
     assert {(r.x, r.y, r.w, r.h) for r in canvas.rects()} == {(0, 0, 2, 16), (0, 16, 2, 16)}
 
 
-def test_draw_op_bottom_inning_shows_b_label() -> None:
+def test_draw_op_bottom_inning_shows_down_arrow() -> None:
     # The InningPhase.BOTTOM arm is a ternary (a coverage blind spot), so assert it.
     canvas = _render(make_card(phase=InningPhase.BOTTOM, inning=9), PanelProfile.QUAD_128X64)
-    assert (68, 6, "B9") in {(t.x, t.y, t.text) for t in canvas.texts()}
+    assert (64, 2, "↓9") in {(t.x, t.y, t.text) for t in canvas.texts()}
 
 
 def test_draw_op_middle_break_shows_label_and_suppresses_at_bat() -> None:
@@ -224,7 +225,7 @@ def test_draw_op_middle_break_shows_label_and_suppresses_at_bat() -> None:
         texts = [t.text for t in canvas.texts()]
         assert "MID7" in texts
         assert "2-1" not in texts and not any("OUT" in t for t in texts)  # at-bat suppressed
-        assert not any(t.startswith(("P: Kershaw", "#. Betts")) for t in texts)  # no live at-bat -> no pitcher/batter
+        assert not any(t.startswith(("P: Kershaw", "3. Betts")) for t in texts)  # no live at-bat -> no pitcher/batter
         assert not any(r.color == WHITE and r.w == r.h for r in canvas.rects())  # no bases drawn
 
 
@@ -239,36 +240,40 @@ def test_draw_op_single_profile_shows_break_label() -> None:
     assert (46, 13, "MID7") in {(t.x, t.y, t.text) for t in canvas.texts()}
 
 
-def test_draw_op_two_digit_score_right_aligns() -> None:
-    # "10" is two 6px glyphs, so its left edge is 58 - 12 = 46 on quad.
+def test_draw_op_two_digit_run_in_the_line_score() -> None:
+    # The run is the first of the three inline R/H/E numbers (after the abbr at x=30 without a logo).
     canvas = _render(make_card(away_score=10), PanelProfile.QUAD_128X64)
-    assert (46, 11, "10") in {(t.x, t.y, t.text) for t in canvas.texts()}
+    assert (30, 5, "10 7 0") in {(t.x, t.y, t.text) for t in canvas.texts()}
 
 
-def test_draw_op_double_digit_hits_errors_right_align() -> None:
-    # "H12 E3" is six 4px glyphs, so its left edge is 58 - 24 = 34 on quad — still clear of the score.
+def test_draw_op_double_digit_line_score() -> None:
+    # Double-digit hits widen the inline triplet without wrapping or clipping.
     canvas = _render(make_card(away_hits=12, away_errors=3), PanelProfile.QUAD_128X64)
-    assert (34, 23, "H12 E3") in {(t.x, t.y, t.text) for t in canvas.texts()}
+    assert (30, 5, "3 12 3") in {(t.x, t.y, t.text) for t in canvas.texts()}
 
 
-def test_draw_op_empty_bases_draw_dim_outlines() -> None:
-    rects = _render(make_card(bases=BaseballBaseState()), PanelProfile.QUAD_128X64).rects()
+def test_draw_op_empty_bases_draw_dim_diamond_outlines() -> None:
+    canvas = _render(make_card(bases=BaseballBaseState()), PanelProfile.QUAD_128X64)  # all bases empty
     dim = RGBColor(60, 60, 60)
-    assert any((r.x, r.y, r.w, r.h) == (108, 16, 6, 1) and r.color == dim for r in rects)  # 1B top edge
-    assert not any(r.w == 6 and r.h == 6 and r.color == WHITE for r in rects)  # nothing filled white
+    assert any(o.op == "set_pixel" and o.color == dim for o in canvas.ops)  # empty bases -> dim diamond outlines
+    # no base is filled: nothing white spans a base-diamond centre row (e.g. 1B at y=20)
+    assert not any(
+        o.op == "fill_rect" and o.color == WHITE and o.y == 20 and o.x <= 108 <= o.x + o.w for o in canvas.ops
+    )
 
 
 def test_logos_replace_the_team_bar_on_quad_and_stack() -> None:
     quad = _render(make_card(), PanelProfile.QUAD_128X64, logos=LOGOS)
-    assert {i.key for i in quad.images()} == {"col", "lad"}  # both tiles blitted
+    assert {i.key for i in quad.images()} == {"col", "lad"}  # both tiles blitted at (2,0)/(2,20)
     bars = {(r.x, r.y, r.w, r.h) for r in quad.rects()}
-    assert (0, 0, 4, 32) not in bars and (0, 32, 4, 32) not in bars  # the tile replaces the colour bar
-    texts = {(t.x, t.y, t.text) for t in quad.texts()}
-    assert {(24, 11, "COL"), (24, 43, "LAD")} <= texts  # abbreviations shift right to clear the tile
+    assert (0, 0, 4, 20) not in bars and (0, 20, 4, 20) not in bars  # the tile replaces the colour bar
+    quad_texts = {(t.x, t.y, t.text) for t in quad.texts()}
+    assert "COL" not in {t.text for t in quad.texts()} and "LAD" not in {t.text for t in quad.texts()}  # abbr dropped
+    assert {(26, 5, "3 7 0"), (26, 25, "5 9 1")} <= quad_texts  # R H E sits in the freed space, no abbr
 
     stack = _render(make_card(), PanelProfile.STACK_64X64, logos=LOGOS)
     assert {i.key for i in stack.images()} == {"col", "lad"}
-    assert {(23, 6, "COL"), (23, 28, "LAD")} <= {(t.x, t.y, t.text) for t in stack.texts()}
+    assert {(23, 6, "COL"), (23, 28, "LAD")} <= {(t.x, t.y, t.text) for t in stack.texts()}  # stack still shows abbr
 
 
 def test_single_profile_drops_the_logo_even_with_a_store() -> None:

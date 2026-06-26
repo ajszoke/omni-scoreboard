@@ -312,19 +312,28 @@ def _last_name(full_name: str) -> str:
     return parts[-1] if parts else full_name
 
 
-def _boxscore_stats(raw: dict[str, Any], player_id: int, group: str) -> dict[str, Any] | None:
-    """A player's ``stats.{group}`` block from either team's boxscore, or None if not on a roster.
+def _boxscore_player(raw: dict[str, Any], player_id: int) -> dict[str, Any] | None:
+    """A player's boxscore record from either team, or None if not on a roster.
 
     The boxscore keys players as ``ID<personId>`` under each side; a player is on exactly one,
-    so search both. An empty stats block (a sub just entered) still resolves — to ``{}``, not None.
+    so search both. Returns the whole player dict (the caller reads ``stats`` and ``battingOrder``).
     """
     teams = ((raw.get("liveData") or {}).get("boxscore") or {}).get("teams") or {}
     key = f"ID{player_id}"
     for side in ("away", "home"):
         player = ((teams.get(side) or {}).get("players") or {}).get(key)
         if isinstance(player, dict):
-            return ((player.get("stats") or {}).get(group)) or {}
+            return player
     return None
+
+
+def _lineup_spot(player: dict[str, Any]) -> int | None:
+    """The batting-order spot (1-9) from a boxscore ``battingOrder`` like ``"400"``, or None."""
+    raw_order = player.get("battingOrder")
+    if not isinstance(raw_order, str) or not raw_order.isdigit():
+        return None
+    spot = int(raw_order) // 100
+    return spot if 1 <= spot <= 9 else None
 
 
 def _current_batter(raw: dict[str, Any]) -> BatterGameLine | None:
@@ -333,11 +342,13 @@ def _current_batter(raw: dict[str, Any]) -> BatterGameLine | None:
     player_id, name = batter.get("id"), batter.get("fullName")
     if not isinstance(player_id, int) or not isinstance(name, str) or not name:
         return None
-    stats = _boxscore_stats(raw, player_id, "batting")
-    if stats is None:
+    player = _boxscore_player(raw, player_id)
+    if player is None:
         return None
+    stats = (player.get("stats") or {}).get("batting") or {}
     return BatterGameLine(
         name=_last_name(name),
+        order=_lineup_spot(player),
         at_bats=int(stats.get("atBats", 0) or 0),
         hits=int(stats.get("hits", 0) or 0),
         rbi=int(stats.get("rbi", 0) or 0),
@@ -351,9 +362,10 @@ def _current_pitcher(raw: dict[str, Any]) -> PitcherGameLine | None:
     player_id, name = pitcher.get("id"), pitcher.get("fullName")
     if not isinstance(player_id, int) or not isinstance(name, str) or not name:
         return None
-    stats = _boxscore_stats(raw, player_id, "pitching")
-    if stats is None:
+    player = _boxscore_player(raw, player_id)
+    if player is None:
         return None
+    stats = (player.get("stats") or {}).get("pitching") or {}
     return PitcherGameLine(
         name=_last_name(name),
         innings_pitched=str(stats.get("inningsPitched", "0.0") or "0.0"),
@@ -645,7 +657,7 @@ _GAME_FIELDS = (
     "liveData,linescore,teams,home,away,runs,hits,errors,currentInning,inningState,balls,strikes,outs,"
     "offense,defense,first,second,third,batter,pitcher,id,"  # current batter/pitcher (their game lines below)
     "boxscore,teamStats,batting,baseOnBalls,hitByPitch,"  # per-side walks/HBP -> perfect-game detection
-    "players,stats,pitching,atBats,homeRuns,strikeOuts,numberOfPitches,inningsPitched,"  # batter/pitcher game lines
+    "players,stats,pitching,battingOrder,atBats,homeRuns,strikeOuts,numberOfPitches,inningsPitched,"  # batter/pitcher lines
     "plays,allPlays,result,eventType,description,rbi,awayScore,homeScore,about,inning,halfInning,atBatIndex,"
     "endTime,startTime,count,playEvents,isPitch,details,type,code,decisions,winner,loser,save,fullName"
 )

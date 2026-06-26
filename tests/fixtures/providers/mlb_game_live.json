@@ -28,7 +28,7 @@
     },
     "boxscore": {
       "teams": {
-        "away": { "players": { "ID500001": { "stats": { "batting": { "atBats": 4, "hits": 2, "rbi": 1, "homeRuns": 0 } } } } },
+        "away": { "players": { "ID500001": { "battingOrder": "400", "stats": { "batting": { "atBats": 4, "hits": 2, "rbi": 1, "homeRuns": 0 } } } } },
         "home": { "players": { "ID600010": { "stats": { "pitching": { "inningsPitched": "6.1", "numberOfPitches": 95, "strikeOuts": 7 } } } } }
       }
     },

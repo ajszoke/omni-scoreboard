@@ -17,10 +17,11 @@ from omni.providers.base import ProviderError
 from omni.providers.mlb_statsapi import (
     MlbStatsApiProvider,
     _batting_walks_hbp,
-    _boxscore_stats,
+    _boxscore_player,
     _current_batter,
     _current_pitcher,
     _last_name,
+    _lineup_spot,
     _parse_decisions,
     _parse_game_state,
     _phase_from_inning_state,
@@ -62,7 +63,7 @@ def test_parse_game_state_from_fixture() -> None:
     # both sides have hits, so both have plainly reached base.
     assert state.away_reached_base is True and state.home_reached_base is True
     # current batter / pitcher with their game lines, looked up from the boxscore.
-    assert state.batter == BatterGameLine(name="Batter", at_bats=4, hits=2, rbi=1, home_runs=0)
+    assert state.batter == BatterGameLine(name="Batter", order=4, at_bats=4, hits=2, rbi=1, home_runs=0)
     assert state.pitcher == PitcherGameLine(name="Miller", innings_pitched="6.1", pitches=95, strikeouts=7)
 
 
@@ -72,13 +73,17 @@ def test_last_name_takes_the_surname_and_skips_a_suffix() -> None:
     assert _last_name("Cedric") == "Cedric"  # a single token degrades to itself
 
 
-def test_boxscore_stats_finds_either_side_and_none_when_absent() -> None:
-    raw = {
-        "liveData": {"boxscore": {"teams": {"home": {"players": {"ID7": {"stats": {"pitching": {"strikeOuts": 9}}}}}}}}
-    }
-    assert _boxscore_stats(raw, 7, "pitching") == {"strikeOuts": 9}
-    assert _boxscore_stats(raw, 7, "batting") == {}  # player present, but no batting group -> empty, not None
-    assert _boxscore_stats(raw, 999, "pitching") is None  # player on no roster -> None
+def test_boxscore_player_finds_either_side_and_none_when_absent() -> None:
+    raw = {"liveData": {"boxscore": {"teams": {"home": {"players": {"ID7": {"battingOrder": "300"}}}}}}}
+    assert _boxscore_player(raw, 7) == {"battingOrder": "300"}  # found on the home roster
+    assert _boxscore_player(raw, 999) is None  # player on no roster -> None
+
+
+def test_lineup_spot_parses_the_batting_order() -> None:
+    assert _lineup_spot({"battingOrder": "400"}) == 4  # 4th in the order
+    assert _lineup_spot({"battingOrder": "901"}) == 9  # a substitution still maps to the spot
+    assert _lineup_spot({}) is None  # no battingOrder -> unknown
+    assert _lineup_spot({"battingOrder": "x"}) is None  # non-numeric degrades, never raises
 
 
 def test_current_batter_and_pitcher_are_none_when_unnamed() -> None:

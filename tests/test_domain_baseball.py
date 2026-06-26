@@ -97,8 +97,9 @@ def test_team_linescore_rejects_negative_values(field: str) -> None:
 
 
 def test_batter_game_line_holds_the_at_bat() -> None:
-    line = BatterGameLine(name="Betts", at_bats=4, hits=2, rbi=1, home_runs=1)
-    assert (line.name, line.hits, line.at_bats, line.rbi, line.home_runs) == ("Betts", 2, 4, 1, 1)
+    line = BatterGameLine(name="Betts", order=3, at_bats=4, hits=2, rbi=1, home_runs=1)
+    assert (line.name, line.order, line.hits, line.at_bats, line.rbi, line.home_runs) == ("Betts", 3, 2, 4, 1, 1)
+    assert BatterGameLine(name="x", at_bats=0, hits=0).order is None  # order is optional
 
 
 def test_batter_game_line_validates() -> None:
@@ -106,6 +107,8 @@ def test_batter_game_line_validates() -> None:
         BatterGameLine(name="", at_bats=0, hits=0)
     with pytest.raises(ValueError, match="hits cannot be negative"):
         BatterGameLine(name="x", at_bats=0, hits=-1)
+    with pytest.raises(ValueError, match="batting-order spot is 1..9"):
+        BatterGameLine(name="x", at_bats=0, hits=0, order=10)
 
 
 def test_pitcher_game_line_holds_the_outing() -> None:
