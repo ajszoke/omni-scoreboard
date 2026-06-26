@@ -159,7 +159,15 @@
           },
           "count": { "balls": 0, "strikes": 0, "outs": 0 }
         }
-      ]
+      ],
+      "currentPlay": {
+        "atBatIndex": 38,
+        "playEvents": [
+          { "isPitch": true, "pitchData": { "startSpeed": 95.4 }, "details": { "type": { "code": "FF", "description": "Four-Seam Fastball" } } },
+          { "isPitch": false, "details": { "description": "Mound Visit" } },
+          { "isPitch": true, "pitchData": { "startSpeed": 86.7 }, "details": { "type": { "code": "ST", "description": "Sweeper" } } }
+        ]
+      }
     }
   }
 }

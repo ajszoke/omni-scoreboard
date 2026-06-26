@@ -144,6 +144,7 @@ class CardFactory:
             win_probability=win_probability,
             batter=state.batter,
             pitcher=state.pitcher,
+            last_pitch=state.last_pitch,
         )
         key = f"{game.id.raw}:live"
         return ScoreboardCard(

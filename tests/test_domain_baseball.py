@@ -16,6 +16,7 @@ from omni.domain.baseball import (
     BatterGameLine,
     PitcherGameLine,
     PitchingFeatProgress,
+    PitchSnapshot,
     PitchType,
     TeamLinescore,
     WinProbability,
@@ -218,7 +219,7 @@ def test_pitching_feat_kind_value_is_the_token() -> None:
 
 
 def test_pitch_type_value_is_the_statsapi_code() -> None:
-    # The enum value is the StatsAPI code, so it doubles as the short display token.
+    # The enum value is the raw StatsAPI code; the board display token is `.short`, not the value.
     assert PitchType.SWEEPER.value == "ST"
     assert PitchType.FOUR_SEAM_FASTBALL.value == "FF"
     assert str(PitchType.SLIDER) == "SL"  # StrEnumMixin renders as the code
@@ -236,6 +237,29 @@ def test_pitch_type_coerces_from_a_raw_code() -> None:
     assert try_coerce_enum(PitchType, "CH") is PitchType.CHANGEUP
     assert try_coerce_enum(PitchType, "ZZ") is None  # an unrecognized code
     assert try_coerce_enum(PitchType, None) is None  # absent
+
+
+def test_pitch_type_short_is_the_legacy_four_char_abbreviation() -> None:
+    # Every member maps, and each abbreviation fits the board's four-cell pitch slot.
+    assert all(0 < len(p.short) <= 4 for p in PitchType)
+    # The sweeper is the load-bearing case: its StatsAPI code is "ST", but the board shows SWPR —
+    # the abbreviation is keyed by pitch, not by code, so the ST/SW mismatch never surfaces.
+    assert PitchType.SWEEPER.short == "SWPR"
+    assert PitchType.FOUR_SEAM_FASTBALL.short == "4SFB"
+    assert PitchType.SINKER.short == "SNKR"
+    assert PitchType.SLURVE.short == "SLRV"
+    assert PitchType.UNKNOWN.short == "UKWN"
+
+
+def test_pitch_snapshot_token_pairs_the_speed_with_the_short_abbreviation() -> None:
+    assert PitchSnapshot(velocity_mph=99, pitch_type=PitchType.SWEEPER).token == "99 SWPR"
+    assert PitchSnapshot(velocity_mph=84, pitch_type=PitchType.FOUR_SEAM_FASTBALL).token == "84 4SFB"
+
+
+def test_pitch_snapshot_requires_a_positive_velocity() -> None:
+    # The absence of a tracked pitch is None, never a zero-velocity placeholder.
+    with pytest.raises(ValueError):
+        PitchSnapshot(velocity_mph=0, pitch_type=PitchType.SLIDER)
 
 
 def test_pitching_decisions_carry_the_winner_loser_and_optional_save() -> None:

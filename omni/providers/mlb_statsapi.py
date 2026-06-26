@@ -27,6 +27,7 @@ from omni.domain.baseball import (
     InningPhase,
     PitcherGameLine,
     PitchingDecisions,
+    PitchSnapshot,
     PitchType,
     WinProbability,
     scoring_impact,
@@ -406,6 +407,7 @@ def _parse_game_state(raw: dict[str, Any]) -> BaseballGameState:
             home_reached_base=_reached_base(raw, side="home", hits=home_hits, fielding_errors=away_errors),
             batter=_current_batter(raw),
             pitcher=_current_pitcher(raw),
+            last_pitch=_last_pitch_snapshot(raw),
             inning=inning,
             phase=_phase_from_inning_state(str(line.get("inningState", "Top"))),
             count=BaseballCount(
@@ -506,21 +508,55 @@ def _event_importance(event_type: BaseballGameEventType, impact: BaseballScoring
     )
 
 
-def _decisive_pitch_type(play: dict[str, Any]) -> PitchType | None:
-    """The typed pitch type of the at-bat's last pitch — the one that ended it — or None.
+def _last_pitch_event(play: dict[str, Any]) -> dict[str, Any] | None:
+    """The play's most recent *actual* pitch event, walking ``playEvents`` from the end.
 
-    Walks ``playEvents`` from the end to the most recent actual pitch (skipping non-pitch
-    entries like mound visits), then coerces its ``details.type.code``; an absent feed,
-    a typeless pitch, or an unrecognized code all yield None.
+    Skips non-pitch entries (a mound visit, a substitution); returns None when the feed
+    carries no ``playEvents`` list or none of them is a pitch.
     """
     events = play.get("playEvents")
     if not isinstance(events, list):
         return None
     for event in reversed(events):
         if isinstance(event, dict) and event.get("isPitch"):
-            type_info = (event.get("details") or {}).get("type") or {}
-            return try_coerce_enum(PitchType, type_info.get("code"))
+            return event
     return None
+
+
+def _decisive_pitch_type(play: dict[str, Any]) -> PitchType | None:
+    """The typed pitch type of the at-bat's last pitch — the one that ended it — or None.
+
+    A typeless pitch, an unrecognized code, or a play with no pitch all yield None.
+    """
+    event = _last_pitch_event(play)
+    if event is None:
+        return None
+    type_info = (event.get("details") or {}).get("type") or {}
+    return try_coerce_enum(PitchType, type_info.get("code"))
+
+
+def _last_pitch_snapshot(raw: dict[str, Any]) -> PitchSnapshot | None:
+    """The current at-bat's most recent pitch — velocity + typed pitch — or None.
+
+    Reads ``liveData.plays.currentPlay`` for the latest tracked pitch, pairing its release
+    speed (``pitchData.startSpeed``, rounded to whole mph) with its typed pitch. A missing
+    current play, an untyped or unrecognized pitch, or one without a positive speed all yield
+    None — the board shows the token only for a real, measured delivery.
+    """
+    current = ((raw.get("liveData") or {}).get("plays") or {}).get("currentPlay")
+    if not isinstance(current, dict):
+        return None
+    event = _last_pitch_event(current)
+    if event is None:
+        return None
+    pitch_type = try_coerce_enum(PitchType, ((event.get("details") or {}).get("type") or {}).get("code"))
+    speed = (event.get("pitchData") or {}).get("startSpeed")
+    if pitch_type is None or not isinstance(speed, (int, float)) or isinstance(speed, bool):
+        return None
+    velocity = round(speed)
+    if velocity <= 0:
+        return None
+    return PitchSnapshot(velocity_mph=velocity, pitch_type=pitch_type)
 
 
 def _parse_one_play(
@@ -650,16 +686,16 @@ def _default_fetch_schedule(game_date: date, sport_ids: str) -> list[dict[str, A
 
 # StatsAPI `fields` is a hierarchical key-name whitelist. The first group keeps the linescore
 # and a slice of the boxscore (-> BaseballGameState, including reached-base); the second keeps
-# play-by-play (-> events). A name must be listed for its nested object to survive, so omitting
-# one silently drops that data — keep this in sync with what `_parse_game_state` /
-# `_parse_game_events` read.
+# play-by-play (allPlays -> events) and the current play (-> the live last-pitch snapshot). A name
+# must be listed for its nested object to survive, so omitting one silently drops that data — keep
+# this in sync with what `_parse_game_state` / `_parse_game_events` read.
 _GAME_FIELDS = (
     "liveData,linescore,teams,home,away,runs,hits,errors,currentInning,inningState,balls,strikes,outs,"
     "offense,defense,first,second,third,batter,pitcher,id,"  # current batter/pitcher (their game lines below)
     "boxscore,teamStats,batting,baseOnBalls,hitByPitch,"  # per-side walks/HBP -> perfect-game detection
     "players,stats,pitching,battingOrder,atBats,homeRuns,strikeOuts,numberOfPitches,inningsPitched,"  # batter/pitcher lines
-    "plays,allPlays,result,eventType,description,rbi,awayScore,homeScore,about,inning,halfInning,atBatIndex,"
-    "endTime,startTime,count,playEvents,isPitch,details,type,code,decisions,winner,loser,save,fullName"
+    "plays,allPlays,currentPlay,result,eventType,description,rbi,awayScore,homeScore,about,inning,halfInning,atBatIndex,"
+    "endTime,startTime,count,playEvents,isPitch,pitchData,startSpeed,details,type,code,decisions,winner,loser,save,fullName"
 )
 
 

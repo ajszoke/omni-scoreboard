@@ -149,11 +149,12 @@ class LiveBaseballRenderer:
         self._out_dots(canvas, 98, 31, payload.count.outs)  # row 3: outs, below the diamond (where home would be)
 
     def _batter_pitcher_strip(self, canvas: Canvas, payload: LiveBaseballCardPayload) -> None:
-        """The bottom strip: the pitcher then the batter, full-width (room for richer lines).
+        """The bottom strip: the pitcher, the batter, and the at-bat's live pitch — full-width.
 
-        ``P:`` leads the pitcher and the lineup spot (``4.``) the batter. The leader + name is the
-        big (score) font, the statline a size smaller and dimmer beside it. Drawn only on a live
-        at-bat (the caller skips it on a break).
+        ``P:`` leads the pitcher and the lineup spot (``4.``) the batter; the leader + name is the
+        big (score) font, the statline a size smaller and dimmer beside it. The live pitch token
+        (velocity + 4-char type, e.g. ``99 SWPR``) sits at the right of the batter row. Drawn only
+        on a live at-bat (the caller skips the whole strip on a break).
         """
         pitcher = payload.pitcher
         if pitcher is not None:
@@ -163,6 +164,11 @@ class LiveBaseballRenderer:
         if batter is not None:
             leader = f"{batter.order}." if batter.order is not None else "#."
             self._roster_line(canvas, f"{leader} {batter.name}", self._batter_line(batter), y=52)
+        pitch = payload.last_pitch
+        if pitch is not None:
+            # The live pitch rides the right of the batter row — it is what this at-bat is seeing
+            # right now, so it shows bright (not the dim stat grey) and the 4-char type names it.
+            draw_right_aligned(canvas, 126, 55, pitch.token, _WHITE, _LABEL_FONT)
 
     @staticmethod
     def _batter_line(batter: BatterGameLine) -> str:

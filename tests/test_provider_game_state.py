@@ -11,7 +11,14 @@ import pytest
 
 from omni.core.enum import GameStatus, League
 from omni.core.ids import LeagueScopedId, SourceRef
-from omni.domain.baseball import BatterGameLine, InningPhase, PitcherGameLine, PitchingDecisions
+from omni.domain.baseball import (
+    BatterGameLine,
+    InningPhase,
+    PitcherGameLine,
+    PitchingDecisions,
+    PitchSnapshot,
+    PitchType,
+)
 from omni.domain.contest import TeamGame
 from omni.providers.base import ProviderError
 from omni.providers.mlb_statsapi import (
@@ -21,6 +28,7 @@ from omni.providers.mlb_statsapi import (
     _current_batter,
     _current_pitcher,
     _last_name,
+    _last_pitch_snapshot,
     _lineup_spot,
     _parse_decisions,
     _parse_game_state,
@@ -65,6 +73,44 @@ def test_parse_game_state_from_fixture() -> None:
     # current batter / pitcher with their game lines, looked up from the boxscore.
     assert state.batter == BatterGameLine(name="Batter", order=4, at_bats=4, hits=2, rbi=1, home_runs=0)
     assert state.pitcher == PitcherGameLine(name="Miller", innings_pitched="6.1", pitches=95, strikeouts=7)
+    # the current play's last pitch (an 86.7mph sweeper, walked past a mound visit) drives the snapshot
+    assert state.last_pitch == PitchSnapshot(velocity_mph=87, pitch_type=PitchType.SWEEPER)
+
+
+def _current_play(events: Any) -> dict[str, Any]:
+    return {"liveData": {"plays": {"currentPlay": {"playEvents": events}}}}
+
+
+def test_last_pitch_snapshot_reads_the_current_plays_latest_pitch() -> None:
+    raw = _current_play(
+        [
+            {"isPitch": True, "pitchData": {"startSpeed": 95.0}, "details": {"type": {"code": "FF"}}},
+            {"isPitch": False, "details": {"description": "Mound Visit"}},
+            {"isPitch": True, "pitchData": {"startSpeed": 86.6}, "details": {"type": {"code": "ST"}}},
+        ]
+    )
+    # walks from the end past the mound visit; rounds 86.6 -> 87.
+    assert _last_pitch_snapshot(raw) == PitchSnapshot(velocity_mph=87, pitch_type=PitchType.SWEEPER)
+
+
+def test_last_pitch_snapshot_is_none_without_a_tracked_pitch() -> None:
+    assert _last_pitch_snapshot({"liveData": {"plays": {}}}) is None  # no current play
+    assert _last_pitch_snapshot({"liveData": {"plays": {"currentPlay": []}}}) is None  # current play not an object
+    assert _last_pitch_snapshot(_current_play(None)) is None  # no playEvents list
+    assert _last_pitch_snapshot(_current_play([{"isPitch": False}])) is None  # only non-pitch events
+
+
+@pytest.mark.parametrize(
+    "event",
+    [
+        {"isPitch": True, "pitchData": {"startSpeed": 90.0}, "details": {"type": {"code": "ZZ"}}},  # unrecognized type
+        {"isPitch": True, "details": {"type": {"code": "FF"}}},  # no pitchData / speed
+        {"isPitch": True, "pitchData": {"startSpeed": True}, "details": {"type": {"code": "FF"}}},  # bool isn't a speed
+        {"isPitch": True, "pitchData": {"startSpeed": 0.0}, "details": {"type": {"code": "FF"}}},  # rounds to 0 mph
+    ],
+)
+def test_last_pitch_snapshot_skips_an_unusable_last_pitch(event: dict[str, Any]) -> None:
+    assert _last_pitch_snapshot(_current_play([event])) is None
 
 
 def test_last_name_takes_the_surname_and_skips_a_suffix() -> None:
