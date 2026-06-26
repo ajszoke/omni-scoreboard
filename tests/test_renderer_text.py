@@ -9,9 +9,11 @@ from omni.renderers.text import draw_centered, draw_right_aligned, text_width
 WHITE = RGBColor(255, 255, 255)
 
 
-def test_text_width_is_cell_width_times_length() -> None:
-    assert text_width("ABC", "4x6") == 12  # 3 glyphs * 4px
-    assert text_width("10", "6x10") == 12  # 2 glyphs * 6px
+def test_text_width_sums_per_glyph_advances() -> None:
+    assert text_width("ABC", "4x6") == 12  # 3 ordinary glyphs * 4px
+    assert text_width("10", "6x10") == 12  # 2 ordinary glyphs * 6px
+    # the thin space advances only 2px, so width is not simply cell * len.
+    assert text_width("A B", "4x6") == 10  # 4 + 2 + 4
 
 
 def test_draw_right_aligned_anchors_the_right_edge() -> None:
