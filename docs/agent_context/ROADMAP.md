@@ -82,15 +82,19 @@ Do not silently cram 128x64 content into 64x32.
 
 | Feature | 64x32 | 64x64 | 128x64 |
 |---|---|---|---|
-| Live MLB at-bat | Score, inning, count, outs, bases | Add batter/pitcher and abbreviated play text | Full live dashboard |
+| Live MLB at-bat | Identity, runs, inning/status, slim meter | Identity, runs, inning/status, count/outs/bases, slim meter | Full live dashboard: R/H/E, bases, count/outs, pitcher/batter, pitch snapshot |
 | Pregame | Matchup, start time, probable pitcher initials | Add probable pitcher names and odds/probability | Full pregame card with odds, weather, probable pitchers |
-| Probability bar | Thin, high contrast | Standard bar plus percentage | Full win-prob module with trend if available |
+| Probability bar | Slim high-contrast meter; no numeral by default | Slim/standard meter; optional numeral later | Full meter/module; trend later |
 | No-hitter/perfect game | Badge plus recurring full-screen alert | Sticky ribbon plus pitcher line | Dedicated panel region/sticky alert |
-| Last K / play-of-inning | Full-screen micro-card before inning card | Micro-card plus inning transition | Preserve in lower/right event queue |
+| Last K / play-of-inning | Separate micro-card only | Separate micro-card or rotation card | Lower/dashboard region once overflow-safe |
 | K-zone | Maybe count-only; optional 3x3 blips | Simple zone/blips | Full pitch-location mini-map |
 | Other-game ticker | Idle states only | Idle states and lower ribbon | Persistent bottom ticker during non-active states |
 | Pitching change | Compact substitution card | Split outgoing/incoming stats | Full takeover animation |
 | HR arcs/3D | Defer/fallback text | Simple animation | Fun rich animation |
+
+_The live-MLB / probability / last-play rows were updated per the **round-3 D1 ruling** (2026-06-26): the
+small profiles are deliberate glance surfaces. Every card still gets an explicit, tested **treatment** on
+each profile, but **equal support ≠ equal information density** — the dense dashboard is the quad's role._
 
 ## Phase plan
 
