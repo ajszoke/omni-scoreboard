@@ -142,6 +142,7 @@ milestones:
         notes:
           - "omni PitchType.SWEEPER = 'ST' (the real StatsAPI/Statcast code) maps it; dogfooded live (9 sweepers, zero unknowns)."
           - "The legacy board's on-device data/pitches.py 'SW' edit was wrong-code and never rendered - preserved in the L0 capture as evidence, not a carry-forward."
+          - "Recognition only - on-board DISPLAY still pending: the PitchType value is the raw code (ST/FF), so the strip token must use a legacy-style 4-char abbreviation (SWPR, not ST or SWEEP), cribbed from legacy data/pitches.py PITCH_SHORT. Lands with PitchSnapshot (B1.5b tail); board caps the pitch type at 4 chars."
       - id: M3-006
         title: "Stat line debounce and anchor stabilization"
         labels: [rendering, mlb, p1]
