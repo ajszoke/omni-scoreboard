@@ -173,7 +173,7 @@ def test_draw_op_quad_128x64() -> None:
     texts = {(t.x, t.y, t.text) for t in canvas.texts()}
     assert {(8, 5, "COL"), (8, 25, "LAD")} <= texts  # abbr only as the colour-bar fallback
     assert {(30, 5, "3 7 0"), (30, 25, "5 9 1")} <= texts  # inline R H E (three equal numbers)
-    assert {(64, 2, "↑7"), (64, 28, "2-1")} <= texts  # inning + count in the state module (big font)
+    assert {(64, 2, "▲7"), (64, 28, "2-1")} <= texts  # inning (filled triangle) + count, big font
     assert {(2, 41, "P: Kershaw"), (65, 44, "6.1IP 7K 95P")} <= texts  # strip: big name + smaller statline
     assert {(2, 52, "3. Betts"), (53, 55, "2-4")} <= texts  # batter strip line
     # 1st base is occupied -> a filled white diamond spanning its centre (108, 20)
@@ -211,10 +211,10 @@ def test_draw_op_single_64x32_is_an_explicit_compromise() -> None:
     assert {(r.x, r.y, r.w, r.h) for r in canvas.rects()} == {(0, 0, 2, 16), (0, 16, 2, 16)}
 
 
-def test_draw_op_bottom_inning_shows_down_arrow() -> None:
-    # The InningPhase.BOTTOM arm is a ternary (a coverage blind spot), so assert it.
+def test_draw_op_bottom_inning_shows_down_triangle() -> None:
+    # The InningPhase.BOTTOM arm picks the down glyph; assert the quad's filled triangle.
     canvas = _render(make_card(phase=InningPhase.BOTTOM, inning=9), PanelProfile.QUAD_128X64)
-    assert (64, 2, "↓9") in {(t.x, t.y, t.text) for t in canvas.texts()}
+    assert (64, 2, "▼9") in {(t.x, t.y, t.text) for t in canvas.texts()}
 
 
 def test_draw_op_middle_break_shows_label_and_suppresses_at_bat() -> None:

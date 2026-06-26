@@ -67,7 +67,7 @@ def test_pipeline_renders_fixture_state_on_quad() -> None:
     texts = {(t.x, t.y, t.text) for t in canvas.texts()}
     assert {(8, 5, "COL"), (8, 25, "LAD")} <= texts  # abbr only as the no-logo fallback
     assert {(30, 5, "3 7 0"), (30, 25, "5 9 1")} <= texts  # inline R H E
-    assert {(64, 2, "↑7"), (64, 28, "2-1")} <= texts  # inning + count in the state module (big font)
+    assert {(64, 2, "▲7"), (64, 28, "2-1")} <= texts  # inning (filled triangle) + count, big font
 
     # First (centre 108,20) and third (96,20) occupied -> filled white diamonds; second (102,9) empty.
     assert any(o.op == "fill_rect" and o.color == WHITE and o.y == 20 and o.x <= 108 <= o.x + o.w for o in canvas.ops)
@@ -84,5 +84,7 @@ def test_pipeline_renders_on_all_three_profiles() -> None:
         canvas = RecordingCanvas(width, height)
         LiveBaseballRenderer().render(card, RenderContext(profile=profile, now=NOW), canvas)
         joined = " ".join(t.text for t in canvas.texts())
-        # Team abbreviations and the inning label appear on every profile.
-        assert "COL" in joined and "LAD" in joined and "↑7" in joined
+        # Team abbreviations and the inning label appear on every profile; the quad's 6x10 inning
+        # uses a filled triangle, the 4x6 profiles an arrow (no 4x6 triangle glyph).
+        inning = "▲7" if profile is PanelProfile.QUAD_128X64 else "↑7"
+        assert "COL" in joined and "LAD" in joined and inning in joined
