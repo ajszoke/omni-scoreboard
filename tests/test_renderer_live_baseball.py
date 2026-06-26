@@ -203,8 +203,8 @@ def test_draw_op_stack_64x64_keeps_full_status() -> None:
     assert any((r.x, r.y, r.w, r.h) == (55, 52, 5, 5) and r.color == WHITE for r in rects)  # 1B filled
     texts = {(t.x, t.y, t.text) for t in canvas.texts()}
     assert {(5, 6, "COL"), (5, 28, "LAD")} <= texts
-    assert {(56, 6, "3"), (56, 28, "5")} <= texts  # right-aligned at 62 - 6
-    assert {(50, 16, "7 0"), (50, 38, "9 1")} <= texts  # hits/errors as bare numbers beneath each run score
+    assert {(56, 6, "3"), (56, 28, "5")} <= texts  # run only, right-aligned at 62 - 6
+    assert not any(t.text in {"7 0", "9 1"} for t in canvas.texts())  # H/E dropped — the stack is run-only
     assert {(3, 46, "↑7"), (20, 46, "2-1"), (3, 55, f"2{THIN}OUT")} <= texts  # full status, thin-spaced outs
     # Compromise: the pitcher/batter lines do not fit at 64px wide — omitted on stack.
     assert not any(t.text.startswith(("P: Kershaw", "3. Betts")) for t in canvas.texts())
@@ -324,17 +324,23 @@ def test_clash_blits_the_home_alt_tile() -> None:
     assert {i.key for i in canvas.images()} == {"nyy", "det-alt"}
 
 
-def test_win_meter_blits_gauges_on_quad_and_stack() -> None:
+def test_win_meter_blits_gauges_on_every_profile() -> None:
     wp = WinProbability(home=26.0, away=74.0)
-    for profile, home_top in ((PanelProfile.QUAD_128X64, 32), (PanelProfile.STACK_64X64, 22)):
+    # (profile, meter x, away fill, home fill) — fill = round(pct * mark height): 20px tiles, 16px bar.
+    cases = (
+        (PanelProfile.QUAD_128X64, 22, 15, 5),
+        (PanelProfile.STACK_64X64, 21, 15, 5),
+        (PanelProfile.SINGLE_64X32, 2, 12, 4),
+    )
+    for profile, x, away_h, home_h in cases:
         canvas = _render(make_card(win_probability=wp), profile, logos=LOGOS)
-        gauges = [r for r in canvas.rects() if r.w == 2 and r.x in (21, 22)]  # the two meter slivers
+        gauges = [r for r in canvas.rects() if r.w == 2 and r.x == x]  # the two meter slivers
         assert len(gauges) == 2, profile
         away, home = sorted(gauges, key=lambda r: r.y)
-        assert away.h == 15 and home.h == 5  # round(74%/26% * 20px), filled from the bottom
+        assert (away.h, home.h) == (away_h, home_h), profile  # filled from the bottom
 
 
-@pytest.mark.parametrize("profile", (PanelProfile.QUAD_128X64, PanelProfile.STACK_64X64))
+@pytest.mark.parametrize("profile", ALL_PROFILES)
 def test_win_meter_golden(profile: PanelProfile) -> None:
     width, height = geometry_for(profile).size
     canvas = PillowCanvas(width, height)

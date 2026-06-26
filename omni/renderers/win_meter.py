@@ -4,8 +4,9 @@ A live game's win probability is shown the way the reference board shows it — 
 gauge next to each club's tile, filled from the bottom in proportion to that side's
 chance. The colour is the team's *freed* colour: whichever of its base/alt palette
 colours is NOT the one its logo tile is currently using (the clash resolver decides
-that), value-lifted so even a dim navy reads on the black panel. Only the profiles that
-fit a logo carry the gauge; ``single_64x32`` (a colour bar, no tile) omits it.
+that), value-lifted so even a dim navy reads on the black panel. The gauge sizes itself from
+the team mark, so every profile carries one — even ``single_64x32``, where it narrows
+to fit beside the colour bar.
 """
 
 from __future__ import annotations
@@ -24,21 +25,52 @@ from omni.renderers.logo_clash import resolve_logo_variants
 __all__ = ["draw_win_meter"]
 
 
+_IDEAL_WIDTH = 2  # the target gauge width; it narrows only when a layout is tight
+_MIN_WIDTH = 1
+
+
 @dataclass(frozen=True, slots=True)
 class _MeterGeom:
-    """Where a team's gauge sits relative to its row top — hugging the logo's right edge."""
+    """Where a team's gauge sits relative to its row top — hugging the mark's right edge."""
 
     x: int
     width: int
-    inset_y: int  # gauge top = row_top + inset_y (aligned with the logo tile)
-    height: int  # full gauge height (the logo height)
+    inset_y: int  # gauge top = row_top + inset_y (aligned with the mark)
+    height: int  # full gauge height (the mark height)
 
 
-# The gauge sits in the 2px gap between the 20px logo and the abbreviation.
-_GEOM: dict[PanelProfile, _MeterGeom] = {
-    PanelProfile.QUAD_128X64: _MeterGeom(x=22, width=2, inset_y=6, height=20),
-    PanelProfile.STACK_64X64: _MeterGeom(x=21, width=2, inset_y=0, height=20),
+@dataclass(frozen=True, slots=True)
+class _MarkExtent:
+    """The team-mark facts the gauge sizes itself from: the mark's right edge (where the gauge
+    sits), the x where the label begins (the gauge fills the gap between), and the mark's
+    height + inset below the row top."""
+
+    right: int
+    label_x: int
+    height: int
+    inset_y: int
+
+
+# Each profile's actual mark — quad/stack hug the 20px tile, the single its 2px colour bar — so
+# the gauge fills whatever pixels that layout leaves free before the label, down to 1px.
+_MARKS: dict[PanelProfile, _MarkExtent] = {
+    PanelProfile.QUAD_128X64: _MarkExtent(right=22, label_x=24, height=20, inset_y=6),
+    PanelProfile.STACK_64X64: _MarkExtent(right=21, label_x=23, height=20, inset_y=0),
+    PanelProfile.SINGLE_64X32: _MarkExtent(right=2, label_x=4, height=16, inset_y=0),
 }
+
+
+def _meter_width(gap: int) -> int:
+    """The gauge width fitting a `gap`-pixel space before the label: the ideal 2px, but as
+    little as 1px when the gap is tight — never wider, which would crowd the score."""
+    return max(_MIN_WIDTH, min(_IDEAL_WIDTH, gap))
+
+
+def _meter_geom(profile: PanelProfile) -> _MeterGeom:
+    """Derive the gauge geometry from `profile`'s team mark — sized per layout, not hardcoded."""
+    mark = _MARKS[profile]
+    width = _meter_width(mark.label_x - mark.right)
+    return _MeterGeom(x=mark.right, width=width, inset_y=mark.inset_y, height=mark.height)
 
 
 def _meter_colour(team: Team, shown: LogoVariant) -> RGBColor:
@@ -61,14 +93,12 @@ def draw_win_meter(
 ) -> None:
     """Draw both teams' win-probability gauges for `context.profile`.
 
-    A no-op on a profile that doesn't fit a logo (`single_64x32`). Each gauge fills from
-    the bottom to its side's win percentage, in that team's freed colour; the variant
-    decision matches the logo marks (the same pure resolver), so a team's gauge colour is
-    always the colour its tile is *not* using.
+    Each gauge fills from the bottom to its side's win percentage, in that team's freed
+    colour; the variant decision matches the logo marks (the same pure resolver), so a
+    team's gauge colour is always the colour its tile is *not* using. The gauge width is
+    derived from the profile's mark, narrowing to 1px where a layout is tight.
     """
-    geom = _GEOM.get(context.profile)
-    if geom is None:
-        return
+    geom = _meter_geom(context.profile)
     variants = resolve_logo_variants(away, home)
     _gauge(canvas, geom, away_top, win_probability.away, _meter_colour(away, variants.away))
     _gauge(canvas, geom, home_top, win_probability.home, _meter_colour(home, variants.home))
