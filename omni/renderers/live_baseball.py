@@ -52,7 +52,7 @@ _LABEL_FONT = "4x6"
 _SCORE_FONT = "6x10"
 _RHE_BIG_FONT = "9x18B"  # the headline quad line score — the largest face we carry
 _RHE_SMALL_FONT = "6x13B"  # stepped down to once a run or hit reaches two digits, to keep the columns fitting
-_RHE_COLS = (35, 49, 63)  # right edges of the runs / hits / errors columns; right-aligned, so they hold steady
+_RHE_COLS = (33, 47, 61)  # right edges of the runs / hits / errors columns; right-aligned, so they hold steady
 _THIN = "\N{THIN SPACE}"  # U+2009, a 2px space in 4x6 — packs dense statlines tighter than a full cell
 
 # Active halves point in the batting team's direction (broadcast convention): up = top of the
@@ -174,7 +174,7 @@ class LiveBaseballRenderer:
         """One team's run/hit/error columns, right-aligned and vertically centered in its 20px row."""
         top = row_top + (20 - char_size(font)[1]) // 2
         if not has_logo:  # only the color bar drew, so the abbreviation has to name the team
-            canvas.text(5, row_top + 5, team.abbreviation, _WHITE, font=_SCORE_FONT)
+            canvas.text(3, row_top + 5, team.abbreviation, _WHITE, font=_SCORE_FONT)
         for value, right_x in zip((line.runs, line.hits, line.errors), _RHE_COLS):
             draw_right_aligned(canvas, right_x, top, str(value), _WHITE, font)
 
@@ -187,11 +187,13 @@ class LiveBaseballRenderer:
         """
         inning = _phase_label(payload.phase, payload.inning, up=_TRIANGLE_UP, down=_TRIANGLE_DOWN)
         canvas.text(72, 2, inning, _YELLOW, font=_SCORE_FONT)  # inning (the triangle points to the batting half)
-        self._diamond(canvas, 106, 7, 5, payload.bases.second)  # 2nd base — top
-        self._diamond(canvas, 99, 16, 5, payload.bases.third)  # 3rd base — lower left
-        self._diamond(canvas, 113, 16, 5, payload.bases.first)  # 1st base — lower right
+        self._diamond(canvas, 113, 7, 5, payload.bases.second)  # 2nd base — top
+        self._diamond(
+            canvas, 106, 15, 5, payload.bases.third
+        )  # 3rd base — lower left (a px up, level with 2nd's sides)
+        self._diamond(canvas, 120, 15, 5, payload.bases.first)  # 1st base — lower right (flush right: 2px padding)
         canvas.text(72, 24, f"{payload.count.balls}-{payload.count.strikes}", _WHITE, font=_SCORE_FONT)  # count
-        self._out_dots(canvas, 98, 26, payload.count.outs)  # outs, below the diamond cluster
+        self._out_dots(canvas, 105, 26, payload.count.outs)  # outs, below the diamond cluster
 
     def _batter_pitcher_strip(self, canvas: Canvas, payload: LiveBaseballCardPayload, *, now: datetime) -> None:
         """The bottom strip: the pitcher, the batter, and the at-bat's live pitch.

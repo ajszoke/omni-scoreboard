@@ -125,7 +125,7 @@ class _ProfileGeom:
 # Distinct from `team_row._GEOM` (the 32px pregame/final rows) — keeping the meter tied to *these*
 # bounds is exactly what fixes the quad gauge that used to sit 6px too low and clip the strip.
 _LIVE_GEOM: dict[PanelProfile, _ProfileGeom] = {
-    PanelProfile.QUAD_128X64: _ProfileGeom(tiles_fit=True, tile_x=2, bar_x=0, bar_width=4, label_x=24, height=20),
+    PanelProfile.QUAD_128X64: _ProfileGeom(tiles_fit=True, tile_x=0, bar_x=0, bar_width=4, label_x=22, height=20),
     PanelProfile.STACK_64X64: _ProfileGeom(tiles_fit=True, tile_x=1, bar_x=0, bar_width=3, label_x=23, height=20),
     PanelProfile.SINGLE_64X32: _ProfileGeom(tiles_fit=False, tile_x=0, bar_x=0, bar_width=2, label_x=4, height=16),
 }
