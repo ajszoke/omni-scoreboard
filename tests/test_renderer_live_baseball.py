@@ -355,23 +355,24 @@ def test_clash_blits_the_home_alt_tile() -> None:
     assert {i.key for i in canvas.images()} == {"nyy", "det-alt"}
 
 
-def test_win_meter_blits_gauges_on_every_profile() -> None:
-    wp = WinProbability(home=26.0, away=74.0)
-    # (profile, meter x, away fill, home fill) — fill = round(pct * mark height): 20px tiles, 16px bar.
-    cases = (
-        (PanelProfile.QUAD_128X64, 22, 15, 5),
-        (PanelProfile.STACK_64X64, 21, 15, 5),
-        (PanelProfile.SINGLE_64X32, 2, 12, 4),
-    )
-    for profile, x, away_h, home_h in cases:
-        canvas = _render(make_card(win_probability=wp), profile, logos=LOGOS)
-        gauges = [r for r in canvas.rects() if r.w == 2 and r.x == x]  # the two meter slivers
-        assert len(gauges) == 2, profile
-        away, home = sorted(gauges, key=lambda r: r.y)
-        assert (away.h, home.h) == (away_h, home_h), profile  # filled from the bottom
+def test_win_meter_stripes_fill_the_favored_side_stay_faint_on_the_other_and_drop_on_single() -> None:
+    wp = WinProbability(home=26.0, away=74.0)  # away ahead -> its stripe fills; home stays at the faint floor
+    for profile, x in ((PanelProfile.QUAD_128X64, 22), (PanelProfile.STACK_64X64, 21)):
+        rows = [
+            r
+            for r in _render(make_card(win_probability=wp), profile, logos=LOGOS).rects()
+            if r.w == 2 and r.x == x and r.h == 1
+        ]
+        assert len(rows) == 40, profile  # both 20px tiles are striped now: faint floor, brighter where won
+        away = {r.color for r in rows if r.y < 20}  # the favored (away) tile brightens -> several levels
+        home = {r.color for r in rows if r.y >= 20}  # the trailing (home) tile holds one faint level
+        assert len(away) > 1 and len(home) == 1, profile
+    # The 64x32 compromise drops the meter — a probability bar crowds the team stripe at that width.
+    single = _render(make_card(win_probability=wp), PanelProfile.SINGLE_64X32, logos=LOGOS)
+    assert not any(r.w == 2 and r.x == 2 for r in single.rects())  # nothing at the old single meter x
 
 
-@pytest.mark.parametrize("profile", ALL_PROFILES)
+@pytest.mark.parametrize("profile", (PanelProfile.QUAD_128X64, PanelProfile.STACK_64X64))
 def test_win_meter_golden(profile: PanelProfile) -> None:
     width, height = geometry_for(profile).size
     canvas = PillowCanvas(width, height)

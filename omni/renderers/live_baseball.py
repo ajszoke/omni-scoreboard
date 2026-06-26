@@ -268,20 +268,11 @@ class LiveBaseballRenderer:
     def _render_single(
         self, canvas: Canvas, context: RenderContext, game: TeamGame, payload: LiveBaseballCardPayload
     ) -> None:
-        # 64x32 compromise: team identity + scores + the inning-phase label, plus a slim win meter.
+        # 64x32 compromise: team identity + scores + the inning-phase label. The win meter is
+        # omitted here — a probability bar crowds the team stripe at 64px wide and reads poorly;
+        # it waits for a dedicated low-res treatment (a small lean glyph) on a later pass.
         canvas.fill_rect(0, 0, 2, 16, game.away.primary_color)
         canvas.fill_rect(0, 16, 2, 16, game.home.primary_color)
-        if payload.win_probability is not None:
-            treatment = resolve_matchup_treatment(
-                game.away,
-                game.home,
-                profile=PanelProfile.SINGLE_64X32,
-                logos=context.logos,
-                policy=context.contrast,
-                away_top=0,
-                home_top=16,
-            )
-            draw_win_meter(canvas, treatment, payload.win_probability)
         canvas.text(4, 5, game.away.abbreviation, _WHITE, font=_LABEL_FONT)
         canvas.text(4, 21, game.home.abbreviation, _WHITE, font=_LABEL_FONT)
         draw_right_aligned(canvas, 42, 3, str(payload.away_line.runs), _WHITE, _SCORE_FONT)
