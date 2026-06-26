@@ -176,9 +176,23 @@ def test_draw_op_quad_128x64() -> None:
     assert {(30, 5, "3 7 0"), (30, 25, "5 9 1")} <= texts  # inline R H E (three equal numbers)
     assert {(64, 2, "▲7"), (64, 28, "2-1")} <= texts  # inning (filled triangle) + count, big font
     assert {(2, 41, "P: Kershaw"), (65, 44, f"6.1IP{THIN}7K{THIN}95P")} <= texts  # strip: thin-spaced statline
-    assert {(2, 52, "3. Betts"), (53, 55, "2-4")} <= texts  # batter strip line
+    assert {(2, 52, "3. Betts"), (53, 55, f"2-4{THIN}RBI")} <= texts  # batter strip line: AB + a lone RBI flag
     # 1st base is occupied -> a filled white diamond spanning its centre (108, 20)
     assert any(o.op == "fill_rect" and o.color == WHITE and o.y == 20 and o.x <= 108 <= o.x + o.w for o in canvas.ops)
+
+
+@pytest.mark.parametrize(
+    "home_runs, rbi, expected",
+    [
+        (0, 0, "2-4"),  # a quiet day is just the line — no flags
+        (0, 1, f"2-4{THIN}RBI"),  # a lone RBI shows the label, not "1 RBI"
+        (1, 2, f"2-4{THIN}HR{THIN}2RBI"),  # a lone HR is a flag; the count rides multiples — HR before RBI
+        (2, 5, f"2-4{THIN}2HR{THIN}5RBI"),  # multiples carry their count
+    ],
+)
+def test_batter_line_cribs_the_legacy_order_and_singular_convention(home_runs: int, rbi: int, expected: str) -> None:
+    batter = BatterGameLine(name="Slugger", at_bats=4, hits=2, home_runs=home_runs, rbi=rbi, order=3)
+    assert LiveBaseballRenderer._batter_line(batter) == expected
 
 
 def test_draw_op_stack_64x64_keeps_full_status() -> None:
