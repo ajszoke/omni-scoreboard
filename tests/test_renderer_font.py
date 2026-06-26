@@ -8,10 +8,22 @@ A named ``THIN_SPACE`` constant isolates U+2009 so the rest of the source stays 
 
 from __future__ import annotations
 
-from omni.renderers.font import advance, rasterize
+import pytest
+
+from omni.renderers.font import FONTS, advance, char_size, rasterize
 
 THIN_SPACE = " "
 ONE_HALF = "½"
+
+
+@pytest.mark.parametrize("name", sorted(FONTS))
+def test_every_registered_font_loads_and_reports_sane_metrics(name: str) -> None:
+    # Each committed font must load through bdfparser and rasterize without error and report a
+    # positive cell + advance, so a registry typo or a missing .bdf fails loudly right here.
+    width, height = char_size(name)
+    assert width > 0 and height > 0
+    assert len(rasterize(name, "Ag5 0")) > 0
+    assert advance(name, "0") > 0
 
 
 def test_advance_is_the_cell_width_for_ordinary_glyphs() -> None:
