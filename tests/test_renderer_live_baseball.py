@@ -177,11 +177,11 @@ def test_draw_op_quad_128x64() -> None:
     assert any((r.x, r.y, r.w, r.h) == (0, 0, 4, 20) and r.color == AWAY_COLOR for r in rects)  # away bar
     assert any((r.x, r.y, r.w, r.h) == (0, 20, 4, 20) and r.color == HOME_COLOR for r in rects)  # home bar
     texts = {(t.x, t.y, t.text) for t in canvas.texts()}
-    assert {(5, 5, "COL"), (5, 25, "LAD")} <= texts  # abbr names the team when only the 4px bar drew
+    assert {(3, 5, "COL"), (3, 25, "LAD")} <= texts  # abbr names the team when only the 4px bar drew (flush left)
     # Big R H E in right-aligned columns (9x18B): single digits land at col_right - 9.
-    assert {(26, 1, "3"), (40, 1, "7"), (54, 1, "0")} <= texts  # away runs / hits / errors (cols nudged +1px)
-    assert {(26, 21, "5"), (40, 21, "9"), (54, 21, "1")} <= texts  # home
-    assert {(72, 2, "▲7"), (72, 24, "2-1")} <= texts  # inning + count, pushed right beside the bases
+    assert {(24, 1, "3"), (38, 1, "7"), (52, 1, "0")} <= texts  # away runs / hits / errors (cols flush left)
+    assert {(24, 21, "5"), (38, 21, "9"), (52, 21, "1")} <= texts  # home
+    assert {(72, 2, "▲7"), (72, 24, "2-1")} <= texts  # inning + count, in the middle beside the bases
     # Pitcher row: the name is drawn still, then the stat line takes a lane that marquees when it
     # overflows the space left of the pitch lane — so only a clipped run of the full statline shows.
     assert (2, 41, "P: Kershaw") in texts
@@ -190,8 +190,8 @@ def test_draw_op_quad_128x64() -> None:
     assert stat_op.text in full_pitcher_stats  # a contiguous run of the statline, clipped to its lane
     assert {(2, 52, "3. Betts"), (53, 55, f"2-4{THIN}RBI")} <= texts  # batter line: name + a fitting statline
     assert (98, 44, "84 SWPR") in texts  # live pitch token in its reserved lane on the pitcher row (SWPR)
-    # 1st base is occupied -> a filled white diamond spanning its center (113, 16)
-    assert any(o.op == "fill_rect" and o.color == WHITE and o.y == 16 and o.x <= 113 <= o.x + o.w for o in canvas.ops)
+    # 1st base is occupied -> a filled white diamond spanning its center (120, 15)
+    assert any(o.op == "fill_rect" and o.color == WHITE and o.y == 15 and o.x <= 120 <= o.x + o.w for o in canvas.ops)
 
 
 @pytest.mark.parametrize(
@@ -292,13 +292,13 @@ def test_draw_op_two_digit_run_steps_down_to_the_tighter_font() -> None:
     # A two-digit value forces both rows down to 6x13B so the wide number clears its column;
     # "10" right-aligns in the runs column (right edge 34) at x = 34 - 12.
     canvas = _render(make_card(away_score=10), PanelProfile.QUAD_128X64)
-    assert (23, 3, "10") in {(t.x, t.y, t.text) for t in canvas.texts()}
+    assert (21, 3, "10") in {(t.x, t.y, t.text) for t in canvas.texts()}
 
 
 def test_draw_op_double_digit_line_score() -> None:
     # Double-digit hits also trip the step-down; "12" right-aligns in the hits column (right edge 48).
     canvas = _render(make_card(away_hits=12, away_errors=3), PanelProfile.QUAD_128X64)
-    assert (37, 3, "12") in {(t.x, t.y, t.text) for t in canvas.texts()}
+    assert (35, 3, "12") in {(t.x, t.y, t.text) for t in canvas.texts()}
 
 
 def test_draw_op_empty_bases_draw_dim_diamond_outlines() -> None:
@@ -313,13 +313,13 @@ def test_draw_op_empty_bases_draw_dim_diamond_outlines() -> None:
 
 def test_logos_replace_the_team_bar_on_quad_and_stack() -> None:
     quad = _render(make_card(), PanelProfile.QUAD_128X64, logos=LOGOS)
-    assert {i.key for i in quad.images()} == {"col", "lad"}  # both tiles blitted at (2,0)/(2,20)
+    assert {(i.x, i.y, i.key) for i in quad.images()} == {(0, 0, "col"), (0, 20, "lad")}  # tiles flush to the left edge
     bars = {(r.x, r.y, r.w, r.h) for r in quad.rects()}
     assert (0, 0, 4, 20) not in bars and (0, 20, 4, 20) not in bars  # the tile replaces the color bar
     quad_texts = {(t.x, t.y, t.text) for t in quad.texts()}
     assert "COL" not in {t.text for t in quad.texts()} and "LAD" not in {t.text for t in quad.texts()}  # abbr dropped
-    assert {(26, 1, "3"), (40, 1, "7"), (54, 1, "0")} <= quad_texts  # big R H E columns, no abbr (logo names it)
-    assert {(26, 21, "5"), (40, 21, "9"), (54, 21, "1")} <= quad_texts
+    assert {(24, 1, "3"), (38, 1, "7"), (52, 1, "0")} <= quad_texts  # big R H E columns, no abbr (logo names it)
+    assert {(24, 21, "5"), (38, 21, "9"), (52, 21, "1")} <= quad_texts
 
     stack = _render(make_card(), PanelProfile.STACK_64X64, logos=LOGOS)
     assert {i.key for i in stack.images()} == {"col", "lad"}
@@ -361,7 +361,7 @@ def test_clash_blits_the_home_alt_tile() -> None:
 
 def test_win_meter_stripes_fill_the_favored_side_stay_faint_on_the_other_and_drop_on_single() -> None:
     wp = WinProbability(home=26.0, away=74.0)  # away ahead -> its stripe fills; home stays at the faint floor
-    for profile, x in ((PanelProfile.QUAD_128X64, 22), (PanelProfile.STACK_64X64, 21)):
+    for profile, x in ((PanelProfile.QUAD_128X64, 20), (PanelProfile.STACK_64X64, 21)):
         rows = [
             r
             for r in _render(make_card(win_probability=wp), profile, logos=LOGOS).rects()

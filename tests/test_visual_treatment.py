@@ -42,7 +42,7 @@ def test_default_policy_reproduces_the_pre_policy_thresholds() -> None:
 
 
 @pytest.mark.parametrize(
-    "profile, tile_x, meter_x", [(PanelProfile.QUAD_128X64, 2, 22), (PanelProfile.STACK_64X64, 1, 21)]
+    "profile, tile_x, meter_x", [(PanelProfile.QUAD_128X64, 0, 20), (PanelProfile.STACK_64X64, 1, 21)]
 )
 def test_a_resolved_tile_puts_the_meter_at_the_tiles_right_edge(
     profile: PanelProfile, tile_x: int, meter_x: int
