@@ -177,8 +177,10 @@ def test_draw_op_quad_128x64() -> None:
     assert any((r.x, r.y, r.w, r.h) == (0, 0, 4, 20) and r.color == AWAY_COLOR for r in rects)  # away bar
     assert any((r.x, r.y, r.w, r.h) == (0, 20, 4, 20) and r.color == HOME_COLOR for r in rects)  # home bar
     texts = {(t.x, t.y, t.text) for t in canvas.texts()}
-    assert {(8, 5, "COL"), (8, 25, "LAD")} <= texts  # abbr only as the color-bar fallback
-    assert {(30, 5, "3 7 0"), (30, 25, "5 9 1")} <= texts  # inline R H E (three equal numbers)
+    assert {(5, 5, "COL"), (5, 25, "LAD")} <= texts  # abbr names the team when only the 4px bar drew
+    # Big R H E in right-aligned columns (9x18B): single digits land at col_right - 9.
+    assert {(25, 1, "3"), (39, 1, "7"), (53, 1, "0")} <= texts  # away runs / hits / errors
+    assert {(25, 21, "5"), (39, 21, "9"), (53, 21, "1")} <= texts  # home
     assert {(64, 2, "▲7"), (64, 28, "2-1")} <= texts  # inning (filled triangle) + count, big font
     # Pitcher row: the name is drawn still, then the stat line takes a lane that marquees when it
     # overflows the space left of the pitch lane — so only a clipped run of the full statline shows.
@@ -286,16 +288,17 @@ def test_draw_op_single_profile_shows_break_label() -> None:
     assert (46, 13, "MID7") in {(t.x, t.y, t.text) for t in canvas.texts()}
 
 
-def test_draw_op_two_digit_run_in_the_line_score() -> None:
-    # The run is the first of the three inline R/H/E numbers (after the abbr at x=30 without a logo).
+def test_draw_op_two_digit_run_steps_down_to_the_tighter_font() -> None:
+    # A two-digit value forces both rows down to 6x13B so the wide number clears its column;
+    # "10" right-aligns in the runs column (right edge 34) at x = 34 - 12.
     canvas = _render(make_card(away_score=10), PanelProfile.QUAD_128X64)
-    assert (30, 5, "10 7 0") in {(t.x, t.y, t.text) for t in canvas.texts()}
+    assert (22, 3, "10") in {(t.x, t.y, t.text) for t in canvas.texts()}
 
 
 def test_draw_op_double_digit_line_score() -> None:
-    # Double-digit hits widen the inline triplet without wrapping or clipping.
+    # Double-digit hits also trip the step-down; "12" right-aligns in the hits column (right edge 48).
     canvas = _render(make_card(away_hits=12, away_errors=3), PanelProfile.QUAD_128X64)
-    assert (30, 5, "3 12 3") in {(t.x, t.y, t.text) for t in canvas.texts()}
+    assert (36, 3, "12") in {(t.x, t.y, t.text) for t in canvas.texts()}
 
 
 def test_draw_op_empty_bases_draw_dim_diamond_outlines() -> None:
@@ -315,7 +318,8 @@ def test_logos_replace_the_team_bar_on_quad_and_stack() -> None:
     assert (0, 0, 4, 20) not in bars and (0, 20, 4, 20) not in bars  # the tile replaces the color bar
     quad_texts = {(t.x, t.y, t.text) for t in quad.texts()}
     assert "COL" not in {t.text for t in quad.texts()} and "LAD" not in {t.text for t in quad.texts()}  # abbr dropped
-    assert {(26, 5, "3 7 0"), (26, 25, "5 9 1")} <= quad_texts  # R H E sits in the freed space, no abbr
+    assert {(25, 1, "3"), (39, 1, "7"), (53, 1, "0")} <= quad_texts  # big R H E columns, no abbr (logo names it)
+    assert {(25, 21, "5"), (39, 21, "9"), (53, 21, "1")} <= quad_texts
 
     stack = _render(make_card(), PanelProfile.STACK_64X64, logos=LOGOS)
     assert {i.key for i in stack.images()} == {"col", "lad"}
