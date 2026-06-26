@@ -68,9 +68,9 @@ def test_pipeline_renders_fixture_state_on_quad() -> None:
     assert {(8, 5, "COL"), (8, 25, "LAD")} <= texts  # abbr only as the no-logo fallback
     assert {(30, 5, "3 7 0"), (30, 25, "5 9 1")} <= texts  # inline R H E
     assert {(64, 2, "▲7"), (64, 28, "2-1")} <= texts  # inning (filled triangle) + count, big font
-    assert (98, 55, "87 SWPR") in texts  # the current-play sweeper (86.7mph) -> the live pitch token
+    assert (98, 44, "87 SWPR") in texts  # the current-play sweeper -> the live pitch token's reserved pitcher-row lane
 
-    # First (centre 108,20) and third (96,20) occupied -> filled white diamonds; second (102,9) empty.
+    # First (center 108,20) and third (96,20) occupied -> filled white diamonds; second (102,9) empty.
     assert any(o.op == "fill_rect" and o.color == WHITE and o.y == 20 and o.x <= 108 <= o.x + o.w for o in canvas.ops)
     assert any(o.op == "fill_rect" and o.color == WHITE and o.y == 20 and o.x <= 96 <= o.x + o.w for o in canvas.ops)
     assert not any(

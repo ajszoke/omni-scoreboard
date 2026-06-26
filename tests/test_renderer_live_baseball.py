@@ -47,8 +47,9 @@ from omni.renderers.base import Renderer
 from omni.renderers.canvas import RecordingCanvas
 from omni.renderers.context import RenderContext
 from omni.renderers.image import LogoStore
-from omni.renderers.live_baseball import LiveBaseballRenderer
+from omni.renderers.live_baseball import LiveBaseballRenderer, _PITCH_LANE_X
 from omni.renderers.pillow_canvas import PillowCanvas
+from omni.renderers.text import text_width
 
 GOLDEN_DIR = Path(__file__).resolve().parent / "golden"
 LOGOS = LogoStore()  # resolves the committed COL/LAD tiles for the logo + golden renders
@@ -170,18 +171,23 @@ def test_renderer_rejects_non_teamgame_contest() -> None:
 
 
 def test_draw_op_quad_128x64() -> None:
-    canvas = _render(make_card(), PanelProfile.QUAD_128X64)  # no logos -> colour bars + abbr fallback
+    canvas = _render(make_card(), PanelProfile.QUAD_128X64)  # no logos -> color bars + abbr fallback
     assert canvas.ops[0].op == "fill" and canvas.ops[0].color == RGBColor(0, 0, 0)
     rects = canvas.rects()
     assert any((r.x, r.y, r.w, r.h) == (0, 0, 4, 20) and r.color == AWAY_COLOR for r in rects)  # away bar
     assert any((r.x, r.y, r.w, r.h) == (0, 20, 4, 20) and r.color == HOME_COLOR for r in rects)  # home bar
     texts = {(t.x, t.y, t.text) for t in canvas.texts()}
-    assert {(8, 5, "COL"), (8, 25, "LAD")} <= texts  # abbr only as the colour-bar fallback
+    assert {(8, 5, "COL"), (8, 25, "LAD")} <= texts  # abbr only as the color-bar fallback
     assert {(30, 5, "3 7 0"), (30, 25, "5 9 1")} <= texts  # inline R H E (three equal numbers)
     assert {(64, 2, "▲7"), (64, 28, "2-1")} <= texts  # inning (filled triangle) + count, big font
-    assert {(2, 41, "P: Kershaw"), (65, 44, f"6.1IP{THIN}7K{THIN}95P")} <= texts  # strip: thin-spaced statline
-    assert {(2, 52, "3. Betts"), (53, 55, f"2-4{THIN}RBI")} <= texts  # batter strip line: AB + a lone RBI flag
-    assert (98, 55, "84 SWPR") in texts  # live pitch token, right-aligned on the batter row (sweeper -> SWPR)
+    # Pitcher row: the name is drawn still, then the stat line takes a lane that marquees when it
+    # overflows the space left of the pitch lane — so only a clipped run of the full statline shows.
+    assert (2, 41, "P: Kershaw") in texts
+    full_pitcher_stats = f"6.1IP{THIN}7K{THIN}95P"
+    stat_op = next(t for t in canvas.texts() if t.y == 44 and 65 <= t.x < _PITCH_LANE_X)
+    assert stat_op.text in full_pitcher_stats  # a contiguous run of the statline, clipped to its lane
+    assert {(2, 52, "3. Betts"), (53, 55, f"2-4{THIN}RBI")} <= texts  # batter line: name + a fitting statline
+    assert (98, 44, "84 SWPR") in texts  # live pitch token in its reserved lane on the pitcher row (SWPR)
     # 1st base is occupied -> a filled white diamond spanning its centre (108, 20)
     assert any(o.op == "fill_rect" and o.color == WHITE and o.y == 20 and o.x <= 108 <= o.x + o.w for o in canvas.ops)
 
@@ -206,6 +212,18 @@ def test_quad_strip_shows_the_pitch_token_only_with_a_snapshot() -> None:
     assert any(t.text == "88 SNKR" for t in shown.texts())  # velocity + the 4-char abbreviation
     hidden = _render(make_card(last_pitch=None), PanelProfile.QUAD_128X64)
     assert not any("SNKR" in t.text for t in hidden.texts())  # no snapshot -> no token
+
+
+def test_quad_overflowing_pitcher_name_claims_the_row_and_drops_stats() -> None:
+    # A name wide enough to crowd out its own stats takes the whole line as a marquee lane, so it
+    # stays readable and never overruns the pitch lane — and there is no room left for a stat line.
+    long_name = "Featherstonhaugh"  # far wider than the strip leaves for a name beside stats + the pitch
+    card = make_card(pitcher=PitcherGameLine(name=long_name, innings_pitched="6.1", pitches=95, strikeouts=7))
+    texts = _render(card, PanelProfile.QUAD_128X64).texts()
+    name_ops = [t for t in texts if t.y == 41]  # the name claims the pitcher row's own font baseline
+    assert name_ops and name_ops[0].text in f"P: {long_name}"  # a clipped run of the name (it marquees)
+    assert all(t.x + text_width(t.text, "6x10") <= _PITCH_LANE_X for t in name_ops)  # never into the pitch lane
+    assert not any(t.y == 44 and "IP" in t.text for t in texts)  # the stat line is dropped — no space for it
 
 
 def test_draw_op_stack_64x64_keeps_full_status() -> None:
@@ -294,7 +312,7 @@ def test_logos_replace_the_team_bar_on_quad_and_stack() -> None:
     quad = _render(make_card(), PanelProfile.QUAD_128X64, logos=LOGOS)
     assert {i.key for i in quad.images()} == {"col", "lad"}  # both tiles blitted at (2,0)/(2,20)
     bars = {(r.x, r.y, r.w, r.h) for r in quad.rects()}
-    assert (0, 0, 4, 20) not in bars and (0, 20, 4, 20) not in bars  # the tile replaces the colour bar
+    assert (0, 0, 4, 20) not in bars and (0, 20, 4, 20) not in bars  # the tile replaces the color bar
     quad_texts = {(t.x, t.y, t.text) for t in quad.texts()}
     assert "COL" not in {t.text for t in quad.texts()} and "LAD" not in {t.text for t in quad.texts()}  # abbr dropped
     assert {(26, 5, "3 7 0"), (26, 25, "5 9 1")} <= quad_texts  # R H E sits in the freed space, no abbr

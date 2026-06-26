@@ -20,6 +20,7 @@ outs, and bases — a stale "1-2, 2 OUT" between innings would be misinformation
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import assert_never
 
 from omni.cards.base import ScoreboardCard
@@ -35,7 +36,8 @@ from omni.renderers.context import RenderContext
 from omni.renderers.team_row import draw_matchup_marks
 from omni.renderers.visual_treatment import MarkTreatment, resolve_matchup_treatment
 from omni.renderers.win_meter import draw_win_meter
-from omni.renderers.text import draw_centered, draw_right_aligned
+from omni.renderers.text import draw_centered, draw_right_aligned, text_width
+from omni.renderers.text_lane import LaneAnchor, TextLane, draw_text_lane
 
 __all__ = ["LiveBaseballRenderer"]
 
@@ -55,6 +57,13 @@ _THIN = "\N{THIN SPACE}"  # U+2009, a 2px space in 4x6 — packs dense statlines
 # in 4x6, which has no triangle glyph, so those profiles keep the arrows — a per-profile compromise.
 _ARROW_UP, _ARROW_DOWN = "↑", "↓"  # stack/single (4x6)
 _TRIANGLE_UP, _TRIANGLE_DOWN = "▲", "▼"  # quad (6x10)
+
+# Quad strip geometry: roster text runs from x=2 to _STRIP_RIGHT. The live pitch is the
+# pitcher's own action, so it gets a reserved lane on the right of the pitcher row; the pitcher's
+# stat line stops short of it, marqueeing within what's left rather than colliding with the token.
+_STRIP_RIGHT = 126  # right inset for the strip's text lanes (a 2px margin off the 128 edge)
+_PITCH_LANE_X = 93  # the pitch's reserved lane spans [_PITCH_LANE_X, _STRIP_RIGHT) on the pitcher row
+_STATS_GAP = 3  # the gap between a roster name and the stat line that trails it
 
 
 def _phase_label(phase: InningPhase, inning: int, *, up: str, down: str) -> str:
@@ -122,7 +131,7 @@ class LiveBaseballRenderer:
             draw_centered(canvas, 60, 128, 14, label, _YELLOW, _SCORE_FONT)
             return
         self._state_module(canvas, payload)
-        self._batter_pitcher_strip(canvas, payload)
+        self._batter_pitcher_strip(canvas, payload, now=context.now)
 
     def _draw_mark(self, canvas: Canvas, context: RenderContext, team: Team, side: MarkTreatment) -> None:
         """Draw the team's mark from its resolved treatment: the logo tile, or the color-bar fallback.
@@ -161,27 +170,36 @@ class LiveBaseballRenderer:
         canvas.text(64, 28, f"{payload.count.balls}-{payload.count.strikes}", _WHITE, font=_SCORE_FONT)  # row 3: count
         self._out_dots(canvas, 98, 31, payload.count.outs)  # row 3: outs, below the diamond (where home would be)
 
-    def _batter_pitcher_strip(self, canvas: Canvas, payload: LiveBaseballCardPayload) -> None:
-        """The bottom strip: the pitcher, the batter, and the at-bat's live pitch — full-width.
+    def _batter_pitcher_strip(self, canvas: Canvas, payload: LiveBaseballCardPayload, *, now: datetime) -> None:
+        """The bottom strip: the pitcher, the batter, and the at-bat's live pitch.
 
         ``P:`` leads the pitcher and the lineup spot (``4.``) the batter; the leader + name is the
-        big (score) font, the statline a size smaller and dimmer beside it. The live pitch token
-        (velocity + 4-char type, e.g. ``99 SWPR``) sits at the right of the batter row. Drawn only
-        on a live at-bat (the caller skips the whole strip on a break).
+        big (score) font, drawn still, the stat line a size smaller and dimmer beside it. The live
+        pitch token (velocity + 4-char type, e.g. ``99 SWPR``) takes a reserved lane on the right of
+        the *pitcher* row — it is the pitcher's own throw — so the pitcher's stats stop short of it
+        and the batter row stays clear of it entirely. Drawn only on a live at-bat (the caller skips
+        the whole strip on a break).
         """
+        pitcher_right = _STRIP_RIGHT
+        pitch = payload.last_pitch
+        if pitch is not None:
+            # The live pitch shows bright (not the dim stat gray) and the 4-char type names it; its
+            # own lane right-anchors the token and keeps the pitcher's stat line from running under it.
+            lane = TextLane(
+                x=_PITCH_LANE_X, y=44, width=_STRIP_RIGHT - _PITCH_LANE_X, font=_LABEL_FONT, anchor=LaneAnchor.RIGHT
+            )
+            draw_text_lane(canvas, lane, pitch.token, _WHITE, now=now)
+            pitcher_right = _PITCH_LANE_X - 2  # the pitcher's stats stop a hair before the pitch lane
         pitcher = payload.pitcher
         if pitcher is not None:
             stats = f"{pitcher.innings_pitched}IP{_THIN}{pitcher.strikeouts}K{_THIN}{pitcher.pitches}P"
-            self._roster_line(canvas, f"P: {pitcher.name}", stats, y=41)
+            self._roster_line(canvas, f"P: {pitcher.name}", stats, y=41, right=pitcher_right, now=now)
         batter = payload.batter
         if batter is not None:
             leader = f"{batter.order}." if batter.order is not None else "#."
-            self._roster_line(canvas, f"{leader} {batter.name}", self._batter_line(batter), y=52)
-        pitch = payload.last_pitch
-        if pitch is not None:
-            # The live pitch rides the right of the batter row — it is what this at-bat is seeing
-            # right now, so it shows bright (not the dim stat gray) and the 4-char type names it.
-            draw_right_aligned(canvas, 126, 55, pitch.token, _WHITE, _LABEL_FONT)
+            self._roster_line(
+                canvas, f"{leader} {batter.name}", self._batter_line(batter), y=52, right=_STRIP_RIGHT, now=now
+            )
 
     @staticmethod
     def _batter_line(batter: BatterGameLine) -> str:
@@ -198,10 +216,23 @@ class LiveBaseballRenderer:
             parts.append(f"{batter.rbi}RBI" if batter.rbi > 1 else "RBI")
         return _THIN.join(parts)
 
-    def _roster_line(self, canvas: Canvas, name: str, stats: str, *, y: int) -> None:
-        """A strip line: ``name`` in the big font, then ``stats`` a size smaller, baseline-aligned."""
-        canvas.text(2, y, name, _WHITE, font=_SCORE_FONT)
-        canvas.text(2 + len(name) * 6 + 3, y + 3, stats, _HE, font=_LABEL_FONT)
+    def _roster_line(self, canvas: Canvas, name: str, stats: str, *, y: int, right: int, now: datetime) -> None:
+        """A strip line: ``name`` in the big font, then ``stats`` a size smaller beside it.
+
+        When the name leaves room, it is drawn where it sits — always readable — and the stats take
+        a lane from just past it to ``right``, marqueeing there when the day's line outgrows the gap
+        (a long pitcher line, extra-innings totals). A name long enough to crowd out its own stats
+        instead claims the whole line as its lane and marquees, so it can never overrun ``right``
+        (and the pitch lane past it). Either way nothing draws beyond the line's bounds.
+        """
+        stats_x = 2 + text_width(name, _SCORE_FONT) + _STATS_GAP
+        if stats_x < right:  # the name leaves room for a stat line beside it
+            canvas.text(2, y, name, _WHITE, font=_SCORE_FONT)
+            draw_text_lane(
+                canvas, TextLane(x=stats_x, y=y + 3, width=right - stats_x, font=_LABEL_FONT), stats, _HE, now=now
+            )
+        else:  # an overflowing name takes the whole line and marquees; no room left for stats
+            draw_text_lane(canvas, TextLane(x=2, y=y, width=right - 2, font=_SCORE_FONT), name, _WHITE, now=now)
 
     def _render_stack(
         self, canvas: Canvas, context: RenderContext, game: TeamGame, payload: LiveBaseballCardPayload
