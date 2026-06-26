@@ -23,7 +23,7 @@ def test_both_palettes_cover_every_team() -> None:
 
 @pytest.mark.parametrize("team_id, info", sorted(_TEAM_ID_INFO.items()))
 def test_palette_matches_the_committed_tiles(team_id: int, info: tuple[str, str]) -> None:
-    # The colour a club's tile actually renders on must equal its palette entry — the
+    # The color a club's tile actually renders on must equal its palette entry — the
     # guard that keeps the runtime maps and the committed art from drifting apart.
     abbr = info[0]
     assert _corner(abbr).pixel(0, 0).delta_e(LOGO_BASE_COLOR[team_id]) < 5
@@ -43,15 +43,15 @@ def test_every_team_has_20x20_base_and_alt_tiles() -> None:
             assert (tile.width, tile.height) == (20, 20)
 
 
-def test_every_meter_colour_value_lifts_to_legibility_on_black() -> None:
-    # The win-probability meter paints a team's freed colour (its base or its alt,
+def test_every_meter_color_value_lifts_to_legibility_on_black() -> None:
+    # The win-probability meter paints a team's freed color (its base or its alt,
     # whichever isn't the logo background) onto the black panel. However dim the brand
-    # colour — the Angels' navy, a deep red — value-lift must clear the legibility floor.
+    # color — the Angels' navy, a deep red — value-lift must clear the legibility floor.
     black = RGBColor(0, 0, 0)
     for palette in (LOGO_BASE_COLOR, LOGO_ALT_COLOR):
-        for team_id, colour in palette.items():
-            lifted = colour.value_lifted()
-            assert lifted.contrast_ratio(black) >= 3.0, f"{_TEAM_ID_INFO[team_id][0]} {colour} did not lift"
+        for team_id, color in palette.items():
+            lifted = color.value_lifted()
+            assert lifted.contrast_ratio(black) >= 3.0, f"{_TEAM_ID_INFO[team_id][0]} {color} did not lift"
 
 
 def test_detrademark_kept_the_twins_c_and_the_athletics_apostrophe() -> None:

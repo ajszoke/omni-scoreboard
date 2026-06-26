@@ -13,15 +13,15 @@ AWAY_C, HOME_C = RGBColor(255, 0, 0), RGBColor(0, 0, 255)
 
 
 def _treatment(away_meter: Rect, home_meter: Rect) -> MatchupVisualTreatment:
-    """A treatment carrying just the two meter bounds + colours the gauge drawer needs."""
+    """A treatment carrying just the two meter bounds + colors the gauge drawer needs."""
 
-    def side(meter: Rect, colour: RGBColor) -> MarkTreatment:
+    def side(meter: Rect, color: RGBColor) -> MarkTreatment:
         return MarkTreatment(
             variant=LogoVariant.BASE,
             is_tile=True,
             mark=Rect(2, meter.y, 20, meter.height),
             meter=meter,
-            meter_colour=colour,
+            meter_color=color,
         )
 
     return MatchupVisualTreatment(away=side(away_meter, AWAY_C), home=side(home_meter, HOME_C))
