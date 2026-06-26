@@ -9,7 +9,14 @@ from omni.cards.factory import CardFactory
 from omni.core.enum import DisplayPriority, GameStatus, League, PanelProfile
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.core.time import DurationSeconds
-from omni.domain.baseball import BaseballBaseState, BaseballCount, BaseballGameState, InningPhase
+from omni.domain.baseball import (
+    BaseballBaseState,
+    BaseballCount,
+    BaseballGameState,
+    BatterGameLine,
+    InningPhase,
+    PitcherGameLine,
+)
 from omni.domain.contest import TeamGame
 from omni.providers.mlb_teams import MlbTeamRegistry
 
@@ -42,6 +49,8 @@ def _state() -> BaseballGameState:
         phase=InningPhase.TOP,
         count=BaseballCount(balls=2, strikes=1, outs=2),
         bases=BaseballBaseState(first=True, third=True),
+        batter=BatterGameLine(name="Betts", at_bats=4, hits=2),
+        pitcher=PitcherGameLine(name="Webb", innings_pitched="6.1", pitches=95, strikeouts=7),
     )
 
 
@@ -58,6 +67,8 @@ def test_live_baseball_card_carries_state_and_metadata() -> None:
     assert (p.away_line.runs, p.home_line.runs) == (3, 5)  # runs flow from the state's scores
     assert (p.away_line.hits, p.away_line.errors) == (7, 1)  # and the H/E totals compose into the linescore
     assert (p.home_line.hits, p.home_line.errors) == (9, 0)
+    assert p.batter is not None and p.batter.name == "Betts"  # current at-bat flows to the payload
+    assert p.pitcher is not None and p.pitcher.name == "Webb"  # current pitcher flows too
     assert p.inning == 7 and p.phase is InningPhase.TOP
     assert (p.count.balls, p.count.strikes, p.count.outs) == (2, 1, 2)
     assert p.bases.first and p.bases.third and not p.bases.second

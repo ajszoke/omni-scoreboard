@@ -12,7 +12,9 @@ from omni.core.enum import GameStatus, HomeAway
 from omni.domain.baseball import (
     BaseballBaseState,
     BaseballCount,
+    BatterGameLine,
     InningPhase,
+    PitcherGameLine,
     PitchingDecisions,
     TeamLinescore,
     WinProbability,
@@ -52,6 +54,8 @@ class LiveBaseballCardPayload:
     bases: BaseballBaseState
     last_play: str | None = None
     win_probability: WinProbability | None = None  # drives the per-team meter; None hides it
+    batter: BatterGameLine | None = None  # current at-bat; None hides the batter line
+    pitcher: PitcherGameLine | None = None  # current pitcher; None hides the pitcher line
 
     def __post_init__(self) -> None:
         # Run/hit/error non-negativity is enforced by TeamLinescore itself.

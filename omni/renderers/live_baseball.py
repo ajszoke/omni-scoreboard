@@ -3,16 +3,15 @@
 Each profile gets its OWN layout, never a crop of another (AGENTS.md forbids
 "cropping 128x64 cards down to 64x32"):
 
-- quad_128x64 : full layout — team rows, scores + a compact H/E line, inning/count/outs,
-  bases diamond.
-- stack_64x64 : the full layout compressed to 64px wide (same fields, smaller).
+- quad_128x64 : a 40px top block — two team rows (logo tile + an inline ``R H E`` line score;
+  the abbreviation is dropped when a tile resolves, since the logo names the team) beside a
+  compact 3-row state module (inning + 2nd base / 1st + 3rd base / count + out-dots) — over a
+  24px full-width pitcher/batter strip.
+- stack_64x64 : a compressed layout — two team rows (logo or bar, run score + a dim ``H E``
+  line) up top, status + bases below.
 - single_64x32: an explicit COMPROMISE — team abbreviations, scores, and the
-  inning-phase label only. Count, outs, the bases diamond, and the H/E detail are
-  omitted (not legible at 64x32). The compromise is asserted by tests so it cannot
-  silently regress into a crop.
-
-The run score is the big bright number; each side's hit and error totals ride a dim
-``H{h} E{e}`` line beneath it (a running line score, so it shows during breaks too).
+  inning-phase label only. Count, outs, the bases, and the H/E detail are omitted
+  (not legible at 64x32). The compromise is asserted by tests so it cannot silently crop.
 
 During a between-halves break (`InningPhase.MIDDLE`/`END`) there is no active
 at-bat, so the larger profiles show the phase label alone and suppress the count,
@@ -29,8 +28,11 @@ from omni.core.colors import RGBColor
 from omni.core.enum import PanelProfile
 from omni.domain.baseball import InningPhase, TeamLinescore
 from omni.domain.contest import TeamGame
+from omni.domain.logos import LogoVariant
+from omni.domain.teams import Team
 from omni.renderers.canvas import Canvas
 from omni.renderers.context import RenderContext
+from omni.renderers.logo_clash import resolve_logo_variants
 from omni.renderers.team_row import draw_matchup_marks
 from omni.renderers.win_meter import draw_win_meter
 from omni.renderers.text import draw_centered, draw_right_aligned
@@ -46,16 +48,21 @@ _HE = RGBColor(160, 160, 160)  # hits/errors line — legible but secondary to t
 _LABEL_FONT = "4x6"
 _SCORE_FONT = "6x10"
 
+# Active halves use a direction arrow (the broadcast convention): up = top, down = bottom.
+# A break keeps a short word. (The board font's filled triangles will replace the arrows
+# once that glyph lands; arrows are the in-font stand-in.)
+_ARROW_UP = "↑"  # ↑ top of the inning (visitor batting)
+_ARROW_DOWN = "↓"  # ↓ bottom of the inning (home batting)
 _PHASE_ABBR = {
-    InningPhase.TOP: "T",
+    InningPhase.TOP: _ARROW_UP,
     InningPhase.MIDDLE: "MID",
-    InningPhase.BOTTOM: "B",
+    InningPhase.BOTTOM: _ARROW_DOWN,
     InningPhase.END: "END",
 }
 
 
 def _phase_label(phase: InningPhase, inning: int) -> str:
-    """Compact inning-phase label: ``T7``/``B7`` when active, ``MID7``/``END7`` on a break."""
+    """Compact inning-phase label: ``↑7``/``↓7`` when active, ``MID7``/``END7`` on a break."""
     return f"{_PHASE_ABBR[phase]}{inning}"
 
 
@@ -95,26 +102,73 @@ class LiveBaseballRenderer:
     def _render_quad(
         self, canvas: Canvas, context: RenderContext, game: TeamGame, payload: LiveBaseballCardPayload
     ) -> None:
-        # Two stacked team rows on the left (logo or colour bar), a status panel + bases on the right.
-        away_x, home_x = draw_matchup_marks(canvas, context, game.away, game.home, away_top=0, home_top=32)
+        # Top 40px: two team rows (logo + inline R/H/E) on the left, the game-state module on the
+        # right. Bottom 24px: the pitcher/batter strip. The logo identifies the team, so the
+        # abbreviation is dropped whenever a tile resolves (kept only as the colour-bar fallback).
+        variants = resolve_logo_variants(game.away, game.home)
+        away_logo = self._mark(canvas, context, game.away, variants.away, top=0)
+        home_logo = self._mark(canvas, context, game.home, variants.home, top=20)
         if payload.win_probability is not None:
-            draw_win_meter(canvas, context, game.away, game.home, payload.win_probability, away_top=0, home_top=32)
-        canvas.text(away_x, 11, game.away.abbreviation, _WHITE, font=_SCORE_FONT)
-        canvas.text(home_x, 43, game.home.abbreviation, _WHITE, font=_SCORE_FONT)
-        draw_right_aligned(canvas, 58, 11, str(payload.away_line.runs), _WHITE, _SCORE_FONT)
-        draw_right_aligned(canvas, 58, 43, str(payload.home_line.runs), _WHITE, _SCORE_FONT)
-        self._hits_errors(canvas, 58, 23, payload.away_line)  # H/E beneath the away run score
-        self._hits_errors(canvas, 58, 55, payload.home_line)  # H/E beneath the home run score
-        label = _phase_label(payload.phase, payload.inning)
-        if payload.phase.is_break:
-            draw_centered(canvas, 64, 128, 28, label, _YELLOW, _LABEL_FONT)  # break: no live at-bat
+            draw_win_meter(canvas, context, game.away, game.home, payload.win_probability, away_top=0, home_top=20)
+        self._line_score(canvas, game.away, payload.away_line, has_logo=away_logo, y=5)
+        self._line_score(canvas, game.home, payload.home_line, has_logo=home_logo, y=25)
+        if payload.phase.is_break:  # between halves: no at-bat, no bases — just the inning
+            draw_centered(canvas, 60, 128, 14, _phase_label(payload.phase, payload.inning), _YELLOW, _SCORE_FONT)
             return
-        canvas.text(68, 6, label, _YELLOW, font=_LABEL_FONT)
-        canvas.text(68, 14, f"{payload.count.balls}-{payload.count.strikes}", _WHITE, font=_LABEL_FONT)
-        canvas.text(68, 22, f"{payload.count.outs} OUT", _WHITE, font=_LABEL_FONT)
-        self._base(canvas, 100, 6, 6, payload.bases.second)
-        self._base(canvas, 92, 16, 6, payload.bases.third)
-        self._base(canvas, 108, 16, 6, payload.bases.first)
+        self._state_module(canvas, payload)
+        self._batter_pitcher_strip(canvas, payload)
+
+    def _mark(self, canvas: Canvas, context: RenderContext, team: Team, variant: LogoVariant, *, top: int) -> bool:
+        """Draw the team's 20px logo tile at ``(2, top)``, or a colour bar; return whether a tile drew."""
+        asset = team.logo_alt if variant is LogoVariant.ALT and team.logo_alt is not None else team.logo
+        logo = context.logos.resolve(asset) if context.logos is not None else None
+        if logo is not None:
+            canvas.draw_image(2, top, logo)
+            return True
+        canvas.fill_rect(0, top, 4, 20, team.primary_color)
+        return False
+
+    def _line_score(self, canvas: Canvas, team: Team, line: TeamLinescore, *, has_logo: bool, y: int) -> None:
+        """Draw a team's ``R H E`` as three equal numbers; prepend the abbr only without a logo."""
+        rhe = f"{line.runs} {line.hits} {line.errors}"
+        if has_logo:
+            canvas.text(26, y, rhe, _WHITE, font=_SCORE_FONT)
+        else:
+            canvas.text(8, y, team.abbreviation, _WHITE, font=_SCORE_FONT)
+            canvas.text(8 + len(team.abbreviation) * 6 + 4, y, rhe, _WHITE, font=_SCORE_FONT)
+
+    def _state_module(self, canvas: Canvas, payload: LiveBaseballCardPayload) -> None:
+        """The compact 3-row game-state cluster on the right: inning+2B / 1B+3B / count+outs.
+
+        Inning and count are the big (score) font; there is room, and they read at a glance.
+        """
+        canvas.text(64, 2, _phase_label(payload.phase, payload.inning), _YELLOW, font=_SCORE_FONT)  # row 1: inning
+        self._diamond(canvas, 102, 8, 3, payload.bases.second)  # 2nd base — top, row 1
+        self._diamond(canvas, 96, 20, 3, payload.bases.third)  # 3rd base — left, row 2
+        self._diamond(canvas, 108, 20, 3, payload.bases.first)  # 1st base — right, row 2
+        canvas.text(64, 28, f"{payload.count.balls}-{payload.count.strikes}", _WHITE, font=_SCORE_FONT)  # row 3: count
+        self._out_dots(canvas, 98, 31, payload.count.outs)  # row 3: outs, below the diamond (where home would be)
+
+    def _batter_pitcher_strip(self, canvas: Canvas, payload: LiveBaseballCardPayload) -> None:
+        """The bottom strip: the pitcher then the batter, full-width (room for richer lines).
+
+        ``P:`` leads the pitcher and the lineup spot (``4.``) the batter. The leader + name is the
+        big (score) font, the statline a size smaller and dimmer beside it. Drawn only on a live
+        at-bat (the caller skips it on a break).
+        """
+        pitcher = payload.pitcher
+        if pitcher is not None:
+            stats = f"{pitcher.innings_pitched}IP {pitcher.strikeouts}K {pitcher.pitches}P"
+            self._roster_line(canvas, f"P: {pitcher.name}", stats, y=41)
+        batter = payload.batter
+        if batter is not None:
+            leader = f"{batter.order}." if batter.order is not None else "#."
+            self._roster_line(canvas, f"{leader} {batter.name}", f"{batter.hits}-{batter.at_bats}", y=52)
+
+    def _roster_line(self, canvas: Canvas, name: str, stats: str, *, y: int) -> None:
+        """A strip line: ``name`` in the big font, then ``stats`` a size smaller, baseline-aligned."""
+        canvas.text(2, y, name, _WHITE, font=_SCORE_FONT)
+        canvas.text(2 + len(name) * 6 + 3, y + 3, stats, _HE, font=_LABEL_FONT)
 
     def _render_stack(
         self, canvas: Canvas, context: RenderContext, game: TeamGame, payload: LiveBaseballCardPayload
@@ -153,8 +207,33 @@ class LiveBaseballRenderer:
 
     @staticmethod
     def _hits_errors(canvas: Canvas, right_x: int, y: int, line: TeamLinescore) -> None:
-        """Draw a side's ``H{hits} E{errors}`` totals, right-aligned to ``right_x``."""
-        draw_right_aligned(canvas, right_x, y, f"H{line.hits} E{line.errors}", _HE, _LABEL_FONT)
+        """Draw a side's hits and errors as bare numbers (the run score above is the R of R/H/E)."""
+        draw_right_aligned(canvas, right_x, y, f"{line.hits} {line.errors}", _HE, _LABEL_FONT)
+
+    @staticmethod
+    def _diamond(canvas: Canvas, cx: int, cy: int, r: int, occupied: bool) -> None:
+        """A base marker rotated 45° (a diamond): filled when occupied, dim outline when empty."""
+        for dy in range(-r, r + 1):
+            half = r - abs(dy)
+            if occupied:
+                canvas.fill_rect(cx - half, cy + dy, 2 * half + 1, 1, _WHITE)
+            else:
+                canvas.set_pixel(cx - half, cy + dy, _DIM)
+                if half > 0:
+                    canvas.set_pixel(cx + half, cy + dy, _DIM)
+
+    @staticmethod
+    def _out_dots(canvas: Canvas, x: int, y: int, outs: int) -> None:
+        """Three out indicators: a 4px dot each, filled once recorded — the empty ones show outs to go."""
+        for i in range(3):
+            left = x + i * 6
+            if i < outs:
+                canvas.fill_rect(left, y, 4, 4, _WHITE)
+            else:
+                canvas.fill_rect(left, y, 4, 1, _DIM)  # top
+                canvas.fill_rect(left, y + 3, 4, 1, _DIM)  # bottom
+                canvas.fill_rect(left, y, 1, 4, _DIM)  # left
+                canvas.fill_rect(left + 3, y, 1, 4, _DIM)  # right
 
     @staticmethod
     def _base(canvas: Canvas, x: int, y: int, size: int, occupied: bool) -> None:
