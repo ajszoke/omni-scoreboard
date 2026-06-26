@@ -33,6 +33,7 @@ from omni.domain.logos import LogoVariant
 from omni.domain.teams import Team
 from omni.renderers.canvas import Canvas
 from omni.renderers.context import RenderContext
+from omni.renderers.font import char_size
 from omni.renderers.team_row import draw_matchup_marks
 from omni.renderers.visual_treatment import MarkTreatment, resolve_matchup_treatment
 from omni.renderers.win_meter import draw_win_meter
@@ -49,6 +50,9 @@ _HE = RGBColor(160, 160, 160)  # hits/errors line — legible but secondary to t
 
 _LABEL_FONT = "4x6"
 _SCORE_FONT = "6x10"
+_RHE_BIG_FONT = "9x18B"  # the headline quad line score — the largest face we carry
+_RHE_SMALL_FONT = "6x13B"  # stepped down to once a run or hit reaches two digits, to keep the columns fitting
+_RHE_COLS = (35, 49, 63)  # right edges of the runs / hits / errors columns; right-aligned, so they hold steady
 _THIN = "\N{THIN SPACE}"  # U+2009, a 2px space in 4x6 — packs dense statlines tighter than a full cell
 
 # Active halves point in the batting team's direction (broadcast convention): up = top of the
@@ -124,8 +128,7 @@ class LiveBaseballRenderer:
         self._draw_mark(canvas, context, game.home, treatment.home)
         if payload.win_probability is not None:
             draw_win_meter(canvas, treatment, payload.win_probability)
-        self._line_score(canvas, game.away, payload.away_line, has_logo=treatment.away.is_tile, y=5)
-        self._line_score(canvas, game.home, payload.home_line, has_logo=treatment.home.is_tile, y=25)
+        self._line_scores(canvas, game, payload, away_logo=treatment.away.is_tile, home_logo=treatment.home.is_tile)
         if payload.phase.is_break:  # between halves: no at-bat, no bases — just the inning
             label = _phase_label(payload.phase, payload.inning, up=_TRIANGLE_UP, down=_TRIANGLE_DOWN)
             draw_centered(canvas, 60, 128, 14, label, _YELLOW, _SCORE_FONT)
@@ -148,27 +151,47 @@ class LiveBaseballRenderer:
         else:
             canvas.fill_rect(side.mark.x, side.mark.y, side.mark.width, side.mark.height, team.primary_color)
 
-    def _line_score(self, canvas: Canvas, team: Team, line: TeamLinescore, *, has_logo: bool, y: int) -> None:
-        """Draw a team's ``R H E`` as three equal numbers; prepend the abbr only without a logo."""
-        rhe = f"{line.runs} {line.hits} {line.errors}"
-        if has_logo:
-            canvas.text(26, y, rhe, _WHITE, font=_SCORE_FONT)
-        else:
-            canvas.text(8, y, team.abbreviation, _WHITE, font=_SCORE_FONT)
-            canvas.text(8 + len(team.abbreviation) * 6 + 4, y, rhe, _WHITE, font=_SCORE_FONT)
+    def _line_scores(
+        self, canvas: Canvas, game: TeamGame, payload: LiveBaseballCardPayload, *, away_logo: bool, home_logo: bool
+    ) -> None:
+        """Draw both rows' ``R H E`` as a big right-aligned line score; abbr prepended only without a logo.
+
+        Both rows share one font so their three columns line up: the headline 9x18B, stepping down to
+        the bold 13 the moment any run or hit reaches two digits, so the columns still clear the
+        state module on the right.
+        """
+        away, home = payload.away_line, payload.home_line
+        # If ANY of the six R/H/E values is two digits, both rows step down to the tighter bold 13 so
+        # the wide number still fits its column — a double-digit 9x18B would spill into its neighbor.
+        values = (away.runs, away.hits, away.errors, home.runs, home.hits, home.errors)
+        font = _RHE_SMALL_FONT if max(values) >= 10 else _RHE_BIG_FONT
+        self._rhe_row(canvas, game.away, away, has_logo=away_logo, font=font, row_top=0)
+        self._rhe_row(canvas, game.home, home, has_logo=home_logo, font=font, row_top=20)
+
+    def _rhe_row(
+        self, canvas: Canvas, team: Team, line: TeamLinescore, *, has_logo: bool, font: str, row_top: int
+    ) -> None:
+        """One team's run/hit/error columns, right-aligned and vertically centered in its 20px row."""
+        top = row_top + (20 - char_size(font)[1]) // 2
+        if not has_logo:  # only the color bar drew, so the abbreviation has to name the team
+            canvas.text(5, row_top + 5, team.abbreviation, _WHITE, font=_SCORE_FONT)
+        for value, right_x in zip((line.runs, line.hits, line.errors), _RHE_COLS):
+            draw_right_aligned(canvas, right_x, top, str(value), _WHITE, font)
 
     def _state_module(self, canvas: Canvas, payload: LiveBaseballCardPayload) -> None:
-        """The compact 3-row game-state cluster on the right: inning+2B / 1B+3B / count+outs.
+        """The game-state cluster, pushed to the top-right now the big line score holds the center.
 
-        Inning and count are the big (score) font; there is room, and they read at a glance.
+        Inning and count (big font) sit on the left; the base diamonds and out squares on the right,
+        sized up off the reference board so they read at a glance. The diamonds are a tight cluster —
+        2nd on top, 3rd and 1st below — over the row of out squares.
         """
         inning = _phase_label(payload.phase, payload.inning, up=_TRIANGLE_UP, down=_TRIANGLE_DOWN)
-        canvas.text(64, 2, inning, _YELLOW, font=_SCORE_FONT)  # row 1: inning (the triangle points to the batting half)
-        self._diamond(canvas, 102, 8, 3, payload.bases.second)  # 2nd base — top, row 1
-        self._diamond(canvas, 96, 20, 3, payload.bases.third)  # 3rd base — left, row 2
-        self._diamond(canvas, 108, 20, 3, payload.bases.first)  # 1st base — right, row 2
-        canvas.text(64, 28, f"{payload.count.balls}-{payload.count.strikes}", _WHITE, font=_SCORE_FONT)  # row 3: count
-        self._out_dots(canvas, 98, 31, payload.count.outs)  # row 3: outs, below the diamond (where home would be)
+        canvas.text(72, 2, inning, _YELLOW, font=_SCORE_FONT)  # inning (the triangle points to the batting half)
+        self._diamond(canvas, 106, 7, 5, payload.bases.second)  # 2nd base — top
+        self._diamond(canvas, 99, 16, 5, payload.bases.third)  # 3rd base — lower left
+        self._diamond(canvas, 113, 16, 5, payload.bases.first)  # 1st base — lower right
+        canvas.text(72, 24, f"{payload.count.balls}-{payload.count.strikes}", _WHITE, font=_SCORE_FONT)  # count
+        self._out_dots(canvas, 98, 26, payload.count.outs)  # outs, below the diamond cluster
 
     def _batter_pitcher_strip(self, canvas: Canvas, payload: LiveBaseballCardPayload, *, now: datetime) -> None:
         """The bottom strip: the pitcher, the batter, and the at-bat's live pitch.
@@ -295,16 +318,16 @@ class LiveBaseballRenderer:
 
     @staticmethod
     def _out_dots(canvas: Canvas, x: int, y: int, outs: int) -> None:
-        """Three out indicators: a 4px dot each, filled once recorded — the empty ones show outs to go."""
+        """Three out squares, 5px each, filled once recorded — the empty ones show the outs still to go."""
         for i in range(3):
-            left = x + i * 6
+            left = x + i * 7
             if i < outs:
-                canvas.fill_rect(left, y, 4, 4, _WHITE)
+                canvas.fill_rect(left, y, 5, 5, _WHITE)
             else:
-                canvas.fill_rect(left, y, 4, 1, _DIM)  # top
-                canvas.fill_rect(left, y + 3, 4, 1, _DIM)  # bottom
-                canvas.fill_rect(left, y, 1, 4, _DIM)  # left
-                canvas.fill_rect(left + 3, y, 1, 4, _DIM)  # right
+                canvas.fill_rect(left, y, 5, 1, _DIM)  # top
+                canvas.fill_rect(left, y + 4, 5, 1, _DIM)  # bottom
+                canvas.fill_rect(left, y, 1, 5, _DIM)  # left
+                canvas.fill_rect(left + 4, y, 1, 5, _DIM)  # right
 
     @staticmethod
     def _base(canvas: Canvas, x: int, y: int, size: int, occupied: bool) -> None:
