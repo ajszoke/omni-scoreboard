@@ -48,22 +48,18 @@ _HE = RGBColor(160, 160, 160)  # hits/errors line — legible but secondary to t
 _LABEL_FONT = "4x6"
 _SCORE_FONT = "6x10"
 
-# Active halves use a direction arrow (the broadcast convention): up = top, down = bottom.
-# A break keeps a short word. (The board font's filled triangles will replace the arrows
-# once that glyph lands; arrows are the in-font stand-in.)
-_ARROW_UP = "↑"  # ↑ top of the inning (visitor batting)
-_ARROW_DOWN = "↓"  # ↓ bottom of the inning (home batting)
-_PHASE_ABBR = {
-    InningPhase.TOP: _ARROW_UP,
-    InningPhase.MIDDLE: "MID",
-    InningPhase.BOTTOM: _ARROW_DOWN,
-    InningPhase.END: "END",
-}
+# Active halves point in the batting team's direction (broadcast convention): up = top of the
+# inning (visitor batting), down = bottom (home batting); a break keeps a short word. The quad's
+# 6x10 font carries the board's filled triangles, so it uses those; the 64x32/64x64 status sits
+# in 4x6, which has no triangle glyph, so those profiles keep the arrows — a per-profile compromise.
+_ARROW_UP, _ARROW_DOWN = "↑", "↓"  # stack/single (4x6)
+_TRIANGLE_UP, _TRIANGLE_DOWN = "▲", "▼"  # quad (6x10)
 
 
-def _phase_label(phase: InningPhase, inning: int) -> str:
-    """Compact inning-phase label: ``↑7``/``↓7`` when active, ``MID7``/``END7`` on a break."""
-    return f"{_PHASE_ABBR[phase]}{inning}"
+def _phase_label(phase: InningPhase, inning: int, *, up: str, down: str) -> str:
+    """Compact inning-phase label: the ``up``/``down`` head when active, ``MID``/``END`` on a break."""
+    heads = {InningPhase.TOP: up, InningPhase.MIDDLE: "MID", InningPhase.BOTTOM: down, InningPhase.END: "END"}
+    return f"{heads[phase]}{inning}"
 
 
 class LiveBaseballRenderer:
@@ -113,7 +109,8 @@ class LiveBaseballRenderer:
         self._line_score(canvas, game.away, payload.away_line, has_logo=away_logo, y=5)
         self._line_score(canvas, game.home, payload.home_line, has_logo=home_logo, y=25)
         if payload.phase.is_break:  # between halves: no at-bat, no bases — just the inning
-            draw_centered(canvas, 60, 128, 14, _phase_label(payload.phase, payload.inning), _YELLOW, _SCORE_FONT)
+            label = _phase_label(payload.phase, payload.inning, up=_TRIANGLE_UP, down=_TRIANGLE_DOWN)
+            draw_centered(canvas, 60, 128, 14, label, _YELLOW, _SCORE_FONT)
             return
         self._state_module(canvas, payload)
         self._batter_pitcher_strip(canvas, payload)
@@ -142,7 +139,8 @@ class LiveBaseballRenderer:
 
         Inning and count are the big (score) font; there is room, and they read at a glance.
         """
-        canvas.text(64, 2, _phase_label(payload.phase, payload.inning), _YELLOW, font=_SCORE_FONT)  # row 1: inning
+        inning = _phase_label(payload.phase, payload.inning, up=_TRIANGLE_UP, down=_TRIANGLE_DOWN)
+        canvas.text(64, 2, inning, _YELLOW, font=_SCORE_FONT)  # row 1: inning (the triangle points to the batting half)
         self._diamond(canvas, 102, 8, 3, payload.bases.second)  # 2nd base — top, row 1
         self._diamond(canvas, 96, 20, 3, payload.bases.third)  # 3rd base — left, row 2
         self._diamond(canvas, 108, 20, 3, payload.bases.first)  # 1st base — right, row 2
@@ -183,7 +181,7 @@ class LiveBaseballRenderer:
         draw_right_aligned(canvas, 62, 28, str(payload.home_line.runs), _WHITE, _SCORE_FONT)
         self._hits_errors(canvas, 62, 16, payload.away_line)  # H/E beneath the away run score
         self._hits_errors(canvas, 62, 38, payload.home_line)  # H/E beneath the home run score
-        label = _phase_label(payload.phase, payload.inning)
+        label = _phase_label(payload.phase, payload.inning, up=_ARROW_UP, down=_ARROW_DOWN)
         if payload.phase.is_break:
             draw_centered(canvas, 0, 64, 50, label, _YELLOW, _LABEL_FONT)  # break: no live at-bat
             return
@@ -202,8 +200,9 @@ class LiveBaseballRenderer:
         canvas.text(4, 21, game.home.abbreviation, _WHITE, font=_LABEL_FONT)
         draw_right_aligned(canvas, 42, 3, str(payload.away_line.runs), _WHITE, _SCORE_FONT)
         draw_right_aligned(canvas, 42, 19, str(payload.home_line.runs), _WHITE, _SCORE_FONT)
-        # The phase label (T7/MID7/B7/END7) already conveys the break; no count/bases/H-E here anyway.
-        canvas.text(46, 13, _phase_label(payload.phase, payload.inning), _YELLOW, font=_LABEL_FONT)
+        # The phase label (↑7/MID7/↓7/END7) already conveys the break; no count/bases/H-E here anyway.
+        label = _phase_label(payload.phase, payload.inning, up=_ARROW_UP, down=_ARROW_DOWN)
+        canvas.text(46, 13, label, _YELLOW, font=_LABEL_FONT)
 
     @staticmethod
     def _hits_errors(canvas: Canvas, right_x: int, y: int, line: TeamLinescore) -> None:
