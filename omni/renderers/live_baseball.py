@@ -52,7 +52,7 @@ _LABEL_FONT = "4x6"
 _SCORE_FONT = "6x10"
 _RHE_BIG_FONT = "9x18B"  # the headline quad line score — the largest face we carry
 _RHE_SMALL_FONT = "6x13B"  # stepped down to once a run or hit reaches two digits, to keep the columns fitting
-_RHE_COLS = (34, 48, 62)  # right edges of the runs / hits / errors columns; right-aligned, so they hold steady
+_RHE_COLS = (35, 49, 63)  # right edges of the runs / hits / errors columns; right-aligned, so they hold steady
 _THIN = "\N{THIN SPACE}"  # U+2009, a 2px space in 4x6 — packs dense statlines tighter than a full cell
 
 # Active halves point in the batting team's direction (broadcast convention): up = top of the
@@ -179,17 +179,19 @@ class LiveBaseballRenderer:
             draw_right_aligned(canvas, right_x, top, str(value), _WHITE, font)
 
     def _state_module(self, canvas: Canvas, payload: LiveBaseballCardPayload) -> None:
-        """The compact 3-row game-state cluster on the right: inning+2B / 1B+3B / count+outs.
+        """The game-state cluster, pushed to the top-right now the big line score holds the center.
 
-        Inning and count are the big (score) font; there is room, and they read at a glance.
+        Inning and count (big font) sit on the left; the base diamonds and out squares on the right,
+        sized up off the reference board so they read at a glance. The diamonds are a tight cluster —
+        2nd on top, 3rd and 1st below — over the row of out squares.
         """
         inning = _phase_label(payload.phase, payload.inning, up=_TRIANGLE_UP, down=_TRIANGLE_DOWN)
-        canvas.text(64, 2, inning, _YELLOW, font=_SCORE_FONT)  # row 1: inning (the triangle points to the batting half)
-        self._diamond(canvas, 102, 8, 3, payload.bases.second)  # 2nd base — top, row 1
-        self._diamond(canvas, 96, 20, 3, payload.bases.third)  # 3rd base — left, row 2
-        self._diamond(canvas, 108, 20, 3, payload.bases.first)  # 1st base — right, row 2
-        canvas.text(64, 28, f"{payload.count.balls}-{payload.count.strikes}", _WHITE, font=_SCORE_FONT)  # row 3: count
-        self._out_dots(canvas, 98, 31, payload.count.outs)  # row 3: outs, below the diamond (where home would be)
+        canvas.text(72, 2, inning, _YELLOW, font=_SCORE_FONT)  # inning (the triangle points to the batting half)
+        self._diamond(canvas, 106, 7, 5, payload.bases.second)  # 2nd base — top
+        self._diamond(canvas, 99, 16, 5, payload.bases.third)  # 3rd base — lower left
+        self._diamond(canvas, 113, 16, 5, payload.bases.first)  # 1st base — lower right
+        canvas.text(72, 24, f"{payload.count.balls}-{payload.count.strikes}", _WHITE, font=_SCORE_FONT)  # count
+        self._out_dots(canvas, 98, 26, payload.count.outs)  # outs, below the diamond cluster
 
     def _batter_pitcher_strip(self, canvas: Canvas, payload: LiveBaseballCardPayload, *, now: datetime) -> None:
         """The bottom strip: the pitcher, the batter, and the at-bat's live pitch.
@@ -316,16 +318,16 @@ class LiveBaseballRenderer:
 
     @staticmethod
     def _out_dots(canvas: Canvas, x: int, y: int, outs: int) -> None:
-        """Three out indicators: a 4px dot each, filled once recorded — the empty ones show outs to go."""
+        """Three out squares, 5px each, filled once recorded — the empty ones show the outs still to go."""
         for i in range(3):
-            left = x + i * 6
+            left = x + i * 7
             if i < outs:
-                canvas.fill_rect(left, y, 4, 4, _WHITE)
+                canvas.fill_rect(left, y, 5, 5, _WHITE)
             else:
-                canvas.fill_rect(left, y, 4, 1, _DIM)  # top
-                canvas.fill_rect(left, y + 3, 4, 1, _DIM)  # bottom
-                canvas.fill_rect(left, y, 1, 4, _DIM)  # left
-                canvas.fill_rect(left + 3, y, 1, 4, _DIM)  # right
+                canvas.fill_rect(left, y, 5, 1, _DIM)  # top
+                canvas.fill_rect(left, y + 4, 5, 1, _DIM)  # bottom
+                canvas.fill_rect(left, y, 1, 5, _DIM)  # left
+                canvas.fill_rect(left + 4, y, 1, 5, _DIM)  # right
 
     @staticmethod
     def _base(canvas: Canvas, x: int, y: int, size: int, occupied: bool) -> None:

@@ -66,16 +66,16 @@ def test_pipeline_renders_fixture_state_on_quad() -> None:
 
     texts = {(t.x, t.y, t.text) for t in canvas.texts()}
     assert {(5, 5, "COL"), (5, 25, "LAD")} <= texts  # abbr names the team when only the 4px bar drew
-    assert {(25, 1, "3"), (39, 1, "7"), (53, 1, "0")} <= texts  # big R H E columns (away runs/hits/errors)
-    assert {(25, 21, "5"), (39, 21, "9"), (53, 21, "1")} <= texts  # home
-    assert {(64, 2, "▲7"), (64, 28, "2-1")} <= texts  # inning (filled triangle) + count, big font
+    assert {(26, 1, "3"), (40, 1, "7"), (54, 1, "0")} <= texts  # big R H E columns (away runs/hits/errors)
+    assert {(26, 21, "5"), (40, 21, "9"), (54, 21, "1")} <= texts  # home
+    assert {(72, 2, "▲7"), (72, 24, "2-1")} <= texts  # inning + count, pushed right beside the bases
     assert (98, 44, "87 SWPR") in texts  # the current-play sweeper -> the live pitch token's reserved pitcher-row lane
 
-    # First (center 108,20) and third (96,20) occupied -> filled white diamonds; second (102,9) empty.
-    assert any(o.op == "fill_rect" and o.color == WHITE and o.y == 20 and o.x <= 108 <= o.x + o.w for o in canvas.ops)
-    assert any(o.op == "fill_rect" and o.color == WHITE and o.y == 20 and o.x <= 96 <= o.x + o.w for o in canvas.ops)
+    # First (center 113,16) and third (99,16) occupied -> filled white diamonds; second (106,7) empty.
+    assert any(o.op == "fill_rect" and o.color == WHITE and o.y == 16 and o.x <= 113 <= o.x + o.w for o in canvas.ops)
+    assert any(o.op == "fill_rect" and o.color == WHITE and o.y == 16 and o.x <= 99 <= o.x + o.w for o in canvas.ops)
     assert not any(
-        o.op == "fill_rect" and o.color == WHITE and o.y == 9 and o.x <= 102 <= o.x + o.w for o in canvas.ops
+        o.op == "fill_rect" and o.color == WHITE and o.y == 7 and o.x <= 106 <= o.x + o.w for o in canvas.ops
     )
 
 

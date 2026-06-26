@@ -179,9 +179,9 @@ def test_draw_op_quad_128x64() -> None:
     texts = {(t.x, t.y, t.text) for t in canvas.texts()}
     assert {(5, 5, "COL"), (5, 25, "LAD")} <= texts  # abbr names the team when only the 4px bar drew
     # Big R H E in right-aligned columns (9x18B): single digits land at col_right - 9.
-    assert {(25, 1, "3"), (39, 1, "7"), (53, 1, "0")} <= texts  # away runs / hits / errors
-    assert {(25, 21, "5"), (39, 21, "9"), (53, 21, "1")} <= texts  # home
-    assert {(64, 2, "▲7"), (64, 28, "2-1")} <= texts  # inning (filled triangle) + count, big font
+    assert {(26, 1, "3"), (40, 1, "7"), (54, 1, "0")} <= texts  # away runs / hits / errors (cols nudged +1px)
+    assert {(26, 21, "5"), (40, 21, "9"), (54, 21, "1")} <= texts  # home
+    assert {(72, 2, "▲7"), (72, 24, "2-1")} <= texts  # inning + count, pushed right beside the bases
     # Pitcher row: the name is drawn still, then the stat line takes a lane that marquees when it
     # overflows the space left of the pitch lane — so only a clipped run of the full statline shows.
     assert (2, 41, "P: Kershaw") in texts
@@ -190,8 +190,8 @@ def test_draw_op_quad_128x64() -> None:
     assert stat_op.text in full_pitcher_stats  # a contiguous run of the statline, clipped to its lane
     assert {(2, 52, "3. Betts"), (53, 55, f"2-4{THIN}RBI")} <= texts  # batter line: name + a fitting statline
     assert (98, 44, "84 SWPR") in texts  # live pitch token in its reserved lane on the pitcher row (SWPR)
-    # 1st base is occupied -> a filled white diamond spanning its centre (108, 20)
-    assert any(o.op == "fill_rect" and o.color == WHITE and o.y == 20 and o.x <= 108 <= o.x + o.w for o in canvas.ops)
+    # 1st base is occupied -> a filled white diamond spanning its center (113, 16)
+    assert any(o.op == "fill_rect" and o.color == WHITE and o.y == 16 and o.x <= 113 <= o.x + o.w for o in canvas.ops)
 
 
 @pytest.mark.parametrize(
@@ -262,7 +262,7 @@ def test_draw_op_single_64x32_is_an_explicit_compromise() -> None:
 def test_draw_op_bottom_inning_shows_down_triangle() -> None:
     # The InningPhase.BOTTOM arm picks the down glyph; assert the quad's filled triangle.
     canvas = _render(make_card(phase=InningPhase.BOTTOM, inning=9), PanelProfile.QUAD_128X64)
-    assert (64, 2, "▼9") in {(t.x, t.y, t.text) for t in canvas.texts()}
+    assert (72, 2, "▼9") in {(t.x, t.y, t.text) for t in canvas.texts()}
 
 
 def test_draw_op_middle_break_shows_label_and_suppresses_at_bat() -> None:
@@ -292,13 +292,13 @@ def test_draw_op_two_digit_run_steps_down_to_the_tighter_font() -> None:
     # A two-digit value forces both rows down to 6x13B so the wide number clears its column;
     # "10" right-aligns in the runs column (right edge 34) at x = 34 - 12.
     canvas = _render(make_card(away_score=10), PanelProfile.QUAD_128X64)
-    assert (22, 3, "10") in {(t.x, t.y, t.text) for t in canvas.texts()}
+    assert (23, 3, "10") in {(t.x, t.y, t.text) for t in canvas.texts()}
 
 
 def test_draw_op_double_digit_line_score() -> None:
     # Double-digit hits also trip the step-down; "12" right-aligns in the hits column (right edge 48).
     canvas = _render(make_card(away_hits=12, away_errors=3), PanelProfile.QUAD_128X64)
-    assert (36, 3, "12") in {(t.x, t.y, t.text) for t in canvas.texts()}
+    assert (37, 3, "12") in {(t.x, t.y, t.text) for t in canvas.texts()}
 
 
 def test_draw_op_empty_bases_draw_dim_diamond_outlines() -> None:
@@ -318,8 +318,8 @@ def test_logos_replace_the_team_bar_on_quad_and_stack() -> None:
     assert (0, 0, 4, 20) not in bars and (0, 20, 4, 20) not in bars  # the tile replaces the color bar
     quad_texts = {(t.x, t.y, t.text) for t in quad.texts()}
     assert "COL" not in {t.text for t in quad.texts()} and "LAD" not in {t.text for t in quad.texts()}  # abbr dropped
-    assert {(25, 1, "3"), (39, 1, "7"), (53, 1, "0")} <= quad_texts  # big R H E columns, no abbr (logo names it)
-    assert {(25, 21, "5"), (39, 21, "9"), (53, 21, "1")} <= quad_texts
+    assert {(26, 1, "3"), (40, 1, "7"), (54, 1, "0")} <= quad_texts  # big R H E columns, no abbr (logo names it)
+    assert {(26, 21, "5"), (40, 21, "9"), (54, 21, "1")} <= quad_texts
 
     stack = _render(make_card(), PanelProfile.STACK_64X64, logos=LOGOS)
     assert {i.key for i in stack.images()} == {"col", "lad"}
