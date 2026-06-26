@@ -12,11 +12,13 @@ tests/conftest.py). Pass ``--pattern`` to focus on one card family.
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
-from omni.preview.contact_sheet import write_contact_sheet
-
 _ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_ROOT))  # so `omni` resolves when this script is run directly, not just under pytest
+
+from omni.preview.contact_sheet import write_contact_sheet
 
 
 def main() -> int:
