@@ -26,7 +26,7 @@ from omni.cards.base import ScoreboardCard
 from omni.cards.baseball import LiveBaseballCardPayload
 from omni.core.colors import RGBColor
 from omni.core.enum import PanelProfile
-from omni.domain.baseball import InningPhase, TeamLinescore
+from omni.domain.baseball import BatterGameLine, InningPhase, TeamLinescore
 from omni.domain.contest import TeamGame
 from omni.domain.logos import LogoVariant
 from omni.domain.teams import Team
@@ -162,7 +162,22 @@ class LiveBaseballRenderer:
         batter = payload.batter
         if batter is not None:
             leader = f"{batter.order}." if batter.order is not None else "#."
-            self._roster_line(canvas, f"{leader} {batter.name}", f"{batter.hits}-{batter.at_bats}", y=52)
+            self._roster_line(canvas, f"{leader} {batter.name}", self._batter_line(batter), y=52)
+
+    @staticmethod
+    def _batter_line(batter: BatterGameLine) -> str:
+        """The batter's day in the legacy stat order — hits-for-AB, then HR, then RBI.
+
+        Cribbed from the legacy board: a lone HR/RBI shows just the label (a flag that it
+        happened), two or more carry the count. Tokens are thin-spaced to stay compact.
+        (The legacy order slots 3B/2B between HR and RBI — restored here once modelled.)
+        """
+        parts = [f"{batter.hits}-{batter.at_bats}"]
+        if batter.home_runs > 0:
+            parts.append(f"{batter.home_runs}HR" if batter.home_runs > 1 else "HR")
+        if batter.rbi > 0:
+            parts.append(f"{batter.rbi}RBI" if batter.rbi > 1 else "RBI")
+        return _THIN.join(parts)
 
     def _roster_line(self, canvas: Canvas, name: str, stats: str, *, y: int) -> None:
         """A strip line: ``name`` in the big font, then ``stats`` a size smaller, baseline-aligned."""
