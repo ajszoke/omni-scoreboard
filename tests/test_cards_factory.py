@@ -78,6 +78,15 @@ def test_live_baseball_card_carries_state_and_metadata() -> None:
     assert p.bases.first and p.bases.third and not p.bases.second
 
 
+def test_live_baseball_declares_its_per_profile_compromises() -> None:
+    # Like every other card, the live card's small-profile omissions belong in the machine-readable
+    # contract (LayoutSupport.compromise_notes), not only in the renderer docstring + tests.
+    card = CardFactory().live_baseball(_game(), _state(), now=NOW)
+    joined = " ".join(card.layout_support.compromise_notes)
+    assert "single_64x32" in joined and "stack_64x64" in joined
+    assert "bases" in joined and "pitcher/batter" in joined  # the single drops live detail; the stack the strip
+
+
 def test_default_timing_and_priority() -> None:
     card = CardFactory().live_baseball(_game(), _state(), now=NOW)
     assert card.timing.available_at == NOW
