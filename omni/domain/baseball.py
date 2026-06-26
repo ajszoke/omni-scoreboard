@@ -15,6 +15,7 @@ from omni.core.enum import HomeAway, StrEnumMixin
 __all__ = [
     "InningPhase",
     "PitchType",
+    "PitchSnapshot",
     "PitchingDecisions",
     "WinProbability",
     "BaseballCount",
@@ -58,9 +59,10 @@ class PitchType(StrEnumMixin, str, Enum):
 
     Replaces a raw pitch-code string on a play so a play's decisive pitch is comparable and
     renderable without stringly-typed checks. The taxonomy is closed and slow-moving — a new
-    pitch like the sweeper (`ST`) is a rare addition — so an enum is the right shape. The enum
-    value doubles as the short display code (`"FF"`, `"SL"`); :attr:`label` is the long name.
-    Coerce a raw code with :func:`omni.core.enum.try_coerce_enum` (None on an unknown code).
+    pitch like the sweeper (`ST`) is a rare addition — so an enum is the right shape. The value
+    is the raw StatsAPI code; :attr:`short` is the board's 4-char display abbreviation (the
+    sweeper shows ``SWPR``, never the raw ``ST``) and :attr:`label` the long name. Coerce a raw
+    code with :func:`omni.core.enum.try_coerce_enum` (None on an unknown code).
     """
 
     AUTOMATIC_BALL = "AB"
@@ -93,6 +95,17 @@ class PitchType(StrEnumMixin, str, Enum):
         """The long human name (e.g. ``Four-Seam Fastball``) for a larger panel or a log."""
         return _PITCH_LABELS[self]
 
+    @property
+    def short(self) -> str:
+        """The board's compact 4-char display abbreviation (e.g. ``4SFB``, ``SWPR``).
+
+        Cribbed from the legacy board's hand-tuned ``PITCH_SHORT`` table, keyed by *pitch*
+        (not raw code) so the sweeper renders ``SWPR`` though its StatsAPI code is ``ST``.
+        Every abbreviation fits the four-cell pitch slot; the enum is closed, so the lookup
+        is total.
+        """
+        return _PITCH_SHORT[self]
+
 
 _PITCH_LABELS: dict[PitchType, str] = {
     PitchType.AUTOMATIC_BALL: "Automatic Ball",
@@ -120,6 +133,62 @@ _PITCH_LABELS: dict[PitchType, str] = {
     PitchType.SLURVE: "Slurve",
     PitchType.UNKNOWN: "Unknown",
 }
+
+
+# The board's four-cell pitch abbreviations, cribbed verbatim from the legacy fork's hand-tuned
+# `PITCH_SHORT` and keyed by typed pitch — so the sweeper shows `SWPR` though its StatsAPI code is
+# `ST` (legacy keyed it `SW`), sidestepping the code mismatch. Every value fits four cells.
+_PITCH_SHORT: dict[PitchType, str] = {
+    PitchType.AUTOMATIC_BALL: "AB",
+    PitchType.AUTOMATIC_STRIKE: "AK",
+    PitchType.CHANGEUP: "CHGP",
+    PitchType.CURVEBALL: "CURV",
+    PitchType.SLOW_CURVE: "SCRV",
+    PitchType.EEPHUS: "EPHS",
+    PitchType.CUTTER: "CUTR",
+    PitchType.FASTBALL: "FB",
+    PitchType.FOUR_SEAM_FASTBALL: "4SFB",
+    PitchType.FORKBALL: "FORK",
+    PitchType.SPLITTER: "SPLT",
+    PitchType.TWO_SEAM_FASTBALL: "2SFB",
+    PitchType.GYROBALL: "GYRO",
+    PitchType.INTENTIONAL_BALL: "INTB",
+    PitchType.KNUCKLE_CURVE: "KCRV",
+    PitchType.KNUCKLEBALL: "KNUK",
+    PitchType.NO_PITCH: "NO P",
+    PitchType.PITCHOUT: "POUT",
+    PitchType.SCREWBALL: "SCRW",
+    PitchType.SINKER: "SNKR",
+    PitchType.SLIDER: "SLDR",
+    PitchType.SWEEPER: "SWPR",
+    PitchType.SLURVE: "SLRV",
+    PitchType.UNKNOWN: "UKWN",
+}
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class PitchSnapshot:
+    """The current at-bat's most recent pitch: how hard it came, and what it was.
+
+    `velocity_mph` is the release speed rounded to whole mph (the feed's ``startSpeed``);
+    `pitch_type` is the typed pitch. :attr:`token` is the board's compact form — the speed
+    then the 4-char abbreviation, ``"84 SWPR"`` — never the raw StatsAPI code. The *absence*
+    of this object means no pitch has been tracked this at-bat (between batters, or a feed
+    without pitch detail), not a zero-velocity placeholder; so a tracked pitch is always a
+    real one, with a positive speed.
+    """
+
+    velocity_mph: int
+    pitch_type: PitchType
+
+    def __post_init__(self) -> None:
+        if self.velocity_mph <= 0:
+            raise ValueError("a tracked pitch has a positive velocity")
+
+    @property
+    def token(self) -> str:
+        """The board token: rounded speed, a space, then the 4-char pitch abbreviation."""
+        return f"{self.velocity_mph} {self.pitch_type.short}"
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -337,6 +406,10 @@ class BaseballGameState:
     # does not name one (between innings, or a payload without the boxscore detail).
     batter: BatterGameLine | None = None
     pitcher: PitcherGameLine | None = None
+    # The current at-bat's most recent pitch (velocity + type); None between batters or when the
+    # feed carries no pitch detail. Part of the observed snapshot, so it lags in lockstep with the
+    # score — no separate delay-safing needed (unlike the freshly fetched win probability).
+    last_pitch: PitchSnapshot | None = None
 
     def __post_init__(self) -> None:
         if self.away_score < 0 or self.home_score < 0:

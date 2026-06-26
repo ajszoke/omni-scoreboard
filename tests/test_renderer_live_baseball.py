@@ -36,6 +36,8 @@ from omni.domain.baseball import (
     BatterGameLine,
     InningPhase,
     PitcherGameLine,
+    PitchSnapshot,
+    PitchType,
     TeamLinescore,
     WinProbability,
 )
@@ -97,6 +99,7 @@ def make_card(
     win_probability: WinProbability | None = None,
     batter: BatterGameLine | None = BatterGameLine(name="Betts", at_bats=4, hits=2, rbi=1, order=3),
     pitcher: PitcherGameLine | None = PitcherGameLine(name="Kershaw", innings_pitched="6.1", pitches=95, strikeouts=7),
+    last_pitch: PitchSnapshot | None = PitchSnapshot(velocity_mph=84, pitch_type=PitchType.SWEEPER),
 ) -> ScoreboardCard[LiveBaseballCardPayload]:
     payload = LiveBaseballCardPayload(
         away_line=TeamLinescore(runs=away_score, hits=away_hits, errors=away_errors),
@@ -108,6 +111,7 @@ def make_card(
         win_probability=win_probability,
         batter=batter,
         pitcher=pitcher,
+        last_pitch=last_pitch,
     )
     return ScoreboardCard(
         id=CardId("g1:live"),
@@ -177,6 +181,7 @@ def test_draw_op_quad_128x64() -> None:
     assert {(64, 2, "▲7"), (64, 28, "2-1")} <= texts  # inning (filled triangle) + count, big font
     assert {(2, 41, "P: Kershaw"), (65, 44, f"6.1IP{THIN}7K{THIN}95P")} <= texts  # strip: thin-spaced statline
     assert {(2, 52, "3. Betts"), (53, 55, f"2-4{THIN}RBI")} <= texts  # batter strip line: AB + a lone RBI flag
+    assert (98, 55, "84 SWPR") in texts  # live pitch token, right-aligned on the batter row (sweeper -> SWPR)
     # 1st base is occupied -> a filled white diamond spanning its centre (108, 20)
     assert any(o.op == "fill_rect" and o.color == WHITE and o.y == 20 and o.x <= 108 <= o.x + o.w for o in canvas.ops)
 
@@ -193,6 +198,14 @@ def test_draw_op_quad_128x64() -> None:
 def test_batter_line_cribs_the_legacy_order_and_singular_convention(home_runs: int, rbi: int, expected: str) -> None:
     batter = BatterGameLine(name="Slugger", at_bats=4, hits=2, home_runs=home_runs, rbi=rbi, order=3)
     assert LiveBaseballRenderer._batter_line(batter) == expected
+
+
+def test_quad_strip_shows_the_pitch_token_only_with_a_snapshot() -> None:
+    card = make_card(last_pitch=PitchSnapshot(velocity_mph=88, pitch_type=PitchType.SINKER))
+    shown = _render(card, PanelProfile.QUAD_128X64)
+    assert any(t.text == "88 SNKR" for t in shown.texts())  # velocity + the 4-char abbreviation
+    hidden = _render(make_card(last_pitch=None), PanelProfile.QUAD_128X64)
+    assert not any("SNKR" in t.text for t in hidden.texts())  # no snapshot -> no token
 
 
 def test_draw_op_stack_64x64_keeps_full_status() -> None:

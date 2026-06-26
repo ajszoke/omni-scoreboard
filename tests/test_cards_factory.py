@@ -16,6 +16,8 @@ from omni.domain.baseball import (
     BatterGameLine,
     InningPhase,
     PitcherGameLine,
+    PitchSnapshot,
+    PitchType,
 )
 from omni.domain.contest import TeamGame
 from omni.providers.mlb_teams import MlbTeamRegistry
@@ -51,6 +53,7 @@ def _state() -> BaseballGameState:
         bases=BaseballBaseState(first=True, third=True),
         batter=BatterGameLine(name="Betts", at_bats=4, hits=2),
         pitcher=PitcherGameLine(name="Webb", innings_pitched="6.1", pitches=95, strikeouts=7),
+        last_pitch=PitchSnapshot(velocity_mph=88, pitch_type=PitchType.SWEEPER),
     )
 
 
@@ -69,6 +72,7 @@ def test_live_baseball_card_carries_state_and_metadata() -> None:
     assert (p.home_line.hits, p.home_line.errors) == (9, 0)
     assert p.batter is not None and p.batter.name == "Betts"  # current at-bat flows to the payload
     assert p.pitcher is not None and p.pitcher.name == "Webb"  # current pitcher flows too
+    assert p.last_pitch is not None and p.last_pitch.token == "88 SWPR"  # the live pitch flows too
     assert p.inning == 7 and p.phase is InningPhase.TOP
     assert (p.count.balls, p.count.strikes, p.count.outs) == (2, 1, 2)
     assert p.bases.first and p.bases.third and not p.bases.second

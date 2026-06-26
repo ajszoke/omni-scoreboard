@@ -16,6 +16,7 @@ from omni.domain.baseball import (
     InningPhase,
     PitcherGameLine,
     PitchingDecisions,
+    PitchSnapshot,
     TeamLinescore,
     WinProbability,
 )
@@ -56,6 +57,7 @@ class LiveBaseballCardPayload:
     win_probability: WinProbability | None = None  # drives the per-team meter; None hides it
     batter: BatterGameLine | None = None  # current at-bat; None hides the batter line
     pitcher: PitcherGameLine | None = None  # current pitcher; None hides the pitcher line
+    last_pitch: PitchSnapshot | None = None  # the at-bat's most recent pitch (velo + type); None hides the token
 
     def __post_init__(self) -> None:
         # Run/hit/error non-negativity is enforced by TeamLinescore itself.
