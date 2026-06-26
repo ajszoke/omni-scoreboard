@@ -32,8 +32,8 @@ from omni.domain.logos import LogoVariant
 from omni.domain.teams import Team
 from omni.renderers.canvas import Canvas
 from omni.renderers.context import RenderContext
-from omni.renderers.logo_clash import resolve_logo_variants
 from omni.renderers.team_row import draw_matchup_marks
+from omni.renderers.visual_treatment import MarkTreatment, resolve_matchup_treatment
 from omni.renderers.win_meter import draw_win_meter
 from omni.renderers.text import draw_centered, draw_right_aligned
 
@@ -102,13 +102,21 @@ class LiveBaseballRenderer:
         # Top 40px: two team rows (logo + inline R/H/E) on the left, the game-state module on the
         # right. Bottom 24px: the pitcher/batter strip. The logo identifies the team, so the
         # abbreviation is dropped whenever a tile resolves (kept only as the colour-bar fallback).
-        variants = resolve_logo_variants(game.away, game.home)
-        away_logo = self._mark(canvas, context, game.away, variants.away, top=0)
-        home_logo = self._mark(canvas, context, game.home, variants.home, top=20)
+        treatment = resolve_matchup_treatment(
+            game.away,
+            game.home,
+            profile=PanelProfile.QUAD_128X64,
+            logos=context.logos,
+            policy=context.contrast,
+            away_top=0,
+            home_top=20,
+        )
+        self._draw_mark(canvas, context, game.away, treatment.away)
+        self._draw_mark(canvas, context, game.home, treatment.home)
         if payload.win_probability is not None:
-            draw_win_meter(canvas, context, game.away, game.home, payload.win_probability, away_top=0, home_top=20)
-        self._line_score(canvas, game.away, payload.away_line, has_logo=away_logo, y=5)
-        self._line_score(canvas, game.home, payload.home_line, has_logo=home_logo, y=25)
+            draw_win_meter(canvas, treatment, payload.win_probability)
+        self._line_score(canvas, game.away, payload.away_line, has_logo=treatment.away.is_tile, y=5)
+        self._line_score(canvas, game.home, payload.home_line, has_logo=treatment.home.is_tile, y=25)
         if payload.phase.is_break:  # between halves: no at-bat, no bases — just the inning
             label = _phase_label(payload.phase, payload.inning, up=_TRIANGLE_UP, down=_TRIANGLE_DOWN)
             draw_centered(canvas, 60, 128, 14, label, _YELLOW, _SCORE_FONT)
@@ -116,15 +124,20 @@ class LiveBaseballRenderer:
         self._state_module(canvas, payload)
         self._batter_pitcher_strip(canvas, payload)
 
-    def _mark(self, canvas: Canvas, context: RenderContext, team: Team, variant: LogoVariant, *, top: int) -> bool:
-        """Draw the team's 20px logo tile at ``(2, top)``, or a colour bar; return whether a tile drew."""
-        asset = team.logo_alt if variant is LogoVariant.ALT and team.logo_alt is not None else team.logo
-        logo = context.logos.resolve(asset) if context.logos is not None else None
+    def _draw_mark(self, canvas: Canvas, context: RenderContext, team: Team, side: MarkTreatment) -> None:
+        """Draw the team's mark from its resolved treatment: the logo tile, or the colour-bar fallback.
+
+        The bounds come from the treatment — the same source the win meter derives from — so the tile
+        and its gauge are guaranteed to agree, never the 6px drift a separate meter geometry once had.
+        """
+        logo = None
+        if side.is_tile and context.logos is not None:
+            asset = team.logo_alt if side.variant is LogoVariant.ALT and team.logo_alt is not None else team.logo
+            logo = context.logos.resolve(asset)
         if logo is not None:
-            canvas.draw_image(2, top, logo)
-            return True
-        canvas.fill_rect(0, top, 4, 20, team.primary_color)
-        return False
+            canvas.draw_image(side.mark.x, side.mark.y, logo)
+        else:
+            canvas.fill_rect(side.mark.x, side.mark.y, side.mark.width, side.mark.height, team.primary_color)
 
     def _line_score(self, canvas: Canvas, team: Team, line: TeamLinescore, *, has_logo: bool, y: int) -> None:
         """Draw a team's ``R H E`` as three equal numbers; prepend the abbr only without a logo."""
@@ -196,7 +209,16 @@ class LiveBaseballRenderer:
         # 64x64: the full layout compressed — two team rows up top (logo or bar), status + bases below.
         away_x, home_x = draw_matchup_marks(canvas, context, game.away, game.home, away_top=0, home_top=22)
         if payload.win_probability is not None:
-            draw_win_meter(canvas, context, game.away, game.home, payload.win_probability, away_top=0, home_top=22)
+            treatment = resolve_matchup_treatment(
+                game.away,
+                game.home,
+                profile=PanelProfile.STACK_64X64,
+                logos=context.logos,
+                policy=context.contrast,
+                away_top=0,
+                home_top=22,
+            )
+            draw_win_meter(canvas, treatment, payload.win_probability)
         canvas.text(away_x, 6, game.away.abbreviation, _WHITE, font=_SCORE_FONT)
         canvas.text(home_x, 28, game.home.abbreviation, _WHITE, font=_SCORE_FONT)
         draw_right_aligned(canvas, 62, 6, str(payload.away_line.runs), _WHITE, _SCORE_FONT)
@@ -219,7 +241,16 @@ class LiveBaseballRenderer:
         canvas.fill_rect(0, 0, 2, 16, game.away.primary_color)
         canvas.fill_rect(0, 16, 2, 16, game.home.primary_color)
         if payload.win_probability is not None:
-            draw_win_meter(canvas, context, game.away, game.home, payload.win_probability, away_top=0, home_top=16)
+            treatment = resolve_matchup_treatment(
+                game.away,
+                game.home,
+                profile=PanelProfile.SINGLE_64X32,
+                logos=context.logos,
+                policy=context.contrast,
+                away_top=0,
+                home_top=16,
+            )
+            draw_win_meter(canvas, treatment, payload.win_probability)
         canvas.text(4, 5, game.away.abbreviation, _WHITE, font=_LABEL_FONT)
         canvas.text(4, 21, game.home.abbreviation, _WHITE, font=_LABEL_FONT)
         draw_right_aligned(canvas, 42, 3, str(payload.away_line.runs), _WHITE, _SCORE_FONT)

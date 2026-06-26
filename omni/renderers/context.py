@@ -14,6 +14,10 @@ the displayed value advances every tick without the card being rebuilt.
 `logos` is the optional tile store. When present a renderer blits the team logo;
 when absent (a unit test that doesn't care, a profile too small to fit one) it falls
 back to a plain colour bar — so adding it broke no existing call site.
+
+`contrast` is the hardware-tunable legibility policy (the WCAG floor a dim brand colour
+is value-lifted to, and the clash distance two tiles must keep). It defaults to the
+pre-policy behaviour, so it too is a transparent addition; a device tunes it per sink.
 """
 
 from __future__ import annotations
@@ -23,6 +27,7 @@ from datetime import datetime
 
 from omni.core.enum import PanelProfile
 from omni.renderers.image import LogoStore
+from omni.renderers.visual_treatment import DEFAULT_CONTRAST_POLICY, VisualContrastPolicy
 
 __all__ = ["RenderContext"]
 
@@ -34,6 +39,7 @@ class RenderContext:
     profile: PanelProfile
     now: datetime  # render time; renderers derive live values (e.g. countdowns) from this
     logos: LogoStore | None = None  # ambient tile store; None -> renderers fall back to a colour bar
+    contrast: VisualContrastPolicy = DEFAULT_CONTRAST_POLICY  # hw-tunable legibility floor + clash threshold
 
     def __post_init__(self) -> None:
         if self.now.tzinfo is None:
