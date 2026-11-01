@@ -13,15 +13,21 @@ from omni.core.enum import GameStatus, League
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.domain.baseball import (
     BatterGameLine,
+    DueUp,
     InningPhase,
     PitcherGameLine,
     PitchingDecisions,
     PitchSnapshot,
     PitchType,
+    PregameDetails,
+    PregameSide,
+    StartingPitcher,
+    WinLossRecord,
 )
 from omni.domain.contest import TeamGame
 from omni.providers.base import ProviderError
 from omni.providers.mlb_statsapi import (
+    _GAME_FIELDS,
     MlbStatsApiProvider,
     _batting_walks_hbp,
     _boxscore_player,
@@ -223,6 +229,166 @@ def test_fetch_game_failure_becomes_provider_error() -> None:
     with pytest.raises(ProviderError) as exc_info:
         provider.fetch_live_feed(_game(), now=NOW)
     assert isinstance(exc_info.value.__cause__, RuntimeError)
+
+
+def _break_feed(offense: dict[str, Any], *, inning_state: str = "Middle") -> dict[str, Any]:
+    feed = _feed()
+    feed["liveData"]["linescore"]["inningState"] = inning_state
+    feed["liveData"]["linescore"]["offense"] = offense
+    feed["liveData"]["boxscore"]["teams"]["home"]["players"].update(
+        {
+            "ID1": {"battingOrder": "100", "stats": {"batting": {"atBats": 3, "hits": 2, "homeRuns": 1, "rbi": 2}}},
+            "ID2": {"battingOrder": "200", "stats": {"batting": {"atBats": 3, "hits": 1}}},
+            "ID3": {"battingOrder": "300", "stats": {"batting": {"atBats": 3, "hits": 0}}},
+        }
+    )
+    return feed
+
+
+DUE_UP_OFFENSE = {
+    "batter": {"id": 1, "fullName": "Shohei Ohtani"},
+    "onDeck": {"id": 2, "fullName": "Mookie Betts"},
+    "inHole": {"id": 3, "fullName": "Ken Griffey Jr."},
+}
+
+
+def test_due_up_reads_the_next_three_batters_on_a_break() -> None:
+    due_up = _parse_game_state(_break_feed(DUE_UP_OFFENSE)).due_up
+    assert due_up == DueUp(
+        batters=(
+            BatterGameLine(name="Ohtani", order=1, at_bats=3, hits=2, rbi=2, home_runs=1),
+            BatterGameLine(name="Betts", order=2, at_bats=3, hits=1),
+            BatterGameLine(name="Griffey", order=3, at_bats=3, hits=0),
+        )
+    )
+    assert _parse_game_state(_break_feed(DUE_UP_OFFENSE, inning_state="End")).due_up is not None
+
+
+def test_due_up_is_none_during_a_live_half() -> None:
+    assert _parse_game_state(_break_feed(DUE_UP_OFFENSE, inning_state="Top")).due_up is None
+
+
+def test_due_up_keeps_the_batters_the_feed_does_name() -> None:
+    partial = {"batter": {"id": 1, "fullName": "Shohei Ohtani"}, "onDeck": {"id": 2}, "inHole": None}
+    due_up = _parse_game_state(_break_feed(partial)).due_up
+    assert due_up is not None and [b.name for b in due_up.batters] == ["Ohtani"]
+
+
+def test_a_due_up_batter_off_every_roster_is_left_out() -> None:
+    offense = {"batter": {"id": 99999, "fullName": "No Roster"}, "onDeck": {"id": 2, "fullName": "Mookie Betts"}}
+    due_up = _parse_game_state(_break_feed(offense)).due_up
+    assert due_up is not None and [b.name for b in due_up.batters] == ["Betts"]
+
+
+def test_due_up_is_none_when_the_feed_names_no_one() -> None:
+    assert _parse_game_state(_break_feed({})).due_up is None
+
+
+def test_the_fields_whitelist_keeps_what_due_up_reads() -> None:
+    # StatsAPI drops any key the whitelist omits, silently: a fixture would still pass.
+    assert {"onDeck", "inHole", "fullName"} <= set(_GAME_FIELDS.split(","))
+
+
+def _pregame_feed() -> dict[str, Any]:
+    return {
+        "gameData": {
+            "teams": {"away": {"record": {"wins": 38, "losses": 44}}, "home": {"record": {"wins": 51, "losses": 31}}},
+            "probablePitchers": {
+                "away": {"id": 21, "fullName": "German Marquez"},
+                "home": {"id": 22, "fullName": "Clayton Kershaw"},
+            },
+        },
+        "liveData": {
+            "boxscore": {
+                "teams": {
+                    "away": {
+                        "players": {"ID21": {"seasonStats": {"pitching": {"wins": 5, "losses": 9, "era": "4.68"}}}}
+                    },
+                    "home": {
+                        "players": {"ID22": {"seasonStats": {"pitching": {"wins": 12, "losses": 3, "era": "2.87"}}}}
+                    },
+                }
+            }
+        },
+    }
+
+
+def test_pregame_details_read_the_records_and_probable_starters() -> None:
+    provider = MlbStatsApiProvider(MlbTeamRegistry({}), fetch_pregame=lambda _pk: _pregame_feed())
+    details = provider.fetch_pregame_details(_game())
+    assert details.away == PregameSide(
+        record=WinLossRecord(wins=38, losses=44),
+        starter=StartingPitcher(name="Marquez", record=WinLossRecord(wins=5, losses=9), era="4.68"),
+    )
+    assert details.home.starter is not None and details.home.starter.name == "Kershaw"
+
+
+def test_a_starter_not_yet_announced_or_not_yet_rostered_comes_back_partial() -> None:
+    feed = _pregame_feed()
+    feed["gameData"]["probablePitchers"] = {"away": {"id": 99, "fullName": "New Guy"}}
+    details = MlbStatsApiProvider(MlbTeamRegistry({}), fetch_pregame=lambda _pk: feed).fetch_pregame_details(_game())
+    assert details.away.starter == StartingPitcher(name="Guy")  # named, with no season line to show
+    assert details.home.starter is None and details.home.record == WinLossRecord(wins=51, losses=31)
+
+
+def test_a_bare_pregame_feed_comes_back_blank() -> None:
+    details = MlbStatsApiProvider(MlbTeamRegistry({}), fetch_pregame=lambda _pk: {}).fetch_pregame_details(_game())
+    assert details == PregameDetails()
+
+
+def test_a_failed_pregame_fetch_is_a_provider_error() -> None:
+    def down(_pk: Any) -> dict[str, Any]:
+        raise OSError("connection refused")
+
+    with pytest.raises(ProviderError, match="pregame fetch failed"):
+        MlbStatsApiProvider(MlbTeamRegistry({}), fetch_pregame=down).fetch_pregame_details(_game())
+
+
+def _decision_feed() -> dict[str, Any]:
+    feed = _feed()
+    feed["liveData"]["decisions"] = {
+        "winner": {"id": 11, "fullName": "Clayton Kershaw"},
+        "loser": {"id": 12, "fullName": "German Marquez"},
+        "save": {"id": 13, "fullName": "Tanner Scott"},
+    }
+    feed["liveData"]["boxscore"]["teams"]["home"]["players"].update(
+        {
+            "ID11": {"seasonStats": {"pitching": {"wins": 12, "losses": 3}}},
+            "ID13": {"seasonStats": {"pitching": {"saves": 27}}},
+        }
+    )
+    feed["liveData"]["boxscore"]["teams"]["away"]["players"]["ID12"] = {
+        "seasonStats": {"pitching": {"wins": 5, "losses": 9}}
+    }
+    return feed
+
+
+def test_decisions_carry_the_season_totals_from_the_boxscore() -> None:
+    assert _parse_decisions(_decision_feed()) == PitchingDecisions(
+        winner="Clayton Kershaw",
+        loser="German Marquez",
+        save="Tanner Scott",
+        winner_record=WinLossRecord(wins=12, losses=3),
+        loser_record=WinLossRecord(wins=5, losses=9),
+        saves=27,
+    )
+
+
+def test_decisions_without_season_totals_still_name_the_pitchers() -> None:
+    decisions = {"winner": {"fullName": "W"}, "loser": {"id": 404, "fullName": "L"}}
+    parsed = _parse_decisions({"liveData": {"decisions": decisions}})
+    assert parsed == PitchingDecisions(winner="W", loser="L")
+
+
+def test_a_half_a_record_is_no_record() -> None:
+    feed = _decision_feed()
+    feed["liveData"]["boxscore"]["teams"]["home"]["players"]["ID11"] = {"seasonStats": {"pitching": {"wins": 12}}}
+    parsed = _parse_decisions(feed)
+    assert parsed is not None and parsed.winner_record is None
+
+
+def test_the_fields_whitelist_keeps_what_the_season_totals_read() -> None:
+    assert {"seasonStats", "wins", "losses", "saves"} <= set(_GAME_FIELDS.split(","))
 
 
 def test_empty_bases_when_no_runners() -> None:

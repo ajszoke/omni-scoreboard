@@ -37,18 +37,22 @@ def test_distinct_bases_both_stay_on_base() -> None:
     assert resolve_logo_variants(REG.resolve(115), REG.resolve(119)) == BOTH_BASE
 
 
-def test_clashing_bases_flip_exactly_the_home_side() -> None:
-    # NYY and DET share an identical cap navy; the home side flips to its alt (orange),
-    # deterministically (it separates the two marks more than the away alt would).
+def test_clashing_bases_switch_the_away_side_and_leave_home_on_its_primary() -> None:
+    # NYY and DET share an identical cap navy: the visiting Yankees switch, the Tigers stay in navy.
     assert resolve_logo_variants(REG.resolve(147), REG.resolve(116)) == MatchupLogoVariants(
-        LogoVariant.BASE, LogoVariant.ALT
+        LogoVariant.ALT, LogoVariant.BASE
+    )
+    # Reversed, it is the visiting Tigers who switch — the home side never does.
+    assert resolve_logo_variants(REG.resolve(116), REG.resolve(147)) == MatchupLogoVariants(
+        LogoVariant.ALT, LogoVariant.BASE
     )
 
 
-def test_identical_black_backgrounds_flip_one_side() -> None:
-    # COL and PIT both render on pure black — indistinguishable until one shows its alt.
-    variants = resolve_logo_variants(REG.resolve(115), REG.resolve(134))
-    assert (variants.away is LogoVariant.ALT) ^ (variants.home is LogoVariant.ALT)  # exactly one flipped
+def test_identical_black_backgrounds_switch_the_away_side() -> None:
+    # COL and PIT both render on pure black — indistinguishable until the visitor shows its alt.
+    assert resolve_logo_variants(REG.resolve(115), REG.resolve(134)) == MatchupLogoVariants(
+        LogoVariant.ALT, LogoVariant.BASE
+    )
 
 
 def test_missing_backgrounds_leave_both_on_base() -> None:
@@ -59,28 +63,18 @@ def test_missing_backgrounds_leave_both_on_base() -> None:
     assert resolve_logo_variants(a, b) == BOTH_BASE
 
 
-def test_a_tie_breaks_to_the_home_side() -> None:
-    # Identical bases, identical alts: both flips separate the marks equally, so the
-    # tie-break (favour the home side) decides — and it must be deterministic.
-    black, white = RGBColor(0, 0, 0), RGBColor(255, 255, 255)
-    a = _stub("aaa", black, white)
-    b = _stub("bbb", black, white)
-    assert resolve_logo_variants(a, b) == MatchupLogoVariants(LogoVariant.BASE, LogoVariant.ALT)
-
-
-def test_no_flip_when_neither_alt_improves_separation() -> None:
-    # Bases clash (delta_e ~2.4) but each alt sits on its own base colour, so flipping
-    # would not separate the marks — the resolver leaves both on base rather than swap.
-    a = _stub("aaa", RGBColor(20, 20, 20), RGBColor(20, 20, 20))
-    b = _stub("bbb", RGBColor(25, 25, 25), RGBColor(25, 25, 25))
+def test_an_away_side_with_no_alt_leaves_both_on_base_rather_than_switch_home() -> None:
+    a = _stub("aaa", RGBColor(0, 0, 0), None, has_alt=False)
+    b = _stub("bbb", RGBColor(0, 0, 0), RGBColor(255, 255, 255))
     assert resolve_logo_variants(a, b) == BOTH_BASE
 
 
-def test_flips_the_side_whose_alt_separates_more() -> None:
-    # Bases clash; only the away alt is far from the opponent base, so the away side flips.
-    a = _stub("aaa", RGBColor(0, 0, 0), RGBColor(255, 0, 0))  # alt red: far from home base black
-    b = _stub("bbb", RGBColor(0, 0, 0), RGBColor(8, 8, 8))  # alt near-black: no help if home flips
-    assert resolve_logo_variants(a, b) == MatchupLogoVariants(LogoVariant.ALT, LogoVariant.BASE)
+def test_no_switch_when_the_away_alt_would_not_separate_the_marks() -> None:
+    # Bases clash (delta_e ~2.4) but the away alt sits on its own base color, so switching would not
+    # help; the home alt is far away, but home keeps its primary regardless.
+    a = _stub("aaa", RGBColor(20, 20, 20), RGBColor(20, 20, 20))
+    b = _stub("bbb", RGBColor(25, 25, 25), RGBColor(255, 0, 0))
+    assert resolve_logo_variants(a, b) == BOTH_BASE
 
 
 def test_threshold_is_honoured() -> None:

@@ -82,7 +82,7 @@ Do not silently cram 128x64 content into 64x32.
 
 | Feature | 64x32 | 64x64 | 128x64 |
 |---|---|---|---|
-| Live MLB at-bat | Identity, runs, inning/status, slim meter | Identity, runs, inning/status, count/outs/bases, slim meter | Full live dashboard: R/H/E, bases, count/outs, pitcher/batter, pitch snapshot |
+| Live MLB at-bat | Identity, runs, slim meter, ABS lane, inning, bases, count/outs — all at glance scale | The same elements, sized up: headline run total, larger state module | Full live dashboard: R/H/E, bases, count/outs, pitcher/batter, pitch snapshot, ABS lane; Due Up on a break |
 | Pregame | Matchup, start time, probable pitcher initials | Add probable pitcher names and odds/probability | Full pregame card with odds, weather, probable pitchers |
 | Probability bar | Slim high-contrast meter; no numeral by default | Slim/standard meter; optional numeral later | Full meter/module; trend later |
 | No-hitter/perfect game | Badge plus recurring full-screen alert | Sticky ribbon plus pitcher line | Dedicated panel region/sticky alert |
@@ -95,6 +95,15 @@ Do not silently cram 128x64 content into 64x32.
 _The live-MLB / probability / last-play rows were updated per the **round-3 D1 ruling** (2026-06-26): the
 small profiles are deliberate glance surfaces. Every card still gets an explicit, tested **treatment** on
 each profile, but **equal support ≠ equal information density** — the dense dashboard is the quad's role._
+
+_**D1, sharpened (2026-08-16).** "Fewer elements" is not the goal, and a small profile is not finished
+just because it is sparse: **scattered, tiny elements marooned in dead space are their own antipattern**,
+as bad as cramming. A profile's layout is right when it carries **every element it can take without
+giving up margins or legibility**, and those elements are then **distributed cohesively** — filling the
+board rather than dotting it. That is why the small live cards regained the win meter, the ABS lane, the
+bases and the count/outs: each one earned its place at that board's scale, and the layout was recomposed
+around them (the single stacks its state column; the stack centers a headline run total and runs the
+quad's state module in three columns) rather than tucked into the gaps between what was already there._
 
 ## Phase plan
 
@@ -383,4 +392,4 @@ NCAA has high data complexity: many teams, rankings, bowls, tournaments, neutral
 - Do we target Python 3.10+ to match upstream runtime checks or push toward a newer typed baseline once hardware images are confirmed?
 - Do we add Pydantic for config/API boundary validation or keep runtime dependencies lighter with dataclasses plus explicit parsing?
 - What exact 64x64 physical panel arrangement is preferred: two 64x32 panels stacked vertically, or native 64x64 panel? The logical profile should support both where matrix flags allow.
-- Should odds/probability be disabled by default to avoid API keys, or enabled where free endpoints suffice?
+- ~~Should odds/probability be disabled by default to avoid API keys, or enabled where free endpoints suffice?~~ Enabled where free endpoints suffice (2026-11-01); `--no-odds` leaves sportsbook odds off the pregame card. See `SOURCES.md`.

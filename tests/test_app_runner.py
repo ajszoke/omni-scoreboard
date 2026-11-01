@@ -98,7 +98,7 @@ def test_build_loop_threads_the_win_probability_fetcher() -> None:
     sink = RecordingDisplaySink(PanelProfile.QUAD_128X64)
     calls: list[str] = []
 
-    def fetch_wp(game: TeamGame) -> WinProbability | None:
+    def fetch_wp(game: TeamGame, _now: datetime) -> WinProbability | None:
         calls.append(game.id.raw)
         return WinProbability(home=70.0, away=30.0)
 

@@ -17,11 +17,18 @@ reports them in `TickResult.render_error` and keeps running, never crashing.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, tzinfo
 
 from omni.app.contest_store import ContestStore, Reconciliation
 from omni.app.display import DisplaySink
-from omni.app.pipeline import FeedFetcher, LiveBaseballPipeline, PipelineResult, WinProbFetcher
+from omni.app.pipeline import (
+    FeedFetcher,
+    GameLinesFetcher,
+    LiveBaseballPipeline,
+    PipelineResult,
+    PregameDetailsFetcher,
+    WinProbFetcher,
+)
 from omni.app.supervisor import ProviderStatus, ProviderSupervisor
 from omni.cards.base import CardId
 from omni.domain.contest import TeamGame
@@ -58,7 +65,11 @@ class AppLoop:
         sink: DisplaySink,
         fetch_feed: FeedFetcher,
         fetch_win_probability: WinProbFetcher | None = None,
+        fetch_fallback_win_probability: WinProbFetcher | None = None,
+        fetch_pregame_details: PregameDetailsFetcher | None = None,
+        fetch_game_lines: GameLinesFetcher | None = None,
         logos: LogoStore | None = None,
+        display_timezone: tzinfo | None = None,
     ) -> None:
         self._supervisor = supervisor
         self._store = store
@@ -68,7 +79,11 @@ class AppLoop:
         self._sink = sink
         self._fetch_feed = fetch_feed
         self._fetch_win_probability = fetch_win_probability  # optional per-game win-prob fetch; None -> no meter
+        self._fetch_fallback_win_probability = fetch_fallback_win_probability  # takes over when that goes quiet
+        self._fetch_pregame_details = fetch_pregame_details  # optional records + starters; None -> a plain pregame
+        self._fetch_game_lines = fetch_game_lines  # optional pregame odds; None -> no odds
         self._logos = logos  # ambient tile store handed to every RenderContext; None -> colour-bar fallback
+        self._display_timezone = display_timezone  # the zone board clocks read in; None -> the render clock's
 
     def run_once(self, now: datetime) -> TickResult:
         """One full pass of the appliance as of ``now``."""
@@ -81,6 +96,9 @@ class AppLoop:
             now=now,
             fetch_feed=self._fetch_feed,
             fetch_win_probability=self._fetch_win_probability,
+            fetch_fallback_win_probability=self._fetch_fallback_win_probability,
+            fetch_pregame_details=self._fetch_pregame_details,
+            fetch_game_lines=self._fetch_game_lines,
         )
 
         card = self._queue.next_card(now, self._sink.profile)
@@ -89,7 +107,9 @@ class AppLoop:
         if card is not None:
             try:
                 frame = self._sink.new_frame()
-                context = RenderContext(profile=self._sink.profile, now=now, logos=self._logos)
+                context = RenderContext(
+                    profile=self._sink.profile, now=now, logos=self._logos, timezone=self._display_timezone
+                )
                 self._registry.render(card, context, frame)
                 self._sink.commit(frame)
                 shown = card.id

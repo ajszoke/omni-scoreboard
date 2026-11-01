@@ -37,3 +37,4 @@ class LogoAsset:
     key: str
     path: str
     preferred_background: RGBColor | None = None
+    meter_color: RGBColor | None = None  # what a win meter spends when this tile is freed, if not its background

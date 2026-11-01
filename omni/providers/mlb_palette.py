@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from omni.core.colors import RGBColor
 
-__all__ = ["LOGO_BASE_COLOR", "LOGO_ALT_COLOR"]
+__all__ = ["LOGO_BASE_COLOR", "LOGO_ALT_COLOR", "FREED_BASE_METER_COLOR"]
 
 # StatsAPI team id -> the base tile background (the team's primary colour).
 LOGO_BASE_COLOR: dict[int, RGBColor] = {
@@ -55,6 +55,14 @@ LOGO_BASE_COLOR: dict[int, RGBColor] = {
     146: RGBColor(0, 0, 0),  # MIA
     147: RGBColor(12, 35, 64),  # NYY
     158: RGBColor(19, 41, 75),  # MIL
+}
+
+# StatsAPI team id -> the meter color when the club shows its alt, where its base won't do. This cap
+# navy lifts to a royal blue none of these clubs wear, so the meter goes white beside the alt instead.
+FREED_BASE_METER_COLOR: dict[int, RGBColor] = {
+    111: RGBColor(255, 255, 255),  # BOS
+    116: RGBColor(255, 255, 255),  # DET
+    147: RGBColor(255, 255, 255),  # NYY
 }
 
 # StatsAPI team id -> the alt tile background (a distinct second brand colour).

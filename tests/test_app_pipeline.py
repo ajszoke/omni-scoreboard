@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from omni.app.pipeline import LiveBaseballPipeline, PipelineResult
+from omni.cards.baseball import PregameCardPayload
 from omni.cards.factory import CardFactory
 from omni.core.enum import DisplayPriority, GameStatus, League, PanelProfile, UpdateUrgency
 from omni.core.ids import LeagueScopedId, SourceRef
@@ -13,8 +14,13 @@ from omni.domain.baseball import (
     BaseballBaseState,
     BaseballCount,
     BaseballGameState,
+    BettingLine,
+    GameLines,
     InningPhase,
     PitchingDecisions,
+    PregameDetails,
+    PregameSide,
+    WinLossRecord,
     WinProbability,
 )
 from omni.domain.contest import TeamGame
@@ -132,7 +138,7 @@ class _WinProb:
         self.calls: list[str] = []
         self.fail: set[str] = set()
 
-    def __call__(self, game: TeamGame) -> WinProbability | None:
+    def __call__(self, game: TeamGame, now: datetime) -> WinProbability | None:
         self.calls.append(game.id.raw)
         if game.id.raw in self.fail:
             raise ProviderError("win-probability feed down")
@@ -249,9 +255,237 @@ def test_win_probability_buffer_is_released_when_the_game_leaves() -> None:
     wp = _WinProb()
     wp.value = WinProbability(home=70.0, away=30.0)
     pipe.refresh([_game("g1")], now=T, fetch_feed=fetch, fetch_win_probability=wp)
-    assert _id("g1") in pipe._win_prob_feeds  # a buffer exists while the game is live
+    assert _id("g1") in pipe._meter_tracks  # a buffer exists while the game is live
     pipe.refresh([], now=T + timedelta(seconds=1), fetch_feed=fetch, fetch_win_probability=wp)
-    assert _id("g1") not in pipe._win_prob_feeds  # gone with the game
+    assert _id("g1") not in pipe._meter_tracks  # gone with the game
+
+
+MARKET_READ = WinProbability(home=70.0, away=30.0)
+MODEL_READ = WinProbability(home=55.0, away=45.0)
+
+
+class _MeterRig:
+    """A live game with a market and a model behind its meter, stepped by seconds since `T`."""
+
+    def __init__(self, *, lag: int = 0) -> None:
+        self.pipe, self.queue = _setup(lag=lag)
+        self.fetch = _Fetch()
+        self.fetch.set("g1", _state(away=1, home=2))
+        self.market, self.model = _WinProb(), _WinProb()
+        self.warnings: tuple[str, ...] = ()
+
+    def meter_at(self, seconds: int) -> WinProbability | None:
+        now = T + timedelta(seconds=seconds)
+        result = self.pipe.refresh(
+            [_game("g1")],
+            now=now,
+            fetch_feed=self.fetch,
+            fetch_win_probability=self.market,
+            fetch_fallback_win_probability=self.model,
+        )
+        self.warnings = result.warnings
+        card = self.queue.next_card(now, QUAD)
+        if card is None:  # the live card itself is still inside the TV delay
+            return None
+        reading: WinProbability | None = card.payload.win_probability
+        return reading
+
+
+def test_the_market_leads_and_the_model_is_not_even_asked_while_it_answers() -> None:
+    rig = _MeterRig()
+    rig.market.value, rig.model.value = MARKET_READ, MODEL_READ
+    assert rig.meter_at(0) == MARKET_READ
+    assert rig.meter_at(30) == MARKET_READ
+    assert rig.model.calls == []
+
+
+def test_a_reading_holds_through_a_gap_then_expires_at_three_minutes_to_the_model() -> None:
+    rig = _MeterRig()
+    rig.market.value, rig.model.value = MARKET_READ, MODEL_READ
+    assert rig.meter_at(0) == MARKET_READ
+    rig.market.value = None  # the market goes quiet
+    assert rig.meter_at(60) == MARKET_READ
+    assert rig.meter_at(179) == MARKET_READ  # still inside the three minutes
+    assert rig.meter_at(180) == MODEL_READ  # expired: the model takes over
+
+
+def test_the_market_takes_back_over_as_soon_as_it_returns() -> None:
+    rig = _MeterRig()
+    rig.market.value, rig.model.value = MARKET_READ, MODEL_READ
+    rig.meter_at(0)
+    rig.market.value = None
+    assert rig.meter_at(180) == MODEL_READ
+    rig.market.value = WinProbability(home=80.0, away=20.0)
+    assert rig.meter_at(192) == WinProbability(home=80.0, away=20.0)
+
+
+def test_the_handover_stays_delay_safe_and_never_leaves_the_meter_blank() -> None:
+    # The model starts buffering when the market goes quiet, not when the reading expires, so it has
+    # already cleared the TV delay by then; and a reading newer than the lag never reaches the meter.
+    rig = _MeterRig(lag=30)
+    rig.market.value, rig.model.value = MARKET_READ, MODEL_READ
+    warmup = [rig.meter_at(seconds) for seconds in range(0, 108, 12)]
+    assert warmup[0] is None and warmup[-1] == MARKET_READ  # nothing shows until a reading clears the delay
+    assert rig.model.calls == []
+    rig.market.value = None
+    after = [rig.meter_at(seconds) for seconds in range(108, 420, 12)]
+    assert after[0] == MARKET_READ and after[-1] == MODEL_READ
+    assert None not in after  # the meter is never blank across the handover
+
+
+def test_a_game_the_market_never_prices_uses_the_model_after_the_delay() -> None:
+    rig = _MeterRig()
+    rig.model.value = MODEL_READ
+    assert rig.meter_at(0) == MODEL_READ
+
+
+def test_the_model_holds_through_its_own_gaps_too() -> None:
+    rig = _MeterRig()
+    rig.model.value = MODEL_READ
+    rig.meter_at(0)
+    rig.model.value = None
+    assert rig.meter_at(179) == MODEL_READ
+    assert rig.meter_at(180) is None  # nothing left to show: better no meter than a stale one
+
+
+def test_with_both_sources_quiet_the_meter_goes_away_at_three_minutes() -> None:
+    rig = _MeterRig()
+    rig.market.value = MARKET_READ
+    rig.meter_at(0)
+    rig.market.value = None
+    assert rig.meter_at(179) == MARKET_READ
+    assert rig.meter_at(180) is None
+
+
+def test_a_market_outage_warns_and_the_model_still_answers() -> None:
+    rig = _MeterRig()
+    rig.model.value = MODEL_READ
+    rig.market.fail.add("g1")
+    assert rig.meter_at(0) == MODEL_READ
+    assert any("win-probability fetch failed" in warning for warning in rig.warnings)
+
+
+def test_both_sources_failing_only_warns() -> None:
+    rig = _MeterRig()
+    rig.market.fail.add("g1")
+    rig.model.fail.add("g1")
+    assert rig.meter_at(0) is None  # the live card still shows, just without a meter
+    assert sum("fetch failed" in warning for warning in rig.warnings) == 2
+
+
+# --- pregame details and odds ------------------------------------------------------
+
+
+COL_SIDE = PregameSide(record=WinLossRecord(wins=38, losses=44))
+LAD_SIDE = PregameSide(record=WinLossRecord(wins=51, losses=31))
+DETAILS = PregameDetails(away=COL_SIDE, home=LAD_SIDE)
+LINES = GameLines(away=BettingLine(moneyline=165), home=BettingLine(moneyline=-195))
+
+
+def _pregame_payload(queue: InterleavedCardQueue, now: datetime) -> PregameCardPayload:
+    card = queue.next_card(now, QUAD)
+    assert card is not None and isinstance(card.payload, PregameCardPayload)
+    return card.payload
+
+
+def test_pregame_card_carries_the_details_and_odds_when_given_sources() -> None:
+    pipe, queue = _setup()
+    pipe.refresh(
+        [_game("g1", GameStatus.SCHEDULED)],
+        now=T,
+        fetch_feed=_Fetch(),
+        fetch_pregame_details=lambda _game: DETAILS,
+        fetch_game_lines=lambda _game, _now: LINES,
+    )
+    payload = _pregame_payload(queue, T)
+    assert payload.away == PregameSide(record=COL_SIDE.record, line=LINES.away)
+    assert payload.home == PregameSide(record=LAD_SIDE.record, line=LINES.home)
+
+
+def test_pregame_odds_alone_still_fill_out_the_card() -> None:
+    pipe, queue = _setup()
+    pipe.refresh(
+        [_game("g1", GameStatus.SCHEDULED)], now=T, fetch_feed=_Fetch(), fetch_game_lines=lambda _game, _now: LINES
+    )
+    assert _pregame_payload(queue, T).home == PregameSide(line=LINES.home)
+
+
+def test_pregame_stays_plain_without_sources_or_when_a_game_is_off_the_board() -> None:
+    pipe, queue = _setup()
+    pipe.refresh(
+        [_game("g1", GameStatus.SCHEDULED)], now=T, fetch_feed=_Fetch(), fetch_game_lines=lambda _game, _now: None
+    )
+    payload = _pregame_payload(queue, T)
+    assert payload.away is None and payload.home is None
+
+
+def test_pregame_details_are_fetched_at_a_relaxed_pace() -> None:
+    pipe, _queue = _setup()
+    calls: list[str] = []
+
+    def details(game: TeamGame) -> PregameDetails:
+        calls.append(game.id.raw)
+        return DETAILS
+
+    games = [_game("g1", GameStatus.SCHEDULED)]
+    pipe.refresh(games, now=T, fetch_feed=_Fetch(), fetch_pregame_details=details)
+    pipe.refresh(games, now=T + timedelta(minutes=4), fetch_feed=_Fetch(), fetch_pregame_details=details)
+    assert calls == ["g1"]
+    pipe.refresh(games, now=T + timedelta(minutes=5), fetch_feed=_Fetch(), fetch_pregame_details=details)
+    assert calls == ["g1", "g1"]
+
+
+def test_a_full_slates_first_fetches_are_spread_over_several_passes() -> None:
+    pipe, _queue = _setup()
+    calls: list[str] = []
+
+    def details(game: TeamGame) -> PregameDetails:
+        calls.append(game.id.raw)
+        return DETAILS
+
+    games = [_game(f"g{i}", GameStatus.SCHEDULED) for i in range(5)]
+    pipe.refresh(games, now=T, fetch_feed=_Fetch(), fetch_pregame_details=details)
+    assert len(calls) == 3
+    pipe.refresh(games, now=T + timedelta(seconds=12), fetch_feed=_Fetch(), fetch_pregame_details=details)
+    assert sorted(calls) == ["g0", "g1", "g2", "g3", "g4"]
+
+
+def test_a_pregame_details_failure_warns_keeps_the_last_good_and_waits_to_retry() -> None:
+    pipe, queue = _setup()
+    games = [_game("g1", GameStatus.SCHEDULED)]
+    pipe.refresh(games, now=T, fetch_feed=_Fetch(), fetch_pregame_details=lambda _game: DETAILS)
+    calls: list[str] = []
+
+    def down(game: TeamGame) -> PregameDetails:
+        calls.append(game.id.raw)
+        raise ProviderError("feed down")
+
+    later = T + timedelta(minutes=5)
+    res = pipe.refresh(games, now=later, fetch_feed=_Fetch(), fetch_pregame_details=down)
+    assert any("pregame details fetch failed" in warning for warning in res.warnings)
+    assert _pregame_payload(queue, later).home == LAD_SIDE
+    pipe.refresh(games, now=later + timedelta(seconds=12), fetch_feed=_Fetch(), fetch_pregame_details=down)
+    assert calls == ["g1"]  # not retried on the very next pass
+
+
+def test_an_odds_failure_warns_and_the_card_just_goes_without() -> None:
+    pipe, queue = _setup()
+
+    def down(_game: TeamGame, _now: datetime) -> GameLines | None:
+        raise ProviderError("coupon down")
+
+    res = pipe.refresh([_game("g1", GameStatus.SCHEDULED)], now=T, fetch_feed=_Fetch(), fetch_game_lines=down)
+    assert any("odds fetch failed" in warning for warning in res.warnings)
+    assert _pregame_payload(queue, T).home is None
+
+
+def test_pregame_details_are_forgotten_once_the_game_leaves_the_upcoming_slate() -> None:
+    pipe, _queue = _setup()
+    games = [_game("g1", GameStatus.SCHEDULED)]
+    pipe.refresh(games, now=T, fetch_feed=_Fetch(), fetch_pregame_details=lambda _game: DETAILS)
+    assert _id("g1") in pipe._pregame_details
+    pipe.refresh([], now=T + timedelta(seconds=1), fetch_feed=_Fetch())
+    assert _id("g1") not in pipe._pregame_details
 
 
 def test_a_non_carding_status_surfaces_nothing() -> None:

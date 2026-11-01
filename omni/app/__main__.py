@@ -43,8 +43,9 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         "--timezone",
         default="America/New_York",
         metavar="IANA",
-        help="IANA zone for the schedule day, e.g. America/Denver (default America/New_York)",
+        help="IANA zone for the schedule day and board clocks, e.g. America/Denver (default America/New_York)",
     )
+    parser.add_argument("--no-odds", action="store_true", help="leave sportsbook odds off the pregame card")
     return parser.parse_args(argv)
 
 
@@ -57,15 +58,19 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
 
     from zoneinfo import ZoneInfo
 
+    from omni.providers.bovada_odds import BovadaOddsProvider
     from omni.providers.mlb_statsapi import MlbStatsApiProvider
     from omni.providers.mlb_teams import MlbTeamRegistry
+    from omni.providers.polymarket_us import PolymarketUsProvider
 
-    provider = MlbStatsApiProvider(MlbTeamRegistry.from_color_file(), schedule_timezone=ZoneInfo(args.timezone))
+    zone = ZoneInfo(args.timezone)
+    provider = MlbStatsApiProvider(MlbTeamRegistry.from_color_file(), schedule_timezone=zone)
+    odds = None if args.no_odds else BovadaOddsProvider()
 
     def fetch_feed(game: TeamGame, now: datetime) -> LiveBaseballFeed:
         return provider.fetch_live_feed(game, now=now)
 
-    def fetch_win_probability(game: TeamGame) -> WinProbability | None:
+    def fetch_model_win_probability(game: TeamGame, _now: datetime) -> WinProbability | None:
         return provider.fetch_win_probability(game)
 
     from RGBMatrixEmulator import RGBMatrix, RGBMatrixOptions
@@ -87,8 +92,12 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
         sink,
         favorites=frozenset(args.favorite),
         broadcast_lag=DurationSeconds(args.delay),
-        fetch_win_probability=fetch_win_probability,  # per-team meter, delayed in lockstep with the score
+        fetch_win_probability=PolymarketUsProvider().win_probability,  # per-team meter, delayed with the score
+        fetch_fallback_win_probability=fetch_model_win_probability,  # when the market goes quiet or has no game
+        fetch_pregame_details=provider.fetch_pregame_details,
+        fetch_game_lines=odds.lines_for if odds is not None else None,
         logos=LogoStore(),  # resolve committed team tiles from assets/ (lazy, cached)
+        display_timezone=zone,
     )
     print(f"omni.app: {profile.value}, delay {args.delay}s, favorites {sorted(args.favorite)} — http://localhost:8888/")
     run_forever(loop, SystemClock(), tick=DurationSeconds(args.tick))

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import dataclasses
+
 from datetime import datetime, timezone
 
 from omni.cards.base import CardKind, CardPriority
@@ -14,6 +16,7 @@ from omni.domain.baseball import (
     BaseballCount,
     BaseballGameState,
     BatterGameLine,
+    DueUp,
     InningPhase,
     PitcherGameLine,
     PitchSnapshot,
@@ -85,6 +88,15 @@ def test_live_baseball_declares_its_per_profile_compromises() -> None:
     joined = " ".join(card.layout_support.compromise_notes)
     assert "single_64x32" in joined and "stack_64x64" in joined
     assert "bases" in joined and "pitcher/batter" in joined  # the single drops live detail; the stack the strip
+
+
+def test_live_baseball_carries_due_up_and_declares_it_quad_only() -> None:
+    due_up = DueUp(batters=(BatterGameLine(name="Ohtani", at_bats=3, hits=2),))
+    state = dataclasses.replace(_state(), phase=InningPhase.MIDDLE, due_up=due_up)
+    card = CardFactory().live_baseball(_game(), state, now=NOW)
+    assert card.payload.due_up == due_up
+    notes = card.layout_support.compromise_notes
+    assert sum("Due Up" in note for note in notes) == 2  # both small boards drop it
 
 
 def test_default_timing_and_priority() -> None:

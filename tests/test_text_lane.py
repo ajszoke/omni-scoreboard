@@ -45,6 +45,11 @@ def test_a_non_positive_speed_is_rejected(speed: float) -> None:
         MarqueeStyle(speed_px_per_s=speed)
 
 
+def test_a_non_positive_minimum_trip_is_rejected() -> None:
+    with pytest.raises(ValueError, match="min_travel"):
+        MarqueeStyle(min_travel_s=0.0)
+
+
 @pytest.mark.parametrize("start, end", [(-1.0, 0.0), (0.0, -1.0)])
 def test_a_negative_dwell_is_rejected(start: float, end: float) -> None:
     with pytest.raises(ValueError, match="dwell"):
@@ -64,35 +69,46 @@ def test_a_lane_needs_a_positive_width() -> None:
 # --- the offset is a deterministic, cyclic function of the clock -------------------------------
 
 
-def test_period_and_scroll_durations() -> None:
-    assert (_PLAN.scroll_s, _PLAN.period_s) == (5.0, 10.0)
+def test_period_and_travel_durations() -> None:
+    assert (_PLAN.travel_s, _PLAN.period_s) == (5.0, 15.0)  # hold 2, out 5, hold 3, back 5
+
+
+def test_a_short_overflow_takes_at_least_the_minimum_trip() -> None:
+    assert MarqueePlan(distance=2, style=_EXACT).travel_s == _EXACT.min_travel_s
 
 
 @pytest.mark.parametrize(
     "clock_s, offset",
     [
-        (0.0, 0),  # head dwell
-        (1.9, 0),  # still the head dwell
-        (2.0, 0),  # slide begins at the head
-        (3.0, 10),  # 1.0s into the slide at 10px/s
-        (4.0, 20),  # 2.0s in
-        (6.0, 40),  # 4.0s in
-        (7.0, 50),  # slide done -> tail dwell pins to distance
-        (9.9, 50),  # still the tail dwell
+        (0.0, 0),  # holding at the head
+        (1.9, 0),  # still holding
+        (2.0, 0),  # the trip out begins at the head
+        (3.25, 7),  # a quarter of the way in time, but well under a quarter of the way in distance
+        (4.5, 25),  # halfway in time is halfway in distance
+        (5.75, 43),  # eases into the far end the same way it left the near one
+        (7.0, 50),  # arrived -> holding at the tail
+        (9.9, 50),  # still holding
+        (10.0, 50),  # the trip back begins at the tail
+        (11.25, 43),  # a mirror of the trip out
+        (12.5, 25),
+        (13.75, 7),
+        (15.0, 0),  # home, and the cycle repeats
     ],
 )
-def test_offset_walks_dwell_slide_dwell(clock_s: float, offset: int) -> None:
+def test_offset_holds_at_each_end_and_eases_there_and_back(clock_s: float, offset: int) -> None:
     assert _PLAN.offset_at(clock_s) == offset
 
 
 def test_offset_is_cyclic_with_the_period() -> None:
     # Same phase one and two periods later -> identical offset (no drift, no accumulation).
-    assert _PLAN.offset_at(4.0) == _PLAN.offset_at(14.0) == _PLAN.offset_at(24.0) == 20
+    assert _PLAN.offset_at(4.5) == _PLAN.offset_at(19.5) == _PLAN.offset_at(34.5) == 25
 
 
-def test_offset_is_monotonic_through_the_slide() -> None:
-    offsets = [_PLAN.offset_at(t) for t in (2.0, 3.0, 4.0, 6.0, 7.0)]
-    assert offsets == sorted(offsets)
+def test_offset_never_jumps_on_the_way_back() -> None:
+    # The return trip retraces the path, rather than the text snapping back to the head.
+    samples = [_PLAN.offset_at(10.0 + i * 0.05) for i in range(101)]
+    assert samples == sorted(samples, reverse=True)
+    assert max(abs(a - b) for a, b in zip(samples, samples[1:])) <= 2  # 0.05s is one or two pixels at most
 
 
 def test_offset_is_pure_in_its_argument() -> None:

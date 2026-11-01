@@ -27,6 +27,7 @@ from omni.renderers.live_baseball import LiveBaseballRenderer
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "providers"
 NOW = datetime(2026, 6, 17, 23, 30, tzinfo=timezone.utc)
 WHITE = RGBColor(255, 255, 255)
+YELLOW = RGBColor(255, 215, 0)
 DIM = RGBColor(60, 60, 60)
 
 
@@ -66,19 +67,19 @@ def test_pipeline_renders_fixture_state_on_quad() -> None:
 
     texts = {(t.x, t.y, t.text) for t in canvas.texts()}
     assert {(3, 5, "COL"), (3, 25, "LAD")} <= texts  # abbr names the team when only the 4px bar drew (flush left)
-    assert {(24, 1, "3"), (38, 1, "7"), (52, 1, "0")} <= texts  # big R H E columns (away runs/hits/errors)
-    assert {(24, 21, "5"), (38, 21, "9"), (52, 21, "1")} <= texts  # home
-    assert {(72, 2, "▲7"), (72, 24, "2-1")} <= texts  # inning + count, in the middle beside the bases
+    assert {(30, 1, "3"), (44, 1, "7"), (58, 1, "0")} <= texts  # big R H E columns (away runs/hits/errors)
+    assert {(30, 21, "5"), (44, 21, "9"), (58, 21, "1")} <= texts  # home
+    assert {(86, 1, "7"), (75, 15, "2-1")} <= texts  # inning number + count (8x13); the half triangle is a shape
     all_text = {t.text for t in canvas.texts()}
     thin = "\N{THIN SPACE}"
     assert f"87mph{thin}SWPR" in all_text  # the current-play sweeper -> the standalone pitch line, right-anchored
-    assert f"P:{thin}95" in all_text  # the pitcher's game pitch count anchors the pitch line's left end
+    assert "P:95" in all_text  # the pitcher's game pitch count anchors the pitch line's left end
 
-    # First (center 120,15) and third (106,15) occupied -> filled white diamonds; second (113,7) empty.
-    assert any(o.op == "fill_rect" and o.color == WHITE and o.y == 15 and o.x <= 120 <= o.x + o.w for o in canvas.ops)
-    assert any(o.op == "fill_rect" and o.color == WHITE and o.y == 15 and o.x <= 106 <= o.x + o.w for o in canvas.ops)
+    # First (center 121,13) and third (107,13) occupied -> filled yellow diamonds; second (114,6) empty.
+    assert any(o.op == "fill_rect" and o.color == YELLOW and o.y == 13 and o.x <= 121 <= o.x + o.w for o in canvas.ops)
+    assert any(o.op == "fill_rect" and o.color == YELLOW and o.y == 13 and o.x <= 107 <= o.x + o.w for o in canvas.ops)
     assert not any(
-        o.op == "fill_rect" and o.color == WHITE and o.y == 7 and o.x <= 113 <= o.x + o.w for o in canvas.ops
+        o.op == "fill_rect" and o.color == YELLOW and o.y == 6 and o.x <= 114 <= o.x + o.w for o in canvas.ops
     )
 
 
@@ -89,7 +90,8 @@ def test_pipeline_renders_on_all_three_profiles() -> None:
         canvas = RecordingCanvas(width, height)
         LiveBaseballRenderer().render(card, RenderContext(profile=profile, now=NOW), canvas)
         joined = " ".join(t.text for t in canvas.texts())
-        # Team abbreviations and the inning label appear on every profile; the quad's 6x10 inning
-        # uses a filled triangle, the 4x6 profiles an arrow (no 4x6 triangle glyph).
-        inning = "▲7" if profile is PanelProfile.QUAD_128X64 else "↑7"
-        assert "COL" in joined and "LAD" in joined and inning in joined
+        # Team abbreviations appear on every profile — this sweep supplies no logo store, so every
+        # mark is the color-bar fallback and the abbreviation has to name the club. Every profile
+        # draws the inning half as a shape, so only the inning number itself is in the text.
+        assert "COL" in joined and "LAD" in joined
+        assert "7" in joined and "↑" not in joined

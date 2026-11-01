@@ -83,6 +83,9 @@ Free/low-cost by default:
 - MLB: upstream MLB StatsAPI integration.
 - NFL/NBA/NHL/PGA initial spike: ESPN site APIs, isolated behind provider interfaces.
 - PGA probability/cut-line optional: DataGolf if worth the key/cost.
+- MLB pregame odds: Bovada's public coupon, behind a provider; it sits behind a 10-minute CDN cache, so never use it for a live value.
+- MLB in-game win probability: Polymarket US public market data first (MLB's own model ignores team strength), with the MLB feed as the fallback.
+- Do not use Kalshi's API (its Developer Agreement limits use to a member's own trading) or polymarket.com's APIs from the US (its terms limit US residents to content features). Details: `docs/agent_context/SOURCES.md`.
 - Commercial fallback only after free sources fail product needs.
 
 ## Device policy

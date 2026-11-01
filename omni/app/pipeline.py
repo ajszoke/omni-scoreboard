@@ -4,8 +4,10 @@ The middle of the orchestration spine. Each tick the loop hands it the current g
 and a way to fetch a game's live feed; the pipeline cards each game for its phase:
 
 - **upcoming** (scheduled / pre-game) — a `pregame` card carrying the matchup and a
-  first-pitch countdown. There is no score to spoil, so it needs no feed fetch and no
-  delay; the renderer derives the live countdown from the render clock.
+  first-pitch countdown. There is no score to spoil, so it needs no live feed and no
+  delay; the renderer derives the live countdown from the render clock. When sources are
+  given it also carries each club's record, probable starter and odds; those change slowly,
+  so they are fetched at a relaxed pace, and a failure only leaves the card showing less.
 - **paused** (delayed / suspended) — a `status` card carrying the matchup and a banner, so a
   game in a rain delay or suspension stays on the board instead of falling out of every phase.
   It reveals no score, so (like the pregame card) it needs no feed fetch and no delay; it is
@@ -24,8 +26,9 @@ and a way to fetch a game's live feed; the pipeline cards each game for its phas
   - **win probability** — the live card's per-team meter. A separate, cheaper fetch whose
     *current* reading is pushed into a per-game delay feed on the same ticks as the state, so
     the surfaced reading is from the same lag-old moment as the shown score — stale-safe, never
-    leading it. A fetch failure is non-fatal (the card shows without a meter); absent until the
-    game has run long enough for a reading to clear the lag.
+    leading it. A market's price comes first, since unlike a model of the game state it knows how
+    good the clubs are. A reading is held through a gap, up to an expiry, and past that a fallback
+    source takes over. A fetch failure is non-fatal; absent until a reading has cleared the lag.
 - **final** — once a game ends, a `final` card with the box score. The result is the
   ultimate spoiler, so the reveal is held until the broadcast lag elapses from when we
   first saw the game final (StatsAPI cannot report FINAL before the last out, so first
@@ -50,8 +53,8 @@ pipeline can dispatch later.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import dataclass, replace
+from datetime import datetime, timedelta
 from typing import Callable, Iterable
 
 from omni.cards.base import CardId
@@ -60,7 +63,15 @@ from omni.cards.factory import CardFactory
 from omni.core.enum import DisplayPriority, GameStatus
 from omni.core.ids import LeagueScopedId
 from omni.core.observation import Observation
-from omni.domain.baseball import BaseballGameState, PitchingDecisions, WinProbability, pitching_feat_progress
+from omni.domain.baseball import (
+    BaseballGameState,
+    GameLines,
+    PitchingDecisions,
+    PregameDetails,
+    PregameSide,
+    WinProbability,
+    pitching_feat_progress,
+)
 from omni.domain.contest import TeamGame
 from omni.events.baseball import BaseballGameEvent, LiveBaseballFeed
 from omni.providers.base import ProviderError
@@ -70,16 +81,39 @@ from omni.queue.delayed_feed import DelayedFeed
 from omni.queue.priority import PriorityScorer
 from omni.queue.scheduler import InterleavedCardQueue
 
-__all__ = ["FeedFetcher", "WinProbFetcher", "PipelineResult", "LiveBaseballPipeline"]
+__all__ = [
+    "FeedFetcher",
+    "WinProbFetcher",
+    "PregameDetailsFetcher",
+    "GameLinesFetcher",
+    "PipelineResult",
+    "LiveBaseballPipeline",
+]
 
 # How the pipeline pulls one game's live feed as of `now` (wraps the provider's
 # per-game fetch): the current state plus the play-by-play events from the same fetch.
 FeedFetcher = Callable[[TeamGame, datetime], LiveBaseballFeed]
 
-# How the pipeline pulls one game's current win probability (a separate, cheaper call than
-# the feed). Returns None when none is available yet (pregame / a payload without it). The
+# How the pipeline pulls one game's current win probability as of `now` (a separate, cheaper call
+# than the feed). Returns None when none is available yet (pregame / a payload without it). The
 # *current* reading — the pipeline delays it itself so the meter never leads the shown score.
-WinProbFetcher = Callable[[TeamGame], WinProbability | None]
+WinProbFetcher = Callable[[TeamGame, datetime], WinProbability | None]
+
+# How the pipeline pulls an upcoming game's records + probable starters (one request per game).
+PregameDetailsFetcher = Callable[[TeamGame], PregameDetails]
+
+# How the pipeline pulls an upcoming game's odds as of `now`, or None when none are posted. Called
+# every pass, so the source is expected to hold its own board and refresh it at its own pace.
+GameLinesFetcher = Callable[[TeamGame, datetime], GameLines | None]
+
+# How long a surfaced meter reading may stand with nothing newer behind it. Long enough to ride out
+# a market going quiet for a few plays; past it, the reading is no longer a fair picture of the game.
+_WIN_PROB_EXPIRY = timedelta(minutes=3)
+
+# A club's record and starter barely move before first pitch, so a slow refresh is plenty; the budget
+# spreads a full slate's first fetches over several passes rather than stalling one of them.
+_PREGAME_DETAILS_REFRESH = timedelta(minutes=5)
+_PREGAME_DETAILS_FETCHES_PER_PASS = 3
 
 # Pre-first-pitch states: both carry a pregame card (a scheduled game later today and one
 # in warmups are both "upcoming"). Mid-game oddities (DELAYED/SUSPENDED) are not pregame.
@@ -92,6 +126,48 @@ _BIG_PLAY_MIN_BAND = DisplayPriority.HIGH_LEVERAGE
 # A no-hitter only becomes news once the pitching side has *finished* this many hitless innings;
 # earlier hitless innings are routine. Counted per side so it never triggers a half-inning early.
 _NO_HITTER_MIN_COMPLETED_INNINGS = 6
+
+
+class _MeterTrack:
+    """One source's readings on their way to the meter: delayed like the score, held through a gap."""
+
+    def __init__(self, delay: DelayPolicy) -> None:
+        self._feed: DelayedFeed[WinProbability] = DelayedFeed(delay)
+        self._held: WinProbability | None = None
+        self._held_at: datetime | None = None
+
+    def push(self, game: TeamGame, reading: WinProbability, now: datetime) -> None:
+        self._feed.push(Observation(subject_id=game.id, source=game.id.source, observed_at=now, value=reading))
+
+    def current(self, now: datetime) -> WinProbability | None:
+        """The newest reading clear of the delay, or the last one until it expires."""
+        eligible = self._feed.latest_eligible(now)
+        if eligible is not None:
+            self._held, self._held_at = eligible.value, now
+        elif self._held_at is not None and now - self._held_at >= _WIN_PROB_EXPIRY:
+            self._held, self._held_at = None, None
+        return self._held
+
+
+class _MeterTracks:
+    """One game's two meter sources, kept apart so a gap in one never mixes into the other's timeline."""
+
+    def __init__(self, delay: DelayPolicy) -> None:
+        self.primary = _MeterTrack(delay)
+        self.fallback = _MeterTrack(delay)
+
+
+def _read_win_probability(
+    fetcher: WinProbFetcher | None, game: TeamGame, now: datetime, warnings: list[str], *, label: str
+) -> WinProbability | None:
+    """Ask one source for a reading; a failure is a warning, and just no reading this pass."""
+    if fetcher is None:
+        return None
+    try:
+        return fetcher(game, now)
+    except ProviderError as exc:
+        warnings.append(f"{label} fetch failed: {exc}")
+        return None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -126,11 +202,13 @@ class LiveBaseballPipeline:
         self._factory = factory
         self._queue = queue
         self._pregame_keys: dict[LeagueScopedId, str] = {}  # contest id -> its pregame card's key
+        # contest id -> its last pregame details (None until a fetch succeeds) and when they were last tried
+        self._pregame_details: dict[LeagueScopedId, tuple[PregameDetails | None, datetime]] = {}
         self._status_keys: dict[LeagueScopedId, str] = {}  # contest id -> its (delay/suspension) status card's key
         self._feeds: dict[LeagueScopedId, DelayedFeed[BaseballGameState]] = {}
-        # contest id -> its win-probability timeline; delayed in lockstep with the state feed so the
+        # contest id -> its win-probability timelines; delayed in lockstep with the state feed so the
         # meter shows the reading from the same lag-old moment as the score (never a fresher one).
-        self._win_prob_feeds: dict[LeagueScopedId, DelayedFeed[WinProbability]] = {}
+        self._meter_tracks: dict[LeagueScopedId, _MeterTracks] = {}
         self._card_keys: dict[LeagueScopedId, str] = {}  # contest id -> its live card's dedupe key
         self._event_streams: dict[LeagueScopedId, DelayedEventStream[BaseballGameEvent]] = {}
         self._no_hitter_keys: dict[LeagueScopedId, str] = {}  # contest id -> its no-hitter card's key
@@ -145,12 +223,19 @@ class LiveBaseballPipeline:
         now: datetime,
         fetch_feed: FeedFetcher,
         fetch_win_probability: WinProbFetcher | None = None,
+        fetch_fallback_win_probability: WinProbFetcher | None = None,
+        fetch_pregame_details: PregameDetailsFetcher | None = None,
+        fetch_game_lines: GameLinesFetcher | None = None,
     ) -> PipelineResult:
         """Observe the slate, surface each game's phase card into the queue, drop stale ones.
 
         `fetch_win_probability`, when given, supplies each live game's current win probability;
         the pipeline buffers it through the same TV delay as the state so the meter never leads
         the shown score. Omitted (a test, or the meter disabled) the live card carries no meter.
+        `fetch_fallback_win_probability`, when given, takes over once that source has gone quiet for
+        longer than a reading may stand, or for a game it has no reading on at all.
+        `fetch_pregame_details` and `fetch_game_lines`, when given, fill out the pregame card; a
+        failure of either is non-fatal, and omitted the card stays at matchup + countdown.
         """
         live = [game for game in games if game.status is GameStatus.LIVE]
         upcoming = [game for game in games if game.status in _UPCOMING_STATUSES]
@@ -171,9 +256,16 @@ class LiveBaseballPipeline:
         skipped: list[str] = []
         warnings: list[str] = []
 
-        # Upcoming games card without a feed fetch — there is no score to spoil, so no delay.
+        # Upcoming games card without a live feed — there is no score to spoil, so no delay.
+        fetch_budget = _PREGAME_DETAILS_FETCHES_PER_PASS
         for game in upcoming:
-            pregames.append(self._surface_pregame(game, now=now))
+            details, fetched, game_warnings = self._pregame_details_for(
+                game, fetch_pregame_details, may_fetch=fetch_budget > 0, now=now
+            )
+            fetch_budget -= fetched
+            lines, line_warnings = self._game_lines_for(game, fetch_game_lines, now=now)
+            warnings.extend(f"{game.id.raw}: {warning}" for warning in (*game_warnings, *line_warnings))
+            pregames.append(self._surface_pregame(game, details, lines, now=now))
 
         # Paused (delayed/suspended) games also card without a fetch — the banner reveals no score,
         # so a long rain delay never hammers the per-game feed.
@@ -200,9 +292,10 @@ class LiveBaseballPipeline:
                 continue
             # Win probability rides its own delay buffer, pushed on the same ticks as the state, so
             # the surfaced reading is from the same lag-old moment as the score — never a fresher one.
-            win_prob, wp_warning = self._safe_win_probability(game, fetch_win_probability, now=now)
-            if wp_warning is not None:
-                warnings.append(f"{game.id.raw}: {wp_warning}")
+            win_prob, wp_warnings = self._safe_win_probability(
+                game, fetch_win_probability, fetch_fallback_win_probability, now=now
+            )
+            warnings.extend(f"{game.id.raw}: {warning}" for warning in wp_warnings)
             priority = self._scorer.score_live_baseball(game, safe.value)
             card = self._factory.live_baseball(game, safe.value, now=now, priority=priority, win_probability=win_prob)
             self._queue.ingest(card)
@@ -250,9 +343,47 @@ class LiveBaseballPipeline:
             warnings=tuple(warnings),
         )
 
-    def _surface_pregame(self, game: TeamGame, *, now: datetime) -> CardId:
-        """Surface (or refresh) the pregame card for an upcoming game."""
-        card = self._factory.pregame(game, now=now)
+    def _pregame_details_for(
+        self, game: TeamGame, fetcher: PregameDetailsFetcher | None, *, may_fetch: bool, now: datetime
+    ) -> tuple[PregameDetails | None, int, list[str]]:
+        """A game's pregame details, refreshed if due: the details, fetches spent (0 or 1), and any warning.
+
+        A failed fetch keeps the last good details and still waits out the refresh, so a source that
+        is down is not retried on every pass.
+        """
+        cached, tried_at = self._pregame_details.get(game.id, (None, None))
+        due = tried_at is None or now - tried_at >= _PREGAME_DETAILS_REFRESH
+        if fetcher is None or not due or not may_fetch:
+            return cached, 0, []
+        warnings: list[str] = []
+        try:
+            cached = fetcher(game)
+        except ProviderError as exc:
+            warnings.append(f"pregame details fetch failed: {exc}")
+        self._pregame_details[game.id] = (cached, now)
+        return cached, 1, warnings
+
+    @staticmethod
+    def _game_lines_for(
+        game: TeamGame, fetcher: GameLinesFetcher | None, *, now: datetime
+    ) -> tuple[GameLines | None, list[str]]:
+        """A game's odds and any fetch-failure warning; a failure just leaves the card without odds."""
+        if fetcher is None:
+            return None, []
+        try:
+            return fetcher(game, now), []
+        except ProviderError as exc:
+            return None, [f"odds fetch failed: {exc}"]
+
+    def _surface_pregame(
+        self, game: TeamGame, details: PregameDetails | None, lines: GameLines | None, *, now: datetime
+    ) -> CardId:
+        """Surface (or refresh) the pregame card for an upcoming game, with whatever details are known."""
+        away, home = (details.away, details.home) if details is not None else (None, None)
+        if lines is not None:
+            away = replace(away or PregameSide(), line=lines.away)
+            home = replace(home or PregameSide(), line=lines.home)
+        card = self._factory.pregame(game, now=now, away=away, home=home)
         self._queue.ingest(card)
         self._pregame_keys[game.id] = card.dedupe_key.raw
         return card.id
@@ -265,29 +396,31 @@ class LiveBaseballPipeline:
         return card.id
 
     def _safe_win_probability(
-        self, game: TeamGame, fetcher: WinProbFetcher | None, *, now: datetime
-    ) -> tuple[WinProbability | None, str | None]:
-        """The TV-safe win probability for this game's live card, plus any fetch-failure warning.
+        self, game: TeamGame, primary: WinProbFetcher | None, fallback: WinProbFetcher | None, *, now: datetime
+    ) -> tuple[WinProbability | None, list[str]]:
+        """The TV-safe win probability for this game's live card, plus any fetch-failure warnings.
 
-        Fetches the *current* reading and pushes it into a per-game delay feed at ``now``, then
-        returns the newest reading that has cleared the broadcast lag — i.e. the one from the same
-        ``now - lag`` moment as the lag-old state the card shows. So the meter can be a touch stale
-        but never leads the score. With no fetcher (the meter disabled) it is a no-op returning None;
-        a fetch failure is non-fatal (the live card still shows) and surfaced as a warning.
+        The primary source's *current* reading goes through a delay feed, so what surfaces is from the
+        same ``now - lag`` moment as the state the card shows: a touch stale, but never leading the
+        score. A surfaced reading is held through a gap in the source until it expires.
+
+        While the primary has nothing, the fallback is read and delayed the same way, so it is ready
+        the moment the held reading expires; while the primary answers, the fallback isn't touched.
+        With neither (the meter disabled) this is a no-op. Fetch failures are non-fatal: the live card
+        still shows, and each is surfaced as a warning.
         """
-        if fetcher is None:
-            return None, None
-        warning: str | None = None
-        try:
-            current = fetcher(game)
-        except ProviderError as exc:
-            current = None
-            warning = f"win-probability fetch failed: {exc}"
-        feed = self._win_prob_feeds.setdefault(game.id, DelayedFeed(self._delay))
+        tracks = self._meter_tracks.setdefault(game.id, _MeterTracks(self._delay))
+        warnings: list[str] = []
+        current = _read_win_probability(primary, game, now, warnings, label="win-probability")
         if current is not None:
-            feed.push(Observation(subject_id=game.id, source=game.id.source, observed_at=now, value=current))
-        eligible = feed.latest_eligible(now)
-        return (eligible.value if eligible is not None else None), warning
+            tracks.primary.push(game, current, now)
+        else:
+            backup = _read_win_probability(fallback, game, now, warnings, label="fallback win-probability")
+            if backup is not None:
+                tracks.fallback.push(game, backup, now)
+        primary_reading = tracks.primary.current(now)
+        fallback_reading = tracks.fallback.current(now)
+        return (primary_reading if primary_reading is not None else fallback_reading), warnings
 
     def _surface_big_plays(
         self, game: TeamGame, events: tuple[BaseballGameEvent, ...], *, now: datetime
@@ -370,6 +503,7 @@ class LiveBaseballPipeline:
         """Drop the pregame card for any game no longer upcoming — it went live, ended, or left the slate."""
         for contest_id in set(self._pregame_keys) - upcoming_ids:
             self._queue.remove(self._pregame_keys.pop(contest_id))
+            self._pregame_details.pop(contest_id, None)
 
     def _drop_stale_status(self, irregular_ids: set[LeagueScopedId]) -> None:
         """Drop the status card for any game no longer paused — it resumed, ended, or left the slate.
@@ -414,7 +548,7 @@ class LiveBaseballPipeline:
                     self._queue.remove(key)
                     removed_cards.append(contest_id)
                 self._feeds.pop(contest_id, None)
-                self._win_prob_feeds.pop(contest_id, None)  # win-prob buffer rides the state feed's lifecycle
+                self._meter_tracks.pop(contest_id, None)  # win-prob buffers ride the state feed's lifecycle
             no_hitter_key = self._no_hitter_keys.pop(contest_id, None)
             if no_hitter_key is not None:
                 self._queue.remove(no_hitter_key)
