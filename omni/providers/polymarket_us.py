@@ -3,7 +3,7 @@
 MLB's own win probability is a model of the game state alone, so it knows nothing of how good the two
 clubs are. A traded price does, which is why this is the meter's first choice. The exchange publishes
 market data with no key; its public responses sit behind a 30-second cache, so asking more often than
-that only re-reads the same answer.
+that only re-reads the same answer. With a key, a `QuoteStream` sharpens those readings to real time.
 
 Each game has one moneyline market, named for its matchup and its date. The market's price is for one
 side of it, so which club that is gets read from the market itself rather than assumed from the name;
@@ -17,7 +17,7 @@ import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from typing import Any
+from typing import Any, Protocol
 from urllib.error import HTTPError
 from zoneinfo import ZoneInfo
 
@@ -26,7 +26,7 @@ from omni.domain.baseball import WinProbability
 from omni.domain.contest import TeamGame
 from omni.providers.base import ProviderError
 
-__all__ = ["PolymarketUsProvider", "MarketFetcher"]
+__all__ = ["MarketFetcher", "MarketQuote", "PolymarketUsProvider", "QuoteStream", "parse_price"]
 
 _BASE_URL = "https://gateway.polymarket.us"
 _OPEN = "MARKET_STATE_OPEN"
@@ -40,6 +40,22 @@ _MARKET_DATE_ZONE = ZoneInfo("America/Los_Angeles")
 
 # How the provider reads a path off the API: the parsed response, or None if there is no such thing.
 MarketFetcher = Callable[[str], Any]
+
+
+@dataclass(frozen=True, slots=True)
+class MarketQuote:
+    """A market's best bid and ask; either side can be empty in a lopsided game."""
+
+    bid: float | None
+    ask: float | None
+
+
+class QuoteStream(Protocol):
+    """A live feed of quotes, consulted between REST polls."""
+
+    def watch(self, slug: str) -> None: ...
+
+    def quote(self, slug: str) -> MarketQuote | None: ...
 
 
 @dataclass(slots=True)
@@ -60,8 +76,10 @@ class PolymarketUsProvider:
         *,
         fetch: MarketFetcher | None = None,
         refresh_every: DurationSeconds = DurationSeconds(30),
+        stream: QuoteStream | None = None,
     ) -> None:
         self._fetch = fetch if fetch is not None else _default_fetch
+        self._stream = stream
         self._refresh_every = refresh_every.as_timedelta()
         self._games: dict[str, _TrackedGame] = {}
 
@@ -75,17 +93,28 @@ class PolymarketUsProvider:
         if tracked is None:
             self._forget_old_games(now)
             tracked = self._games[game.id.raw] = _TrackedGame()
-        if tracked.read_at is not None and now - tracked.read_at < self._refresh_every:
-            return tracked.reading
+        if tracked.read_at is None or now - tracked.read_at >= self._refresh_every:
+            self._refresh(game, tracked, now)
+        return self._sharpened(tracked)
+
+    def _refresh(self, game: TeamGame, tracked: _TrackedGame, now: datetime) -> None:
         tracked.read_at, tracked.reading = now, None
         try:
             if tracked.slug is None and not self._find_market(game, tracked):
-                return None
+                return
             raw = self._fetch(f"/v1/markets/{tracked.slug}/bbo")
         except Exception as exc:
             raise ProviderError(f"Polymarket US fetch failed for {game.id.raw}: {exc}") from exc
         tracked.reading = _parse_quote(raw, away_is_long=tracked.away_is_long)
-        return tracked.reading
+
+    def _sharpened(self, tracked: _TrackedGame) -> WinProbability | None:
+        """The latest reading, with the stream's newer price if it has one for a market REST calls open."""
+        if self._stream is None or tracked.slug is None or tracked.reading is None:
+            return tracked.reading
+        self._stream.watch(tracked.slug)
+        quote = self._stream.quote(tracked.slug)
+        live = _reading_from(quote, away_is_long=tracked.away_is_long) if quote is not None else None
+        return live if live is not None else tracked.reading
 
     def _find_market(self, game: TeamGame, tracked: _TrackedGame) -> bool:
         """Confirm this game's market and which club its price is for; False if it can't be confirmed."""
@@ -139,11 +168,19 @@ def _starts_near(market: dict[str, Any], game: TeamGame) -> bool:
 
 
 def _parse_quote(raw: Any, *, away_is_long: bool) -> WinProbability | None:
-    """A win probability from a market's best bid and ask: their midpoint, for the side it prices."""
+    """A win probability from an open market's REST quote."""
     data = (raw or {}).get("marketData") if isinstance(raw, dict) else None
     if not isinstance(data, dict) or data.get("state") != _OPEN:
         return None
-    bid, ask = _price(data.get("bestBid")), _price(data.get("bestAsk"))
+    return _reading_from(
+        MarketQuote(bid=parse_price(data.get("bestBid")), ask=parse_price(data.get("bestAsk"))),
+        away_is_long=away_is_long,
+    )
+
+
+def _reading_from(quote: MarketQuote, *, away_is_long: bool) -> WinProbability | None:
+    """A win probability from a quote: its midpoint, for the side the market prices."""
+    bid, ask = quote.bid, quote.ask
     if bid is not None and ask is not None:
         if ask - bid > _MAX_SPREAD:
             return None
@@ -158,7 +195,8 @@ def _parse_quote(raw: Any, *, away_is_long: bool) -> WinProbability | None:
     return WinProbability(home=home, away=away)
 
 
-def _price(raw: Any) -> float | None:
+def parse_price(raw: Any) -> float | None:
+    """A price from the API's ``{"value": "0.55", "currency": "USD"}`` form, or None."""
     try:
         return float(raw["value"])
     except (TypeError, KeyError, ValueError):

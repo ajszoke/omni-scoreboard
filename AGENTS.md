@@ -23,7 +23,7 @@ config (permissions/skills) lives in `.claude/` but carries no project knowledge
 ## Operating notes
 
 - **Commit identity:** author as `ajszoke <aszoke1@gmail.com>`, set **repo-local** (not global). Push over **HTTPS + `gh`** — SSH may resolve to a different GitHub identity on some machines. Never force-push `main`.
-- **Never commit:** secrets, `config.json`, `emulator_config.json`, `.venv/`, build artifacts/caches.
+- **Never commit:** secrets, `.env`, `config.json`, `emulator_config.json`, `.venv/`, build artifacts/caches.
 - **Knowledge-base hygiene (keep it ingestion-optimal):** one concept per doc; keep this map lean (links, not prose dumps); prune docs for shipped/abandoned work; promote a thrice-repeated fact into a doc and a repeated procedure into a `.claude/skills/` skill; verify a referenced file/flag still exists before relying on it. Claude Code's machine-local auto-memory supplements but never overrides these committed docs.
 
 ## Supported displays

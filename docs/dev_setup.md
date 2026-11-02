@@ -3,6 +3,21 @@
 Local development runs the scoreboard against the **RGBMatrixEmulator** — no Raspberry Pi
 hardware required. Verified on WSL2 (Ubuntu, headless) with Python 3.12.3.
 
+## Optional: a real-time win meter
+
+Without a key the meter reads Polymarket US's public quotes, which are cached for 30 seconds. With one
+it also reads the exchange's live stream. Create a key at https://polymarket.us/developer (this needs a
+Polymarket US account with identity verification), then put it in a `.env` at the repo root, which is
+git-ignored:
+
+```
+POLYMARKET_KEY_ID=...
+POLYMARKET_SECRET_KEY=...
+```
+
+`.venv/bin/python tools/polymarket_stream_check.py` checks the key against the live stream without
+printing it. `python -m omni.app` says which mode the meter is in when it starts.
+
 ## Dependency isolation: `uv` + project-local `.venv`
 
 We use [uv](https://docs.astral.sh/uv/) for the dev environment. It drives the existing
