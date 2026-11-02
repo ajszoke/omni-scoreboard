@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 import json
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 from types import TracebackType
 from typing import Any
@@ -325,6 +326,42 @@ def test_a_connection_that_heard_something_resets_the_backoff() -> None:
     stream.watch(SLUG)
     stream._run()
     assert stop.waits == [1.0, 2.0, 1.0, 2.0]  # back to the start after the one that worked
+
+
+def test_a_quote_comes_through_on_a_real_thread_and_stopping_clears_it() -> None:
+    delivered = threading.Event()
+
+    class _Live:
+        """Delivers one quote once subscribed, then idles until the stream stops."""
+
+        def __init__(self) -> None:
+            self.pending: list[str] = []
+
+        def send(self, message: str) -> None:
+            if "subscribe" in json.loads(message):
+                self.pending.append(json.dumps(_quote_message()))
+
+        def recv(self, timeout: float | None = None) -> str | bytes:
+            if self.pending:
+                return self.pending.pop()
+            delivered.set()
+            time.sleep(0.01)
+            raise TimeoutError
+
+        def __enter__(self) -> _Live:
+            return self
+
+        def __exit__(self, *_exc: object) -> None:
+            return None
+
+    stream = MarketQuoteStream(CREDENTIALS, connect=lambda _headers: _Live())
+    stream.watch(SLUG)
+    stream.start()
+    assert delivered.wait(timeout=5.0)
+    assert stream.quote(SLUG) == MarketQuote(bid=0.54, ask=0.56)  # held while the connection is up
+    assert stream.last_error is None
+    stream.stop()
+    assert stream.quote(SLUG) is None  # and cleared on the way out, so read before stopping
 
 
 def test_it_runs_and_stops_on_a_real_thread() -> None:

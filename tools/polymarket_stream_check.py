@@ -142,10 +142,12 @@ def main() -> int:
         stream.watch(slug)
     stream.start()
     time.sleep(_CLIENT_CHECK_S)
+    app_quotes = {slug: stream.quote(slug) for slug in slugs}  # before stopping, which clears them
+    app_error = stream.last_error
     stream.stop()
-    print(f"\napp client after {_CLIENT_CHECK_S:.0f}s: {[stream.quote(slug) for slug in slugs]}")
-    print(f"app client error: {stream.last_error}")
-    return 0
+    print(f"\napp client after {_CLIENT_CHECK_S:.0f}s: {app_quotes}")
+    print(f"app client error: {app_error}")
+    return 0 if all(app_quotes.values()) else 1
 
 
 if __name__ == "__main__":
