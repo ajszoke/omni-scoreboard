@@ -22,6 +22,7 @@ def _treatment() -> MatchupVisualTreatment:
             mark=Rect(2, meter.y, 20, meter.height),
             meter=meter,
             meter_color=color,
+            bar_color=color,
         )
 
     return MatchupVisualTreatment(away=side(Rect(22, 0, 2, 20), AWAY_C), home=side(Rect(22, 20, 2, 20), HOME_C))

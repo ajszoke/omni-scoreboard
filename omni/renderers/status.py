@@ -21,7 +21,7 @@ from omni.core.enum import GameStatus, PanelProfile
 from omni.domain.contest import TeamGame
 from omni.renderers.canvas import Canvas
 from omni.renderers.context import RenderContext
-from omni.renderers.team_row import draw_matchup_marks
+from omni.renderers.team_row import draw_matchup_marks, draw_single_bars
 from omni.renderers.text import draw_centered, draw_right_aligned
 
 __all__ = ["StatusRenderer", "status_banner"]
@@ -75,7 +75,7 @@ class StatusRenderer:
         elif profile is PanelProfile.STACK_64X64:
             self._render_stack(canvas, context, game, banner)
         elif profile is PanelProfile.SINGLE_64X32:
-            self._render_single(canvas, game, banner)
+            self._render_single(canvas, context, game, banner)
         else:  # pragma: no cover - exhaustiveness guard; mypy errors if a profile is unhandled
             assert_never(profile)
 
@@ -93,10 +93,9 @@ class StatusRenderer:
         canvas.text(home_x, 28, game.home.abbreviation, _WHITE, font=_VALUE_FONT)
         draw_centered(canvas, 0, 64, 50, banner, _AMBER, _LABEL_FONT)
 
-    def _render_single(self, canvas: Canvas, game: TeamGame, banner: str) -> None:
+    def _render_single(self, canvas: Canvas, context: RenderContext, game: TeamGame, banner: str) -> None:
         # 64x32: abbreviations on the left, banner on the right — the full card still fits.
-        canvas.fill_rect(0, 0, 2, 16, game.away.primary_color)
-        canvas.fill_rect(0, 16, 2, 16, game.home.primary_color)
+        draw_single_bars(canvas, context, game.away, game.home)
         canvas.text(4, 5, game.away.abbreviation, _WHITE, font=_LABEL_FONT)
         canvas.text(4, 21, game.home.abbreviation, _WHITE, font=_LABEL_FONT)
         draw_right_aligned(canvas, 62, 13, banner, _AMBER, _LABEL_FONT)

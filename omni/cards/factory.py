@@ -36,7 +36,7 @@ from omni.cards.baseball import (
 )
 from omni.core.enum import DisplayPriority, GameStatus, HomeAway, PanelProfile
 from omni.core.time import DurationSeconds
-from omni.domain.baseball import BaseballGameState, PitchingDecisions, TeamLinescore, WinProbability
+from omni.domain.baseball import BaseballGameState, PitchingDecisions, PregameSide, TeamLinescore, WinProbability
 from omni.domain.contest import TeamGame
 from omni.events.baseball import BaseballGameEvent
 
@@ -45,12 +45,15 @@ __all__ = ["CardFactory"]
 # The live-baseball renderer natively supports all three profiles, each at its own density.
 _LIVE_BASEBALL_PROFILES = frozenset({PanelProfile.SINGLE_64X32, PanelProfile.STACK_64X64, PanelProfile.QUAD_128X64})
 _LIVE_BASEBALL_COMPROMISE = (
-    "single_64x32: team identity + run score + inning-phase label only — count, outs, bases, and H/E are dropped (not legible at 64x32).",
-    "stack_64x64: run score + live status (count/outs/bases) — the inline H/E and the full pitcher/batter strip are dropped (no room at 64px wide).",
+    "single_64x32: run score + live status (count/outs/bases) — H/E, the pitcher/batter strip and Due Up are dropped (not legible at 64x32).",
+    "stack_64x64: run score + live status (count/outs/bases) — the inline H/E, the full pitcher/batter strip and Due Up are dropped (no room at 64px wide).",
 )
 # Pregame renders natively on all three; the small panel drops the "first pitch" label.
 _PREGAME_PROFILES = frozenset({PanelProfile.SINGLE_64X32, PanelProfile.STACK_64X64, PanelProfile.QUAD_128X64})
-_PREGAME_COMPROMISE = ("single_64x32: matchup + countdown only — the 'first pitch' label is dropped (no room).",)
+_PREGAME_COMPROMISE = (
+    "single_64x32: matchup + countdown only — the 'first pitch' label, records, starters and odds are dropped (no room).",
+    "stack_64x64: matchup + countdown — records, starters and odds are dropped (no room at 64px wide).",
+)
 # Final renders natively on all three; the small panel shortens the status label.
 _FINAL_PROFILES = frozenset({PanelProfile.SINGLE_64X32, PanelProfile.STACK_64X64, PanelProfile.QUAD_128X64})
 _FINAL_COMPROMISE = (
@@ -149,6 +152,7 @@ class CardFactory:
             batter=state.batter,
             pitcher=state.pitcher,
             last_pitch=state.last_pitch,
+            due_up=state.due_up,
         )
         key = f"{game.id.raw}:live"
         return ScoreboardCard(
@@ -172,13 +176,15 @@ class CardFactory:
         *,
         now: datetime,
         priority: CardPriority | None = None,
+        away: PregameSide | None = None,
+        home: PregameSide | None = None,
     ) -> ScoreboardCard[PregameCardPayload]:
         """Build a pregame MLB card from a scheduled matchup.
 
         The card snapshots the scheduled first pitch; the renderer derives the live
         countdown from the render clock, so one card stays correct across ticks.
         """
-        payload = PregameCardPayload(scheduled_start=game.scheduled_start)
+        payload = PregameCardPayload(scheduled_start=game.scheduled_start, away=away, home=home)
         key = f"{game.id.raw}:pregame"
         return ScoreboardCard(
             id=CardId(key),
@@ -210,7 +216,14 @@ class CardFactory:
         None on a tie or an undecided feed) rides along for the W/L/S line. The card lingers
         for a finite postgame window (``final_postgame_window``), then expires from rotation.
         """
-        payload = FinalCardPayload(away_score=state.away_score, home_score=state.home_score, decisions=decisions)
+        payload = FinalCardPayload(
+            away_score=state.away_score,
+            home_score=state.home_score,
+            decisions=decisions,
+            away_line=TeamLinescore(runs=state.away_score, hits=state.away_hits, errors=state.away_errors),
+            home_line=TeamLinescore(runs=state.home_score, hits=state.home_hits, errors=state.home_errors),
+            inning=state.inning,
+        )
         key = f"{game.id.raw}:final"
         return ScoreboardCard(
             id=CardId(key),

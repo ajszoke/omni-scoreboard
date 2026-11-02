@@ -15,6 +15,9 @@ the displayed value advances every tick without the card being rebuilt.
 when absent (a unit test that doesn't care, a profile too small to fit one) it falls
 back to a plain color bar — so adding it broke no existing call site.
 
+`timezone` is the zone a clock on the board reads in. The render clock itself runs in UTC, so a
+renderer showing a time of day converts through this; None falls back to the render clock's own zone.
+
 `contrast` is the hardware-tunable legibility policy (the WCAG floor a dim brand color
 is value-lifted to, and the clash distance two tiles must keep). It defaults to the
 pre-policy behavior, so it too is a transparent addition; a device tunes it per sink.
@@ -23,7 +26,7 @@ pre-policy behavior, so it too is a transparent addition; a device tunes it per 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, tzinfo
 
 from omni.core.enum import PanelProfile
 from omni.renderers.image import LogoStore
@@ -40,6 +43,7 @@ class RenderContext:
     now: datetime  # render time; renderers derive live values (e.g. countdowns) from this
     logos: LogoStore | None = None  # ambient tile store; None -> renderers fall back to a color bar
     contrast: VisualContrastPolicy = DEFAULT_CONTRAST_POLICY  # hw-tunable legibility floor + clash threshold
+    timezone: tzinfo | None = None  # the zone board clocks read in; None -> the render clock's own zone
 
     def __post_init__(self) -> None:
         if self.now.tzinfo is None:

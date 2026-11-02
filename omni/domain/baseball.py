@@ -16,14 +16,22 @@ __all__ = [
     "InningPhase",
     "PitchType",
     "PitchSnapshot",
+    "WinLossRecord",
     "PitchingDecisions",
+    "StartingPitcher",
+    "BettingLine",
+    "GameLines",
+    "PregameSide",
+    "PregameDetails",
     "WinProbability",
+    "ChallengeState",
     "BaseballCount",
     "BaseballBaseState",
     "BaseballScoringImpact",
     "TeamLinescore",
     "BatterGameLine",
     "PitcherGameLine",
+    "DueUp",
     "BaseballGameState",
     "PitchingFeatKind",
     "PitchingFeatProgress",
@@ -192,6 +200,21 @@ class PitchSnapshot:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class WinLossRecord:
+    """A season win-loss record, a team's or a pitcher's."""
+
+    wins: int
+    losses: int
+
+    def __post_init__(self) -> None:
+        if self.wins < 0 or self.losses < 0:
+            raise ValueError("a record cannot be negative")
+
+    def __str__(self) -> str:
+        return f"{self.wins}-{self.losses}"
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class PitchingDecisions:
     """The winning and losing pitchers of a completed game, and the save if one was earned.
 
@@ -204,6 +227,10 @@ class PitchingDecisions:
     winner: str
     loser: str
     save: str | None = None
+    # The season totals these decisions leave each pitcher with, where the feed gives them.
+    winner_record: WinLossRecord | None = None
+    loser_record: WinLossRecord | None = None
+    saves: int | None = None
 
     def __post_init__(self) -> None:
         if not self.winner or not self.loser:
@@ -211,14 +238,61 @@ class PitchingDecisions:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class StartingPitcher:
+    """A probable starter and how the season has gone, where known: ``era`` as the feed prints it, like ``3.21``."""
+
+    name: str
+    record: WinLossRecord | None = None
+    era: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.name:
+            raise ValueError("a starter needs a name")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class BettingLine:
+    """One side's pregame odds in American form: its moneyline, and the run line with its price if posted."""
+
+    moneyline: int
+    runline: float | None = None
+    runline_price: int | None = None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class GameLines:
+    """Both sides' pregame odds for one game; a side is None when it has no line posted."""
+
+    away: BettingLine | None = None
+    home: BettingLine | None = None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class PregameSide:
+    """What a pregame card shows for one club beyond its identity; each part is None when unknown."""
+
+    record: WinLossRecord | None = None
+    starter: StartingPitcher | None = None
+    line: BettingLine | None = None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class PregameDetails:
+    """Both clubs' pregame details for one game."""
+
+    away: PregameSide = PregameSide()
+    home: PregameSide = PregameSide()
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class WinProbability:
     """Live in-game win probability for the two sides, as percentages.
 
-    Sourced from the feed (MLB StatsAPI `game_contextMetrics`); the two normally sum to
-    ~100. The *absence* of this object means no probability is available yet (a game not
-    started, or a feed without the block) — never a 50/50 placeholder. `favored` is the
+    From a traded market where there is one, else the MLB feed's own model; the two normally
+    sum to ~100. The *absence* of this object means no probability is available yet (a game
+    not started, or a source without one) — never a 50/50 placeholder. `favored` is the
     leading side, or None at an exact tie. General to any home/away contest, not baseball-
-    specific, but lives here with the other live-game values the MLB feed produces.
+    specific, but lives here with the other live-game values.
     """
 
     home: float
@@ -241,6 +315,25 @@ class WinProbability:
     def percent_for(self, side: HomeAway) -> float:
         """This side's win-probability percentage."""
         return self.home if side is HomeAway.HOME else self.away
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ChallengeState:
+    """ABS (automated ball-strike) challenges remaining, per side.
+
+    The 2025 experiment gives each team a small pool of challenges to the robo-umpire; this
+    carries how many each side has left. The *absence* of this object means the game is not
+    using the ABS system (or the feed does not report it), not zero challenges — so a rendered
+    module always reflects a real, tracked pool.
+    """
+
+    away: int
+    home: int
+
+    def __post_init__(self) -> None:
+        for side, value in (("away", self.away), ("home", self.home)):
+            if value < 0:
+                raise ValueError(f"{side} challenges cannot be negative")
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -375,6 +468,17 @@ class PitcherGameLine:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class DueUp:
+    """The batters due up next, in order: leadoff, on deck, in the hole — as many as the feed names."""
+
+    batters: tuple[BatterGameLine, ...]
+
+    def __post_init__(self) -> None:
+        if not 1 <= len(self.batters) <= 3:
+            raise ValueError("due up names one to three batters")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class BaseballGameState:
     """A live baseball game's observed state: score/inning/phase/count/bases.
 
@@ -410,6 +514,8 @@ class BaseballGameState:
     # feed carries no pitch detail. Part of the observed snapshot, so it lags in lockstep with the
     # score — no separate delay-safing needed (unlike the freshly fetched win probability).
     last_pitch: PitchSnapshot | None = None
+    # Who bats next, during a break between halves; None mid-half or when the feed names no one.
+    due_up: DueUp | None = None
 
     def __post_init__(self) -> None:
         if self.away_score < 0 or self.home_score < 0:

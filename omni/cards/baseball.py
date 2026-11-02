@@ -13,10 +13,13 @@ from omni.domain.baseball import (
     BaseballBaseState,
     BaseballCount,
     BatterGameLine,
+    ChallengeState,
+    DueUp,
     InningPhase,
     PitcherGameLine,
     PitchingDecisions,
     PitchSnapshot,
+    PregameSide,
     TeamLinescore,
     WinProbability,
 )
@@ -58,6 +61,8 @@ class LiveBaseballCardPayload:
     batter: BatterGameLine | None = None  # current at-bat; None hides the batter line
     pitcher: PitcherGameLine | None = None  # current pitcher; None hides the pitcher line
     last_pitch: PitchSnapshot | None = None  # the at-bat's most recent pitch (velo + type); None hides the token
+    challenges: ChallengeState | None = None  # ABS challenges left per side; None when the game has no ABS system
+    due_up: DueUp | None = None  # who bats next, during a break; None hides it
 
     def __post_init__(self) -> None:
         # Run/hit/error non-negativity is enforced by TeamLinescore itself.
@@ -74,11 +79,13 @@ class PregameCardPayload:
     """The pregame "situation" a baseball card renders before first pitch: when the
     game starts. Teams come from the contest. Held as a self-contained snapshot (a
     copy of the scheduled start) so the renderer derives the live countdown from the
-    render clock, not from a mutable contest. Probable pitchers / team records will
-    join here when the provider surfaces them.
+    render clock, not from a mutable contest. `away`/`home` carry each club's record,
+    probable starter and odds when known; None leaves the card at matchup + countdown.
     """
 
     scheduled_start: datetime
+    away: PregameSide | None = None
+    home: PregameSide | None = None
 
     def __post_init__(self) -> None:
         if self.scheduled_start.tzinfo is None:
@@ -96,12 +103,16 @@ class FinalCardPayload:
     Teams come from the contest; `winner` is computed from the scores so it can never
     contradict them (an equal score — e.g. a weather-shortened tie — yields None).
     `decisions` is the winning/losing/saving pitchers (None on a tie or a feed without
-    them); a renderer shortens to last names and a small panel may drop it.
+    them); a renderer shortens to last names and a small panel may drop it. `away_line`/
+    `home_line` are the full R/H/E and `inning` how many were played, where known.
     """
 
     away_score: int
     home_score: int
     decisions: PitchingDecisions | None = None
+    away_line: TeamLinescore | None = None
+    home_line: TeamLinescore | None = None
+    inning: int | None = None
 
     def __post_init__(self) -> None:
         if self.away_score < 0 or self.home_score < 0:

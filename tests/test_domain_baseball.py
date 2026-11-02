@@ -10,10 +10,14 @@ from omni.domain.baseball import (
     BaseballCount,
     BaseballGameState,
     BaseballScoringImpact,
+    ChallengeState,
     InningPhase,
     PitchingDecisions,
     PitchingFeatKind,
     BatterGameLine,
+    DueUp,
+    StartingPitcher,
+    WinLossRecord,
     PitcherGameLine,
     PitchingFeatProgress,
     PitchSnapshot,
@@ -69,6 +73,14 @@ def test_inning_phase_breaks() -> None:
     assert InningPhase.MIDDLE.is_break and InningPhase.END.is_break  # between-halves breaks
 
 
+def test_challenge_state_holds_counts_and_rejects_negative() -> None:
+    assert ChallengeState(away=2, home=0).away == 2
+    with pytest.raises(ValueError):
+        ChallengeState(away=-1, home=0)
+    with pytest.raises(ValueError):
+        ChallengeState(away=0, home=-1)
+
+
 def test_game_state_holds_hits_and_rejects_negative() -> None:
     assert _state(away_hits=4, home_hits=0).away_hits == 4
     with pytest.raises(ValueError):
@@ -95,6 +107,25 @@ def test_team_linescore_rejects_negative_values(field: str) -> None:
     values = {"runs": 0, "hits": 0, "errors": 0, field: -1}
     with pytest.raises(ValueError, match=f"{field} cannot be negative"):
         TeamLinescore(**values)
+
+
+def test_due_up_holds_one_to_three_named_batters() -> None:
+    batter = BatterGameLine(name="Ohtani", order=1, at_bats=3, hits=2)
+    assert DueUp(batters=(batter,) * 3).batters[0] == batter
+    for batters in ((), (batter,) * 4):
+        with pytest.raises(ValueError):
+            DueUp(batters=batters)
+
+
+def test_a_record_reads_as_wins_dash_losses_and_cannot_go_negative() -> None:
+    assert str(WinLossRecord(wins=12, losses=3)) == "12-3"
+    with pytest.raises(ValueError):
+        WinLossRecord(wins=-1, losses=0)
+
+
+def test_a_starter_needs_a_name() -> None:
+    with pytest.raises(ValueError):
+        StartingPitcher(name="", record=WinLossRecord(wins=0, losses=0), era="0.00")
 
 
 def test_batter_game_line_holds_the_at_bat() -> None:

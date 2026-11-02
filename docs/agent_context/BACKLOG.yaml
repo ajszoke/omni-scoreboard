@@ -227,6 +227,13 @@ milestones:
       - id: M5-005
         title: "1x1/2x1/2x2 case-design notes and BOM"
         labels: [hardware, case, p2]
+      - id: M5-006
+        title: "Shared odds and market service for multiple boards (AWS)"
+        labels: [cloud, odds, secrets, p3]
+        notes:
+          - "Direction from the user, 2026-11-01: once there are several boards, they pull odds from one source on our side rather than each making the same requests. It can also be the key store, so no board holds a secret."
+          - "Not started, and a cloud backend still needs explicit go-ahead per AGENTS.md. Boards consume data through injected fetchers (WinProbFetcher, GameLinesFetcher, PregameDetailsFetcher), so pointing them at this service shouldn't touch renderers or the pipeline."
+          - "Check first: feeding other people's boards from one Polymarket US account is the redistribution question in clause 22 of its participant agreement, so get its written permission before building on that. See SOURCES.md."
 
   - id: M6
     name: nfl_support

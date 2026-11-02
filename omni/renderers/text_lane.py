@@ -10,14 +10,15 @@ The scroll position is a pure function of the render clock (`RenderContext.now`)
 the renderer bumps once per frame. A frame-counted scroller advances by however many times the
 render loop happened to fire, so its speed drifts with frame timing and it can jump or stutter;
 deriving the offset from wall-clock time instead means the same instant always yields the same
-frame and the text glides at a fixed pixels-per-second no matter how the loop is paced. One
-cycle dwells at the head (so the start is readable), slides left at a constant rate, dwells at
-the tail (so the end is readable), then repeats — all of it determined by the clock, so nothing
-has to be reset when a card appears or the loop hitches.
+frame and the text moves at the same pace no matter how the loop is paced. One cycle holds at
+the head (so the start is readable), eases left along a half sine wave, holds at the tail (so the
+end is readable), then eases back — all of it determined by the clock, so nothing has to be reset
+when a card appears or the loop hitches.
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
@@ -47,19 +48,23 @@ class LaneAnchor(Enum):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class MarqueeStyle:
-    """The tunable feel of a marquee scroll: how fast it slides and how long it pauses at each end.
+    """The tunable feel of a marquee: how fast it travels and how long it holds at each end.
 
-    Speed is in pixels per second, so the scroll reads at the same rate on any render loop. The
-    dwells give the eye time to catch the start and the end before the cycle repeats.
+    Speed is the average over a trip, in pixels per second, so the scroll reads at the same rate on
+    any render loop; easing makes it faster mid-trip and slower near the ends. The floor keeps a
+    string that only just overflows from lurching through its short trip.
     """
 
-    speed_px_per_s: float = 14.0  # a comfortable small-panel read speed
-    start_dwell_s: float = 1.5  # hold at the head before sliding, so the start can be read
-    end_dwell_s: float = 1.5  # hold at the tail before repeating, so the end can be read
+    speed_px_per_s: float = 8.0  # mid-slow: a name stays readable the whole way across
+    min_travel_s: float = 1.0  # the shortest a one-way trip may take
+    start_dwell_s: float = 2.0  # hold at the head, so the start can be read
+    end_dwell_s: float = 2.0  # hold at the tail, so the end can be read
 
     def __post_init__(self) -> None:
         if self.speed_px_per_s <= 0:
             raise ValueError("speed_px_per_s must be positive")
+        if self.min_travel_s <= 0:
+            raise ValueError("min_travel_s must be positive")
         if self.start_dwell_s < 0 or self.end_dwell_s < 0:
             raise ValueError("dwell seconds cannot be negative")
 
@@ -84,24 +89,32 @@ class MarqueePlan:
             raise ValueError("a marquee plan needs a positive travel distance (the text must overflow)")
 
     @property
-    def scroll_s(self) -> float:
-        """Seconds the slide itself takes at the style's speed."""
-        return self.distance / self.style.speed_px_per_s
+    def travel_s(self) -> float:
+        """Seconds one trip takes, in either direction."""
+        return max(self.distance / self.style.speed_px_per_s, self.style.min_travel_s)
 
     @property
     def period_s(self) -> float:
-        """One full cycle: the head dwell, the slide, then the tail dwell."""
-        return self.style.start_dwell_s + self.scroll_s + self.style.end_dwell_s
+        """One full cycle: hold at the head, out, hold at the tail, back."""
+        return self.style.start_dwell_s + self.travel_s + self.style.end_dwell_s + self.travel_s
 
     def offset_at(self, clock_s: float) -> int:
         """The leftward pixel shift at absolute time ``clock_s`` (seconds), cycling every period."""
         t = clock_s % self.period_s
         if t < self.style.start_dwell_s:
-            return 0  # dwelling at the head — the start is held still and readable
+            return 0
         t -= self.style.start_dwell_s
-        if t >= self.scroll_s:
-            return self.distance  # dwelling at the tail — the end is held still and readable
-        return min(self.distance, int(t * self.style.speed_px_per_s))  # sliding at a constant rate
+        if t < self.travel_s:
+            return self._eased(t / self.travel_s)
+        t -= self.travel_s
+        if t < self.style.end_dwell_s:
+            return self.distance
+        t -= self.style.end_dwell_s
+        return self._eased(1.0 - t / self.travel_s)
+
+    def _eased(self, progress: float) -> int:
+        """The offset ``progress`` (0..1) of the way along a half sine wave, easing out of each end."""
+        return round(self.distance * (1.0 - math.cos(math.pi * progress)) / 2.0)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

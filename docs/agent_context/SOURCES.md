@@ -23,6 +23,14 @@ Primary repositories and references:
 - Gidger Raspberry Pi sports scoreboard reference: https://github.com/gidger/rpi-led-nhl-scoreboard
 - Ty Porter LED scoreboard hardware/dev-env writeup: https://blog.ty-porter.dev/development/raspberry%20pi/emulation/2021/11/11/building-raspberry-pi-led-scoreboards.html
 
+Odds and win probability (measured 2026-11-01):
+
+- Bovada coupon, no key, undocumented: `https://www.bovada.lv/services/sports/event/coupon/events/A/description/baseball/mlb`. Served with `Cache-Control: max-age=600`; the copy refreshes only about every 10 minutes (two cycles observed), and a `no-cache` request is ignored. No 429s at up to 1 request/second against that cached copy. Fine for pregame, too stale for live.
+- Polymarket US market data, no key: `https://gateway.polymarket.us` (`/v1/market/slug/{slug}`, `/v1/markets/{slug}/bbo`). Docs: https://docs.polymarket.us/ . 25 requests/second per IP (https://docs.polymarket.us/api-reference/rate-limits.md). Public responses are cached for 30 seconds; real-time needs the keyed WebSocket (https://docs.polymarket.us/api-reference/websocket/markets.md). Moneyline slugs are `aec-mlb-{away}-{home}-{local date}`: all 15 games matched on 2026-09-16 and 2026-06-10, but doubleheader games matched none of the variants tried.
+- Polymarket US participant agreement (binds account holders, so anyone with a key), clause 22: data "may not be redistributed except as PMUS expressly permits": https://www.polymarketexchange.com/files/legal/latest/participant-agreement
+- Kalshi Developer Agreement v1.1, section 3: API use "is expressly limited to facilitating a members own trading"; section 1: accessing the API counts as accepting it. Ruled out: https://kalshi-public-docs.s3.amazonaws.com/Kalshi-Developer-Agreement.pdf
+- polymarket.com terms, sections 1 and 4.2: US residents are limited to content features, and scraping is barred. Ruled out from the US: https://polymarket.com/tos
+
 Local execution note:
 
 - Browser-based GitHub access worked.

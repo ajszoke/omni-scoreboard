@@ -24,11 +24,16 @@ from omni.domain.baseball import (
     BaseballGameState,
     BaseballScoringImpact,
     BatterGameLine,
+    DueUp,
     InningPhase,
     PitcherGameLine,
     PitchingDecisions,
     PitchSnapshot,
     PitchType,
+    PregameDetails,
+    PregameSide,
+    StartingPitcher,
+    WinLossRecord,
     WinProbability,
     scoring_impact,
 )
@@ -161,6 +166,7 @@ class MlbStatsApiProvider:
         fetch_schedule: ScheduleFetcher | None = None,
         *,
         fetch_game: GameFetcher | None = None,
+        fetch_pregame: GameFetcher | None = None,
         fetch_context_metrics: ContextMetricsFetcher | None = None,
         source: SourceRef | None = None,
         sport_ids: str = "1,51",  # 1 = MLB, 51 = WBC (mirrors upstream)
@@ -172,6 +178,7 @@ class MlbStatsApiProvider:
         self._fetch_context_metrics = (
             fetch_context_metrics if fetch_context_metrics is not None else _default_fetch_context_metrics
         )
+        self._fetch_pregame = fetch_pregame if fetch_pregame is not None else _default_fetch_pregame
         self.source = source if source is not None else _SOURCE
         self._sport_ids = sport_ids
         self._tz = schedule_timezone if schedule_timezone is not None else _DEFAULT_SCHEDULE_TZ
@@ -214,6 +221,18 @@ class MlbStatsApiProvider:
         state = _parse_game_state(raw)
         events, warnings = _parse_game_events(raw, contest=game, source=self.source, observed_at=now)
         return LiveBaseballFeed(state=state, events=events, decisions=_parse_decisions(raw), warnings=warnings)
+
+    def fetch_pregame_details(self, game: TeamGame) -> PregameDetails:
+        """Fetch one upcoming game's records and probable starters.
+
+        A separate, narrow request from the live feed, for a game with no live state to parse yet.
+        Raises `ProviderError` if the fetch fails; a side the feed says nothing about comes back blank.
+        """
+        try:
+            raw = self._fetch_pregame(game.id.raw)
+        except Exception as exc:
+            raise ProviderError(f"MLB pregame fetch failed for {game.id.raw}: {exc}") from exc
+        return PregameDetails(away=_pregame_side(raw, "away"), home=_pregame_side(raw, "home"))
 
     def fetch_win_probability(self, game: TeamGame) -> WinProbability | None:
         """Fetch one game's live win probability, or None when none is available.
@@ -337,10 +356,9 @@ def _lineup_spot(player: dict[str, Any]) -> int | None:
     return spot if 1 <= spot <= 9 else None
 
 
-def _current_batter(raw: dict[str, Any]) -> BatterGameLine | None:
-    """The batter at the plate with their game line, or None if the feed names none."""
-    batter = ((raw.get("liveData") or {}).get("linescore") or {}).get("offense", {}).get("batter") or {}
-    player_id, name = batter.get("id"), batter.get("fullName")
+def _batter_game_line(raw: dict[str, Any], person: dict[str, Any]) -> BatterGameLine | None:
+    """A named batter with their game line, or None if the feed doesn't name them or carry the line."""
+    player_id, name = person.get("id"), person.get("fullName")
     if not isinstance(player_id, int) or not isinstance(name, str) or not name:
         return None
     player = _boxscore_player(raw, player_id)
@@ -355,6 +373,12 @@ def _current_batter(raw: dict[str, Any]) -> BatterGameLine | None:
         rbi=int(stats.get("rbi", 0) or 0),
         home_runs=int(stats.get("homeRuns", 0) or 0),
     )
+
+
+def _current_batter(raw: dict[str, Any]) -> BatterGameLine | None:
+    """The batter at the plate with their game line, or None if the feed names none."""
+    batter = ((raw.get("liveData") or {}).get("linescore") or {}).get("offense", {}).get("batter") or {}
+    return _batter_game_line(raw, batter)
 
 
 def _current_pitcher(raw: dict[str, Any]) -> PitcherGameLine | None:
@@ -373,6 +397,13 @@ def _current_pitcher(raw: dict[str, Any]) -> PitcherGameLine | None:
         pitches=int(stats.get("numberOfPitches", 0) or 0),
         strikeouts=int(stats.get("strikeOuts", 0) or 0),
     )
+
+
+def _due_up(raw: dict[str, Any], offense: dict[str, Any]) -> DueUp | None:
+    """The batters due up from a break's ``offense``, which already names the side coming to bat."""
+    lines = (_batter_game_line(raw, offense.get(key) or {}) for key in ("batter", "onDeck", "inHole"))
+    batters = tuple(line for line in lines if line is not None)
+    return DueUp(batters=batters) if batters else None
 
 
 def _parse_game_state(raw: dict[str, Any]) -> BaseballGameState:
@@ -394,6 +425,7 @@ def _parse_game_state(raw: dict[str, Any]) -> BaseballGameState:
         home_hits = int(home_team.get("hits", 0) or 0)
         away_errors = int(away_team.get("errors", 0) or 0)
         home_errors = int(home_team.get("errors", 0) or 0)
+        phase = _phase_from_inning_state(str(line.get("inningState", "Top")))
         return BaseballGameState(
             away_score=int(away_team.get("runs", 0) or 0),
             home_score=int(home_team.get("runs", 0) or 0),
@@ -409,7 +441,8 @@ def _parse_game_state(raw: dict[str, Any]) -> BaseballGameState:
             pitcher=_current_pitcher(raw),
             last_pitch=_last_pitch_snapshot(raw),
             inning=inning,
-            phase=_phase_from_inning_state(str(line.get("inningState", "Top"))),
+            phase=phase,
+            due_up=_due_up(raw, offense) if phase.is_break else None,
             count=BaseballCount(
                 balls=int(line.get("balls", 0) or 0),
                 strikes=int(line.get("strikes", 0) or 0),
@@ -642,6 +675,37 @@ def _pitcher_name(person: Any) -> str | None:
     return name if isinstance(name, str) and name else None
 
 
+def _season_pitching(raw: dict[str, Any], person: Any) -> dict[str, Any]:
+    """A `decisions` person's season pitching totals from the boxscore, or empty if not found."""
+    player_id = person.get("id") if isinstance(person, dict) else None
+    player = _boxscore_player(raw, player_id) if isinstance(player_id, int) else None
+    return ((player or {}).get("seasonStats") or {}).get("pitching") or {}
+
+
+def _season_record(pitching: dict[str, Any]) -> WinLossRecord | None:
+    """A win-loss record from season pitching totals, or None unless both halves are present."""
+    wins, losses = _safe_int(pitching.get("wins")), _safe_int(pitching.get("losses"))
+    return WinLossRecord(wins=wins, losses=losses) if wins is not None and losses is not None else None
+
+
+def _pregame_side(raw: dict[str, Any], side: str) -> PregameSide:
+    """One club's record and probable starter from a pregame feed, each None if the feed lacks it."""
+    game_data = raw.get("gameData") or {}
+    team = (game_data.get("teams") or {}).get(side) or {}
+    person = (game_data.get("probablePitchers") or {}).get(side)
+    name = _pitcher_name(person)
+    starter = None
+    if name is not None:
+        pitching = _season_pitching(raw, person)
+        era = pitching.get("era")
+        starter = StartingPitcher(
+            name=_last_name(name),
+            record=_season_record(pitching),
+            era=era if isinstance(era, str) and era else None,
+        )
+    return PregameSide(record=_season_record(team.get("record") or {}), starter=starter)
+
+
 def _parse_decisions(raw: dict[str, Any]) -> PitchingDecisions | None:
     """Parse `liveData.decisions` into the winning/losing/saving pitchers, or None.
 
@@ -655,7 +719,14 @@ def _parse_decisions(raw: dict[str, Any]) -> PitchingDecisions | None:
     loser = _pitcher_name(decisions.get("loser"))
     if winner is None or loser is None:
         return None
-    return PitchingDecisions(winner=winner, loser=loser, save=_pitcher_name(decisions.get("save")))
+    return PitchingDecisions(
+        winner=winner,
+        loser=loser,
+        save=_pitcher_name(decisions.get("save")),
+        winner_record=_season_record(_season_pitching(raw, decisions.get("winner"))),
+        loser_record=_season_record(_season_pitching(raw, decisions.get("loser"))),
+        saves=_safe_int(_season_pitching(raw, decisions.get("save")).get("saves")),
+    )
 
 
 def _parse_win_probability(raw: dict[str, Any]) -> WinProbability | None:
@@ -691,12 +762,27 @@ def _default_fetch_schedule(game_date: date, sport_ids: str) -> list[dict[str, A
 # this in sync with what `_parse_game_state` / `_parse_game_events` read.
 _GAME_FIELDS = (
     "liveData,linescore,teams,home,away,runs,hits,errors,currentInning,inningState,balls,strikes,outs,"
-    "offense,defense,first,second,third,batter,pitcher,id,"  # current batter/pitcher (their game lines below)
+    "offense,defense,first,second,third,batter,onDeck,inHole,pitcher,id,"  # current batter/pitcher (lines below), due up
     "boxscore,teamStats,batting,baseOnBalls,hitByPitch,"  # per-side walks/HBP -> perfect-game detection
     "players,stats,pitching,battingOrder,atBats,homeRuns,strikeOuts,numberOfPitches,inningsPitched,"  # batter/pitcher lines
+    "seasonStats,wins,losses,saves,"  # season totals for the final card's decisions
     "plays,allPlays,currentPlay,result,eventType,description,rbi,awayScore,homeScore,about,inning,halfInning,atBatIndex,"
     "endTime,startTime,count,playEvents,isPitch,pitchData,startSpeed,details,type,code,decisions,winner,loser,save,fullName"
 )
+
+
+# The narrow whitelist for an upcoming game: its records and probable starters, and nothing else.
+_PREGAME_FIELDS = (
+    "gameData,teams,home,away,record,wins,losses,probablePitchers,id,fullName,"
+    "liveData,boxscore,players,seasonStats,pitching,era"
+)
+
+
+def _default_fetch_pregame(game_pk: Any) -> dict[str, Any]:  # pragma: no cover - real network
+    import statsapi
+
+    result: dict[str, Any] = statsapi.get("game", {"gamePk": game_pk, "fields": _PREGAME_FIELDS})
+    return result
 
 
 def _default_fetch_game(game_pk: Any) -> dict[str, Any]:  # pragma: no cover - real network
