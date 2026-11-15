@@ -72,6 +72,12 @@ Default panel is 32x32. For the Omni target profiles, pass matrix dimensions, e.
 - Benign first-run warnings: placeholder OpenWeather API key, and optional
   `colors/*.json` / `coordinates/*.json` overrides falling back to bundled defaults.
 
+## The cloud market service
+
+The poller and its API live in `cloud/`; `cloud/README.md` covers deploying them and issuing board tokens. A
+git-ignored `.env` at the repo root holds machine-local secrets. The Polymarket key goes there first
+(`POLYMARKET_KEY_ID`, `POLYMARKET_SECRET_KEY`), from https://polymarket.us/developer , on its way to SSM.
+
 ## Raspberry Pi devices
 
 For physical units, use upstream `install.sh` (it creates its own `venv/` and installs the

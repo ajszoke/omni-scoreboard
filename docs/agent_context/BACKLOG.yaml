@@ -232,7 +232,10 @@ milestones:
         labels: [cloud, odds, secrets, p3]
         notes:
           - "Direction from the user, 2026-11-01: once there are several boards, they pull odds from one source on our side rather than each making the same requests. It can also be the key store, so no board holds a secret."
-          - "Not started, and a cloud backend still needs explicit go-ahead per AGENTS.md. Boards consume data through injected fetchers (WinProbFetcher, GameLinesFetcher, PregameDetailsFetcher), so pointing them at this service shouldn't touch renderers or the pipeline."
+          - "Go-ahead given 2026-11-02: heartbeat every 5 minutes, poll until 10 minutes after the latest, a table row per poll, boards pull the latest. Built in cloud/ (Lambda ZIP, DynamoDB, S3) and deployed 2026-11-15; tested on live NBA games, where 25 of 30 prices in the first run came off the keyed stream. PR #95's stream client moved there, so the Pi needs neither cryptography nor websockets."
+          - "Remaining: the board client behind WinProbFetcher, with its heartbeat and a stale-row guard (ignore rows older than about 60 seconds, so a frozen poller falls through to the 3-minute hold and then MLB's number); then CI deploys."
+          - "Open: doubleheaders can use the exchange's league listing rather than a guessed slug, which needs real MLB games to confirm. Bovada stays out of the cloud by the user's call, 2026-11-02, given its terms (SOURCES.md): a board keeps fetching it directly for now, and a second board could take pregame odds from Polymarket's price instead, a moneyline with no run line."
+          - "User's call, 2026-11-01: settle the permission question when sharing actually starts, not before."
           - "Check first: feeding other people's boards from one Polymarket US account is the redistribution question in clause 22 of its participant agreement, so get its written permission before building on that. See SOURCES.md."
 
   - id: M6

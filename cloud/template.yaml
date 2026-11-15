@@ -1,0 +1,132 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Omni market service. One poller reads betting markets; boards pull the latest stored value.
+
+Parameters:
+  SlateLeagues:
+    Type: String
+    Default: mlb
+    Description: Comma-separated leagues to poll. MLB uses its schedule; others use the exchange's listing.
+  BovadaEnabled:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Whether the poller reads and stores Bovada's pregame lines. See cloud/README.md before enabling.
+  PolymarketKeyPrefix:
+    Type: String
+    Default: /omni/polymarket
+    Description: SSM path holding key-id and secret-key. With neither stored, the poller uses public quotes.
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Architectures: [arm64]
+    MemorySize: 256
+    CodeUri: build/package/
+    Environment:
+      Variables:
+        TABLE_NAME: !Ref Table
+
+Resources:
+  Table:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: pk, AttributeType: S }
+        - { AttributeName: sk, AttributeType: "N" }
+      KeySchema:
+        - { AttributeName: pk, KeyType: HASH }
+        - { AttributeName: sk, KeyType: RANGE }
+      TimeToLiveSpecification:
+        AttributeName: expires_at
+        Enabled: true
+
+  # The keepsake copy of every reading. It outlives the stack, so tearing the service down can't lose it.
+  Archive:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  ApiLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 14
+
+  PollerLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 14
+
+  # Public by design: every route checks a per-board token itself, and boards hold no AWS credentials.
+  Api:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: cloud.market_service.api_handler.lambda_handler
+      Timeout: 10
+      LoggingConfig:
+        LogGroup: !Ref ApiLogs
+      FunctionUrlConfig:
+        AuthType: NONE
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action: [dynamodb:GetItem, dynamodb:Query, dynamodb:UpdateItem]
+              Resource: !GetAtt Table.Arn
+
+  # Timeout is the lease span in poller.py: past it, a run holding the lease is surely dead.
+  Poller:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: cloud.market_service.poller_handler.lambda_handler
+      Timeout: 58
+      LoggingConfig:
+        LogGroup: !Ref PollerLogs
+      Environment:
+        Variables:
+          ARCHIVE_BUCKET: !Ref Archive
+          SLATE_LEAGUES: !Ref SlateLeagues
+          BOVADA_ENABLED: !Ref BovadaEnabled
+          POLYMARKET_KEY_PREFIX: !Ref PolymarketKeyPrefix
+      EventInvokeConfig:
+        MaximumRetryAttempts: 0
+        MaximumEventAgeInSeconds: 60
+      Events:
+        EveryMinute:
+          Type: Schedule
+          Properties:
+            Schedule: rate(1 minute)
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action: [dynamodb:BatchWriteItem, dynamodb:DeleteItem, dynamodb:GetItem, dynamodb:PutItem]
+              Resource: !GetAtt Table.Arn
+            - Effect: Allow
+              Action: s3:PutObject
+              Resource: !Sub "${Archive.Arn}/readings/*"
+            - Effect: Allow
+              Action: ssm:GetParameters
+              Resource: !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${PolymarketKeyPrefix}/*"
+
+Outputs:
+  ApiUrl:
+    Description: Where boards call.
+    Value: !GetAtt ApiUrl.FunctionUrl
+  TableName:
+    Value: !Ref Table
+  ArchiveBucket:
+    Value: !Ref Archive

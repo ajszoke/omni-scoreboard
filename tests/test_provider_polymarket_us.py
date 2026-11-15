@@ -14,13 +14,18 @@ from omni.domain.baseball import WinProbability
 from omni.domain.contest import TeamGame
 from omni.providers.base import ProviderError
 from omni.providers.mlb_teams import MlbTeamRegistry
-from omni.providers.polymarket_us import PolymarketUsProvider, _parse_quote
+from omni.providers.polymarket_us import PolymarketUsProvider, _open_quote, _reading_from
 
 REG = MlbTeamRegistry.from_color_file()
 SOURCE = SourceRef("mlb_statsapi")
 START = datetime(2026, 9, 17, 1, 40, tzinfo=timezone.utc)  # a night game: still Sep 16 where it's played
 NOW = START + timedelta(hours=1)
 SLUG = "aec-mlb-col-lad-2026-09-16"
+
+
+def _parse_quote(raw: Any, *, away_is_long: bool) -> WinProbability | None:
+    quote = _open_quote(raw)
+    return _reading_from(quote, away_is_long=away_is_long) if quote is not None else None
 
 
 def _game(raw: str = "g1") -> TeamGame:
