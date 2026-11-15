@@ -17,13 +17,13 @@ config (permissions/skills) lives in `.claude/` but carries no project knowledge
 - **Current status:** `docs/agent_context/STATUS.md` (living — update when state changes).
 - **Deep context:** `docs/agent_context/` — `ROADMAP.md`, `ARCHITECTURE_TYPED_DOMAIN.md`, `BACKLOG.yaml`, `SOURCES.md`.
 - **Dev environment:** uv + project-local `.venv`; software emulator, no Pi needed — `docs/dev_setup.md`.
-- **Code:** `main.py` (entry), `renderers/`, `data/`, local packages `bullpen/ standings/ news/`; `starter_code/` holds typed-domain sketches to grow into `omni/`.
+- **Code:** `main.py` (entry), `renderers/`, `data/`, local packages `bullpen/ standings/ news/`; `starter_code/` holds typed-domain sketches to grow into `omni/`; `cloud/` is the AWS market service (see its `README.md`).
 - **Reference hardware:** a physical `quad_128x64` (2×2) board runs headless on the LAN (`screen` + `run.sh`); its SSH target is machine-local (`CLAUDE.local.md`, git-ignored). Use the `run-on-board` skill. It currently runs the pre-revival code.
 
 ## Operating notes
 
 - **Commit identity:** author as `ajszoke <aszoke1@gmail.com>`, set **repo-local** (not global). Push over **HTTPS + `gh`** — SSH may resolve to a different GitHub identity on some machines. Never force-push `main`.
-- **Never commit:** secrets, `config.json`, `emulator_config.json`, `.venv/`, build artifacts/caches.
+- **Never commit:** secrets, `.env`, `config.json`, `emulator_config.json`, `.venv/`, build artifacts/caches.
 - **Knowledge-base hygiene (keep it ingestion-optimal):** one concept per doc; keep this map lean (links, not prose dumps); prune docs for shipped/abandoned work; promote a thrice-repeated fact into a doc and a repeated procedure into a `.claude/skills/` skill; verify a referenced file/flag still exists before relying on it. Claude Code's machine-local auto-memory supplements but never overrides these committed docs.
 
 ## Supported displays
@@ -83,7 +83,7 @@ Free/low-cost by default:
 - MLB: upstream MLB StatsAPI integration.
 - NFL/NBA/NHL/PGA initial spike: ESPN site APIs, isolated behind provider interfaces.
 - PGA probability/cut-line optional: DataGolf if worth the key/cost.
-- MLB pregame odds: Bovada's public coupon, behind a provider; it sits behind a 10-minute CDN cache, so never use it for a live value.
+- MLB pregame odds: Bovada's public coupon, behind a provider; it sits behind a 10-minute CDN cache, so never use it for a live value. Its terms limit content to private personal use and bar storing it elsewhere without consent, so the cloud poller leaves it off by default.
 - MLB in-game win probability: Polymarket US public market data first (MLB's own model ignores team strength), with the MLB feed as the fallback.
 - Do not use Kalshi's API (its Developer Agreement limits use to a member's own trading) or polymarket.com's APIs from the US (its terms limit US residents to content features). Details: `docs/agent_context/SOURCES.md`.
 - Commercial fallback only after free sources fail product needs.
@@ -97,7 +97,7 @@ For friends/family units:
 - Local config and credentials.
 - Sleep/wake schedule.
 - Physical switch/button support.
-- Avoid cloud dependencies.
+- A board must keep working when the cloud is down: the shared market service (`cloud/`) improves a board but is never required.
 
 ## Never do these without explicit human approval
 

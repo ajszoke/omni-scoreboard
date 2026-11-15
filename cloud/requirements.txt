@@ -1,0 +1,5 @@
+# What the Lambda bundle adds to the runtime, which already carries boto3.
+MLB-StatsAPI>=1.9.0
+cryptography>=42
+tzdata  # zoneinfo's data, in case the runtime image doesn't ship it
+websockets>=13
