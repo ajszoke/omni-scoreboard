@@ -5,11 +5,17 @@
 Polls the MLB StatsAPI, runs the delay-safe pipeline, and rotates cards on the
 emulator (browser at http://localhost:8888/). This is the thin I/O shell around the
 deterministic `AppLoop`; everything testable lives in `runner.py` / `loop.py`.
+
+With ``OMNI_CLOUD_URL`` and ``OMNI_CLOUD_TOKEN`` in the environment or a git-ignored ``.env``, the
+win meter reads Omni's market service (``cloud/``); without them it reads Polymarket's public quotes.
 """
 
 from __future__ import annotations
 
 import argparse
+import os
+import subprocess
+from pathlib import Path
 from typing import Sequence, cast
 
 from datetime import datetime
@@ -18,6 +24,7 @@ from omni.app.clock import SystemClock
 from omni.app.display import MatrixDevice, MatrixDisplaySink
 from omni.app.runner import build_loop, run_forever
 from omni.core.enum import PanelProfile
+from omni.core.env import read_env_file
 from omni.core.time import DurationSeconds
 from omni.domain.baseball import WinProbability
 from omni.domain.contest import TeamGame
@@ -26,6 +33,8 @@ from omni.panels.geometry import geometry_for
 from omni.renderers.image import LogoStore
 
 __all__ = ["main"]
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
@@ -49,6 +58,17 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _app_version() -> str:  # pragma: no cover - reads the checkout
+    """The checked-out commit, which is what a heartbeat reports."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(_REPO_ROOT), "rev-parse", "--short", "HEAD"], capture_output=True, text=True, timeout=5
+        )
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+    return result.stdout.strip() or "unknown"
+
+
 def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives the live emulator + network
     args = _parse_args(argv)
     profile = PanelProfile(args.profile)
@@ -59,6 +79,12 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
     from zoneinfo import ZoneInfo
 
     from omni.providers.bovada_odds import BovadaOddsProvider
+    from omni.providers.market_service import (
+        HeartbeatSender,
+        MarketServiceClient,
+        MarketServiceConfig,
+        UrllibTransport,
+    )
     from omni.providers.mlb_statsapi import MlbStatsApiProvider
     from omni.providers.mlb_teams import MlbTeamRegistry
     from omni.providers.polymarket_us import PolymarketUsProvider
@@ -66,6 +92,17 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
     zone = ZoneInfo(args.timezone)
     provider = MlbStatsApiProvider(MlbTeamRegistry.from_color_file(), schedule_timezone=zone)
     odds = None if args.no_odds else BovadaOddsProvider()
+
+    # The shared market service when this board has a token for it; the public quotes otherwise.
+    cloud = MarketServiceConfig.from_env({**read_env_file(_REPO_ROOT / ".env"), **os.environ})
+    if cloud is not None:
+        transport = UrllibTransport(cloud)
+        HeartbeatSender(transport, version=_app_version()).start()
+        fetch_market_win_probability = MarketServiceClient(transport).win_probability
+        meter = "market service"
+    else:
+        fetch_market_win_probability = PolymarketUsProvider().win_probability
+        meter = "Polymarket public quotes"
 
     def fetch_feed(game: TeamGame, now: datetime) -> LiveBaseballFeed:
         return provider.fetch_live_feed(game, now=now)
@@ -92,14 +129,17 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
         sink,
         favorites=frozenset(args.favorite),
         broadcast_lag=DurationSeconds(args.delay),
-        fetch_win_probability=PolymarketUsProvider().win_probability,  # per-team meter, delayed with the score
+        fetch_win_probability=fetch_market_win_probability,  # per-team meter, delayed with the score
         fetch_fallback_win_probability=fetch_model_win_probability,  # when the market goes quiet or has no game
         fetch_pregame_details=provider.fetch_pregame_details,
         fetch_game_lines=odds.lines_for if odds is not None else None,
         logos=LogoStore(),  # resolve committed team tiles from assets/ (lazy, cached)
         display_timezone=zone,
     )
-    print(f"omni.app: {profile.value}, delay {args.delay}s, favorites {sorted(args.favorite)} — http://localhost:8888/")
+    print(
+        f"omni.app: {profile.value}, delay {args.delay}s, favorites {sorted(args.favorite)}, meter {meter}"
+        " — http://localhost:8888/"
+    )
     run_forever(loop, SystemClock(), tick=DurationSeconds(args.tick))
     return 0
 

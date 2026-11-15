@@ -74,7 +74,9 @@ Default panel is 32x32. For the Omni target profiles, pass matrix dimensions, e.
 
 ## The cloud market service
 
-The poller and its API live in `cloud/`; `cloud/README.md` covers deploying them and issuing board tokens. A
+The poller and its API live in `cloud/`; `cloud/README.md` covers deploying them and issuing board tokens. To point
+the emulator at the service, issue this machine a token (`cloud/tools/issue_board_token.py`); the app reads it from
+`.env` and says which meter source it's using when it starts. A
 git-ignored `.env` at the repo root holds machine-local secrets. The Polymarket key goes there first
 (`POLYMARKET_KEY_ID`, `POLYMARKET_SECRET_KEY`), from https://polymarket.us/developer , on its way to SSM.
 
