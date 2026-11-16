@@ -115,7 +115,7 @@ def follow(recording: Path) -> tuple[list[FeedResult], RecordedNflMeta]:
     for arrived in server.arrivals:
         clock.advance(arrived - clock.now())
         if due is None or arrived >= due - _EARLY:
-            results.append(feed.ask(clock.now()))
+            results.append(feed.ask(clock.read()))
             due = results[-1].next_ask
     return results, server
 

@@ -87,7 +87,7 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         type=int,
         default=None,
         metavar="SECONDS",
-        help="how long to stop polling once a game reaches halftime (default 15 minutes)",
+        help="how long after halftime begins to stop polling (default 13 minutes)",
     )
     parser.add_argument(
         "--scroll-speed",

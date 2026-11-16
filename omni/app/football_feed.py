@@ -3,7 +3,8 @@
 `GameFeed` keeps the asking cadence. It asks the provider when its last answer says to, retries 30
 seconds after a failure, and stops once the final has settled. It also reads the market with each
 answer, when there is a market. Each answer comes back as a `FeedResult`, stamped with when it was
-asked and when it actually arrived. The board dates what it shows from the arrival.
+asked and when it actually arrived, on both clocks. The board dates what it shows from the arrival, and
+holds it back from the arrival on the monotonic clock, which a wall-clock jump doesn't move.
 
 The board collects answers once per frame through a `FeedSource`:
 - `GameFeed` itself asks inline, when due. That is deterministic, and what tests and replay use.
@@ -20,7 +21,7 @@ from datetime import datetime, timedelta
 from typing import Protocol
 
 from omni.app.background import Repeating
-from omni.core.clock import Clock
+from omni.core.clock import Clock, ClockReading, MonotonicTime
 from omni.domain.baseball import WinProbability
 from omni.domain.contest import TeamGame
 from omni.providers.base import ProviderError
@@ -64,13 +65,14 @@ class FeedResult:
     held: bool = False  # the provider repeated its last answer during a hold, without asking
     holding: bool = False  # after this answer, the provider is holding off the feed (halftime)
     quote: MarketQuote | None = None  # None without a market, or when the answer was held
+    received_monotonic: MonotonicTime | None = None  # its arrival on the monotonic clock; None from a trace
 
 
 class FeedSource(Protocol):
     """Where a board collects its game's answers, once a frame."""
 
-    def collect(self, now: datetime) -> list[FeedResult]:
-        """The answers that arrived since the last collect, oldest first."""
+    def collect(self, at: ClockReading) -> list[FeedResult]:
+        """The answers that arrived since the last collect, as of ``at``, oldest first."""
         ...
 
 
@@ -97,16 +99,19 @@ class GameFeed:
         self._next_ask = now + RETRY_AFTER_FAILURE
         return self._next_ask
 
-    def ask(self, now: datetime, *, arrived: Callable[[], datetime] | None = None) -> FeedResult:
-        """Ask the provider (and the market) as of ``now``; ``arrived`` reads the time the answer came."""
+    def ask(self, at: ClockReading, *, arrived: Callable[[], ClockReading] | None = None) -> FeedResult:
+        """Ask the provider (and the market) as of ``at``; ``arrived`` reads the clock when the answer came."""
+        now = at.utc
         held = self._provider.holding(self._game_id, now)  # a held poll repeats the last answer, unasked
         try:
             snapshot = self._provider.poll(self._game_id, now)
         except ProviderError as exc:
             retry = self.back_off(now)
+            received = arrived() if arrived is not None else at
             return FeedResult(
                 asked_at=now,
-                received_at=arrived() if arrived is not None else now,
+                received_at=received.utc,
+                received_monotonic=received.monotonic,
                 next_ask=retry,
                 snapshot=None,
                 error=str(exc),
@@ -118,9 +123,11 @@ class GameFeed:
                 quote = MarketQuote(self._win_probability(snapshot.game, now))
             except ProviderError as exc:
                 quote = MarketQuote(None, error=str(exc))
+        received = arrived() if arrived is not None else at
         return FeedResult(
             asked_at=now,
-            received_at=arrived() if arrived is not None else now,
+            received_at=received.utc,
+            received_monotonic=received.monotonic,
             next_ask=self._next_ask,
             snapshot=snapshot,
             held=held,
@@ -128,8 +135,8 @@ class GameFeed:
             quote=quote,
         )
 
-    def collect(self, now: datetime, *, arrived: Callable[[], datetime] | None = None) -> list[FeedResult]:
-        return [self.ask(now, arrived=arrived)] if self.due(now) else []
+    def collect(self, at: ClockReading, *, arrived: Callable[[], ClockReading] | None = None) -> list[FeedResult]:
+        return [self.ask(at, arrived=arrived)] if self.due(at.utc) else []
 
 
 class BackgroundFeed:
@@ -147,7 +154,7 @@ class BackgroundFeed:
     def stop(self, timeout: float | None = None) -> None:
         self._worker.stop(timeout)
 
-    def collect(self, now: datetime) -> list[FeedResult]:
+    def collect(self, at: ClockReading) -> list[FeedResult]:
         answers: list[FeedResult] = []
         while True:
             try:
@@ -156,15 +163,20 @@ class BackgroundFeed:
                 return answers
 
     def _check(self) -> None:
-        for answer in self._feed.collect(self._clock.now(), arrived=self._clock.now):
+        for answer in self._feed.collect(self._clock.read(), arrived=self._clock.read):
             self._answers.put(answer)
 
     def _failed(self, exc: Exception) -> None:
         """An ask that broke outright: report it, and wait the retry rather than ask again at once."""
-        now = self._clock.now()
-        retry = self._feed.back_off(now)
+        now = self._clock.read()
+        retry = self._feed.back_off(now.utc)
         self._answers.put(
             FeedResult(
-                asked_at=now, received_at=now, next_ask=retry, snapshot=None, error=f"{type(exc).__name__}: {exc}"
+                asked_at=now.utc,
+                received_at=now.utc,
+                received_monotonic=now.monotonic,
+                next_ask=retry,
+                snapshot=None,
+                error=f"{type(exc).__name__}: {exc}",
             )
         )
