@@ -209,10 +209,12 @@ def test_a_game_without_a_state_has_no_feed() -> None:
     assert [(entry.shown, entry.frame) for entry in trace] == [(None, FrameKind.IDLE)]  # the final can't be read
 
 
-def test_the_slate_replays_to_its_recorded_decisions() -> None:
+@pytest.mark.parametrize("profile", list(PanelProfile))
+def test_the_slate_replays_to_its_recorded_decisions(profile: PanelProfile) -> None:
+    """The board decides alike on every profile; only the drawing differs."""
     from tests.mlb_slate import END, FAVORITES, LAG, slate
 
-    lines = replay_decisions(slate(), profile=QUAD, until=END, broadcast_lag=LAG, favorites=FAVORITES)
+    lines = replay_decisions(slate(), profile=profile, until=END, broadcast_lag=LAG, favorites=FAVORITES)
     assert lines == SLATE_DECISIONS.read_text().splitlines()
 
 

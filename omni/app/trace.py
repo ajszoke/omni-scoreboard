@@ -46,7 +46,7 @@ class DecisionTracer:
         health = refresh.health
         key = (health.source, health.reason, health.held, health.unfed)
         dropped = refresh.pipeline.skipped + refresh.pipeline.warnings
-        if key == self._last_refresh and not dropped:
+        if key == self._last_refresh and not dropped and not refresh.unseen:
             return
         self._last_refresh = key
         line = f"refresh {self._clock(refresh.at)} in {took.total_seconds():.1f}s: source {health.source.value}"
@@ -59,6 +59,8 @@ class DecisionTracer:
         self._log(line + f" | next {self._clock(next_at) if next_at is not None else '-'}")
         for note in dropped:
             self._log(f"  dropped: {note}")
+        for card in refresh.unseen:
+            self._log(f"  unseen: {card.raw} (expired before it aired)")
 
     def painted(self, painted: Painted) -> None:
         for change in painted.changes:

@@ -48,6 +48,7 @@ class EndReason(StrEnumMixin, str, Enum):
     CLEARED = "cleared"  # the surface was cleared
     TOO_LATE = "too late to start"  # its latest start passed while it waited
     EXPIRED = "expired"  # its hard expiry passed
+    UNDRAWN = "failed to draw"  # the display couldn't draw it
 
 
 class ChangeKind(StrEnumMixin, str, Enum):

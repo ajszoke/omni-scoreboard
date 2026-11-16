@@ -111,19 +111,20 @@ class InterleavedCardQueue:
             self._cards.pop(dedupe_key, None)
             self._forget_orphans()
 
-    def prune(self, now: datetime) -> int:
-        """Drop cards whose `expires_at` has passed; returns how many were removed."""
+    def prune(self, now: datetime) -> list[ScoreboardCard[Any]]:
+        """Drop cards whose `expires_at` has passed; returns those that expired without ever airing."""
         with self._lock:
             expired = [
                 key
                 for key, card in self._cards.items()
                 if card.timing.expires_at is not None and now >= card.timing.expires_at
             ]
+            unseen = [self._cards[key] for key in expired if key not in self._card_last_shown]
             for key in expired:
                 del self._cards[key]
             if expired:
                 self._forget_orphans()
-            return len(expired)
+            return unseen
 
     def __len__(self) -> int:
         with self._lock:
@@ -149,14 +150,18 @@ class InterleavedCardQueue:
         with self._lock:
             return [card for card in self._cards.values() if self._showable(card, now, profile)]
 
-    def peek(self, at: ClockReading, profile: PanelProfile, *, takeovers: bool = True) -> Pick | None:
+    def peek(
+        self, at: ClockReading, profile: PanelProfile, *, takeovers: bool = True, skip: frozenset[str] = frozenset()
+    ) -> Pick | None:
         """What should air next, with the reason; None if nothing is eligible. Records nothing.
 
         With ``takeovers`` off the board wants a turn of its own: BURST cards, aired or not, wait for
-        another card to air first, unless nothing else is eligible.
+        another card to air first, unless nothing else is eligible. Cards whose dedupe keys are in
+        ``skip`` (ones the display can't draw) are passed over, and hold up nothing ordered behind them.
         """
         with self._lock:
-            pool = self._usable(self._in_order(self.eligible(at.utc, profile)), at.utc)
+            eligible = [card for card in self.eligible(at.utc, profile) if card.dedupe_key.raw not in skip]
+            pool = self._usable(self._in_order(eligible), at.utc)
             if not takeovers:
                 pool = [card for card in pool if card.attention.mode is not AttentionMode.BURST] or pool
             if not pool:

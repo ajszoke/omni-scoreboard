@@ -56,7 +56,7 @@ from omni.providers.nflmeta import NflLiveSnapshot
 from omni.renderers.base import Renderer
 from omni.renderers.context import RenderContext
 from omni.renderers.image import LogoStore
-from omni.renderers.live_football import LiveFootballRenderer
+from omni.renderers.live_football import NO_STRIP_NOTE, STRIP_PROFILES, LiveFootballRenderer
 from omni.renderers.text_lane import DEFAULT_MARQUEE, LaneClock, Marquee, MarqueeStyle
 from omni.tower import ChangeKind, Cue, Dwell, EndReason, Hold, Lane, LaneChange, Provenance, Segment, SegmentKey
 from omni.tower import Surface, earliest
@@ -116,6 +116,8 @@ class FootballBoard:
         self._log = log
         self._renderer: Renderer[LiveFootballCardPayload] = renderer or LiveFootballRenderer()
         self._strip: Lane[PlaySummary] = Lane(Surface.PLAY_STRIP)
+        self._strip_drawn = sink.profile in STRIP_PROFILES  # the small profiles' cards have no strip to fill
+        self._paint_error: str | None = None
         self._pending: deque[_Reading] = deque()
         self._showing: _Reading | None = None
         self._closing: _Reading | None = None  # a break, waiting for the plays that led to it
@@ -170,21 +172,25 @@ class FootballBoard:
         if state is not None and state.interval is not None:
             if self._closing is not None:
                 self._closing = reading  # still closing out: the newest break, and any plays it brings
-                self._strip.offer(_segments(reading))
+                self._strip.offer(self._segments(reading))
             elif shown is not None and shown.interval is None:
                 self._closing, self._closing_since = reading, at.monotonic  # the period just ended: its plays first
                 self._strip.close_out()
-                self._strip.offer(_segments(reading))
+                self._strip.offer(self._segments(reading))
             else:
                 self._showing = reading  # already in a break, or starting in one: the strip stays empty
-                self._dropped(self._strip.clear(at) + _segments(reading), "during a break")
+                self._dropped(self._strip.clear(at) + self._segments(reading), "during a break")
             return
         self._closing = None
         self._strip.resume()
         if shown is not None and state is not None and _field(state) != _field(shown):
             self._strip.invalidate()
-        self._strip.offer(_segments(reading))
+        self._strip.offer(self._segments(reading))
         self._showing = reading
+
+    def _segments(self, reading: _Reading) -> list[Segment[PlaySummary]]:
+        """A reading's events for the strip, on a profile that draws one."""
+        return _segments(reading) if self._strip_drawn else []
 
     def _dropped(self, segments: list[Segment[PlaySummary]], why: str) -> None:
         for segment in segments:
@@ -259,7 +265,7 @@ class FootballBoard:
                 available_at=reading.show_at, min_display=DurationSeconds(5), max_display=DurationSeconds(30)
             ),
             priority=CardPriority(band=DisplayPriority.FAVORITE, score=50.0),
-            layout_support=LayoutSupport(profiles=frozenset(PanelProfile)),
+            layout_support=LayoutSupport(profiles=frozenset(PanelProfile), compromise_notes=(NO_STRIP_NOTE,)),
             dedupe_key=DedupeKey(key),
             payload=LiveFootballCardPayload(
                 state=state,
@@ -268,15 +274,25 @@ class FootballBoard:
                 break_ends_at=_delayed(reading.snapshot.break_ends_at, self._delay),
             ),
         )
-        frame = self._sink.new_frame()
         # The strip's lines belong to the strip frame up: a new one starts its lines at their heads.
         lanes = self._lanes.frame((cue.segment.key, cue.frame) if cue is not None else None, at.monotonic)
         marquee = Marquee(style=self._marquee, clock=lanes)
         context = RenderContext(
             profile=self._sink.profile, now=at.utc, logos=self._logos, timezone=self._timezone, marquee=marquee
         )
-        self._renderer.render(card, context, frame)
-        self._sink.commit(frame)
+        try:
+            frame = self._sink.new_frame()
+            self._renderer.render(card, context, frame)
+            self._sink.commit(frame)
+        except Exception as exc:  # a frame nobody saw spends no strip time, and never stops the board
+            error = f"{type(exc).__name__}: {exc}"
+            if error != self._paint_error:
+                self._paint_error = error
+                self._log(f"paint failed: {error}")
+            return
+        if self._paint_error is not None:
+            self._paint_error = None
+            self._log("paint recovered")
         lanes.commit()
         if cue is not None:
             self._strip.committed(cue, at)

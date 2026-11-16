@@ -122,6 +122,17 @@ def test_expired_cards_are_pruned_and_not_shown() -> None:
     assert len(queue) == 0
 
 
+def test_pruning_names_the_expired_cards_that_never_aired() -> None:
+    queue = InterleavedCardQueue()
+    aired, unseen = _card("g1", expires_at=NOW + timedelta(seconds=30)), _card(
+        "g2", expires_at=NOW + timedelta(seconds=30)
+    )
+    queue.ingest_all((aired, unseen))
+    queue.book(Pick(aired, SelectionReason.ROTATION), _at(NOW))
+    assert queue.prune(NOW) == []
+    assert queue.prune(NOW + timedelta(seconds=30)) == [unseen] and len(queue) == 0
+
+
 def test_two_equal_cards_alternate_fairly() -> None:
     queue = InterleavedCardQueue()
     queue.ingest(_card("g1"))

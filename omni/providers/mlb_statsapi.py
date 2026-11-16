@@ -756,10 +756,40 @@ def _parse_win_probability(raw: dict[str, Any]) -> WinProbability | None:
         return None  # out-of-range percentages from a malformed payload
 
 
-def _default_fetch_schedule(game_date: date, sport_ids: str) -> list[dict[str, Any]]:  # pragma: no cover - real network
+HTTP_TIMEOUT_S = 15.0  # StatsAPI answers in well under a second; a request this slow has hung
+
+
+class TimedRequests:
+    """`requests` as `statsapi` calls it, with a timeout on every `get` that sets none.
+
+    `statsapi` calls ``requests.get(url)`` with no timeout, so a stalled connection would hang its
+    caller for good. Every other attribute passes through.
+    """
+
+    def __init__(self, requests: Any, timeout_s: float) -> None:
+        self._requests = requests
+        self._timeout_s = timeout_s
+
+    def get(self, url: str, **kwargs: Any) -> Any:
+        kwargs.setdefault("timeout", self._timeout_s)
+        return self._requests.get(url, **kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._requests, name)
+
+
+def _statsapi() -> Any:  # pragma: no cover - real network
+    """The `statsapi` module, with its requests bounded by `HTTP_TIMEOUT_S`."""
     # Lazy import keeps the network library out of `omni` import time and tests.
     import statsapi
 
+    if not isinstance(statsapi.requests, TimedRequests):
+        statsapi.requests = TimedRequests(statsapi.requests, HTTP_TIMEOUT_S)
+    return statsapi
+
+
+def _default_fetch_schedule(game_date: date, sport_ids: str) -> list[dict[str, Any]]:  # pragma: no cover - real network
+    statsapi = _statsapi()
     result: list[dict[str, Any]] = statsapi.schedule(date=game_date.strftime("%Y-%m-%d"), sportId=sport_ids)
     return result
 
@@ -788,21 +818,18 @@ _PREGAME_FIELDS = (
 
 
 def _default_fetch_pregame(game_pk: Any) -> dict[str, Any]:  # pragma: no cover - real network
-    import statsapi
-
+    statsapi = _statsapi()
     result: dict[str, Any] = statsapi.get("game", {"gamePk": game_pk, "fields": _PREGAME_FIELDS})
     return result
 
 
 def _default_fetch_game(game_pk: Any) -> dict[str, Any]:  # pragma: no cover - real network
-    import statsapi
-
+    statsapi = _statsapi()
     result: dict[str, Any] = statsapi.get("game", {"gamePk": game_pk, "fields": _GAME_FIELDS})
     return result
 
 
 def _default_fetch_context_metrics(game_pk: Any) -> dict[str, Any]:  # pragma: no cover - real network
-    import statsapi
-
+    statsapi = _statsapi()
     result: dict[str, Any] = statsapi.get("game_contextMetrics", {"gamePk": game_pk})
     return result

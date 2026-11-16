@@ -15,7 +15,9 @@ from omni.core.ids import SourceRef
 from omni.domain.contest import TeamGame
 from omni.providers.base import ProviderError, ProviderUpdate
 from omni.providers.mlb_statsapi import (
+    HTTP_TIMEOUT_S,
     MlbStatsApiProvider,
+    TimedRequests,
     _parse_start,
     _SkipGame,
     map_game_status,
@@ -170,3 +172,20 @@ def test_parse_start_handles_zulu_naive_and_bad_values() -> None:
         _parse_start(None, 1)
     with pytest.raises(_SkipGame):
         _parse_start("not-a-date", 1)
+
+
+def test_statsapi_requests_get_a_timeout_unless_they_set_one() -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    class _Requests:
+        codes = "passed through"
+
+        def get(self, url: str, **kwargs: object) -> str:
+            calls.append((url, kwargs))
+            return "response"
+
+    timed = TimedRequests(_Requests(), HTTP_TIMEOUT_S)
+    assert timed.get("https://statsapi.mlb.com/a") == "response"
+    timed.get("https://statsapi.mlb.com/b", timeout=3)
+    assert calls == [("https://statsapi.mlb.com/a", {"timeout": 15.0}), ("https://statsapi.mlb.com/b", {"timeout": 3})]
+    assert timed.codes == "passed through"

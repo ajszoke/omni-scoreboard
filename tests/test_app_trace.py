@@ -63,6 +63,16 @@ def test_a_refresh_that_drops_a_game_or_a_play_is_always_written() -> None:
     assert lines[1:] == [lines[0], "  dropped: g2: feed down", "  dropped: g1: odd play"]
 
 
+def test_a_card_that_expired_before_it_aired_is_written() -> None:
+    lines: list[str] = []
+    tracer = DecisionTracer(lines.append, timezone=timezone.utc)
+    refresh = _refresh()
+    tracer.refreshed(refresh, took=timedelta(0), next_at=LATER)
+    unseen = (CardId("g1:bigplay:g1:ab:3"),)
+    tracer.refreshed(dataclasses.replace(refresh, unseen=unseen), took=timedelta(0), next_at=LATER)
+    assert lines[1:] == [lines[0], "  unseen: g1:bigplay:g1:ab:3 (expired before it aired)"]
+
+
 def test_a_card_going_up_names_why_and_how_its_teams_were_drawn() -> None:
     lines: list[str] = []
     tracer = DecisionTracer(lines.append, timezone=timezone.utc)

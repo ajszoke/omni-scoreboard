@@ -79,3 +79,40 @@ def test_a_failed_frame_gives_way_to_a_newer_one() -> None:
 def test_stopping_a_writer_that_never_started_is_harmless() -> None:
     writer = BackgroundFrameWriter(lambda frame: True)
     writer.stop()
+
+
+def test_handing_over_reports_a_display_that_is_failing_until_a_frame_lands() -> None:
+    landing = threading.Event()
+
+    def write(frame: bytes) -> bool:
+        return landing.is_set()
+
+    writer = BackgroundFrameWriter(write, retry_every=timedelta(milliseconds=1))
+    writer.start()
+    assert writer(b"A") is True  # nothing has failed yet
+    assert _until(lambda: writer(b"A") is False)  # its write failed: the display isn't taking frames
+    landing.set()
+    assert _until(lambda: writer(b"A") is True)  # one landed: it is again
+    writer.stop(_SOON)
+
+
+def test_handing_over_reports_a_write_that_has_stalled() -> None:
+    now = [0.0]
+    writing, release = threading.Event(), threading.Event()
+
+    def write(frame: bytes) -> bool:
+        writing.set()
+        assert release.wait(_SOON)
+        return True
+
+    writer = BackgroundFrameWriter(write, stall_after=timedelta(seconds=2), monotonic=lambda: now[0])
+    writer.start()
+    writer(b"A")
+    assert writing.wait(_SOON)
+    now[0] = 1.9
+    assert writer(b"B") is True  # slow, not yet stalled
+    now[0] = 2.0
+    assert writer(b"C") is False  # stalled: frames handed over now aren't being seen
+    release.set()
+    assert _until(lambda: writer(b"D") is True)
+    writer.stop(_SOON)

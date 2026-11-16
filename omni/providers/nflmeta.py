@@ -310,7 +310,7 @@ class NflMetaLiveProvider:
         scored = _unexplained_points(game, tracked, ledger, state, now) if state is not None else []
         events = scored + plays + _injury_events(tracked, row, now)
         if state is not None:
-            state = _with_plays(state, ledger, postseason=_postseason(row))
+            state = _with_plays(state, ledger, postseason=_postseason(row), known=tracked.caught_up_plays)
         caught_up = _caught_up(row, phase, tracked, ledger)
         if at_half and tracked.halftime_at is None:
             if first_look:
@@ -529,14 +529,21 @@ def _postseason(row: Mapping[str, Any]) -> bool:
     return isinstance(week, int) and week > _REGULAR_SEASON_WEEKS
 
 
-def _with_plays(state: FootballGameState, ledger: PlayLedger, *, postseason: bool) -> FootballGameState:
+def _with_plays(
+    state: FootballGameState, ledger: PlayLedger, *, postseason: bool, known: bool = True
+) -> FootballGameState:
     """The state with what only the plays can tell: timeouts, challenges, who has a kickoff coming.
+
+    Until the play feed has been read through (``known``), the ledger holds only part of the game, so
+    its counts would be guesses: no timeouts or challenges show, and nothing is inferred from it.
 
     Over halftime the ball is the second half's receiver's and timeouts start over, so none show. At
     regulation's end overtime has its own toss, so no one has the ball yet; after the final, nothing
     is left to spend. In overtime every review is the booth's, so no challenges show, and postseason
     overtime's timeouts (three for each of its halves) aren't counted yet, so none show there either.
     """
+    if not known:
+        return dataclasses.replace(state, timeouts=None, challenges=None)
     overtime = state.period > _REGULATION_PERIODS
     challenges = None if overtime else ledger.challenges()
     timeouts = None if overtime and postseason else ledger.timeouts(state.period)

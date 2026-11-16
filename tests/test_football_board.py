@@ -20,7 +20,7 @@ from omni.app.football_board import (
     METER_MAX_AGE,
     FootballBoard,
 )
-from omni.app.frame_stream import FRAME_MAGIC, StreamDisplaySink, encode_frame
+from omni.app.frame_stream import FRAME_MAGIC, DisplayUnavailable, StreamDisplaySink, encode_frame
 from omni.core.colors import RGBColor
 from omni.core.enum import PanelProfile
 from omni.domain.baseball import WinProbability
@@ -31,7 +31,7 @@ from omni.events.football import FootballEvent, FootballEventKind
 from omni.providers.base import ProviderError
 from omni.providers.nfl_teams import NflTeamRegistry
 from omni.providers.nflmeta import FINAL_DRAIN, HALFTIME_HOLD, NFLMETA_SOURCE, NflMetaLiveProvider
-from omni.renderers.canvas import RecordingCanvas
+from omni.renderers.canvas import Canvas, RecordingCanvas
 from omni.tower import ChangeKind, EndReason, LaneChange, Provenance, Segment, SegmentKey, Surface
 from tests.test_nflmeta import GAME, FakeFeed, _change, _page, _row, _scores, _synced
 
@@ -44,10 +44,12 @@ def _at(moment: datetime) -> ClockReading:
     return ClockReading(utc=moment, monotonic=MonotonicTime((moment - T0).total_seconds()))
 
 
-def _board(feed: FakeFeed, **kwargs: Any) -> tuple[FootballBoard, RecordingDisplaySink, list[str]]:
+def _board(
+    feed: FakeFeed, *, sink: RecordingDisplaySink | None = None, **kwargs: Any
+) -> tuple[FootballBoard, RecordingDisplaySink, list[str]]:
     provider = NflMetaLiveProvider(NflTeamRegistry.default(source=NFLMETA_SOURCE), fetch=feed)
     lines: list[str] = []
-    sink = RecordingDisplaySink(PanelProfile.QUAD_128X64)
+    sink = sink if sink is not None else RecordingDisplaySink(PanelProfile.QUAD_128X64)
     source = GameFeed(provider, GAME, win_probability=kwargs.pop("win_probability", None))
     return FootballBoard(source, sink, log=lines.append, **kwargs), sink, lines
 
@@ -72,6 +74,43 @@ def test_polls_when_due_and_draws_every_step() -> None:
     assert sum(path == "/api/v1/live-scores" for path, _ in feed.requests) == 2
     assert len(lines) == 3  # nothing changed, nothing logged
     assert board.showing is not None
+
+
+def test_a_profile_without_a_strip_logs_plays_without_putting_them_up() -> None:
+    feed = FakeFeed()
+    feed.scores = [_scores(_synced("p1"))]
+    feed.plays = [_page(_change("p1", 1, "C.Johnston punts 44 yards to CIN 18.", play_type="punt"))]
+    board, sink, lines = _board(feed, sink=RecordingDisplaySink(PanelProfile.STACK_64X64))
+    board.step(_at(T0))
+    assert sink.committed == 1 and lines[1:] == [
+        "  > PUNT | C.Johnston punts 44 yards to CIN 18."
+    ]  # arrived, not shown
+    assert board._strip.idle
+
+
+class _FailingSink(RecordingDisplaySink):
+    failing = True
+
+    def commit(self, frame: Canvas) -> None:
+        if self.failing:
+            raise DisplayUnavailable("the display isn't taking frames")
+        super().commit(frame)
+
+
+def test_a_frame_the_display_did_not_take_spends_no_strip_time() -> None:
+    feed = FakeFeed()
+    feed.scores = [_scores(_synced("p1"))]
+    feed.plays = [_page(_change("p1", 1, "C.Johnston punts 44 yards to CIN 18.", play_type="punt"))]
+    sink = _FailingSink(PanelProfile.QUAD_128X64)
+    board, _, lines = _board(feed, sink=sink)
+    board.step(_at(T0))
+    board.step(_at(T0 + 5 * S))  # the same failure is logged once
+    assert lines[-1] == "paint failed: DisplayUnavailable: the display isn't taking frames"
+    assert not any(line.startswith("  =") for line in lines)  # nothing went up
+    sink.failing = False
+    board.step(_at(T0 + 8 * S))
+    assert lines[-2:] == ["paint recovered", "  = PUNT | C.Johnston punts 44 yards to CIN 18."]
+    assert board.next_deadline(_at(T0 + 8 * S)) == MonotonicTime(28)  # its 20 s count from the frame that landed
 
 
 def test_holds_each_reading_back_by_the_broadcast_delay() -> None:
@@ -204,7 +243,8 @@ def test_streams_each_new_frame_once() -> None:
     assert len(sent[0]) == 8 + 64 * 32 * 3
     lit = sink.new_frame()
     lit.set_pixel(0, 0, RGBColor(255, 0, 0))
-    sink.commit(lit)  # not delivered, so the same frame goes again
+    with pytest.raises(DisplayUnavailable):
+        sink.commit(lit)  # not delivered: the board shouldn't count it as shown, and it goes again
     sink.commit(lit)
     assert len(sent) == 3 and sent[1] == sent[2]
     with pytest.raises(TypeError):
