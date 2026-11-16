@@ -25,6 +25,7 @@ from omni.renderers.canvas import Canvas
 from omni.renderers.context import RenderContext
 from omni.renderers.final import FinalRenderer
 from omni.renderers.live_baseball import LiveBaseballRenderer
+from omni.renderers.live_football import LiveFootballRenderer
 from omni.renderers.no_hitter import NoHitterRenderer
 from omni.renderers.pregame import PregameRenderer
 from omni.renderers.status import StatusRenderer
@@ -72,7 +73,8 @@ class RendererRegistry:
 
 
 def default_registry() -> RendererRegistry:
-    """A registry wired with today's renderers (baseball live + pregame + final + big play + no-hitter + status)."""
+    """A registry wired with today's renderers: baseball's live, pregame, final, big-play, no-hitter and status
+    cards, and football's live card."""
     registry = RendererRegistry()
     registry.register(Sport.BASEBALL, CardKind.LIVE_GAME, LiveBaseballRenderer())
     registry.register(Sport.BASEBALL, CardKind.PREGAME, PregameRenderer())
@@ -80,4 +82,5 @@ def default_registry() -> RendererRegistry:
     registry.register(Sport.BASEBALL, CardKind.BIG_PLAY, BigPlayRenderer())
     registry.register(Sport.BASEBALL, CardKind.NO_HITTER, NoHitterRenderer())
     registry.register(Sport.BASEBALL, CardKind.STATUS, StatusRenderer())
+    registry.register(Sport.FOOTBALL, CardKind.LIVE_GAME, LiveFootballRenderer())
     return registry

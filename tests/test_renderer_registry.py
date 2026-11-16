@@ -17,6 +17,7 @@ from omni.domain.contest import TeamGame
 from omni.providers.mlb_teams import MlbTeamRegistry
 from omni.renderers.canvas import Canvas, RecordingCanvas
 from omni.renderers.context import RenderContext
+from omni.renderers.live_football import LiveFootballRenderer
 from omni.renderers.registry import RenderDispatchError, RendererRegistry, default_registry
 
 _REG = MlbTeamRegistry.from_color_file()
@@ -152,3 +153,11 @@ def test_default_registry_routes_final_to_its_renderer() -> None:
     canvas = RecordingCanvas(128, 64)
     default_registry().render(_final_card(), CTX, canvas)
     assert "FINAL" in {t.text for t in canvas.texts()}
+
+
+def test_default_registry_routes_a_live_football_card_to_its_renderer() -> None:
+    from omni.domain.football import FootballGameState
+    from tests.football_fixtures import live_football_card
+
+    card = live_football_card(FootballGameState(period=1, clock_seconds=900, away_score=0, home_score=0))
+    assert isinstance(default_registry().renderer_for(card), LiveFootballRenderer)
