@@ -61,6 +61,9 @@ def test_refresh_localizes_the_schedule_date_to_the_configured_zone() -> None:
     # 02:00 UTC Jun 18 == 22:00 EDT Jun 17 — still "tonight" in New York.
     provider.refresh(datetime(2026, 6, 18, 2, 0, tzinfo=timezone.utc))
     assert calls == [date(2026, 6, 17)]  # today's games, not tomorrow's (UTC would say Jun 18)
+    assert provider.schedule_timezone == ZoneInfo("America/New_York")
+    provider.fetch_schedule(date(2026, 6, 16), now=datetime(2026, 6, 18, 2, 0, tzinfo=timezone.utc))
+    assert calls[-1] == date(2026, 6, 16)  # any one date, for a schedule window
 
 
 def test_refresh_parses_known_games_and_warns_on_unknown_team() -> None:

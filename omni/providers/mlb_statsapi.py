@@ -183,11 +183,20 @@ class MlbStatsApiProvider:
         self._sport_ids = sport_ids
         self._tz = schedule_timezone if schedule_timezone is not None else _DEFAULT_SCHEDULE_TZ
 
+    @property
+    def schedule_timezone(self) -> ZoneInfo:
+        """The zone whose calendar decides which day's slate is "today"."""
+        return self._tz
+
     def refresh(self, now: datetime) -> ProviderUpdate:
+        # Localize to the configured zone, not UTC: in US evenings `now.date()`
+        # (UTC) is already tomorrow while tonight's games are still on.
+        return self.fetch_schedule(local_date(now, self._tz), now=now)
+
+    def fetch_schedule(self, day: date, *, now: datetime) -> ProviderUpdate:
+        """One local date's slate, as observed at ``now``."""
         try:
-            # Localize to the configured zone, not UTC: in US evenings `now.date()`
-            # (UTC) is already tomorrow while tonight's games are still on.
-            rows = self._fetch(local_date(now, self._tz), self._sport_ids)
+            rows = self._fetch(day, self._sport_ids)
         except Exception as exc:  # network/library failure -> whole-update error
             raise ProviderError(f"MLB schedule fetch failed: {exc}") from exc
 

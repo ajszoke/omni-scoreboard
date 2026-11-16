@@ -285,7 +285,10 @@ class LiveBaseballPipeline:
 
             # Live-state path: hold in the delay feed, surface only the lag-old value.
             state_feed = self._feeds.setdefault(game.id, DelayedFeed(self._delay))
-            state_feed.push(Observation(subject_id=game.id, source=game.id.source, observed_at=now, value=feed.state))
+            received = feed.received_at if feed.received_at is not None else now
+            state_feed.push(
+                Observation(subject_id=game.id, source=game.id.source, observed_at=received, value=feed.state)
+            )
             safe = state_feed.latest_eligible(now)
             if safe is None:
                 held.append(game.id)  # still inside the TV delay — nothing safe to show yet

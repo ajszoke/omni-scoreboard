@@ -30,13 +30,21 @@ class DelayedFeed(Generic[FeedValueT]):
     def __init__(self, policy: DelayPolicy) -> None:
         self._policy = policy
         self._held: list[Observation[FeedValueT]] = []
+        self._newest: datetime | None = None  # the newest observation pushed so far
 
     @property
     def policy(self) -> DelayPolicy:
         return self._policy
 
     def push(self, observation: Observation[FeedValueT]) -> None:
-        """Record a new observation of the subject."""
+        """Record a new observation of the subject.
+
+        One no newer than an observation already pushed is ignored: the same answer read again on a
+        later pass, or one that arrived out of order.
+        """
+        if self._newest is not None and observation.observed_at <= self._newest:
+            return
+        self._newest = observation.observed_at
         self._held.append(observation)
 
     def latest_eligible(self, now: datetime) -> Observation[FeedValueT] | None:

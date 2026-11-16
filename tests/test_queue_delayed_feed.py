@@ -69,3 +69,15 @@ def test_source_time_anchoring_makes_it_eligible_by_when_it_happened() -> None:
     assert feed.latest_eligible(T + timedelta(seconds=29)) is None
     got = feed.latest_eligible(T + timedelta(seconds=30))
     assert got is not None and got.value == "play"
+
+
+def test_an_observation_no_newer_than_one_already_pushed_is_ignored() -> None:
+    feed: DelayedFeed[str] = DelayedFeed(POLICY)
+    feed.push(_obs("answer", T))
+    feed.push(_obs("answer", T))  # the same answer read again on a later pass
+    feed.push(_obs("older", T - timedelta(seconds=5)))  # one that arrived out of order
+    assert feed.pending() == 1
+    eligible = feed.latest_eligible(T + timedelta(seconds=30))
+    assert eligible is not None and eligible.value == "answer"
+    feed.push(_obs("answer", T))  # read again after it surfaced: still nothing new
+    assert feed.pending() == 0

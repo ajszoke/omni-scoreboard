@@ -343,15 +343,18 @@ milestones:
       - id: M11-002
         title: "Provider fetches off the frame thread (football and MLB)"
         labels: [app, clock, providers, p1]
+        status: done  # MLB, A1a step 2, 2026-11-16; football joins with the shared path
         notes:
           - "Round 4 (A1a step 2): a typed PollPlan for slate, per-game and optional sources; single-flight fetches; priority cadence within quota; bounded retries; per-game last-good expiry; previous and current local dates in the schedule window. Isolate render and sink failures (H4)."
           - "A1a step 1 took the fetches off both frame paths: MLB decisions (fetches included) run on a worker thread; football asks NFLMeta and the market on a feed thread (football_feed.BackgroundFeed); the stream sink writes on its own thread (frame_stream.BackgroundFrameWriter), so a stalled SSH link can't stop drawing. The PollPlan is still to come."
+          - "A1a step 2 (2026-11-16): omni/app/poll_plan.py, poller.py and planned_mlb.py. MLB decisions read the plan's answers and never fetch. Single flight per key; cadence by priority (a favorite's live feed every 8 s, others 15 s, finals and yesterday's slate background); per-source quotas shared in priority order; three quick retries, then the cadence; last good until keep_for (a feed 90 s). The slate spans the previous and current local dates, deduplicated, keeping a previous-date game while it isn't final or after this session showed it (round-2 M5). The meter reads only answers that arrived no later than the game's feed answer, so it never leads the score. Pregame details and odds keep their own pacing for now; football's single-game feed keeps its own cadence until it joins the shared path."
       - id: M11-003
         title: "One clock seam everywhere (football launcher on SystemClock; monotonic only for pacing)"
         labels: [app, clock, p2]
         notes:
           - "Round 4: one injected seam, two readings: UTC dates observations and release times; monotonic measures dwell, freshness since receipt, backoff, cooldown, animation and pacing. Replay advances both and can jump the wall clock alone. Stamp actual receipts: MLB fallbacks stamp the pass's start (pipeline.py:288)."
           - "A1a step 1: Clock.read() gives ClockReading(utc, monotonic); FakeClock.advance moves both and FakeClock.set jumps the wall clock alone; Pacer paces loops on monotonic time; the football launcher reads SystemClock, and its answers are dated by arrival. Still open: MLB receipt stamps (pipeline.py:288), with the PollPlan. The dev machine's wall clock (WSL2) was seen jumping back about 2.4 s mid-run, while the monotonic beat held."
+          - "A1a step 2: MLB states are dated by receipt (LiveBaseballFeed.received_at), and DelayedFeed ignores an observation no newer than one already pushed, so re-reading a cached answer adds nothing."
       - id: M11-004
         title: "Scheduling primitives (segment, surface/lane, timer heap, tower) with PlayStrip as first consumer, replay-parity tested"
         labels: [queue, clock, p2]

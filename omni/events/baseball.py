@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 
 from omni.core.enum import StrEnumMixin
@@ -116,3 +117,4 @@ class LiveBaseballFeed:
     events: tuple[BaseballGameEvent, ...] = ()
     decisions: PitchingDecisions | None = None
     warnings: tuple[str, ...] = ()
+    received_at: datetime | None = None  # when this answer arrived; None means as of the pass that read it

@@ -967,3 +967,14 @@ def test_walk_off_flashes_then_the_final_reveals() -> None:
     assert len(res.big_plays) == 1  # the walk-off flashes...
     assert [c.raw for c in res.finals] == ["g1:final"]  # ...and the final confirms it
     assert _id("g1") not in pipe._event_streams  # stream drained and dropped at the reveal
+
+
+def test_a_state_is_dated_by_when_its_answer_arrived() -> None:
+    pipe, queue = _setup(lag=30)
+    arrived = T - timedelta(seconds=30)  # read from the plan now, but it arrived 30 s ago
+
+    def fetch_feed(game: TeamGame, now: datetime) -> LiveBaseballFeed:
+        return LiveBaseballFeed(state=_state(), received_at=arrived)
+
+    res = pipe.refresh([_game("g1")], now=T, fetch_feed=fetch_feed)
+    assert len(res.ingested) == 1 and len(queue) == 1  # already clear of the delay

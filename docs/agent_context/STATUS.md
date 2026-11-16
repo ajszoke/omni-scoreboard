@@ -11,6 +11,13 @@ _Living status doc. Keep it short; update whenever project state changes (branch
   - **Clock:** one seam, two readings (`ClockReading`: UTC and monotonic). Loops are paced on monotonic time. The dev machine's wall clock (WSL2) was seen jumping back about 2.4 s mid-run; the monotonic beat held.
   - **Traces:** `omni/app/trace.py` writes each decision that changes the pick (with its reason and the next decision) and each card's first committed frame, with how its teams were drawn (round-3 Q3).
   - **Next:** A1a step 2, the typed `PollPlan`, which also stamps MLB's receipts.
+- **2026-11-16, A1a step 2 (branch `agent/a1a-pollplan`):** MLB's fetching runs from a typed `PollPlan`, and decisions never fetch (a decision now takes milliseconds).
+  - **Plan:** one ask in flight per key; cadence by priority (a favorite's live feed every 8 s, others 15 s; finals and yesterday's slate in the background); per-source quotas shared in priority order; three quick retries, then the normal cadence; the last good answer stands until it expires (a feed 90 s), so a blip no longer drops a game.
+  - **Schedule window:** the slate spans the previous and current local dates, so a game running past midnight keeps its card and gets its final (round-2 M5).
+  - **Receipts:** MLB states are dated by when their answer arrived, and the meter reads only answers that arrived no later than the game's feed answer, so it never leads the score.
+  - **Start-up:** a warm-up fills the plan before the board starts; a real past day's 15 finals were up in about 3 s.
+  - **Not yet planned:** pregame details and odds keep their own pacing, and football's single-game feed keeps its own cadence until it joins the shared path.
+  - **Next:** step 3, `PlayStrip` as the first session on the shared primitives, checked on the PIT@CIN replay.
 - **2026-11-15, external review round 4: conditional yes.** The head chose sequence (A): A1a is the tower's first slice. It blessed NFL-before-A1, the cloud market service, NFLMeta and the SSH frame bridge (for the experiment), and redirected the separate football loop and the `LaneClock` into A1a. The branch ships as a single-game dogfood tool once its findings H1–H3 and M1 are fixed and the goldens are approved. Adjudication: `~/omni-review/plans/omni-build-fidelity-REVIEWS.md` (round 4).
   - **Fixed on the branch:**
     - **H1:** play-feed reads keep what arrived and carry on after a failure; "caught up" counts only kept rows; a refused cursor (400/410) restarts quietly.
