@@ -29,6 +29,27 @@ runner in a detached screen named `omni`):
 ssh omni-board "screen -list | grep -q '\\.omni' && screen -x omni || screen -dmS omni bash -c 'cd ~/omni-scoreboard && ./run.sh'"
 ```
 
+Show one live NFL game (until football joins the main app). The app renders here and
+pipes frames to `tools/board_frame_sink.py`, which owns the panel under the board's system
+Python (it is 3.9 there, and the app needs 3.12). Copy the sink over once, then:
+
+```bash
+ssh omni-board 'mkdir -p ~/omni' && scp tools/board_frame_sink.py omni-board:omni/
+.venv/bin/python -m omni.app.football --profile quad_128x64 --teams PIT,CIN \
+    --sink-command "ssh -o ServerAliveInterval=15 omni-board sudo python3 omni/board_frame_sink.py"
+```
+
+The sink blanks the panel when the stream ends, and the app restarts it if SSH drops (and resends
+the current frame to the new display process).
+
+Opt-in flags:
+- `--odds`: the win meter from the market. It is experimental: its lag is measured from request time,
+  so it can lead the feed.
+- `--record`: keeps NFLMeta's responses under `build/recordings/nflmeta/` to diagnose the feed.
+  NFLMeta's terms allow no standing copy, so delete recordings after use.
+- `--play-feed every-poll`: reads the play feed every tick, for about twice the requests (suited to a
+  paid quota).
+
 **Cautions**
 - This drives a PHYSICAL panel and is often already running — check first; never restart casually.
 - The board currently runs the **pre-revival** code at `~/omni-scoreboard` on the Pi via

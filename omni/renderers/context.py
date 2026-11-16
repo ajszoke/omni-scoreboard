@@ -30,6 +30,7 @@ from datetime import datetime, tzinfo
 
 from omni.core.enum import PanelProfile
 from omni.renderers.image import LogoStore
+from omni.renderers.text_lane import Marquee
 from omni.renderers.visual_treatment import DEFAULT_CONTRAST_POLICY, VisualContrastPolicy
 
 __all__ = ["RenderContext"]
@@ -44,6 +45,7 @@ class RenderContext:
     logos: LogoStore | None = None  # ambient tile store; None -> renderers fall back to a color bar
     contrast: VisualContrastPolicy = DEFAULT_CONTRAST_POLICY  # hw-tunable legibility floor + clash threshold
     timezone: tzinfo | None = None  # the zone board clocks read in; None -> the render clock's own zone
+    marquee: Marquee = Marquee()  # how this board's scrolling lines move, and when each went up
 
     def __post_init__(self) -> None:
         if self.now.tzinfo is None:

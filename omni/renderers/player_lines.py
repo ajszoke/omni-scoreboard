@@ -13,7 +13,7 @@ from datetime import datetime
 from omni.core.colors import RGBColor
 from omni.renderers.canvas import Canvas
 from omni.renderers.text import text_width
-from omni.renderers.text_lane import TextLane, draw_text_lane
+from omni.renderers.text_lane import Marquee, TextLane, draw_text_lane
 
 __all__ = ["PANEL_X", "PanelEntry", "draw_name_with_stats", "draw_panel_entry"]
 
@@ -47,14 +47,18 @@ def _draw_leader(canvas: Canvas, leader: str | None, *, x: int, y: int, color: R
     return x + text_width(f"{leader} ", font)
 
 
-def draw_panel_entry(canvas: Canvas, entry: PanelEntry, *, y: int, now: datetime) -> None:
+def draw_panel_entry(canvas: Canvas, entry: PanelEntry, *, y: int, now: datetime, marquee: Marquee = Marquee()) -> None:
     """Draw one panel entry with its name's cell top at ``y``."""
     name_x = _draw_leader(canvas, entry.leader, x=PANEL_X, y=y, color=entry.name_color, font=_PANEL_NAME_FONT)
-    name_lane = TextLane(x=name_x, y=y, width=PANEL_X + _PANEL_WIDTH - name_x, font=_PANEL_NAME_FONT)
-    draw_text_lane(canvas, name_lane, entry.name, entry.name_color, now=now)
+    name_lane = TextLane(
+        x=name_x, y=y, width=PANEL_X + _PANEL_WIDTH - name_x, font=_PANEL_NAME_FONT, style=marquee.style
+    )
+    draw_text_lane(canvas, name_lane, entry.name, entry.name_color, now=now, clock=marquee.clock)
     if entry.stats is not None and entry.stats_color is not None:
-        stats_lane = TextLane(x=PANEL_X, y=y + _PANEL_STATS_DROP, width=_PANEL_WIDTH, font=_PANEL_STATS_FONT)
-        draw_text_lane(canvas, stats_lane, entry.stats, entry.stats_color, now=now)
+        stats_lane = TextLane(
+            x=PANEL_X, y=y + _PANEL_STATS_DROP, width=_PANEL_WIDTH, font=_PANEL_STATS_FONT, style=marquee.style
+        )
+        draw_text_lane(canvas, stats_lane, entry.stats, entry.stats_color, now=now, clock=marquee.clock)
 
 
 def draw_name_with_stats(
@@ -71,6 +75,7 @@ def draw_name_with_stats(
     leader: str | None = None,
     name_font: str = "6x10",
     stats_font: str = "4x6",
+    marquee: Marquee = Marquee(),
 ) -> None:
     """A single line: ``name``, then ``stats`` a size smaller beside it.
 
@@ -83,8 +88,8 @@ def draw_name_with_stats(
     stats_x = name_x + text_width(name, name_font) + _STATS_GAP
     if stats_x < right:  # the name leaves room for a stat line beside it
         canvas.text(name_x, y, name, name_color, font=name_font)
-        lane = TextLane(x=stats_x, y=y + _STATS_DROP, width=right - stats_x, font=stats_font)
-        draw_text_lane(canvas, lane, stats, stats_color, now=now)
+        lane = TextLane(x=stats_x, y=y + _STATS_DROP, width=right - stats_x, font=stats_font, style=marquee.style)
+        draw_text_lane(canvas, lane, stats, stats_color, now=now, clock=marquee.clock)
     else:  # an overflowing name takes the whole line and marquees; no room left for stats
-        lane = TextLane(x=name_x, y=y, width=right - name_x, font=name_font)
-        draw_text_lane(canvas, lane, name, name_color, now=now)
+        lane = TextLane(x=name_x, y=y, width=right - name_x, font=name_font, style=marquee.style)
+        draw_text_lane(canvas, lane, name, name_color, now=now, clock=marquee.clock)

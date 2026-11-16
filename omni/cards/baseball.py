@@ -56,7 +56,6 @@ class LiveBaseballCardPayload:
     phase: InningPhase
     count: BaseballCount
     bases: BaseballBaseState
-    last_play: str | None = None
     win_probability: WinProbability | None = None  # drives the per-team meter; None hides it
     batter: BatterGameLine | None = None  # current at-bat; None hides the batter line
     pitcher: PitcherGameLine | None = None  # current pitcher; None hides the pitcher line

@@ -35,6 +35,7 @@ from omni.domain.contest import TeamGame
 from omni.queue.scheduler import InterleavedCardQueue
 from omni.renderers.context import RenderContext
 from omni.renderers.image import LogoStore
+from omni.renderers.text_lane import DEFAULT_MARQUEE, LaneClock, Marquee, MarqueeStyle
 from omni.renderers.registry import RendererRegistry
 
 __all__ = ["TickResult", "AppLoop"]
@@ -70,6 +71,7 @@ class AppLoop:
         fetch_game_lines: GameLinesFetcher | None = None,
         logos: LogoStore | None = None,
         display_timezone: tzinfo | None = None,
+        marquee: MarqueeStyle = DEFAULT_MARQUEE,
     ) -> None:
         self._supervisor = supervisor
         self._store = store
@@ -83,6 +85,7 @@ class AppLoop:
         self._fetch_pregame_details = fetch_pregame_details  # optional records + starters; None -> a plain pregame
         self._fetch_game_lines = fetch_game_lines  # optional pregame odds; None -> no odds
         self._logos = logos  # ambient tile store handed to every RenderContext; None -> colour-bar fallback
+        self._marquee = Marquee(style=marquee, clock=LaneClock())  # how lines scroll, and when each went up
         self._display_timezone = display_timezone  # the zone board clocks read in; None -> the render clock's
 
     def run_once(self, now: datetime) -> TickResult:
@@ -108,7 +111,11 @@ class AppLoop:
             try:
                 frame = self._sink.new_frame()
                 context = RenderContext(
-                    profile=self._sink.profile, now=now, logos=self._logos, timezone=self._display_timezone
+                    profile=self._sink.profile,
+                    now=now,
+                    logos=self._logos,
+                    timezone=self._display_timezone,
+                    marquee=self._marquee,
                 )
                 self._registry.render(card, context, frame)
                 self._sink.commit(frame)

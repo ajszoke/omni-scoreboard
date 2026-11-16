@@ -176,7 +176,9 @@ class FinalRenderer:
             span = len(entries) * _ENTRY_HEIGHT + (len(entries) - 1) * _ENTRY_GAP
             top = (_BOARD_HEIGHT - span) // 2 - 1  # the name font lights from its cell's second row
             for i, entry in enumerate(entries):
-                draw_panel_entry(canvas, entry, y=top + i * (_ENTRY_HEIGHT + _ENTRY_GAP), now=context.now)
+                draw_panel_entry(
+                    canvas, entry, y=top + i * (_ENTRY_HEIGHT + _ENTRY_GAP), now=context.now, marquee=context.marquee
+                )
 
     def _render_stack(
         self,

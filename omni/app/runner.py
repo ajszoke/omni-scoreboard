@@ -32,6 +32,7 @@ from omni.queue.priority import PriorityScorer
 from omni.queue.scheduler import InterleavedCardQueue
 from omni.renderers.image import LogoStore
 from omni.renderers.registry import default_registry
+from omni.renderers.text_lane import DEFAULT_MARQUEE, MarqueeStyle
 
 __all__ = ["build_loop", "run_forever"]
 
@@ -51,6 +52,7 @@ def build_loop(
     fetch_game_lines: GameLinesFetcher | None = None,
     logos: LogoStore | None = None,
     display_timezone: tzinfo | None = None,
+    marquee: MarqueeStyle = DEFAULT_MARQUEE,
 ) -> AppLoop:
     """Wire the standard spine into an `AppLoop` (deterministic; no I/O performed here).
 
@@ -84,6 +86,7 @@ def build_loop(
         fetch_game_lines=fetch_game_lines,
         logos=logos,
         display_timezone=display_timezone,
+        marquee=marquee,
     )
 
 

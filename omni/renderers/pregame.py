@@ -33,6 +33,7 @@ from omni.renderers.context import RenderContext
 from omni.renderers.player_lines import draw_name_with_stats
 from omni.renderers.team_row import draw_matchup_marks, draw_single_bars, draw_treated_mark
 from omni.renderers.text import draw_centered, draw_right_aligned
+from omni.renderers.text_lane import Marquee
 from omni.renderers.visual_treatment import resolve_matchup_treatment
 
 __all__ = ["PregameRenderer", "first_pitch_label"]
@@ -162,13 +163,13 @@ class PregameRenderer:
             draw_treated_mark(canvas, context, team, side)
             if not side.is_tile:  # only the color bar drew, so the abbreviation has to name the team
                 canvas.text(3, row_top + 5, team.abbreviation, _WHITE, font=_VALUE_FONT)
-            self._detail_lines(canvas, details, row_top=row_top, now=context.now)
+            self._detail_lines(canvas, details, row_top=row_top, now=context.now, marquee=context.marquee)
         start_time = start_time_label(payload.scheduled_start, context.timezone or context.now.tzinfo)
         draw_centered(canvas, 0, 128, _START_TIME_Y, start_time, _WHITE, _TIME_FONT)
         draw_centered(canvas, 0, 128, _COUNTDOWN_Y, f"{_FIRST_PITCH} {countdown}", _YELLOW, _LABEL_FONT)
 
     @staticmethod
-    def _detail_lines(canvas: Canvas, details: PregameSide, *, row_top: int, now: datetime) -> None:
+    def _detail_lines(canvas: Canvas, details: PregameSide, *, row_top: int, now: datetime, marquee: Marquee) -> None:
         """A club's two lines beside its tile: record + odds, then starter + season stats."""
         record = str(details.record) if details.record is not None else ""
         odds = _line_label(details.line) if details.line is not None else ""
@@ -182,6 +183,7 @@ class PregameRenderer:
             name_color=_WHITE,
             stats_color=_ODDS_GREEN,
             now=now,
+            marquee=marquee,
         )
         starter = details.starter
         draw_name_with_stats(
@@ -194,6 +196,7 @@ class PregameRenderer:
             name_color=_YELLOW,
             stats_color=_STATS_TEAL,
             now=now,
+            marquee=marquee,
         )
 
     def _render_stack(self, canvas: Canvas, context: RenderContext, game: TeamGame, countdown: str) -> None:
