@@ -81,7 +81,9 @@ Every spacing/animation bug fixed should get a fixture or golden-image snapshot 
 Free/low-cost by default:
 
 - MLB: upstream MLB StatsAPI integration.
-- NFL: NFLMeta (chosen 2026-11-15; ESPN's terms bar automated access), behind a provider. NBA/NHL/PGA: not yet chosen; candidates in `docs/agent_context/SOURCES.md`.
+- NFL: NFLMeta (chosen 2026-11-15; ESPN's terms bar automated access), behind a provider.
+- NBA: BALLDONTLIE's Free tier (chosen 2026-11-16), behind a provider. Its terms bar sharing a key, so the key never goes onto a friend's board.
+- NHL/PGA: not yet chosen; candidates in `docs/agent_context/SOURCES.md`.
 - PGA probability/cut-line optional: DataGolf if worth the key/cost.
 - MLB pregame odds: Bovada's public coupon, behind a provider; it sits behind a 10-minute CDN cache, so never use it for a live value. Its terms limit content to private personal use and bar storing it elsewhere without consent, so the cloud poller leaves it off by default.
 - MLB in-game win probability: Polymarket US public market data first (MLB's own model ignores team strength), with the MLB feed as the fallback.
