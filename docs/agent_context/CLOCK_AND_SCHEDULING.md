@@ -286,6 +286,13 @@ Round 4 groups the first five as A1a:
 
 ## After A1a: the rulings still open (self-review for round 5, 2026-11-16)
 
+**Round 5 (2026-11-16)** signed A1a off conditionally. The four gates C1–C4, its sequence, and how it
+ruled on the table below are in STATUS "Next" and `~/omni-review/plans/omni-build-fidelity-REVIEWS.md`.
+- **Latest start:** step 7, before shared NFL rotation.
+- **Inline fetches, and the release guard against clock jumps:** both move into C3.
+- **The football strip's semantics:** they land with NFL on the shared board (blessed).
+- **Lane identity:** semantic lane ids within a presentation come with shared NFL.
+
 An audit of A1a against the round-4 rulings found four defects, fixed before round 5:
 - **A card the display can't draw** held the board: it was cued again every frame and nothing else
   aired. Now it comes down (`drop … (failed to draw)`) and is set aside until it changes or a minute
