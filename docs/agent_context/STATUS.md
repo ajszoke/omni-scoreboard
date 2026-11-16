@@ -4,10 +4,10 @@ _Living status doc. Keep it short; update whenever project state changes (branch
 
 ## Now (2026-11-16)
 
-- **2026-11-16, A1a step 4 (branch `agent/a1a-board`, PR pending golden approval):** the board's card rotation runs on the tower (`omni/tower/board.py`), under the same contract as the play strip.
+- **2026-11-16, A1a step 4 (branch `agent/a1a-board`; the goldens were approved with the held frame's redesign):** the board's card rotation runs on the tower (`omni/tower/board.py`), under the same contract as the play strip.
   - **Turns:** a card is booked when its first frame is committed and gets its minimum from then. It yields to a takeover or reminder after that minimum, to rotation after its turn (`--slot`, 12 s by default, within its own min and max; `--tick` still works), and at once if it leaves the queue or expires. A lone card stays up.
   - **Takeovers and order:** a big play takes over once. After 30 s of takeovers back to back, a rotation card gets a full turn. Finals air in the order their games ended, each after its game's walk-off.
-  - **Explicit frames:** idle, held (in the TV delay) and offline, each the board clock with a word. A card whose data is past its age is drawn dimmed, and a live card whose feed stopped answering comes down 2 minutes later.
+  - **Explicit frames:** idle, held (in the TV delay) and offline, each over the board clock. Held reads an amber `Syncing...` over a bar filling toward when the first held card clears (the user's design). A card whose data is past its age is drawn dimmed, and a live card whose feed stopped answering comes down 2 minutes later.
   - **When:** refreshes run when a poll answer lands or something is due, and the board chooses at frame rate.
   - **Marquee (R4-6):** a line's start is kept by the card's time on the board (or the strip frame) and its lane, set when its frame is committed.
   - **Checked:** an MLB slate replay (six games, 55 minutes, an outage). Its decisions were recorded from the old loop first, and they change as intended: turns from each commit, a takeover the old loop lost, and an outage that dims, clears and recovers instead of rotating frozen cards.

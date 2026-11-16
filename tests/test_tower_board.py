@@ -225,9 +225,10 @@ def test_with_nothing_to_show_the_board_says_why() -> None:
     board = _board()
     assert board.cue(_at(0)).payload == BoardFrame(FrameKind.IDLE, "nothing eligible")
     board.health = BoardHealth(held=2)
-    assert board.cue(_at(1)).payload == BoardFrame(FrameKind.HELD, "2 games in the TV delay")
+    waiting_since = T0 + timedelta(seconds=1)  # no end known yet: its bar shows an empty track
+    assert board.cue(_at(1)).payload == BoardFrame(FrameKind.HELD, "2 games in the TV delay", waiting_since)
     board.health = BoardHealth(held=1)
-    assert board.cue(_at(2)).payload == BoardFrame(FrameKind.HELD, "a game in the TV delay")
+    assert board.cue(_at(2)).payload == BoardFrame(FrameKind.HELD, "a game in the TV delay", waiting_since)
     board.health = BoardHealth(source=SourceHealth.OFFLINE, reason="no schedule yet: down")
     assert board.cue(_at(3)).payload == BoardFrame(FrameKind.OFFLINE, "no schedule yet: down")
     assert board.health.source is SourceHealth.OFFLINE
@@ -237,10 +238,12 @@ def test_a_frame_with_a_new_reason_is_revised_in_place() -> None:
     board = _board()
     board.health = BoardHealth(held=1)
     first = _air(board, 0)
-    board.health = BoardHealth(held=2)
+    board.health = BoardHealth(held=2, held_until=T0 + timedelta(seconds=45))
     revised = board.cue(_at(1))
     assert revised.occurrence == first.occurrence and revised.segment.revision == 1
     assert [change.kind for change in board.changes()] == [ChangeKind.UP]
+    # The wait it shows runs from when the board began waiting, whatever has changed since.
+    assert revised.payload == BoardFrame(FrameKind.HELD, "2 games in the TV delay", T0, T0 + timedelta(seconds=45))
 
 
 def test_a_frame_gives_way_to_a_card_at_once() -> None:

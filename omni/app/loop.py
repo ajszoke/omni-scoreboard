@@ -261,25 +261,34 @@ class AppLoop:
         on the board because their card is still inside the TV delay."""
         carded = self._queue.contests()
         held = sum(1 for game_id in result.held if game_id not in carded)
+        held_until = min((at for game_id, at in result.releases if game_id not in carded), default=None)
         unfed = sum(1 for game_id in result.stale if game_id not in carded)
         update, age = snapshot.update, snapshot.age
         error = snapshot.last_error or "no answer"
         if update is None or age is None:
             self._health_changes_at = None
-            return BoardHealth(source=SourceHealth.OFFLINE, reason=f"no schedule yet: {error}", held=held, unfed=unfed)
+            return BoardHealth(
+                source=SourceHealth.OFFLINE,
+                reason=f"no schedule yet: {error}",
+                held=held,
+                held_until=held_until,
+                unfed=unfed,
+            )
         # Ages are whole seconds, and a limit is passed only once a full second over it.
         second = timedelta(seconds=1)
         max_age = self._supervisor.max_age.as_timedelta()
         if age.as_timedelta() > self._offline_after:
             self._health_changes_at = None
             reason = f"no schedule for over {_span(self._offline_after)}: {error}"
-            return BoardHealth(source=SourceHealth.OFFLINE, reason=reason, held=held, unfed=unfed)
+            return BoardHealth(
+                source=SourceHealth.OFFLINE, reason=reason, held=held, held_until=held_until, unfed=unfed
+            )
         if snapshot.status is ProviderStatus.STALE:
             self._health_changes_at = update.observed_at + self._offline_after + second
             reason = f"no schedule for over {_span(max_age)}: {error}"
-            return BoardHealth(source=SourceHealth.STALE, reason=reason, held=held, unfed=unfed)
+            return BoardHealth(source=SourceHealth.STALE, reason=reason, held=held, held_until=held_until, unfed=unfed)
         self._health_changes_at = update.observed_at + max_age + second
-        return BoardHealth(source=SourceHealth.FRESH, held=held, unfed=unfed)
+        return BoardHealth(source=SourceHealth.FRESH, held=held, held_until=held_until, unfed=unfed)
 
 
 def _span(span: timedelta) -> str:

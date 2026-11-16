@@ -144,6 +144,7 @@ def test_run_once_holds_the_board_within_the_delay_then_surfaces() -> None:
     loop, sink, _ = _build(lag=30)
     first = loop.run_once(_at(T))
     assert first.shown is None and first.frame is FrameKind.HELD  # the game's card is still inside the TV delay
+    assert loop.refresh(T).health.held_until == T + timedelta(seconds=30)  # when it clears: the bar's end
     second = loop.run_once(_later(30))
     assert second.shown is not None and sink.committed == 2
 

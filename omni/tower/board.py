@@ -32,7 +32,7 @@ on the frame thread; the decision thread updates the queue (which is thread-safe
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, Union
 
@@ -69,10 +69,24 @@ class FrameKind(StrEnumMixin, str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class BoardFrame:
-    """An explicit frame and why it's up."""
+    """An explicit frame and why it's up.
+
+    A held frame also says how the wait is going: from when the board began waiting until the first held
+    card is due to clear the delay, if that's known.
+    """
 
     kind: FrameKind
     reason: str
+    started: datetime | None = None  # a held frame: when the board began waiting
+    until: datetime | None = None  # a held frame: when the first held card is due to clear the delay
+
+    def progress(self, now: datetime) -> float | None:
+        """How far through its wait a held frame is at ``now``, from 0 to 1; None when that isn't known."""
+        if self.started is None or self.until is None:
+            return None
+        if self.until <= self.started:
+            return 1.0
+        return min(max((now - self.started) / (self.until - self.started), 0.0), 1.0)
 
 
 class SourceHealth(StrEnumMixin, str, Enum):
@@ -90,6 +104,7 @@ class BoardHealth:
     source: SourceHealth = SourceHealth.FRESH
     reason: str = ""  # why the source is stale or offline
     held: int = 0  # games with nothing on the board yet because their card is inside the TV delay
+    held_until: datetime | None = None  # when the first of those games' cards is due to clear the delay
     unfed: int = 0  # games with nothing on the board because their feed has stopped answering
 
 
@@ -171,7 +186,8 @@ class BoardSession:
             elif health.unfed:
                 self._air_frame(BoardFrame(FrameKind.OFFLINE, f"no feed for {_games(health.unfed)}"), at)
             elif health.held:
-                self._air_frame(BoardFrame(FrameKind.HELD, f"{_games(health.held)} in the TV delay"), at)
+                reason = f"{_games(health.held)} in the TV delay"
+                self._air_frame(BoardFrame(FrameKind.HELD, reason, self._waiting_since(at), health.held_until), at)
             else:
                 self._air_frame(BoardFrame(FrameKind.IDLE, "nothing eligible"), at)
         return self._cue(health)
@@ -264,6 +280,16 @@ class BoardSession:
         slot = min(max(turn if turn is not None else self._policy.slot, dwell.minimum), dwell.maximum)
         self._occurrences += 1
         self._on_air = _OnAir(segment=segment, occurrence=self._occurrences, pick=pick, slot=slot)
+
+    def _waiting_since(self, at: ClockReading) -> datetime:
+        """When the held frame up began waiting; now, if none is up."""
+        on = self._on_air
+        if on is not None and on.pick is None:
+            frame = on.segment.frames[0]
+            assert isinstance(frame, BoardFrame)
+            if frame.kind is FrameKind.HELD and frame.started is not None:
+                return frame.started
+        return at.utc
 
     def _air_frame(self, frame: BoardFrame, at: ClockReading) -> None:
         on = self._on_air

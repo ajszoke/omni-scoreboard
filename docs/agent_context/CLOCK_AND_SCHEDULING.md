@@ -174,9 +174,11 @@ Round 4 groups the first five as A1a:
      game's walk-off (`ScoreboardCard.after`); its reveal waits for the game's plays still in the delay.
    - **Explicit frames:** *idle* (nothing to show), *held* (a game's card is still inside the TV delay)
      and *offline* (the schedule silent for over 10 minutes, or a game's feed down and its card gone),
-     each the board clock with a word on every profile, and traced with its reason. A card whose data
-     is past its age is drawn dimmed: a live card whose feed has stopped answering, which comes down 2
-     minutes later, or any card while the schedule is over 2 minutes old.
+     each traced with its reason. Each is the board clock on every profile: alone when idle, over a
+     red `OFFLINE`, or over an amber `Syncing...` with a bar that fills toward when the first held card
+     clears the delay (the user's design, 2026-11-16; on the single, a 2-pixel bar along the bottom
+     edge). A card whose data is past its age is drawn dimmed: a live card whose feed has stopped
+     answering, which comes down 2 minutes later, or any card while the schedule is over 2 minutes old.
    - **When:** a refresh runs when a poll answer lands (the poller wakes it), at the pipeline's next
      release or the source's next change in health, and at least every 5 s. The board's choice runs on
      the frame thread. `AppLoop.next_deadline` publishes both.

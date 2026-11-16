@@ -6,7 +6,7 @@ Regenerate goldens intentionally with: OMNI_REGEN_GOLDEN=1 pytest -k "board_fram
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -29,7 +29,10 @@ NOW = datetime(2026, 6, 18, 1, 42, tzinfo=timezone.utc)  # 7:42 PM in Denver
 DENVER = ZoneInfo("America/Denver")
 _FRAMES = {
     FrameKind.IDLE: BoardFrame(FrameKind.IDLE, "nothing eligible"),
-    FrameKind.HELD: BoardFrame(FrameKind.HELD, "2 games in the TV delay"),
+    # 20 s into a 45 s wait: the bar is 4/9 full.
+    FrameKind.HELD: BoardFrame(
+        FrameKind.HELD, "2 games in the TV delay", NOW - timedelta(seconds=20), NOW + timedelta(seconds=25)
+    ),
     FrameKind.OFFLINE: BoardFrame(FrameKind.OFFLINE, "no schedule for over 10m: down"),
 }
 
@@ -59,9 +62,41 @@ def test_every_frame_is_the_clock_and_all_but_idle_say_why(profile: PanelProfile
         canvas = RecordingCanvas(width, height)
         BoardFrameRenderer().render(frame, RenderContext(profile=profile, now=NOW, timezone=DENVER), canvas)
         texts = [op.text for op in canvas.texts()]
-        labels = {FrameKind.IDLE: [], FrameKind.HELD: ["TV DELAY"], FrameKind.OFFLINE: ["OFFLINE"]}[kind]
+        labels = {FrameKind.IDLE: [], FrameKind.HELD: ["Syncing..."], FrameKind.OFFLINE: ["OFFLINE"]}[kind]
         assert texts == ["7:42 PM", *labels]
         assert all(0 <= op.x and op.y + 6 <= height for op in canvas.texts())  # on the panel
+
+
+@pytest.mark.parametrize(
+    ("profile", "bar"),
+    [
+        (PanelProfile.QUAD_128X64, (28, 47, 72, 4, 32)),
+        (PanelProfile.STACK_64X64, (10, 42, 44, 3, 19)),
+        (PanelProfile.SINGLE_64X32, (0, 30, 64, 2, 28)),  # the whole bottom edge
+    ],
+)
+def test_a_held_frame_fills_its_bar_through_the_wait(profile: PanelProfile, bar: tuple[int, ...]) -> None:
+    x, y, width, height, filled = bar
+    canvas = RecordingCanvas(*geometry_for(profile).size)
+    BoardFrameRenderer().render(_FRAMES[FrameKind.HELD], RenderContext(profile=profile, now=NOW), canvas)
+    track, fill = canvas.rects()
+    assert (track.x, track.y, track.w, track.h) == (x, y, width, height)
+    assert (fill.x, fill.y, fill.w, fill.h) == (x, y, filled, height)  # 4/9 of the way
+
+
+def test_a_held_frame_with_no_known_end_shows_an_empty_track() -> None:
+    unknown = BoardFrame(FrameKind.HELD, "a game in the TV delay", NOW)
+    canvas = RecordingCanvas(128, 64)
+    BoardFrameRenderer().render(unknown, RenderContext(profile=PanelProfile.QUAD_128X64, now=NOW), canvas)
+    assert [(rect.w, rect.h) for rect in canvas.rects()] == [(72, 4)]
+
+
+def test_a_wait_s_progress_runs_from_zero_to_one() -> None:
+    held = _FRAMES[FrameKind.HELD]
+    assert held.progress(NOW - timedelta(seconds=30)) == 0.0
+    assert held.progress(NOW + timedelta(seconds=60)) == 1.0
+    assert BoardFrame(FrameKind.HELD, "-", NOW, NOW).progress(NOW) == 1.0  # due already
+    assert BoardFrame(FrameKind.IDLE, "-").progress(NOW) is None
 
 
 @pytest.mark.parametrize("profile", ALL_PROFILES)

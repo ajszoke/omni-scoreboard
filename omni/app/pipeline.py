@@ -189,6 +189,7 @@ class PipelineResult:
     skipped: tuple[str, ...]  # per-game fetch failures — the game is dropped this pass
     warnings: tuple[str, ...] = ()  # non-fatal per-play parse drops — the game still shows
     stale: tuple[LeagueScopedId, ...] = ()  # live games whose feed has stopped answering
+    releases: tuple[tuple[LeagueScopedId, datetime], ...] = ()  # when each held game's next card clears the delay
 
 
 class LiveBaseballPipeline:
@@ -259,6 +260,7 @@ class LiveBaseballPipeline:
         no_hitters: list[CardId] = []
         finals: list[CardId] = []
         held: list[LeagueScopedId] = []
+        releases: list[tuple[LeagueScopedId, datetime]] = []
         skipped: list[str] = []
         warnings: list[str] = []
 
@@ -300,6 +302,9 @@ class LiveBaseballPipeline:
             safe = state_feed.latest_eligible(now)
             if safe is None:
                 held.append(game.id)  # still inside the TV delay — nothing safe to show yet
+                release = state_feed.next_eligible(now)
+                if release is not None:
+                    releases.append((game.id, release))
                 continue
             # Win probability rides its own delay buffer, pushed on the same ticks as the state, so
             # the surfaced reading is from the same lag-old moment as the score — never a fresher one.
@@ -336,6 +341,7 @@ class LiveBaseballPipeline:
                 finals.append(revealed)
             else:
                 held.append(game.id)  # ended, but the result is still inside the post-game delay
+                releases.append((game.id, self._final_release(game.id, now)))
 
         removed = self._drop_absent(live_ids, final_ids)
         self._drop_stale_pregame(upcoming_ids)
@@ -353,6 +359,7 @@ class LiveBaseballPipeline:
             skipped=tuple(skipped),
             warnings=tuple(warnings),
             stale=tuple(sorted(self._stale, key=str)),
+            releases=tuple(sorted(releases, key=lambda release: str(release[0]))),
         )
 
     def _pregame_details_for(
@@ -603,6 +610,13 @@ class LiveBaseballPipeline:
             card = self._queue.card(key)
             if card is not None and card.stale_since is None:
                 self._queue.ingest(replace(card, stale_since=since))
+
+    def _final_release(self, game_id: LeagueScopedId, now: datetime) -> datetime:
+        """When a held final is next due to clear: its reveal, or then its last play still in the delay."""
+        reveal = self._final_reveal(game_id, self._final_pending[game_id])
+        stream = self._event_streams.get(game_id)
+        plays = stream.next_eligible() if stream is not None else None
+        return reveal if reveal > now or plays is None else plays
 
     def _final_reveal(self, game_id: LeagueScopedId, seen_at: datetime) -> datetime:
         """When a game first seen final at ``seen_at`` may show its result."""
