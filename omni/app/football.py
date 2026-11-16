@@ -215,7 +215,7 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
     frames = Pacer(clock, timedelta(seconds=1.0 / args.fps))
     try:
         while True:
-            board.step(clock.now())
+            board.step(clock.read())
             frames.wait()
     except KeyboardInterrupt:
         pass

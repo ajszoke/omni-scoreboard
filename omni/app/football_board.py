@@ -6,10 +6,12 @@ off the frame path), and draws the newest reading whose broadcast delay has pass
 from when each answer arrived. It draws every step, so a marqueeing strip keeps moving; the sink
 decides whether a frame is new enough to send.
 
-The play strip keeps its own schedule (`PlayStrip`). An event shows in frames: its description, then
-the named players' lines for the game. Each frame gets 10 seconds, and 20 while nothing else is
-waiting; then the strip goes blank until the next event. A stoppage (a timeout, a TV timeout, an
-injury, a review's ruling) stays up instead until play resumes.
+The play strip is a lane on the tower's shared primitives (`omni.tower`): each event becomes a segment
+of the strip, in frames: its description, then the named players' lines for the game. Each frame gets
+10 seconds, and 20 while nothing else is waiting; then the strip goes blank until the next event. A
+stoppage (a timeout, a TV timeout, an injury, a review's ruling) is held instead, until play resumes.
+A frame's time counts from when the display first took it, so a frame that failed to draw keeps its
+time.
 
 A field change shows at once. If its play comes with it, the play comes straight up; if not, what the
 strip still shows no longer describes the field, so it clears (once its frame has had 10 seconds) and
@@ -26,20 +28,21 @@ from `meter_lag` before it instead, and none at all once the market has been qui
 past that. The lag is measured from when each price was asked for, not from when the market set it, so
 it can still run ahead of the feed: the meter is opt-in until it's anchored to the market's own clock.
 
-The log keeps three things apart: what arrives (`>`), what the strip puts up (`=`), and what it drops
-unseen (`-`), with notes on the feed itself (`!`).
+The log keeps apart what arrives (`>`), what the strip puts up (`=`), what it clears early because the
+field moved on without its play (`x`), and what it drops unseen (`-`), with notes on the feed itself
+(`!`).
 """
 
 from __future__ import annotations
 
 import dataclasses
 from collections import deque
-from enum import Enum
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, tzinfo
 from typing import Any
 
+from omni.app.clock import ClockReading, MonotonicTime
 from omni.app.display import DisplaySink
 from omni.app.football_feed import AFTER_FINAL, FeedResult, FeedSource
 from omni.cards.base import CardId, CardKind, CardPriority, DedupeKey, DisplayTiming, LayoutSupport, ScoreboardCard
@@ -50,10 +53,13 @@ from omni.domain.baseball import WinProbability
 from omni.domain.football import FootballGameState, PlaySummary
 from omni.events.football import FootballEvent
 from omni.providers.nflmeta import NflLiveSnapshot
+from omni.renderers.base import Renderer
 from omni.renderers.context import RenderContext
 from omni.renderers.image import LogoStore
 from omni.renderers.live_football import LiveFootballRenderer
 from omni.renderers.text_lane import DEFAULT_MARQUEE, LaneClock, Marquee, MarqueeStyle
+from omni.tower import ChangeKind, Cue, Dwell, EndReason, Hold, Lane, LaneChange, Provenance, Segment, SegmentKey
+from omni.tower import Surface, earliest
 
 __all__ = [
     "CLOSING_WAIT",
@@ -61,8 +67,8 @@ __all__ = [
     "METER_MAX_AGE",
     "FRAME_MAX",
     "FRAME_MIN",
+    "STRIP_DWELL",
     "FootballBoard",
-    "PlayStrip",
 ]
 
 FRAME_MIN = timedelta(seconds=10)  # every frame of the strip (a description, a players' line) gets this
@@ -70,101 +76,14 @@ FRAME_MAX = timedelta(seconds=20)  # and keeps going to this while nothing else 
 METER_LAG = timedelta(seconds=15)
 METER_MAX_AGE = timedelta(seconds=60)  # a price this much older than its lag is no reading at all
 CLOSING_WAIT = timedelta(seconds=30)  # longest a break waits for the play that ended the period
-
-
-class _Frame(Enum):
-    """What of an event the strip shows: its description, then its players' lines."""
-
-    DESCRIPTION = "description"
-    PLAYERS = "players"
-
-
-class PlayStrip:
-    """What the play strip shows when: each event's frames in turn, then nothing until the next.
-
-    Every frame gets `FRAME_MIN`, and keeps going to `FRAME_MAX` while nothing is pending: no event
-    waiting, no field change, no break coming. Once something is, the frame ends at its minimum and the
-    event with it, so a waiting play comes straight up, and a field that moved on its own leaves the
-    strip blank until its play arrives. A stoppage holds until something is pending.
-    """
-
-    def __init__(self) -> None:
-        self._waiting: deque[FootballEvent] = deque()
-        self._seen: set[str] = set()
-        self._current: FootballEvent | None = None
-        self._frame = _Frame.DESCRIPTION
-        self._frame_since: datetime | None = None
-        self._stale = False  # the field has moved on since the current event went up
-        self._brief = False  # closing out a period: one frame each, at its minimum
-        self._presented: list[FootballEvent] = []  # put up since the last `presented`
-
-    def add(self, events: Iterable[FootballEvent]) -> None:
-        """Queue events behind any still waiting; one already queued is ignored."""
-        for event in events:
-            if event.key not in self._seen:
-                self._seen.add(event.key)
-                self._waiting.append(event)
-
-    def field_changed(self) -> None:
-        """The scoreboard moved, so what's up goes as soon as its frame has had its minimum."""
-        self._stale = True
-
-    def close_out(self) -> None:
-        """A break is coming: what's up and what's waiting get one frame each, at its minimum."""
-        self._stale = self._brief = True
-
-    def resume(self) -> None:
-        """Play is on again: frames get their full time."""
-        self._brief = False
-
-    def clear(self) -> list[FootballEvent]:
-        """Empty the strip; what was still waiting, and so goes unseen."""
-        dropped = list(self._waiting)
-        self._waiting.clear()
-        self._current = None
-        return dropped
-
-    def presented(self) -> list[FootballEvent]:
-        """The events put up since the last ask, oldest first."""
-        presented, self._presented = self._presented, []
-        return presented
-
-    @property
-    def idle(self) -> bool:
-        """Nothing up and nothing waiting, as of the last `showing`."""
-        return self._current is None and not self._waiting
-
-    def showing(self, now: datetime) -> PlaySummary | None:
-        """The strip at ``now``: an event's description, its players' lines, or nothing."""
-        current = self._current
-        if current is not None and self._frame_since is not None:
-            pending = bool(self._waiting) or self._stale or self._brief
-            holds = current.kind.spans and not self._brief
-            if now - self._frame_since >= FRAME_MIN and pending:
-                self._current = None
-            elif now - self._frame_since >= FRAME_MAX and not holds:
-                if self._frame is _Frame.DESCRIPTION and current.players_line:
-                    # The players' frame starts when the description's ran out, however late this is asked.
-                    self._frame, self._frame_since = _Frame.PLAYERS, self._frame_since + FRAME_MAX
-                    if now - self._frame_since >= FRAME_MAX:
-                        self._current = None
-                else:
-                    self._current = None
-        if self._current is None and self._waiting:
-            self._current, self._frame, self._frame_since = self._waiting.popleft(), _Frame.DESCRIPTION, now
-            self._stale = False
-            self._presented.append(self._current)
-        if self._current is None:
-            return None
-        if self._frame is _Frame.PLAYERS:
-            return dataclasses.replace(self._current.summary, detail=self._current.players_line)
-        return self._current.summary
+STRIP_DWELL = Dwell(minimum=FRAME_MIN, maximum=FRAME_MAX)
 
 
 @dataclass(frozen=True, slots=True)
 class _Reading:
-    """A poll's answer, and when the broadcast catches up to it."""
+    """A poll's answer, when it arrived, and when the broadcast catches up to it."""
 
+    received_at: datetime
     show_at: datetime
     snapshot: NflLiveSnapshot
     win_probability: WinProbability | None
@@ -184,6 +103,7 @@ class FootballBoard:
         timezone: tzinfo | None = None,
         marquee: MarqueeStyle = DEFAULT_MARQUEE,
         log: Callable[[str], None] = print,
+        renderer: Renderer[LiveFootballCardPayload] | None = None,
     ) -> None:
         self._feed = feed
         self._sink = sink
@@ -193,12 +113,12 @@ class FootballBoard:
         self._timezone = timezone
         self._marquee = Marquee(style=marquee, clock=LaneClock())  # one memory of lines for the board's life
         self._log = log
-        self._renderer = LiveFootballRenderer()
-        self._strip = PlayStrip()
+        self._renderer: Renderer[LiveFootballCardPayload] = renderer or LiveFootballRenderer()
+        self._strip: Lane[PlaySummary] = Lane(Surface.PLAY_STRIP)
         self._pending: deque[_Reading] = deque()
         self._showing: _Reading | None = None
         self._closing: _Reading | None = None  # a break, waiting for the plays that led to it
-        self._closing_since: datetime | None = None
+        self._closing_since: MonotonicTime | None = None
         self._holding = False
         self._last_line: str | None = None
         self._prices: deque[tuple[datetime, WinProbability | None]] = deque()  # the market's readings, oldest first
@@ -207,57 +127,78 @@ class FootballBoard:
     def showing(self) -> NflLiveSnapshot | None:
         return self._showing.snapshot if self._showing is not None else None
 
-    def step(self, now: datetime) -> None:
+    def step(self, at: ClockReading) -> None:
         """Take the feed's new answers, then draw what the broadcast has caught up to."""
-        for result in self._feed.collect(now):
+        for result in self._feed.collect(at.utc):
             self._absorb(result)
-        while self._pending and self._pending[0].show_at <= now:
-            self._take(self._pending.popleft(), now)
-        lines = self._strip.showing(now)
+        while self._pending and self._pending[0].show_at <= at.utc:
+            self._take(self._pending.popleft(), at)
+        cue = self._strip.cue(at)
         closing = self._closing
         if closing is not None and self._strip.idle and self._closing_since is not None:
-            if closing.snapshot.caught_up or now - self._closing_since >= CLOSING_WAIT:
+            if closing.snapshot.caught_up or at.monotonic.since(self._closing_since) >= CLOSING_WAIT:
                 self._showing, self._closing = closing, None
-                self._dropped(self._strip.clear(), "the break began")
-                lines = None
-        for event in self._strip.presented():
-            self._log(f"  = {_words(event)}")
+                self._dropped(self._strip.clear(at), "the break began")
+                cue = None
         showing = self._showing
-        if showing is None or showing.snapshot.state is None:
-            return
-        if self._closing is not None and self._closing.snapshot.state is not None:
-            self._draw(self._closing, _closing_view(showing.snapshot.state, self._closing.snapshot.state), lines, now)
-        elif showing.snapshot.state.interval is None:
-            self._draw(showing, showing.snapshot.state, lines, now)
-        else:
-            self._draw(showing, showing.snapshot.state, None, now)
+        if showing is not None and showing.snapshot.state is not None:
+            if self._closing is not None and self._closing.snapshot.state is not None:
+                view = _closing_view(showing.snapshot.state, self._closing.snapshot.state)
+                self._draw(self._closing, view, cue, at)
+            elif showing.snapshot.state.interval is None:
+                self._draw(showing, showing.snapshot.state, cue, at)
+            else:
+                self._draw(showing, showing.snapshot.state, None, at)
+        self._trace(self._strip.changes())
 
-    def _take(self, reading: _Reading, now: datetime) -> None:
+    def next_deadline(self, at: ClockReading) -> MonotonicTime | None:
+        """When the board will next decide something by itself, as of ``at``: a strip frame's time running
+        out, a reading clearing the broadcast delay, or a break's wait for its last play ending. New
+        answers from the feed come on top of these."""
+        deadlines = [self._strip.next_deadline(at)]
+        if self._pending:
+            deadlines.append(at.monotonic + max(timedelta(0), self._pending[0].show_at - at.utc))
+        if self._closing is not None and self._closing_since is not None:
+            deadlines.append(self._closing_since + CLOSING_WAIT)
+        return earliest(deadlines)
+
+    def _take(self, reading: _Reading, at: ClockReading) -> None:
         """A reading the broadcast has caught up to: show it, or close out the period it ends."""
         state = reading.snapshot.state
         shown = self._showing.snapshot.state if self._showing is not None else None
         if state is not None and state.interval is not None:
             if self._closing is not None:
                 self._closing = reading  # still closing out: the newest break, and any plays it brings
-                self._strip.add(reading.snapshot.events)
+                self._strip.offer(_segments(reading))
             elif shown is not None and shown.interval is None:
-                self._closing, self._closing_since = reading, now  # the period just ended: its plays first
+                self._closing, self._closing_since = reading, at.monotonic  # the period just ended: its plays first
                 self._strip.close_out()
-                self._strip.add(reading.snapshot.events)
+                self._strip.offer(_segments(reading))
             else:
                 self._showing = reading  # already in a break, or starting in one: the strip stays empty
-                self._dropped(self._strip.clear() + list(reading.snapshot.events), "during a break")
+                self._dropped(self._strip.clear(at) + _segments(reading), "during a break")
             return
         self._closing = None
         self._strip.resume()
         if shown is not None and state is not None and _field(state) != _field(shown):
-            self._strip.field_changed()
-        self._strip.add(reading.snapshot.events)
+            self._strip.invalidate()
+        self._strip.offer(_segments(reading))
         self._showing = reading
 
-    def _dropped(self, events: list[FootballEvent], why: str) -> None:
-        for event in events:
-            self._log(f"  - {_words(event)} (unseen: {why})")
+    def _dropped(self, segments: list[Segment[PlaySummary]], why: str) -> None:
+        for segment in segments:
+            self._log(f"  - {_words(segment.frames[0])} (unseen: {why})")
+
+    def _trace(self, changes: list[LaneChange[PlaySummary]]) -> None:
+        """The strip's changes in the log: what went up, what the field cleared early, what went unseen."""
+        for change in changes:
+            if change.kind is ChangeKind.UP:
+                self._log(f"  = {_words(change.segment.frames[0])}")
+            elif change.kind is ChangeKind.DOWN and change.reason is EndReason.INVALIDATED:
+                self._log(f"  x {_words(change.segment.frames[0])} (cleared: the field moved on without its play)")
+            elif change.kind is ChangeKind.DROPPED:
+                why = change.reason.value if change.reason is not None else "dropped"
+                self._log(f"  - {_words(change.segment.frames[0])} (unseen: {why})")
 
     def _absorb(self, result: FeedResult) -> None:
         """An answer from the feed: queue its reading behind the broadcast delay, and log what came."""
@@ -273,14 +214,14 @@ class FootballBoard:
             self._holding = False
             self._log("halftime hold over: polling again")
         probability = self._probability(result)
-        self._pending.append(_Reading(result.received_at + self._delay, snapshot, probability))
+        self._pending.append(_Reading(result.received_at, result.received_at + self._delay, snapshot, probability))
         meter = f" | meter {probability.away:.0f}-{probability.home:.0f}" if probability is not None else ""
         line = _describe(snapshot) + meter
         if line != self._last_line:
             self._last_line = line
             self._log(line)
         for event in snapshot.events:
-            self._log(f"  > {_words(event)}")
+            self._log(f"  > {_words(event.summary)}")
         if result.holding:
             self._holding = True
             self._log("halftime: holding off the feed")
@@ -303,9 +244,12 @@ class FootballBoard:
             return self._prices[0][1]
         return None  # nothing old enough yet, or the market has gone quiet
 
-    def _draw(self, reading: _Reading, state: FootballGameState, strip: PlaySummary | None, now: datetime) -> None:
+    def _draw(
+        self, reading: _Reading, state: FootballGameState, cue: Cue[PlaySummary] | None, at: ClockReading
+    ) -> None:
+        """Draw the card, and tell the strip which of its frames went up."""
         game = reading.snapshot.game
-        key = f"nfl-{game.id.raw}:live"
+        key = _card_key(reading)
         card = ScoreboardCard(
             id=CardId(key),
             kind=CardKind.LIVE_GAME,
@@ -318,17 +262,19 @@ class FootballBoard:
             dedupe_key=DedupeKey(key),
             payload=LiveFootballCardPayload(
                 state=state,
-                last_play=strip,
+                last_play=cue.payload if cue is not None else None,
                 win_probability=reading.win_probability,
                 break_ends_at=_delayed(reading.snapshot.break_ends_at, self._delay),
             ),
         )
         frame = self._sink.new_frame()
         context = RenderContext(
-            profile=self._sink.profile, now=now, logos=self._logos, timezone=self._timezone, marquee=self._marquee
+            profile=self._sink.profile, now=at.utc, logos=self._logos, timezone=self._timezone, marquee=self._marquee
         )
         self._renderer.render(card, context, frame)
         self._sink.commit(frame)
+        if cue is not None:
+            self._strip.committed(cue, at)
 
 
 def _delayed(instant: datetime | None, delay: timedelta) -> datetime | None:
@@ -336,8 +282,34 @@ def _delayed(instant: datetime | None, delay: timedelta) -> datetime | None:
     return instant + delay if instant is not None else None
 
 
-def _words(event: FootballEvent) -> str:
-    summary = event.summary
+def _card_key(reading: _Reading) -> str:
+    return f"nfl-{reading.snapshot.game.id.raw}:live"
+
+
+def _segments(reading: _Reading) -> list[Segment[PlaySummary]]:
+    """A reading's events as strip segments: each a description, then its players' lines if it has them."""
+    game = reading.snapshot.game
+    return [
+        Segment(
+            key=SegmentKey(Surface.PLAY_STRIP, event.key),
+            frames=_frames(event),
+            dwell=STRIP_DWELL,
+            provenance=Provenance(source=game.id.source, received_at=reading.received_at),
+            available_at=reading.show_at,
+            parent=_card_key(reading),
+            hold=Hold.PLAY_RESUMES if event.kind.spans else None,
+        )
+        for event in reading.snapshot.events
+    ]
+
+
+def _frames(event: FootballEvent) -> tuple[PlaySummary, ...]:
+    if event.players_line:
+        return event.summary, dataclasses.replace(event.summary, detail=event.players_line)
+    return (event.summary,)
+
+
+def _words(summary: PlaySummary) -> str:
     return summary.headline + (f" | {summary.detail}" if summary.detail else "")
 
 

@@ -359,14 +359,17 @@ milestones:
       - id: M11-004
         title: "Scheduling primitives (segment, surface/lane, timer heap, tower) with PlayStrip as first consumer, replay-parity tested"
         labels: [queue, clock, p2]
+        status: done  # A1a step 3, 2026-11-16; the marquee epoch at commit (R4-6) moves to M11-005
         notes:
           - "Round 4 presentation contract: stable identity and revision; surface and parent; typed payload and provenance; availability; latest start and hard expiry where distinct; min/max dwell; typed prerequisites for closes and holds. A pending revision replaces the pending item; a material correction to an aired one airs as a correction; cosmetic edits keep dwell. Commit acknowledges first presentation, repeat and cooldown use, and lane start."
           - "Round 4 R4-6: a lane's marquee epoch is chosen at commit, keyed by surface, card occurrence and lane, and passed into pure render math (replaces the LaneClock's geometry key and 5 s forget window). Compare decision transitions, not frame counts, on the PIT@CIN replay: a minimized trace (ids, revisions, write and receipt times, statuses, accept/skip reasons, presented frames), not raw NFLMeta rows."
+          - "A1a step 3 (2026-11-16): omni/tower/segment.py (the contract) and lane.py (one surface's schedule, next_deadline); the football strip is a Lane of segments, and its dwell counts from each frame's first commit. tools/nflmeta_replay_trace.py writes the minimized PIT@CIN trace (no NFLMeta text or ids; the snap and clock are stand-ins), and omni/replay/football.py replays a board over it. The ported board makes the baseline's 564 decisions, and stepping only at arrivals and deadlines matches stepping every 10 ms. The trace is the board's input (feed answers), not the provider's: cursor and accept/skip reasons stay in the local full trace."
       - id: M11-005
         title: "Board card queue onto the tower; enforce min/max display there"
         labels: [queue, clock, p1]
         notes:
           - "Round 4 H4 (A1a step 4): selection is acknowledged at commit (scheduler.py:121 records a card as shown before it renders); an explicit idle frame when nothing is eligible (loop.py:107-110 leaves the last frame up); a minimum starts at the first committed frame and isn't spent by a failed render."
+          - "Also step 4 (from M11-004): the marquee epoch at commit (R4-6), keyed by surface, card occurrence and lane, passed into pure render math; animation phase on monotonic time. The strip's Lane already records each frame's first commit."
       - id: M11-006
         title: "Air clock and per-source lag models; fold football's delay and the meter lag into it"
         labels: [queue, delay, clock, p2]

@@ -1,0 +1,564 @@
+   915.75  field  Q1 0-0 kickoff -
+   915.75  strip  -
+   982.75  field  Q1 0-0 -
+   982.75  strip  PLAY 1 | detail 1
+  1002.75  strip  PLAY 1 | players 1
+  1011.00  field  Q1 0-0 home 1&1 @1
+  1012.75  strip  PLAY 2 | detail 2
+  1032.75  strip  PLAY 2 | players 2
+  1052.75  strip  -
+  1058.25  field  Q1 0-0 home 2&1 @1
+  1058.25  strip  PLAY 3 | detail 3
+  1068.25  field  Q1 0-0 home 3&1 @1
+  1068.25  strip  -
+  1086.75  strip  PLAY 4 | detail 4
+  1106.75  field  Q1 0-0 home 4&1 @1
+  1106.75  strip  -
+  1135.50  strip  PLAY 5 | detail 5
+  1155.50  strip  PLAY 5 | players 5
+  1172.50  field  Q1 0-0 home 1&2 @1
+  1172.50  strip  PLAY 6 | detail 6
+  1192.50  strip  PLAY 6 | players 6
+  1211.25  field  Q1 0-0 home 2&2 @1
+  1211.25  strip  PLAY 7 | detail 7
+  1231.25  strip  PLAY 7 | players 7
+  1240.00  field  Q1 0-0 home 3&2 @1
+  1241.25  strip  PLAY 8 | detail 8
+  1261.25  strip  PLAY 8 | players 8
+  1281.25  strip  -
+  1288.75  field  Q1 0-0 home 4&2 @1
+  1288.75  strip  PLAY 9 | detail 9
+  1308.75  strip  PLAY 9 | players 9
+  1328.75  strip  -
+  1346.25  field  Q1 0-0 home 1&3 @1
+  1346.25  strip  PLAY 10 | detail 10
+  1366.25  strip  PLAY 10 | players 10
+  1374.75  field  Q1 0-0 home 2&3 @1
+  1376.25  strip  PLAY 11 | detail 11
+  1396.25  strip  PLAY 11 | players 11
+  1416.25  strip  -
+  1421.75  field  Q1 0-0 home 3&3 @1
+  1421.75  strip  PLAY 12 | detail 12
+  1441.75  strip  PLAY 12 | players 12
+  1460.50  field  Q1 0-0 home 4&3 @1
+  1460.50  strip  -
+  1470.50  strip  PLAY 13 | detail 13
+  1490.50  strip  PLAY 13 | players 13
+  1499.00  field  Q1 0-3 -
+  1500.50  strip  -
+  1517.50  field  Q1 0-3 kickoff home
+  1517.50  strip  PLAY 14 | detail 14
+  1527.50  strip  TV TIMEOUT 15
+  1698.00  field  Q1 0-3 -
+  1698.00  strip  PLAY 16 | detail 16
+  1718.00  strip  -
+  1746.50  field  Q1 0-3 away 1&4 @1
+  1746.50  strip  PLAY 17 | detail 17
+  1766.50  strip  PLAY 17 | players 17
+  1783.50  field  Q1 0-3 away 2&4 @1
+  1783.50  strip  -
+  1793.50  strip  PLAY 18 | detail 18
+  1813.50  strip  PLAY 18 | players 18
+  1822.25  field  Q1 0-3 away 3&4 @1
+  1823.50  strip  -
+  1832.25  strip  PLAY 19 | detail 19
+  1852.25  strip  PLAY 19 | players 19
+  1872.25  strip  -
+  1889.25  field  Q1 0-3 home 4&4 @1
+  1899.25  strip  PLAY 20 | detail 20
+  1909.25  strip  TV TIMEOUT 21
+  2069.75  field  Q1 0-3 home 1&5 @1
+  2069.75  strip  PLAY 22 | detail 22
+  2089.75  strip  PLAY 22 | players 22
+  2098.25  field  Q1 0-3 home 2&5 @1
+  2099.75  strip  -
+  2108.25  strip  PLAY 23 | detail 23
+  2126.50  field  Q1 0-3 home 3&5 @1
+  2126.50  strip  -
+  2136.50  strip  PLAY 24 | detail 24
+  2156.50  strip  PLAY 24 | players 24
+  2175.25  field  Q1 0-3 home 4&5 @1
+  2175.25  strip  -
+  2193.75  strip  PLAY 25 | detail 25
+  2213.75  strip  PLAY 25 | players 25
+  2222.25  field  Q1 0-3 home 1&6 @1
+  2223.75  strip  -
+  2232.50  strip  PLAY 26 | detail 26
+  2251.00  field  Q1 0-3 home 2&6 @1
+  2251.00  strip  -
+  2261.00  strip  PLAY 27 | detail 27
+  2281.00  strip  PLAY 27 | players 27
+  2299.50  field  Q1 0-3 home 3&6 @1
+  2299.50  strip  PLAY 28 | detail 28
+  2319.50  strip  PLAY 28 | players 28
+  2339.50  strip  -
+  2546.75  field  Q1 0-3 home 4&6 @1
+  2546.75  strip  REVIEW 29 | detail 29
+  2556.75  strip  PLAY 30 | detail 30
+  2565.25  field  Q1 0-3 home 1&7 @1
+  2566.75  strip  -
+  2575.25  field  Q1 0-3 home 2&7 @1
+  2583.75  strip  PLAY 31 | detail 31
+  2603.75  strip  PLAY 31 | players 31
+  2622.00  field  Q1 0-3 home 3&7 @1
+  2622.00  strip  -
+  2632.50  strip  PLAY 32 | detail 32
+  2652.50  strip  PLAY 32 | players 32
+  2660.75  field  Q1 0-3 home 4&7 @1
+  2662.50  strip  PLAY 33 | detail 33
+  2682.50  strip  PLAY 33 | players 33
+  2689.00  field  Q1 0-3 home 1&8 @1
+  2692.50  strip  -
+  2699.00  strip  PLAY 34 | detail 34
+  2707.50  field  Q1 0-3 -
+  2709.00  strip  -
+  2727.50  field  Q1 0-3 end_of_quarter
+  2735.75  field  Q2 0-3 home 1&8 @1
+  2974.75  field  Q2 0-3 home 2&8 @1
+  2974.75  strip  PLAY 35 | detail 35
+  2983.25  field  Q2 0-3 home 3&8 @1
+  2984.75  strip  -
+  3021.50  field  Q2 0-3 -
+  3031.50  field  Q2 0-9 -
+  3040.00  strip  PLAY 36 | detail 36
+  3050.00  field  Q2 0-10 home None&None @None
+  3050.00  strip  -
+  3173.75  field  Q2 0-10 -
+  3193.75  strip  CONVERSION 37 | detail 37
+  3203.75  strip  PLAY 38 | detail 38
+  3223.75  strip  PLAY 38 | players 38
+  3230.50  field  Q2 0-10 away 4&8 @1
+  3233.75  strip  -
+  3240.50  strip  PLAY 39 | detail 39
+  3260.50  strip  PLAY 39 | players 39
+  3280.50  strip  -
+  3287.25  field  Q2 0-10 away 1&9 @1
+  3297.50  strip  PLAY 40 | detail 40
+  3317.50  field  Q2 0-10 away 2&9 @1
+  3317.50  strip  -
+  3336.00  strip  PLAY 41 | detail 41
+  3356.00  strip  PLAY 41 | players 41
+  3376.00  strip  -
+  3382.75  field  Q2 0-10 away 3&9 @1
+  3382.75  strip  PLAY 42 | detail 42
+  3402.75  strip  PLAY 42 | players 42
+  3422.75  strip  -
+  3469.75  field  Q2 0-10 away 4&9 @1
+  3488.25  strip  REVIEW 43 | detail 43
+  3640.50  field  Q2 0-10 home 1&10 @1
+  3640.50  strip  -
+  3650.50  strip  PLAY 44 | detail 44
+  3668.75  field  Q2 0-10 home 2&10 @1
+  3668.75  strip  -
+  3697.25  strip  PLAY 45 | detail 45
+  3715.50  field  Q2 0-10 home 3&9 @1
+  3715.50  strip  -
+  3735.75  strip  PLAY 46 | detail 46
+  3755.75  strip  PLAY 46 | players 46
+  3764.25  field  Q2 0-10 home 3&10 @1
+  3765.75  strip  -
+  3774.25  strip  PLAY 47 | detail 47
+  3794.25  strip  PLAY 47 | players 47
+  3803.00  field  Q2 0-10 home 4&10 @1
+  3804.25  strip  -
+  3821.25  strip  PLAY 48 | detail 48
+  3839.75  field  Q2 0-10 home 1&11 @1
+  3839.75  strip  -
+  3859.75  strip  PLAY 49 | detail 49
+  3879.75  strip  PLAY 49 | players 49
+  3899.75  strip  -
+  3906.50  field  Q2 0-10 home 2&11 @1
+  3906.50  strip  PLAY 50 | detail 50
+  3926.50  strip  PLAY 50 | players 50
+  3945.00  field  Q2 0-10 away 3&11 @1
+  3945.00  strip  PLAY 51 | detail 51
+  3963.25  field  Q2 0-10 away 4&11 @1
+  3963.25  strip  -
+  3973.25  strip  TV TIMEOUT 52
+  4125.00  field  Q2 0-10 away 1&12 @1
+  4125.00  strip  PLAY 53 | detail 53
+  4145.00  strip  PLAY 53 | players 53
+  4155.00  strip  PLAY 54 | detail 54
+  4165.00  field  Q2 0-10 away 2&12 @1
+  4165.00  strip  -
+  4192.75  field  Q2 0-10 away 3&12 @1
+  4192.75  strip  PLAY 55 | detail 55
+  4212.75  strip  PLAY 55 | players 55
+  4232.75  strip  -
+  4236.25  field  Q2 0-10 away 4&12 @1
+  4246.25  strip  PLAY 56 | detail 56
+  4266.25  strip  PLAY 56 | players 56
+  4286.25  strip  -
+  4306.75  field  Q2 0-10 home 4&5 @1
+  4306.75  strip  PLAY 57 | detail 57
+  4326.75  strip  PLAY 57 | players 57
+  4336.75  strip  TV TIMEOUT 58
+  4400.25  field  Q2 0-10 away 1&13 @1
+  4400.25  strip  REVIEW 59 | detail 59
+  4480.75  field  Q2 0-10 home 2&13 @1
+  4480.75  strip  -
+  4511.00  strip  PLAY 60 | detail 60
+  4531.00  strip  PLAY 60 | players 60
+  4543.25  field  Q2 0-10 home 3&13 @1
+  4543.25  strip  -
+  4571.75  field  Q2 0-10 home 4&13 @1
+  4583.25  field  Q2 0-10 home 1&14 @1
+  4603.25  strip  PLAY 61 | detail 61
+  4613.25  strip  PLAY 62 | detail 62
+  4613.50  field  Q2 0-10 home 2&8 @1
+  4623.25  strip  -
+  4633.50  field  Q2 0-10 home 3&8 @1
+  4643.75  strip  PLAY 63 | detail 63
+  4663.75  strip  PLAY 63 | players 63
+  4683.75  field  Q2 0-10 home 2&14 @1
+  4683.75  strip  -
+  4704.00  strip  PLAY 64 | detail 64
+  4714.00  field  Q2 0-16 -
+  4714.00  strip  -
+  4734.25  strip  PLAY 65 | detail 65
+  4754.25  field  Q2 0-17 -
+  4754.25  strip  -
+  4774.50  field  Q2 0-17 kickoff home
+  4774.50  strip  CONVERSION 66 | detail 66
+  4784.50  strip  TV TIMEOUT 67
+  4794.50  strip  INJURY 68 | detail 68
+  4955.50  field  Q2 0-17 -
+  4955.50  strip  PLAY 69 | detail 69
+  4975.50  strip  PLAY 69 | players 69
+  4995.50  field  Q2 0-17 away 3&14 @1
+  4995.50  strip  PLAY 70 | detail 70
+  5015.50  strip  PLAY 70 | players 70
+  5035.50  strip  -
+  5086.00  field  Q2 0-17 away 1&7 @1
+  5096.00  strip  PLAY 71 | detail 71
+  5116.00  strip  PLAY 71 | players 71
+  5126.25  field  Q2 0-17 away 4&14 @1
+  5126.25  strip  -
+  5136.25  strip  PLAY 72 | detail 72
+  5156.25  strip  PLAY 72 | players 72
+  5166.50  field  Q2 0-17 away 1&15 @1
+  5166.50  strip  -
+  5176.75  strip  PLAY 73 | detail 73
+  5196.75  strip  PLAY 73 | players 73
+  5216.75  field  Q2 0-17 away 2&15 @1
+  5216.75  strip  -
+  5226.75  strip  PLAY 74 | detail 74
+  5237.00  field  Q2 0-17 away 3&15 @1
+  5237.00  strip  -
+  5257.00  strip  PLAY 75 | detail 75
+  5277.00  strip  PLAY 75 | players 75
+  5287.25  strip  TWO MINUTE WARNING 76
+  5488.25  field  Q2 0-17 away 4&15 @1
+  5488.25  strip  PLAY 77 | detail 77
+  5498.25  strip  TIMEOUT 78 | detail 78
+  5548.75  field  Q2 0-17 away 1&16 @1
+  5548.75  strip  PLAY 79 | detail 79
+  5558.75  strip  TIMEOUT 80 | detail 80
+  5629.00  field  Q2 0-17 away 2&16 @1
+  5629.00  strip  -
+  5639.25  strip  PLAY 81 | detail 81
+  5659.25  strip  TIMEOUT 82 | detail 82
+  5850.00  field  Q2 3-17 -
+  5850.00  strip  -
+  5870.25  field  Q2 3-17 kickoff away
+  5870.25  strip  PLAY 83 | detail 83
+  5890.25  strip  -
+  5956.75  field  Q2 3-17 -
+  5956.75  strip  PLAY 84 | detail 84
+  5976.75  strip  PLAY 84 | players 84
+  5987.00  field  Q2 3-17 home 3&16 @1
+  5987.00  strip  -
+  5997.00  strip  PLAY 85 | detail 85
+  6007.00  field  Q2 3-17 home 4&16 @1
+  6007.00  strip  -
+  6017.00  strip  PLAY 86 | detail 86
+  6037.00  strip  PLAY 86 | players 86
+  6047.25  field  Q2 3-17 home 1&17 @1
+  6047.25  strip  PLAY 87 | detail 87
+  6067.25  field  Q2 3-17 home 2&17 @1
+  6067.25  strip  -
+  6077.25  strip  PLAY 88 | detail 88
+  6097.25  strip  PLAY 88 | players 88
+  6117.25  strip  -
+  6117.50  field  Q2 3-17 home 3&17 @1
+  6127.50  strip  PLAY 89 | detail 89
+  6137.50  strip  PLAY 90 | detail 90
+  6157.50  strip  PLAY 90 | players 90
+  6177.50  strip  -
+  6177.75  field  Q2 3-17 home 4&17 @1
+  6187.75  strip  PLAY 91 | detail 91
+  6207.75  strip  PLAY 91 | players 91
+  6218.00  field  Q2 3-23 -
+  6218.00  strip  -
+  6228.25  strip  PLAY 92 | detail 92
+  6248.25  field  Q2 3-24 -
+  6248.25  strip  -
+  6258.25  field  Q2 3-24 home None&None @None
+  6268.25  field  Q2 3-24 kickoff home
+  6268.25  strip  CONVERSION 93 | detail 93
+  6288.25  strip  -
+  6345.50  field  Q2 3-24 -
+  6345.50  strip  PLAY 94 | detail 94
+  6365.50  strip  PLAY 94 | players 94
+  6385.50  strip  -
+  6386.00  field  Q2 3-24 away 1&18 @1
+  6386.00  strip  PLAY 95 | detail 95
+  6396.00  field  Q2 3-24 -
+  6396.00  strip  -
+  6426.00  field  Q2 3-24 halftime
+  7494.50  field  Q3 3-24 away 2&18 @1
+  7494.50  strip  PLAY 96 | detail 96
+  7504.50  strip  PLAY 97 | detail 97
+  7514.50  strip  PLAY 98 | detail 98
+  7524.50  strip  PLAY 99 | detail 99
+  7534.50  strip  PLAY 100 | detail 100
+  7544.50  strip  PLAY 101 | detail 101
+  7544.75  field  Q3 3-24 away 3&18 @1
+  7554.50  strip  PLAY 102 | detail 102
+  7564.50  strip  INJURY 103 | detail 103
+  7574.50  strip  PLAY 104 | detail 104
+  7594.50  strip  PLAY 104 | players 104
+  7609.00  field  Q3 3-24 home 2&5 @1
+  7609.00  strip  PLAY 105 | detail 105
+  7629.00  strip  TV TIMEOUT 106
+  7770.00  field  Q3 3-24 home 4&18 @1
+  7770.00  strip  -
+  7780.00  strip  PLAY 107 | detail 107
+  7800.00  strip  PLAY 107 | players 107
+  7810.25  strip  PLAY 108 | detail 108
+  7820.25  field  Q3 3-24 home 4&5 @1
+  7820.25  strip  -
+  7850.25  field  Q3 3-24 home 1&19 @1
+  7850.25  strip  PLAY 109 | detail 109
+  7870.25  strip  PLAY 109 | players 109
+  7890.25  strip  -
+  7900.50  field  Q3 3-24 home 1&7 @1
+  7900.50  strip  PLAY 110 | detail 110
+  7920.50  strip  PLAY 110 | players 110
+  7930.75  strip  PLAY 111 | detail 111
+  7940.75  field  Q3 3-24 home 4&14 @1
+  7940.75  strip  -
+  7981.00  field  Q3 3-24 home 3&7 @1
+  7981.00  strip  PLAY 112 | detail 112
+  8001.00  strip  PLAY 112 | players 112
+  8021.00  strip  -
+  8031.25  field  Q3 3-24 home 2&19 @1
+  8031.25  strip  PLAY 113 | detail 113
+  8051.25  strip  PLAY 113 | players 113
+  8057.25  field  Q3 3-24 home 1&2 @1
+  8061.25  strip  -
+  8067.50  strip  PLAY 114 | detail 114
+  8087.50  strip  PLAY 114 | players 114
+  8097.50  field  Q3 3-24 home 3&19 @1
+  8097.50  strip  -
+  8107.50  strip  PLAY 115 | detail 115
+  8127.50  strip  PLAY 115 | players 115
+  8147.50  strip  -
+  8158.75  field  Q3 3-24 home 4&19 @1
+  8169.00  strip  PLAY 116 | detail 116
+  8189.00  strip  PLAY 116 | players 116
+  8209.00  strip  -
+  8219.25  field  Q3 3-30 -
+  8239.25  field  Q3 3-31 -
+  8279.50  strip  SCORE 117 | detail 117
+  8289.50  strip  TV TIMEOUT 118
+  8450.25  strip  PLAY 119 | detail 119
+  8470.25  strip  PLAY 119 | players 119
+  8480.75  field  Q3 3-31 away 1&20 @1
+  8480.75  strip  -
+  8490.50  strip  PLAY 120 | detail 120
+  8510.50  strip  PLAY 120 | players 120
+  8520.75  field  Q3 3-31 away 2&20 @1
+  8520.75  strip  PLAY 121 | detail 121
+  8540.75  strip  PLAY 121 | players 121
+  8560.75  strip  -
+  8571.00  field  Q3 3-31 away 3&20 @1
+  8581.25  strip  PLAY 122 | detail 122
+  8601.25  strip  PLAY 122 | players 122
+  8611.25  field  Q3 3-31 home 4&20 @1
+  8611.25  strip  -
+  8621.25  strip  PLAY 123 | detail 123
+  8631.25  strip  TV TIMEOUT 124
+  8772.00  field  Q3 3-31 home 1&1 @2
+  8772.00  strip  -
+  8792.00  strip  PLAY 125 | detail 125
+  8812.00  strip  PLAY 125 | players 125
+  8832.00  strip  -
+  8832.25  field  Q3 3-31 home 2&1 @2
+  8832.25  strip  PLAY 126 | detail 126
+  8852.25  strip  PLAY 126 | players 126
+  8872.25  strip  -
+  8872.50  field  Q3 3-31 home 3&1 @2
+  8872.50  strip  PLAY 127 | detail 127
+  8892.50  strip  PLAY 127 | players 127
+  8912.50  strip  -
+  8928.00  strip  PLAY 128 | detail 128
+  8938.00  field  Q3 3-31 away 4&1 @2
+  8938.00  strip  -
+  8948.00  strip  TV TIMEOUT 129
+  9114.25  field  Q3 3-31 away 1&2 @2
+  9114.25  strip  -
+  9124.25  strip  PLAY 130 | detail 130
+  9144.25  field  Q3 3-31 away 2&2 @2
+  9144.25  strip  -
+  9164.50  field  Q3 3-31 -
+  9173.00  strip  PLAY 131 | detail 131
+  9183.00  field  Q3 3-31 end_of_quarter
+  9183.00  strip  -
+  9194.50  field  Q4 3-31 away 2&2 @2
+  9361.75  field  Q4 3-31 away 3&2 @2
+  9381.75  strip  PLAY 132 | detail 132
+  9391.75  field  Q4 3-31 away 4&2 @2
+  9391.75  strip  -
+  9411.75  strip  PLAY 133 | detail 133
+  9422.00  field  Q4 3-31 away 1&3 @2
+  9422.00  strip  -
+  9432.00  strip  PLAY 134 | detail 134
+  9452.00  field  Q4 3-31 away 2&3 @2
+  9452.00  strip  -
+  9472.00  strip  PLAY 135 | detail 135
+  9492.00  strip  PLAY 135 | players 135
+  9492.25  field  Q4 3-31 away 3&3 @2
+  9502.00  strip  -
+  9502.25  strip  PLAY 136 | detail 136
+  9522.25  strip  PLAY 136 | players 136
+  9532.50  field  Q4 3-31 away 4&3 @2
+  9532.50  strip  -
+  9542.75  strip  PLAY 137 | detail 137
+  9562.75  field  Q4 3-31 away 1&4 @2
+  9562.75  strip  -
+  9572.75  strip  PLAY 138 | detail 138
+  9592.75  strip  PLAY 138 | players 138
+  9612.75  strip  -
+  9623.25  field  Q4 9-31 -
+  9623.25  strip  PLAY 139 | detail 139
+  9633.25  strip  INJURY 140 | detail 140
+  9653.50  field  Q4 11-31 -
+  9653.50  strip  -
+  9673.25  field  Q4 11-31 kickoff away
+  9673.25  strip  CONVERSION 141 | detail 141
+  9693.25  strip  -
+  9703.25  strip  TV TIMEOUT 142
+  9864.00  field  Q4 11-31 -
+  9864.00  strip  PLAY 143 | detail 143
+  9884.00  strip  -
+  9914.00  field  Q4 11-31 home 2&4 @2
+  9924.25  strip  PLAY 144 | detail 144
+  9944.25  strip  PLAY 144 | players 144
+  9954.25  strip  PLAY 145 | detail 145
+  9964.50  field  Q4 11-31 home 3&4 @2
+  9964.50  strip  -
+ 10085.00  field  Q4 11-31 home 4&4 @2
+ 10095.00  strip  PLAY 146 | detail 146
+ 10115.00  strip  PLAY 146 | players 146
+ 10135.00  strip  -
+ 10145.25  field  Q4 11-37 -
+ 10145.25  strip  PLAY 147 | detail 147
+ 10165.25  strip  PLAY 147 | players 147
+ 10185.25  strip  -
+ 10185.50  field  Q4 11-38 home None&None @None
+ 10193.50  field  Q4 11-38 -
+ 10203.50  field  Q4 11-38 kickoff home
+ 10203.50  strip  CONVERSION 148 | detail 148
+ 10213.50  strip  TV TIMEOUT 149
+ 10374.50  field  Q4 11-38 -
+ 10374.50  strip  PLAY 150 | detail 150
+ 10394.50  strip  PLAY 150 | players 150
+ 10414.50  strip  -
+ 10424.75  field  Q4 11-38 away 1&5 @2
+ 10434.75  strip  PLAY 151 | detail 151
+ 10454.75  strip  PLAY 151 | players 151
+ 10474.75  strip  -
+ 10475.00  field  Q4 11-38 away 1&7 @1
+ 10485.00  strip  PLAY 152 | detail 152
+ 10495.00  field  Q4 11-38 away 2&5 @2
+ 10495.00  strip  -
+ 10505.25  strip  PLAY 153 | detail 153
+ 10525.25  strip  PLAY 153 | players 153
+ 10545.25  strip  -
+ 10551.25  field  Q4 11-38 away 1&8 @1
+ 10551.25  strip  PLAY 154 | detail 154
+ 10571.25  strip  PLAY 154 | players 154
+ 10591.25  strip  -
+ 10611.50  field  Q4 11-38 away 3&5 @2
+ 10611.50  strip  PLAY 155 | detail 155
+ 10631.50  strip  PLAY 155 | players 155
+ 10641.75  strip  PLAY 156 | detail 156
+ 10652.00  field  Q4 11-38 away 4&5 @2
+ 10652.00  strip  -
+ 10692.25  field  Q4 11-38 away 1&6 @2
+ 10692.25  strip  PLAY 157 | detail 157
+ 10712.25  strip  PLAY 157 | players 157
+ 10732.25  strip  -
+ 10750.75  field  Q4 17-38 -
+ 10750.75  strip  PLAY 158 | detail 158
+ 10770.75  strip  PLAY 158 | players 158
+ 10772.50  field  Q4 18-38 kickoff away
+ 10780.75  strip  CONVERSION 159 | detail 159
+ 10800.75  strip  -
+ 10823.00  strip  TV TIMEOUT 160
+ 10993.75  field  Q4 18-38 -
+ 10993.75  strip  PLAY 161 | detail 161
+ 11013.75  strip  PLAY 161 | players 161
+ 11024.00  strip  PLAY 162 | detail 162
+ 11034.00  field  Q4 18-38 home 2&6 @2
+ 11034.00  strip  -
+ 11064.25  field  Q4 18-38 home 3&6 @2
+ 11064.25  strip  PLAY 163 | detail 163
+ 11084.25  strip  -
+ 11084.50  field  Q4 18-38 home 4&6 @2
+ 11104.50  field  Q4 18-38 home 1&7 @2
+ 11104.50  strip  PLAY 164 | detail 164
+ 11124.50  strip  INJURY 165 | detail 165
+ 11144.75  field  Q4 18-38 home 2&7 @2
+ 11144.75  strip  -
+ 11154.75  strip  PLAY 166 | detail 166
+ 11174.75  strip  PLAY 166 | players 166
+ 11185.00  field  Q4 18-38 home 3&7 @2
+ 11185.00  strip  -
+ 11205.25  strip  PLAY 167 | detail 167
+ 11225.25  strip  -
+ 11235.25  field  Q4 18-38 away 2&13 @1
+ 11235.25  strip  PLAY 168 | detail 168
+ 11255.25  strip  -
+ 11285.75  field  Q4 18-38 away 4&7 @2
+ 11305.75  strip  PLAY 169 | detail 169
+ 11325.75  strip  PLAY 169 | players 169
+ 11336.25  field  Q4 18-38 away 1&8 @2
+ 11336.25  strip  PLAY 170 | detail 170
+ 11356.25  strip  PLAY 170 | players 170
+ 11376.25  strip  -
+ 11411.00  field  Q4 18-38 away 2&8 @2
+ 11411.00  strip  PLAY 171 | detail 171
+ 11431.00  strip  PLAY 171 | players 171
+ 11451.00  strip  -
+ 11451.25  field  Q4 18-38 away 3&8 @2
+ 11451.25  strip  PLAY 172 | detail 172
+ 11471.25  strip  PLAY 172 | players 172
+ 11491.25  strip  -
+ 11552.00  field  Q4 18-38 away 4&8 @2
+ 11552.00  strip  PLAY 173 | detail 173
+ 11571.75  strip  PLAY 174 | detail 174
+ 11581.75  field  Q4 18-38 away 1&9 @2
+ 11581.75  strip  -
+ 11622.00  field  Q4 18-38 away 2&3 @2
+ 11622.00  strip  PLAY 175 | detail 175
+ 11642.00  strip  PLAY 175 | players 175
+ 11652.25  strip  TWO MINUTE WARNING 176
+ 11722.50  field  Q4 18-38 away 3&3 @2
+ 11722.50  strip  -
+ 11732.50  strip  PLAY 177 | detail 177
+ 11752.50  strip  PLAY 177 | players 177
+ 11762.75  field  Q4 18-38 away 2&9 @2
+ 11762.75  strip  -
+ 11772.75  strip  PLAY 178 | detail 178
+ 11792.75  strip  PLAY 178 | players 178
+ 11812.75  strip  -
+ 11823.00  field  Q4 18-38 away 3&9 @2
+ 11823.00  strip  PLAY 179 | detail 179
+ 11843.00  strip  PLAY 179 | players 179
+ 11853.00  field  Q4 18-38 away 4&9 @2
+ 11853.00  strip  PLAY 180 | detail 180
+ 11873.00  field  Q4 18-38 -
+ 11873.00  strip  -
+ 11903.00  field  Q4 18-38 final
