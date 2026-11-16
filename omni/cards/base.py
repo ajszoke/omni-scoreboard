@@ -112,6 +112,12 @@ class ScoreboardCard(Generic[CardPayloadT]):
     payload: CardPayloadT
     source_event_ids: tuple[LeagueScopedId, ...] = ()
     attention: AttentionPolicy = NORMAL_ATTENTION
+    after: tuple[DedupeKey, ...] = ()  # cards that air first while they're eligible (a decisive play before FINAL)
+    stale_since: datetime | None = None  # when its source stopped answering; None while it's current
+
+    def __post_init__(self) -> None:
+        if self.stale_since is not None and self.stale_since.tzinfo is None:
+            raise ValueError("stale_since must be timezone-aware")
 
     @property
     def league(self) -> League:

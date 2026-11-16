@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from omni.app.clock import ClockReading, MonotonicTime
+from omni.core.clock import ClockReading, MonotonicTime
 from omni.core.ids import SourceRef
 from omni.domain.football import PlaySummary, PlayTone
 from omni.tower import (

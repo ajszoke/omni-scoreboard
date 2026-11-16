@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import dataclasses
 from datetime import datetime, timedelta, timezone
 
 from omni.app.pipeline import LiveBaseballPipeline, PipelineResult
 from omni.cards.baseball import PregameCardPayload
 from omni.cards.factory import CardFactory
+from omni.core.clock import ClockReading, MonotonicTime
 from omni.core.enum import DisplayPriority, GameStatus, League, PanelProfile, UpdateUrgency
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.core.time import DurationSeconds
 from omni.domain.baseball import (
+    BaseballScoringImpact,
     BaseballBaseState,
     BaseballCount,
     BaseballGameState,
@@ -36,6 +39,11 @@ _REG = MlbTeamRegistry.from_color_file()
 SOURCE = SourceRef("mlb_statsapi", "https://statsapi.mlb.com")
 T = datetime(2026, 6, 17, 23, 0, 0, tzinfo=timezone.utc)
 QUAD = PanelProfile.QUAD_128X64
+
+
+def _at(moment: datetime) -> ClockReading:
+    """``moment`` read both ways, the monotonic clock running alongside UTC."""
+    return ClockReading(moment, MonotonicTime((moment - T).total_seconds()))
 
 
 def _id(raw: str) -> LeagueScopedId:
@@ -181,7 +189,7 @@ def test_shows_lag_old_state_not_the_current_spoiler() -> None:
     pipe.refresh([_game("g1")], now=T, fetch_feed=fetch)  # observes 0-0
     fetch.set("g1", _state(home=1))  # a run scores...
     pipe.refresh([_game("g1")], now=T + timedelta(seconds=30), fetch_feed=fetch)  # ...but it's fresh
-    card = queue.next_card(T + timedelta(seconds=30), QUAD)
+    card = queue.next_card(_at(T + timedelta(seconds=30)), QUAD)
     assert card is not None
     assert card.payload.home_line.runs == 0  # the delayed 0-0, never the un-aired 0-1
 
@@ -201,13 +209,13 @@ def test_win_probability_is_delay_safe_never_leads_the_score() -> None:
     wp.value = early
     at30 = T + timedelta(seconds=30)
     pipe.refresh([_game("g1")], now=at30, fetch_feed=fetch, fetch_win_probability=wp)  # state surfaces; early pushed
-    c1 = queue.next_card(at30, QUAD)
+    c1 = queue.next_card(_at(at30), QUAD)
     assert c1 is not None and c1.payload.win_probability is None  # warm-up: early has not cleared the lag yet
 
     wp.value = later  # a fresher reading arrives...
     at60 = T + timedelta(seconds=60)
     pipe.refresh([_game("g1")], now=at60, fetch_feed=fetch, fetch_win_probability=wp)
-    c2 = queue.next_card(at60, QUAD)
+    c2 = queue.next_card(_at(at60), QUAD)
     assert c2 is not None and c2.payload.win_probability == early  # ...but the meter shows the delayed `early`
 
 
@@ -219,7 +227,7 @@ def test_win_probability_surfaces_once_clear_of_a_zero_lag() -> None:
     wp = _WinProb()
     wp.value = WinProbability(home=70.0, away=30.0)
     pipe.refresh([_game("g1")], now=T, fetch_feed=fetch, fetch_win_probability=wp)
-    card = queue.next_card(T, QUAD)
+    card = queue.next_card(_at(T), QUAD)
     assert card is not None and card.payload.win_probability == WinProbability(home=70.0, away=30.0)
 
 
@@ -229,7 +237,7 @@ def test_no_win_probability_fetcher_means_no_meter() -> None:
     fetch = _Fetch()
     fetch.set("g1", _state(away=1, home=2))
     pipe.refresh([_game("g1")], now=T, fetch_feed=fetch)
-    card = queue.next_card(T, QUAD)
+    card = queue.next_card(_at(T), QUAD)
     assert card is not None and card.payload.win_probability is None
 
 
@@ -243,7 +251,7 @@ def test_win_probability_fetch_failure_is_a_nonfatal_warning() -> None:
     res = pipe.refresh([_game("g1")], now=T, fetch_feed=fetch, fetch_win_probability=wp)
     assert len(res.ingested) == 1 and res.skipped == ()  # the live card still shows; not a game drop
     assert any("win-probability" in warning for warning in res.warnings)
-    card = queue.next_card(T, QUAD)
+    card = queue.next_card(_at(T), QUAD)
     assert card is not None and card.payload.win_probability is None  # no meter on a failed fetch
 
 
@@ -284,7 +292,7 @@ class _MeterRig:
             fetch_fallback_win_probability=self.model,
         )
         self.warnings = result.warnings
-        card = self.queue.next_card(now, QUAD)
+        card = self.queue.next_card(_at(now), QUAD)
         if card is None:  # the live card itself is still inside the TV delay
             return None
         reading: WinProbability | None = card.payload.win_probability
@@ -383,7 +391,7 @@ LINES = GameLines(away=BettingLine(moneyline=165), home=BettingLine(moneyline=-1
 
 
 def _pregame_payload(queue: InterleavedCardQueue, now: datetime) -> PregameCardPayload:
-    card = queue.next_card(now, QUAD)
+    card = queue.next_card(_at(now), QUAD)
     assert card is not None and isinstance(card.payload, PregameCardPayload)
     return card.payload
 
@@ -745,7 +753,7 @@ def test_perfect_game_surfaces_with_the_perfect_flag_and_finished_innings() -> N
     fetch.set("g1", _state(inning=7, phase=InningPhase.TOP, away_hits=0, away_reached_base=False))
     res = pipe.refresh([_game("g1")], now=T, fetch_feed=fetch)
     assert [c.raw for c in res.no_hitters] == ["g1:nohitter"]
-    card = queue.next_card(T, QUAD)
+    card = queue.next_card(_at(T), QUAD)
     assert card is not None and card.dedupe_key.raw == "g1:nohitter"
     assert card.payload.perfect is True and card.payload.through_inning == 6  # finished innings, not current
 
@@ -843,7 +851,7 @@ def test_final_reveals_once_the_delay_elapses() -> None:
     pipe.refresh([_game("g1", GameStatus.FINAL)], now=T, fetch_feed=fetch)  # first seen final here
     res = pipe.refresh([_game("g1", GameStatus.FINAL)], now=T + timedelta(seconds=30), fetch_feed=fetch)
     assert [c.raw for c in res.finals] == ["g1:final"] and len(queue) == 1
-    card = queue.next_card(T + timedelta(seconds=30), QUAD)
+    card = queue.next_card(_at(T + timedelta(seconds=30)), QUAD)
     assert card is not None and card.payload.away_score == 2 and card.payload.home_score == 5
 
 
@@ -900,7 +908,7 @@ def test_final_card_carries_the_pitching_decisions() -> None:
     fetch.decisions["g1"] = PitchingDecisions(winner="Clayton Kershaw", loser="German Marquez", save="Tanner Scott")
     res = pipe.refresh([_game("g1", GameStatus.FINAL)], now=T, fetch_feed=fetch)
     assert [c.raw for c in res.finals] == ["g1:final"]
-    card = queue.next_card(T, QUAD)
+    card = queue.next_card(_at(T), QUAD)
     assert card is not None and card.payload.decisions == fetch.decisions["g1"]
 
 
@@ -928,7 +936,7 @@ def test_last_live_frame_is_held_across_the_final_embargo() -> None:
     held = pipe.refresh([_game("g1", GameStatus.FINAL)], now=T + timedelta(seconds=35), fetch_feed=fetch)
     assert held.finals == () and _id("g1") in held.held
     assert _id("g1") in pipe._card_keys and _id("g1") not in held.removed  # live card not torn down
-    card = queue.next_card(T + timedelta(seconds=35), QUAD)
+    card = queue.next_card(_at(T + timedelta(seconds=35)), QUAD)
     assert card is not None and card.dedupe_key.raw == "g1:live"  # the last live frame, not blank
 
     # Once the embargo elapses, the final reveals and the held frame is dropped in the same pass.
@@ -978,3 +986,72 @@ def test_a_state_is_dated_by_when_its_answer_arrived() -> None:
 
     res = pipe.refresh([_game("g1")], now=T, fetch_feed=fetch_feed)
     assert len(res.ingested) == 1 and len(queue) == 1  # already clear of the delay
+
+
+def _walk_off(eid: str, *, source_time: datetime) -> BaseballGameEvent:
+    event = _event(eid, source_time=source_time, away=2, home=3)
+    impact = BaseballScoringImpact(rbi=1, go_ahead=True, walk_off=True)
+    return dataclasses.replace(event, payload=dataclasses.replace(event.payload, scoring_impact=impact))
+
+
+def test_a_final_waits_for_its_plays_and_airs_after_its_walk_off() -> None:
+    pipe, queue = _setup(lag=30)
+    fetch = _Fetch()
+    fetch.set("g1", _state(away=2, home=3))
+    pipe.refresh([_game("g1")], now=T, fetch_feed=fetch)  # live; first sight primes the backlog
+    # The feed's clock runs a little ahead of ours: the walk-off is stamped after we first see the final.
+    walk_off = _walk_off("g1:ab:99", source_time=T + timedelta(seconds=5))
+    fetch.set_events("g1", (walk_off,))
+    pipe.refresh([_game("g1", GameStatus.FINAL)], now=T + timedelta(seconds=3), fetch_feed=fetch)
+    first_final = pipe.refresh([_game("g1", GameStatus.FINAL)], now=T + timedelta(seconds=10), fetch_feed=fetch)
+    assert first_final.releases == ((_id("g1"), T + timedelta(seconds=33)),)  # its result's reveal
+    held = pipe.refresh([_game("g1", GameStatus.FINAL)], now=T + timedelta(seconds=33), fetch_feed=fetch)
+    assert held.finals == () and _id("g1") in held.held  # the result could show, but its walk-off can't yet
+    assert held.releases == ((_id("g1"), T + timedelta(seconds=35)),)  # then the walk-off clears
+    assert pipe.next_deadline(T + timedelta(seconds=33)) == T + timedelta(seconds=35)
+    res = pipe.refresh([_game("g1", GameStatus.FINAL)], now=T + timedelta(seconds=35), fetch_feed=fetch)
+    assert len(res.big_plays) == 1 and [card.raw for card in res.finals] == ["g1:final"]
+    final = queue.card("g1:final")
+    assert final is not None and final.after == (CardFactory.big_play_key(_game("g1"), walk_off),)
+    assert final.timing.available_at == T + timedelta(seconds=33)  # available from when its result could show
+
+
+def test_a_game_whose_feed_stops_answering_goes_stale_then_comes_down() -> None:
+    pipe, queue = _setup(lag=0)
+    fetch = _Fetch()
+    fetch.set("g1", _state(away_hits=0, inning=8, phase=InningPhase.BOTTOM))  # a no-hit bid: two cards
+    pipe.refresh([_game("g1")], now=T, fetch_feed=fetch)
+    assert {card.dedupe_key.raw for card in queue.eligible(T, QUAD)} == {"g1:live", "g1:nohitter"}
+    fetch.fail.add("g1")
+    res = pipe.refresh([_game("g1")], now=T + timedelta(seconds=10), fetch_feed=fetch)
+    assert res.stale == (_id("g1"),)
+    marked = {card.dedupe_key.raw: card.stale_since for card in queue.eligible(T, QUAD)}
+    assert marked == {"g1:live": T + timedelta(seconds=10), "g1:nohitter": T + timedelta(seconds=10)}
+    pipe.refresh([_game("g1")], now=T + timedelta(seconds=60), fetch_feed=fetch)  # still stale: marked once
+    assert pipe.next_deadline(T + timedelta(seconds=60)) == T + timedelta(seconds=130)
+    pipe.refresh([_game("g1")], now=T + timedelta(seconds=130), fetch_feed=fetch)
+    assert len(queue) == 0  # two minutes on, the last good comes down
+    fetch.fail.clear()
+    back = pipe.refresh([_game("g1")], now=T + timedelta(seconds=140), fetch_feed=fetch)
+    live = queue.card("g1:live")
+    assert back.stale == () and live is not None and live.stale_since is None
+
+
+def test_a_stale_game_that_leaves_the_live_set_is_forgotten() -> None:
+    pipe, _ = _setup(lag=0)
+    fetch = _Fetch()
+    fetch.set("g1", _state())
+    pipe.refresh([_game("g1")], now=T, fetch_feed=fetch)
+    fetch.fail.add("g1")
+    assert pipe.refresh([_game("g1")], now=T + timedelta(seconds=5), fetch_feed=fetch).stale == (_id("g1"),)
+    assert pipe.refresh([], now=T + timedelta(seconds=6), fetch_feed=fetch).stale == ()
+
+
+def test_the_next_deadline_is_the_soonest_release() -> None:
+    pipe, _ = _setup(lag=30)
+    assert pipe.next_deadline(T) is None
+    fetch = _Fetch()
+    fetch.set("g1", _state())
+    res = pipe.refresh([_game("g1")], now=T, fetch_feed=fetch)
+    assert pipe.next_deadline(T) == T + timedelta(seconds=30)  # its state clears the delay
+    assert res.releases == ((_id("g1"), T + timedelta(seconds=30)),)  # and the held game says when

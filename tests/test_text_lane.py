@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from omni.core.clock import MonotonicTime
 from omni.core.colors import RGBColor
 from omni.renderers.canvas import RecordingCanvas
 from omni.renderers.text import text_width
@@ -208,9 +209,15 @@ def test_a_lane_narrower_than_its_glyphs_draws_blank_rather_than_spilling() -> N
     assert canvas.texts() == []
 
 
-def _drawn(lane: TextLane, text: str, at: datetime, clock: LaneClock) -> tuple[int, str] | None:
+def _drawn(
+    lane: TextLane, text: str, seconds: float, clock: LaneClock, *, presentation: str = "card", commit: bool = True
+) -> tuple[int, str] | None:
+    """Draw ``text`` in a frame of ``presentation`` at ``seconds`` on the monotonic clock; where it landed."""
+    frame = clock.frame(presentation, MonotonicTime(seconds))
     canvas = RecordingCanvas(64, 8)
-    draw_text_lane(canvas, lane, text, _WHITE, now=at, clock=clock)
+    draw_text_lane(canvas, lane, text, _WHITE, now=NOW, clock=frame)
+    if commit:
+        frame.commit()
     texts = [op for op in canvas.ops if op.text]
     return (texts[0].x, texts[0].text) if texts else None
 
@@ -220,11 +227,11 @@ _LANE = TextLane(x=0, y=0, width=20, font="4x6")
 
 
 def test_with_a_lane_clock_a_line_starts_at_its_head_whatever_the_clock_says() -> None:
-    for start in (NOW, datetime(2026, 11, 16, 2, 7, 33, 300000, tzinfo=timezone.utc)):
+    for start in (0.0, 7123.3):
         clock = LaneClock()
         first = _drawn(_LANE, _LONG, start, clock)
         assert first is not None and first[0] == 0 and _LONG.startswith(first[1])
-        moving = [_drawn(_LANE, _LONG, start + timedelta(seconds=t / 10), clock) for t in range(1, 60)]
+        moving = [_drawn(_LANE, _LONG, start + t / 10, clock) for t in range(1, 60)]
         assert moving[15] == first  # still holding at 1.6s
         assert moving[-1] != first  # moving by 6s
 
@@ -232,22 +239,36 @@ def test_with_a_lane_clock_a_line_starts_at_its_head_whatever_the_clock_says() -
 def test_a_changed_line_starts_over_and_a_replaced_scroll_leaves_a_beat_of_nothing() -> None:
     clock = LaneClock()
     for tenth in range(80):  # the first line scrolls a while
-        _drawn(_LANE, _LONG, NOW + timedelta(seconds=tenth / 10), clock)
-    swap = NOW + timedelta(seconds=8)
-    assert _drawn(_LANE, "AND ANOTHER LONG LINE ENTIRELY", swap, clock) is None  # the beat between lines
-    after = _drawn(_LANE, "AND ANOTHER LONG LINE ENTIRELY", swap + timedelta(seconds=0.3), clock)
+        _drawn(_LANE, _LONG, tenth / 10, clock)
+    assert _drawn(_LANE, "AND ANOTHER LONG LINE ENTIRELY", 8.0, clock) is None  # the beat between lines
+    after = _drawn(_LANE, "AND ANOTHER LONG LINE ENTIRELY", 8.3, clock)
     assert after is not None and after[0] == 0 and after[1].startswith("AND")  # at its own head
-    short = _drawn(_LANE, "OK", swap + timedelta(seconds=0.4), clock)
-    assert short is None  # still a beat: the line it replaced scrolled
-    assert _drawn(_LANE, "OK", swap + timedelta(seconds=0.7), clock) == (0, "OK")
-    assert _drawn(_LANE, "NO", swap + timedelta(seconds=0.8), clock) == (0, "NO")  # a short line swaps at once
+    assert _drawn(_LANE, "OK", 8.4, clock) is None  # still a beat: the line it replaced scrolled
+    assert _drawn(_LANE, "OK", 8.7, clock) == (0, "OK")
+    assert _drawn(_LANE, "NO", 8.8, clock) == (0, "NO")  # a short line swaps at once
 
 
-def test_a_lane_not_drawn_for_a_while_starts_over() -> None:
+def test_a_line_keeps_its_place_however_long_its_lane_goes_undrawn() -> None:
     clock = LaneClock()
-    _drawn(_LANE, _LONG, NOW, clock)
-    later = NOW + timedelta(seconds=30)
-    assert _drawn(_LANE, _LONG, later, clock) == _drawn(_LANE, _LONG, later, LaneClock())
+    _drawn(_LANE, _LONG, 0.0, clock)
+    resumed = _drawn(_LANE, _LONG, 30.0, clock)  # 30 s in: on its way back, a few pixels short of its head
+    head = _drawn(_LANE, _LONG, 30.0, LaneClock())
+    assert resumed is not None and head is not None and resumed != head and resumed[1] == "ONG "
+
+
+def test_a_new_presentation_starts_every_line_at_its_head() -> None:
+    clock = LaneClock()
+    _drawn(_LANE, _LONG, 0.0, clock, presentation="first")
+    moved = _drawn(_LANE, _LONG, 5.0, clock, presentation="first")
+    fresh = _drawn(_LANE, _LONG, 5.0, clock, presentation="second")  # the same text in the same lane
+    assert moved != fresh and fresh is not None and fresh[0] == 0 and _LONG.startswith(fresh[1])
+
+
+def test_a_frame_the_display_never_took_starts_nothing() -> None:
+    clock = LaneClock()
+    _drawn(_LANE, _LONG, 0.0, clock, commit=False)  # drawn, but it never reached the panel
+    later = _drawn(_LANE, _LONG, 5.0, clock)
+    assert later is not None and later[0] == 0 and _LONG.startswith(later[1])  # its line starts here, at its head
 
 
 def test_speeds_raise_the_top_speed_at_one_acceleration_and_keep_the_holds() -> None:

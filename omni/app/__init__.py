@@ -11,10 +11,10 @@ runner that powers ``python -m omni.app``.
 
 from __future__ import annotations
 
-from omni.app.clock import Clock, ClockReading, FakeClock, MonotonicTime, Pacer, SystemClock
+from omni.core.clock import Clock, ClockReading, FakeClock, MonotonicTime, Pacer, SystemClock
 from omni.app.contest_store import ContestStore, Reconciliation
 from omni.app.display import DisplaySink, MatrixDevice, MatrixDisplaySink, RecordingDisplaySink
-from omni.app.loop import AppLoop, Decision, Painted, Presentation, TickResult
+from omni.app.loop import AppLoop, Painted, Presentation, Refresh, TickResult
 from omni.app.pipeline import FeedFetcher, LiveBaseballPipeline, PipelineResult
 from omni.app.runner import build_loop, run_forever
 from omni.app.supervisor import BackoffPolicy, ProviderStatus, ProviderSupervisor, SupervisedSnapshot
@@ -40,7 +40,7 @@ __all__ = [
     "MatrixDevice",
     "MatrixDisplaySink",
     "AppLoop",
-    "Decision",
+    "Refresh",
     "Painted",
     "Presentation",
     "TickResult",

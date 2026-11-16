@@ -1,13 +1,17 @@
 # Clock and scheduling: toward one clock and one "tower"
 
 Status: **accepted in external review round 4** (2026-11-15). A1a is built as the tower's first slice
-(see "Steps"), and the head's rulings below amend the target. A1a step 1 is built (2026-11-16): the
-two-reading clock, decisions apart from frames, fetches and frame writes off the frame path, and basic
-traces. A1a step 2 is built too: MLB's fetches run from a typed `PollPlan`. So is step 3: the scheduling
-primitives (`omni/tower`: segments and the lane), with the football play strip as their first user,
-checked on the PIT@CIN replay. "Today" describes the result. This doc is the target that new timing code
-should move toward,
-so that we don't add more one-off timers in the meantime.
+(see "Steps"), and the head's rulings below amend the target. All four of its steps are built
+(2026-11-16):
+1. the two-reading clock, decisions apart from frames, fetches and frame writes off the frame path, and
+   basic traces;
+2. MLB's fetches from a typed `PollPlan`;
+3. the scheduling primitives (`omni/tower`: segments and the lane), with the football play strip as
+   their first user, checked on the PIT@CIN replay;
+4. the board's card rotation on the same primitives, checked on an MLB slate replay.
+
+"Today" describes the result. This doc is the target that new timing code should move toward, so that
+we don't add more one-off timers in the meantime.
 
 ## Why
 
@@ -24,18 +28,19 @@ has to be handled like flights at a control tower:
 
 | Where | What it times | Driven by |
 |---|---|---|
-| `omni/app/runner.py` `run_forever`, `AppLoop.decide` and `AppLoop.paint` (MLB) | decisions (pipeline, card queue) on a worker thread, reading the plan's answers; painting the current pick on the main thread | decisions once a tick, 12 s by default; frames at `--fps`, 10 by default |
+| `omni/app/runner.py` `run_forever`, `AppLoop.refresh` and `AppLoop.paint` (MLB) | refreshes (pipeline into the card queue, the source's health) on a worker thread, reading the plan's answers; painting what the board has up on the main thread | a refresh when an answer lands, at the pipeline's or the source's next deadline, and at least every 5 s; frames at `--fps`, 10 by default |
 | `PollPlan` + `Poller` + `PlannedMlb` (MLB) | what to ask when: slates for the previous and current local dates, each live game's feed, market and model probabilities; one ask in flight per key, priority cadence within a per-source quota, three quick retries, last good until `keep_for` | the plan on monotonic time; a poller thread checking every 250 ms, with four workers |
 | `ProviderSupervisor` | last-known-good and stale status for the slate (its backoff is off for a planned slate) | `now` passed per call |
 | `LiveBaseballPipeline` (`DelayPolicy`, `DelayedFeed`, `DelayedEventStream`) | TV delay anchored to when a play happened; meter readings; the final's embargo | `now` per tick |
-| `InterleavedCardQueue` | which card next: two-level rotation, BURST takeover windows, RECURRING cooldowns | `now` per tick; **dwell is "the render loop's job", and no such loop exists** |
+| `InterleavedCardQueue` | which card should air next (`peek`): eligibility, required order (finals by when their games ended, a final after its walk-off), a usable window, then a takeover, a due reminder, or two-level rotation; `book` records a turn at commit | UTC for availability and expiry; reminder cooldowns on monotonic time |
+| The board, a `BoardSession` (`omni/tower/board.py`) | one card at a time: dwell from the first committed frame, preemption after a minimum, a turn (`--slot`, 12 s) within the card's min and max, a cap on takeovers back to back, explicit idle, held and offline frames, stale cards dimmed | the frame thread; dwell on monotonic time; `next_deadline` |
 | `FootballBoard.step` (single-game NFL) | a receipt-anchored `--delay` buffer, meter lag, closing out a period before a break | ~10 fps frame loop on `ClockReading`s, taking whatever answers have arrived; publishes `next_deadline` |
 | `GameFeed` in a `BackgroundFeed` (`football_feed.py`) | poll cadence, retry after failure, parking after the final; answers dated by arrival | its own thread, checking every 250 ms whether an ask is due |
 | `BackgroundFrameWriter` (`frame_stream.py`) | writing frames to the display process, retrying until one lands | its own thread; only the newest frame waits |
 | The play strip, a `Lane` of segments (`omni/tower`) | frames (10 s min, 20 s max each), stoppage holds, invalidation on a field change, close-out; availability, latest start, expiry, edits by revision | dwell on monotonic time from each frame's first commit; `next_deadline` |
 | `NflMetaLiveProvider` | halftime hold (plus its grace), correction watch, score backstop, injury news window | private datetimes on per-game state |
 | Market (`PolymarketUsProvider`, the market-service client, the heartbeat thread, the cloud poller) | 30 s REST refresh; 10 s/60 s freshness; 30 s retry; 300 s heartbeat; 1 min cloud schedule | each its own |
-| Rendering (`text_lane.py`, `LaneClock`, the halftime countdown) | marquee offsets, line start times, the colon blink | `RenderContext.now`; `LaneClock` keeps render-side memory |
+| Rendering (`text_lane.py`, `LaneClock`, the halftime countdown) | marquee offsets, line start times, the colon blink | a line's start on monotonic time, by presentation (a card's time on the board, a strip frame) and lane, kept once its frame is committed; the countdown and its blink off `RenderContext.now` |
 | Launchers | time itself | `SystemClock` in both, read two ways (`ClockReading`: UTC and monotonic); loops paced by `Pacer` on monotonic time |
 
 ### What that adds up to
@@ -48,8 +53,8 @@ has to be handled like flights at a control tower:
    - Football separates frames but still polls on the frame thread, so a slow request freezes the
      board.
    - A1a step 1 (2026-11-16) split these: MLB decides on its own thread and paints at a frame rate,
-     and football's feed and frame writes run on threads of their own. Decisions still run on a fixed
-     cadence rather than when something changes.
+     and football's feed and frame writes run on threads of their own. Since step 4, MLB refreshes
+     when an answer lands or a deadline passes, and the board's choices run at frame rate.
 2. **Timers are scattered.** A dozen objects each keep their own deadline. Nothing can answer "what
    happens next, and when?", which makes end-to-end replay and tuning by taste harder than they
    should be.
@@ -59,8 +64,8 @@ has to be handled like flights at a control tower:
    viewer's delay.
 4. **The same scheduling problem is solved twice.** The card queue picks which card comes next; the
    football strip picks which line comes next. Both need slots with minimum and maximum dwell,
-   priority, freshness and preemption. Since A1a step 3 the strip runs on the shared lane; the card
-   queue moves onto it in step 4.
+   priority, freshness and preemption. Since A1a steps 3 and 4 both run on the tower's primitives: the
+   strip on a `Lane`, the board's cards on a `BoardSession`.
 
 ## Target
 
@@ -112,15 +117,15 @@ has to be handled like flights at a control tower:
 ## How today's pieces map onto it
 
 - `DelayPolicy`, `DelayedFeed` and `DelayedEventStream` become the air clock and eligibility.
-- `InterleavedCardQueue`'s rotation, BURST takeovers and RECURRING cooldowns become the tower's
-  selection policy for the board surface, with dwell finally enforced there.
+- `InterleavedCardQueue`'s rotation, BURST takeovers and RECURRING cooldowns became the tower's
+  selection policy for the board surface, with dwell enforced there (A1a step 4).
 - `PlayStrip`'s rules (frames, stoppage holds, clearing on a field change, close-out) became the
   lane's (A1a step 3). The same machinery should drive baseball's Due Up and at-bat lines and any
   future ticker.
 - Provider-side timers (halftime hold, correction watch, score backstop) and supervisor backoff
   become poll plans registered in the timer heap.
-- `LaneClock` stays render-side as pure presentation. Once segments exist, it is keyed by segment
-  identity rather than by lane geometry.
+- `LaneClock` stays render-side as pure presentation. Since A1a step 4 it is keyed by presentation
+  (a card occurrence, a strip frame) and lane, not by lane geometry alone.
 
 ## Steps, smallest first (each useful on its own)
 
@@ -154,49 +159,47 @@ Round 4 groups the first five as A1a:
    - Stepped only at arrivals and deadlines, the board decides as it does stepped every 10 ms, which
      shows its deadlines miss nothing.
 5. **Port the board's card queue onto the tower** and enforce minimum and maximum display there.
-   Medium. *This is A1a step 4. The plan below was drawn from the code on 2026-11-16:*
-   - **Today:**
-     - `AppLoop.decide` (`omni/app/loop.py`) asks `InterleavedCardQueue.pick`
-       (`omni/queue/scheduler.py`) for a card at every decision tick (12 s by default), and `paint`
-       shows that card until the next tick.
-     - `pick` books group rotation, last-shown and the RECURRING count and cooldown when it selects
-       (`scheduler.py:144-149`), before the card has rendered (round-4 H4).
-     - Nothing enforces `DisplayTiming.min_display` and `max_display`; the queue leaves dwell to "the
-       render loop".
-     - With nothing eligible, painting stops and the panel keeps its last frame (`loop.py:152`).
-   - **Target:** cards become segments on `Surface.BOARD`, scheduled by the same pieces as the strip.
-     - **Choosing the next card:** the strip's lane takes the next segment in order; the board takes
-       the queue's pick. So `Lane` gains a pluggable choice of the next segment, or a board session
-       wraps it.
-     - **Booking at commit:** selection is booked at the first committed frame. The queue's
-       last-shown, group rotation and RECURRING count and cooldown move from `pick` to that commit.
-     - **Dwell:** it counts from the first committed frame. Ordinary priority never cuts a visible
-       minimum. Factual invalidation (a card removed or replaced), hard expiry and device controls
-       may.
-     - **When to choose:** a new card is chosen when the one on air has had its minimum with
-       something better waiting, or has had its maximum. Decisions can then run when due
-       (`next_deadline`), with the `PollPlan`'s `next_due` as the other deadline, instead of on a
-       fixed tick.
-     - **Bounded takeovers:** BURST takeovers get an aggregate cap in seconds, even back to back,
-       then a base rotation slot.
-     - **Ordered finals:** a game's decisive play (a walk-off) is an explicit predecessor of its
-       FINAL card, and finals air in the order their games ended (round 4's question 4 asks for the
-       exact final-order decisions).
-     - **Explicit frames:** when nothing should hold the panel, the board shows idle (nothing
-       eligible), held (the last frame, kept on purpose while a source recovers), stale (last-good
-       past its age) or offline (its source expired), each traced with its reason.
-   - **The marquee epoch at commit (R4-6):**
-     - Each lane's epoch is keyed by surface, card occurrence and lane, and passed into the render
-       math in place of the `LaneClock`'s geometry key and its 5 s forgetting.
-     - Animation runs on monotonic time, so the render context carries the clock reading.
-     - The strip's `Lane` already records each frame's first commit.
-   - **Import order:** `omni.tower` imports `omni.app.clock`. Before `omni.app.loop` imports the tower,
-     move the clock to `omni/core/clock.py`, keeping `omni.app.clock` as a re-export. Otherwise
-     importing `omni.tower` first would cycle through `omni.app`'s package init.
-   - **Checking it:** as in step 3, record the MLB replay's decisions (`omni/replay/harness.py`
-     timelines) before the change. Unlike step 3, differences are expected (dwell, booking at commit,
-     idle frames), and each one gets explained. Representative frames are compared on all three
-     profiles. A fixed mixed MLB/NFL fixture through the same scheduler is round 5's question 4.
+   Medium. *Done in A1a step 4:*
+   - **The board** (`omni/tower/board.py`, a `BoardSession`) airs one card at a time as a segment on
+     `Surface.BOARD`. The queue says what should air (`peek`) and records it only when the card's
+     first frame is committed (`book`). So a turn, a reminder's cooldown and a takeover are spent only
+     on airtime the panel showed (round-4 H4).
+   - **Dwell:** a card gets its minimum from its first commit. After that it yields to a stronger claim
+     (a takeover over a reminder, a reminder over rotation); after its turn (`--slot`, 12 s by default,
+     held within its own min and max) to any other card; and at once if it leaves the queue, expires,
+     or its source goes offline. A card with nothing else waiting stays up.
+   - **Takeovers:** a BURST card takes over once, the first time it airs. After 30 s of takeovers back
+     to back, a rotation card gets a full turn before the next one.
+   - **Order:** finals that haven't aired go in the order their games ended, and a final airs after its
+     game's walk-off (`ScoreboardCard.after`); its reveal waits for the game's plays still in the delay.
+   - **Explicit frames:** *idle* (nothing to show), *held* (a game's card is still inside the TV delay)
+     and *offline* (the schedule silent for over 10 minutes, or a game's feed down and its card gone),
+     each traced with its reason. Each is the board clock on every profile: alone when idle, over a
+     red `OFFLINE`, or over an amber `Syncing...` with a bar that fills toward when the first held card
+     clears the delay (the user's design, 2026-11-16; on the single, a 2-pixel bar along the bottom
+     edge). A card whose data is past its age is drawn dimmed: a live card whose feed has stopped
+     answering, which comes down 2 minutes later, or any card while the schedule is over 2 minutes old.
+   - **When:** a refresh runs when a poll answer lands (the poller wakes it), at the pipeline's next
+     release or the source's next change in health, and at least every 5 s. The board's choice runs on
+     the frame thread. `AppLoop.next_deadline` publishes both.
+   - **The marquee epoch at commit (R4-6):** a line's start is kept on the monotonic clock by
+     presentation (the board's card occurrence, or the strip frame) and lane, and stands only once its
+     frame is committed. A new presentation starts its lines at their heads; there is no 5 s forgetting.
+   - **Import order:** the clock moved to `omni/core/clock.py`, with every import updated and no
+     re-export left behind.
+   - **Checked on an MLB slate replay** (`tests/mlb_slate.py`): six games over 55 minutes behind a 45 s
+     delay, with back-to-back home runs, four big plays within 20 s, a walk-off, a no-hitter, a rain
+     delay and a 12-minute outage. The harness now steps at the timeline's changes and the loop's
+     deadlines. The baseline from the old loop was recorded first (commit 1 of step 4), and the
+     decisions changed as intended:
+     - each card's turn is timed from its own commit, not the 12 s decision tick, and a takeover or
+       reminder cuts in at the current card's minimum rather than at the next tick;
+     - the CHC triple, fourth in a burst of big plays, kept its takeover (the old loop lost it when
+       its 8 s window ran out), after a rotation turn once three home runs had run past the cap;
+     - through the outage the old loop rotated frozen cards for 12 minutes; now live cards dim at
+       once, come down after 2 minutes, finals dim once the schedule is stale, and the offline frame
+       goes up at 10 minutes, until the source answers again.
+   - A fixed mixed MLB/NFL fixture through the same scheduler is round 5's question 4.
 6. **Build the air clock and per-source lag models.** Fold football's delay and the meter lag into
    it, with lags measured from recordings (e.g., market jumps against NFLMeta's play times). Medium.
 7. **The value squeeze:** freshness decay by segment kind, preemption classes, and fairness across
@@ -272,6 +275,11 @@ Round 4 groups the first five as A1a:
   - Latest start and expiry drop a segment unseen, with the reason traced.
   - A football board counts a frame committed once its sink takes it; proof that it reached the
     matrix is round 4's open question 2.
-  - Repeat and cooldown use come with the card rotation (step 4).
-  - So does the marquee epoch at commit (R4-6), keyed by card occurrence. The lane already records
-    each frame's first commit.
+
+  As built in A1a step 4 (`omni/tower/board.py`), for the board:
+  - A card airs as a segment: its dedupe key, its revision as refreshes replace it, its game as the
+    parent, its display timing as availability, expiry and dwell.
+  - Repeat, rotation and cooldown use are booked at the first commit, and a line's marquee starts at
+    its frame's commit.
+  - A refreshed card on air swaps in place and keeps its dwell; one that leaves the queue comes down at
+    once, as a factual invalidation.

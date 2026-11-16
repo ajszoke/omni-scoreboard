@@ -42,7 +42,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, tzinfo
 from typing import Any
 
-from omni.app.clock import ClockReading, MonotonicTime
+from omni.core.clock import ClockReading, MonotonicTime
 from omni.app.display import DisplaySink
 from omni.app.football_feed import AFTER_FINAL, FeedResult, FeedSource
 from omni.cards.base import CardId, CardKind, CardPriority, DedupeKey, DisplayTiming, LayoutSupport, ScoreboardCard
@@ -111,7 +111,8 @@ class FootballBoard:
         self._meter_lag = meter_lag
         self._logos = logos
         self._timezone = timezone
-        self._marquee = Marquee(style=marquee, clock=LaneClock())  # one memory of lines for the board's life
+        self._marquee = marquee  # how lines scroll
+        self._lanes = LaneClock()  # when each line went up, by the strip frame it belongs to
         self._log = log
         self._renderer: Renderer[LiveFootballCardPayload] = renderer or LiveFootballRenderer()
         self._strip: Lane[PlaySummary] = Lane(Surface.PLAY_STRIP)
@@ -268,11 +269,15 @@ class FootballBoard:
             ),
         )
         frame = self._sink.new_frame()
+        # The strip's lines belong to the strip frame up: a new one starts its lines at their heads.
+        lanes = self._lanes.frame((cue.segment.key, cue.frame) if cue is not None else None, at.monotonic)
+        marquee = Marquee(style=self._marquee, clock=lanes)
         context = RenderContext(
-            profile=self._sink.profile, now=at.utc, logos=self._logos, timezone=self._timezone, marquee=self._marquee
+            profile=self._sink.profile, now=at.utc, logos=self._logos, timezone=self._timezone, marquee=marquee
         )
         self._renderer.render(card, context, frame)
         self._sink.commit(frame)
+        lanes.commit()
         if cue is not None:
             self._strip.committed(cue, at)
 

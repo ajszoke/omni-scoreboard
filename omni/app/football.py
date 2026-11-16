@@ -25,7 +25,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import IO, Any, cast
 
-from omni.app.clock import Pacer, SystemClock
+from omni.core.clock import Pacer, SystemClock
 from omni.app.football_board import FootballBoard
 from omni.app.football_feed import BackgroundFeed, GameFeed
 from omni.core.enum import PanelProfile

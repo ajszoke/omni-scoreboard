@@ -104,3 +104,22 @@ def test_display_timing_rejects_expiry_at_or_before_availability() -> None:
             min_display=DurationSeconds(5),
             max_display=DurationSeconds(30),
         )
+
+
+def test_a_card_marked_stale_needs_an_aware_instant() -> None:
+    import dataclasses
+
+    card = ScoreboardCard(
+        id=CardId("c1"),
+        kind=CardKind.LIVE_GAME,
+        contest=make_contest(),
+        timing=DisplayTiming(available_at=T, min_display=DurationSeconds(5), max_display=DurationSeconds(30)),
+        priority=CardPriority(band=DisplayPriority.NORMAL, score=0.0),
+        layout_support=LayoutSupport(profiles=frozenset({PanelProfile.QUAD_128X64})),
+        dedupe_key=DedupeKey("g1:live"),
+        payload={"placeholder": "payload"},
+    )
+    assert card.after == () and card.stale_since is None  # current, and waiting on nothing
+    assert dataclasses.replace(card, stale_since=T).stale_since == T
+    with pytest.raises(ValueError, match="stale_since"):
+        dataclasses.replace(card, stale_since=datetime(2026, 6, 17, 23, 0))

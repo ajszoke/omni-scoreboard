@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from omni.app.clock import Clock, ClockReading, FakeClock, MonotonicTime, Pacer, SystemClock
+from omni.core.clock import Clock, ClockReading, FakeClock, MonotonicTime, Pacer, SystemClock
 from omni.core.time import DurationSeconds
 
 T = datetime(2026, 6, 17, 23, 30, tzinfo=timezone.utc)

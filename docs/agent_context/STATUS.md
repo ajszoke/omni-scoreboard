@@ -4,6 +4,14 @@ _Living status doc. Keep it short; update whenever project state changes (branch
 
 ## Now (2026-11-16)
 
+- **2026-11-16, A1a step 4 (branch `agent/a1a-board`; the goldens were approved with the held frame's redesign):** the board's card rotation runs on the tower (`omni/tower/board.py`), under the same contract as the play strip.
+  - **Turns:** a card is booked when its first frame is committed and gets its minimum from then. It yields to a takeover or reminder after that minimum, to rotation after its turn (`--slot`, 12 s by default, within its own min and max; `--tick` still works), and at once if it leaves the queue or expires. A lone card stays up.
+  - **Takeovers and order:** a big play takes over once. After 30 s of takeovers back to back, a rotation card gets a full turn. Finals air in the order their games ended, each after its game's walk-off.
+  - **Explicit frames:** idle, held (in the TV delay) and offline, each over the board clock. Held reads an amber `Syncing...` over a bar filling toward when the first held card clears (the user's design). A card whose data is past its age is drawn dimmed, and a live card whose feed stopped answering comes down 2 minutes later.
+  - **When:** refreshes run when a poll answer lands or something is due, and the board chooses at frame rate.
+  - **Marquee (R4-6):** a line's start is kept by the card's time on the board (or the strip frame) and its lane, set when its frame is committed.
+  - **Checked:** an MLB slate replay (six games, 55 minutes, an outage). Its decisions were recorded from the old loop first, and they change as intended: turns from each commit, a takeover the old loop lost, and an outage that dims, clears and recovers instead of rotating frozen cards.
+  - **The clock** moved to `omni/core/clock.py`.
 - **2026-11-16, NBA provider: BALLDONTLIE's Free tier (the user's pick; research in PR #102, merged):** its games endpoint carries a whole slate's score, period, clock, timeouts and bonus every 12 s, under terms that allow one central poller to serve every board. No budget feed has a running clock, possession or a challenge count.
   - **Probe** (`tools/balldontlie_record.py --probe`): the key works. A slate answers in about 0.15 s, uncached, with rate-limit headers, and endpoints above the tier answer 401 (`SOURCES.md`).
   - **Recording:** the same tool is taking the 2026-11-16 slate (8 games) into `build/recordings/balldontlie/nba/`, to measure how often the feed changes before NBA work starts (BACKLOG M7-001).
@@ -82,13 +90,8 @@ _Living status doc. Keep it short; update whenever project state changes (branch
   1. ✅ (#101) paint apart from decision ticks, with fetches off both frame paths; first, the MLB 12-second paint (M11-001). One clock seam gives two readings: UTC for event and release times, monotonic for dwell, backoff and pacing. Basic decision traces start here.
   2. ✅ (#103) a typed `PollPlan`: single-flight fetches, priority cadence within quota, bounded retries, per-game last-good expiry, and the previous and current local dates in the schedule window.
   3. ✅ (#105) port `PlayStrip` as the first session, and compare its decisions on the PIT@CIN replay.
-  4. Put the board's card rotation behind the same presentation contract (the plan: `CLOCK_AND_SCHEDULING.md`, "Steps", item 5):
-     - dwell starts at the first committed frame;
-     - selection is acknowledged at commit (round-4 H4);
-     - finals are ordered;
-     - takeovers are bounded;
-     - held, idle, stale and offline frames are explicit;
-     - a lane's marquee epoch is set at commit (R4-6).
+  4. ✅ (built, PR pending) the board's card rotation behind the same presentation contract (`CLOCK_AND_SCHEDULING.md`, "Steps", item 5): dwell from the first committed frame, selection booked at commit (round-4 H4), ordered finals, bounded takeovers, explicit idle, held and offline frames with stale cards dimmed, and the marquee epoch at commit (R4-6).
+  - **Then:** external review round 5, on A1a as a whole.
 - **Before mixed-league operation** (round-4 H5; M6-004, M7, L5):
   - partitioned snapshots per provider, league and scope;
   - full typed ids in card keys, favorites and market joins;

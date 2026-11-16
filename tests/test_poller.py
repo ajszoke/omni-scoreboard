@@ -6,7 +6,7 @@ import threading
 import time
 from datetime import date, datetime, timedelta, timezone
 
-from omni.app.clock import FakeClock, SystemClock
+from omni.core.clock import FakeClock, SystemClock
 from omni.app.poll_plan import PollKey, PollPlan, PollPolicy, PollPriority, PollSource
 from omni.app.poller import Poller
 
@@ -29,7 +29,11 @@ def test_running_due_asks_inline_files_answers_and_failures() -> None:
 
     plan.want(good, slow, priority=PollPriority.NORMAL, at=clock.read())
     plan.want(bad, broken, priority=PollPriority.NORMAL, at=clock.read())
-    assert Poller(plan, clock).run_due() == 2
+    poller = Poller(plan, clock)
+    heard: list[str] = []
+    poller.listen(lambda: heard.append("filed"))
+    assert poller.run_due() == 2
+    assert heard == ["filed", "filed"]  # a listener hears each answer and each failure as it's filed
     answer = plan.latest(good, clock.read())
     assert answer is not None and answer.value == "asked 23:00:00"
     assert answer.received.utc == T0 + timedelta(milliseconds=300)  # stamped when it arrived

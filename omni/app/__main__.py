@@ -5,10 +5,11 @@
 Polls the MLB StatsAPI, runs the delay-safe pipeline, and rotates cards on the
 emulator (browser at http://localhost:8888/). This is the thin I/O shell around the
 deterministic `AppLoop`; everything testable lives in `runner.py` / `loop.py`.
-Decisions run once a ``--tick``; frames draw ``--fps`` times a second in between, so
-scrolling lines and countdowns move. Each decision that changes something is traced.
-The network is read by a poller on its own threads, on the cadences in
-`omni.app.planned_mlb.MLB_POLICIES`; decisions read its latest answers.
+Each card stays up for its turn (``--slot``, held within the card's own minimum and maximum)
+unless a bigger moment takes over, and frames draw ``--fps`` times a second, so scrolling lines
+and countdowns move. Each change on the board is traced. The network is read by a poller on its
+own threads, on the cadences in `omni.app.planned_mlb.MLB_POLICIES`; a refresh reads its latest
+answers whenever one lands.
 
 With ``OMNI_CLOUD_URL`` and ``OMNI_CLOUD_TOKEN`` in the environment or a git-ignored ``.env``, the
 win meter reads Omni's market service (``cloud/``); without them it reads Polymarket's public quotes.
@@ -19,10 +20,11 @@ from __future__ import annotations
 import argparse
 import os
 import subprocess
+from datetime import timedelta
 from pathlib import Path
 from typing import Sequence, cast
 
-from omni.app.clock import SystemClock
+from omni.core.clock import SystemClock
 from omni.app.display import MatrixDevice, MatrixDisplaySink
 from omni.app.runner import build_loop, run_forever
 from omni.core.enum import PanelProfile
@@ -31,6 +33,7 @@ from omni.core.time import DurationSeconds
 from omni.panels.geometry import geometry_for
 from omni.renderers.image import LogoStore
 from omni.renderers.text_lane import DEFAULT_MARQUEE, ScrollSpeed
+from omni.tower.board import BoardPolicy
 
 __all__ = ["main"]
 
@@ -48,7 +51,13 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     )
     parser.add_argument("--delay", type=int, default=45, help="TV broadcast delay in seconds (default 45)")
     parser.add_argument(
-        "--tick", type=int, default=12, help="seconds between decisions: poll, then pick the card (default 12)"
+        "--slot",
+        "--tick",
+        dest="slot",
+        type=int,
+        default=12,
+        help="seconds a card in rotation stays up when another is waiting, within its own minimum and maximum"
+        " (default 12)",
     )
     parser.add_argument(
         "--timezone",
@@ -148,6 +157,7 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
         logos=LogoStore(),  # resolve committed team tiles from assets/ (lazy, cached)
         display_timezone=zone,
         marquee=DEFAULT_MARQUEE.at(ScrollSpeed(args.scroll_speed)),
+        policy=BoardPolicy(slot=timedelta(seconds=args.slot)),
     )
     print(
         f"omni.app: {profile.value}, delay {args.delay}s, favorites {sorted(args.favorite)}, meter {meter}"
@@ -156,7 +166,6 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
     run_forever(
         loop,
         clock,
-        tick=DurationSeconds(args.tick),
         fps=args.fps,
         log=lambda line: print(line, flush=True),
         timezone=zone,

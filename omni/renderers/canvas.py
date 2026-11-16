@@ -8,7 +8,7 @@ from typing import Protocol, runtime_checkable
 from omni.core.colors import RGBColor
 from omni.renderers.image import LogoImage
 
-__all__ = ["Canvas", "DrawOp", "RecordingCanvas"]
+__all__ = ["Canvas", "DimmedCanvas", "DrawOp", "RecordingCanvas"]
 
 
 @runtime_checkable
@@ -94,3 +94,60 @@ class RecordingCanvas:
 
     def images(self) -> list[DrawOp]:
         return [o for o in self.ops if o.op == "image"]
+
+
+class DimmedCanvas:
+    """A `Canvas` that draws onto another at a fraction of every color's brightness.
+
+    The board draws a card whose data is past its age through one, so the whole card reads as
+    stale on every profile without any renderer making room for a marker.
+    """
+
+    def __init__(self, inner: Canvas, *, brightness: float = 0.4) -> None:
+        if not 0.0 < brightness <= 1.0:
+            raise ValueError("brightness must be in (0, 1]")
+        self._inner = inner
+        self._brightness = brightness
+
+    @property
+    def width(self) -> int:
+        return self._inner.width
+
+    @property
+    def height(self) -> int:
+        return self._inner.height
+
+    def fill(self, color: RGBColor) -> None:
+        self._inner.fill(self._dim(color))
+
+    def set_pixel(self, x: int, y: int, color: RGBColor) -> None:
+        self._inner.set_pixel(x, y, self._dim(color))
+
+    def fill_rect(self, x: int, y: int, w: int, h: int, color: RGBColor) -> None:
+        self._inner.fill_rect(x, y, w, h, self._dim(color))
+
+    def text(self, x: int, y: int, s: str, color: RGBColor, *, font: str = "4x6") -> None:
+        self._inner.text(x, y, s, self._dim(color), font=font)
+
+    def draw_image(self, x: int, y: int, image: LogoImage) -> None:
+        self._inner.draw_image(x, y, _dimmed_image(image, self._brightness))
+
+    def _dim(self, color: RGBColor) -> RGBColor:
+        return _dimmed(color, self._brightness)
+
+
+def _dimmed(color: RGBColor, brightness: float) -> RGBColor:
+    return RGBColor(round(color.r * brightness), round(color.g * brightness), round(color.b * brightness))
+
+
+_DIMMED_TILES: dict[tuple[str, float], LogoImage] = {}  # a tile's key names one image: the store caches by it
+
+
+def _dimmed_image(image: LogoImage, brightness: float) -> LogoImage:
+    """A tile at a fraction of its brightness, kept so a stale card's frames don't redo the work."""
+    dimmed = _DIMMED_TILES.get((image.key, brightness))
+    if dimmed is None:
+        pixels = tuple(_dimmed(pixel, brightness) for pixel in image.pixels)
+        dimmed = LogoImage(key=f"{image.key}@{brightness:g}", width=image.width, height=image.height, pixels=pixels)
+        _DIMMED_TILES[(image.key, brightness)] = dimmed
+    return dimmed

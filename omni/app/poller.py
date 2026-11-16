@@ -4,16 +4,18 @@
 and start-up warm-up use it. `start` runs the same work in the background: a thread checks the plan
 a few times a second and hands each due ask to a small pool of workers, so a slow source holds up
 only its own ask. Each answer is stamped with the clock's two readings as it arrives; any exception
-from a fetch is filed as that ask's failure.
+from a fetch is filed as that ask's failure. Whoever reads the answers can `listen`, to hear when one
+is filed.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 
 from omni.app.background import Repeating
-from omni.app.clock import Clock
+from omni.core.clock import Clock
 from omni.app.poll_plan import Ask, PollPlan
 
 __all__ = ["Poller"]
@@ -33,6 +35,11 @@ class Poller:
         self._check_every = check_every
         self._pool: ThreadPoolExecutor | None = None
         self._dispatcher: Repeating | None = None
+        self._listeners: list[Callable[[], None]] = []
+
+    def listen(self, listener: Callable[[], None]) -> None:
+        """Call ``listener`` after each answer or failure is filed."""
+        self._listeners.append(listener)
 
     def run_due(self) -> int:
         """Ask everything due now, here, in turn; returns how many asks ran."""
@@ -64,5 +71,7 @@ class Poller:
             value = ask.fetch(asked.utc)
         except Exception as exc:  # any failure is this ask's, filed for the decision pass to see
             self._plan.failed(ask.key, f"{type(exc).__name__}: {exc}", self._clock.read())
-            return
-        self._plan.answered(ask.key, value, self._clock.read())
+        else:
+            self._plan.answered(ask.key, value, self._clock.read())
+        for listener in self._listeners:
+            listener()

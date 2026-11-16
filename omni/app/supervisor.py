@@ -77,6 +77,11 @@ class ProviderSupervisor:
         self._last_error: str | None = None
         self._next_retry_at: datetime | None = None
 
+    @property
+    def max_age(self) -> DurationSeconds:
+        """How old the last-known-good snapshot may get before it is reported stale."""
+        return self._max_age
+
     def ready_to_poll(self, now: datetime) -> bool:
         """Whether the backoff window has elapsed and a refresh should be attempted."""
         return self._next_retry_at is None or now >= self._next_retry_at

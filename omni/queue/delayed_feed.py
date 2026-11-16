@@ -63,3 +63,8 @@ class DelayedFeed(Generic[FeedValueT]):
     def pending(self) -> int:
         """How many observations are still held (not yet superseded)."""
         return len(self._held)
+
+    def next_eligible(self, now: datetime) -> datetime | None:
+        """When the next held observation clears the delay, if one is still inside it at ``now``."""
+        upcoming = [self._policy.eligible_at(obs) for obs in self._held]
+        return min((instant for instant in upcoming if instant > now), default=None)

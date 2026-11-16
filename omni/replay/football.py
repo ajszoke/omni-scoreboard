@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
-from omni.app.clock import FakeClock
+from omni.core.clock import FakeClock
 from omni.app.football_board import FootballBoard
 from omni.app.football_feed import FeedResult
 from omni.cards.base import ScoreboardCard

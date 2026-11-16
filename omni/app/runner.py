@@ -3,10 +3,12 @@
 `build_loop` wires the spine's collaborators into an `AppLoop` from a provider, a
 feed fetcher, and a display sink — the one place the standard wiring lives, so the
 emulator entry, a future hardware entry, and tests all build the loop the same way.
-`run_forever` is the thin real-time wrapper: decisions on a thread of their own, once a
-tick, and frames on this one at a steady rate, so a slow fetch never freezes the panel. Given
-a `Poller`, it warms the plan up first (the slate, then its games, then a pass that can show
-them) and then leaves the fetching to the poller's workers.
+`run_forever` is the thin real-time wrapper: refreshes on a thread of their own, and frames on
+this one at a steady rate, so a slow fetch never freezes the panel. A refresh runs whenever a
+poll answer lands, when the last one said something would change by itself (a play clearing the
+delay, the source going stale), and at least every few seconds. Given a `Poller`, it warms the
+plan up first (the slate, then its games, then a pass that can show them) and then leaves the
+fetching to the poller's workers.
 """
 
 from __future__ import annotations
@@ -14,8 +16,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import timedelta, tzinfo
 
-from omni.app.background import Repeating
-from omni.app.clock import Clock, Pacer
+from omni.app.background import Waking
 from omni.app.contest_store import ContestStore
 from omni.app.display import DisplaySink
 from omni.app.loop import AppLoop
@@ -30,18 +31,21 @@ from omni.app.pipeline import (
 from omni.app.supervisor import BackoffPolicy, ProviderSupervisor
 from omni.app.trace import DecisionTracer
 from omni.cards.factory import CardFactory
+from omni.core.clock import Clock, MonotonicTime, Pacer
 from omni.core.time import DurationSeconds
 from omni.providers.base import Provider
 from omni.queue.delay_policy import DelayPolicy
 from omni.queue.priority import PriorityScorer
 from omni.queue.scheduler import InterleavedCardQueue
 from omni.renderers.image import LogoStore
-from omni.renderers.registry import default_registry
+from omni.renderers.registry import RendererRegistry, default_registry
 from omni.renderers.text_lane import DEFAULT_MARQUEE, MarqueeStyle
+from omni.tower.board import BoardPolicy
 
 __all__ = ["build_loop", "run_forever", "warm_up"]
 
 _WARM_UP_PASSES = 3  # the slate, then its games' feeds, then a pass that can show them
+_REFRESH_AT_LEAST_EVERY = timedelta(seconds=5)  # for what changes with nothing to wake it (an answer expiring)
 
 
 def build_loop(
@@ -60,6 +64,8 @@ def build_loop(
     logos: LogoStore | None = None,
     display_timezone: tzinfo | None = None,
     marquee: MarqueeStyle = DEFAULT_MARQUEE,
+    policy: BoardPolicy = BoardPolicy(),
+    registry: RendererRegistry | None = None,
 ) -> AppLoop:
     """Wire the standard spine into an `AppLoop` (deterministic; no I/O performed here).
 
@@ -70,7 +76,9 @@ def build_loop(
     records + starters and odds; omitted, it stays at matchup + countdown.
     `display_timezone` is the zone board clocks read in, since the render clock runs in UTC.
     `logos`, when given, is the ambient tile store every render uses; left None (a
-    test/replay that doesn't care) the renderers fall back to a plain colour bar.
+    test/replay that doesn't care) the renderers fall back to a plain color bar.
+    `policy` sets how the board shares its airtime: a rotation card's turn, and the cap on
+    takeovers back to back. `registry` replaces today's renderers (a replay that only lists decisions).
     """
     queue = InterleavedCardQueue()
     pipeline = LiveBaseballPipeline(
@@ -84,7 +92,7 @@ def build_loop(
         store=ContestStore(),
         pipeline=pipeline,
         queue=queue,
-        registry=default_registry(),
+        registry=registry if registry is not None else default_registry(),
         sink=sink,
         fetch_feed=fetch_feed,
         fetch_win_probability=fetch_win_probability,
@@ -94,13 +102,14 @@ def build_loop(
         logos=logos,
         display_timezone=display_timezone,
         marquee=marquee,
+        policy=policy,
     )
 
 
 def warm_up(loop: AppLoop, poller: Poller, clock: Clock) -> None:
-    """Fill the plan before the board starts: decide, then ask what that decision wanted, a few times."""
+    """Fill the plan before the board starts: refresh, then ask what that refresh wanted, a few times."""
     for _ in range(_WARM_UP_PASSES):
-        loop.decide(clock.now())
+        loop.refresh(clock.now())
         poller.run_due()
 
 
@@ -108,26 +117,29 @@ def run_forever(
     loop: AppLoop,
     clock: Clock,
     *,
-    tick: DurationSeconds,
     fps: float = 10.0,
     log: Callable[[str], None] = print,
     timezone: tzinfo | None = None,
     poller: Poller | None = None,
 ) -> None:  # pragma: no cover - real-time loop
-    """Decide once a `tick` on a worker thread, and paint the current pick `fps` times a second here."""
+    """Refresh on a worker thread whenever there's reason to, and paint `fps` times a second here."""
+    tracer = DecisionTracer(log, timezone=timezone)
+
+    def refresh() -> MonotonicTime | None:
+        started = clock.read()
+        result = loop.refresh(started.utc)
+        deadline = loop.refresh_deadline(clock.read())
+        next_at = started.utc + deadline.since(started.monotonic) if deadline is not None else None
+        tracer.refreshed(result, took=clock.monotonic().since(started.monotonic), next_at=next_at)
+        return deadline
+
+    refresher = Waking("refresh", clock, refresh, at_least_every=_REFRESH_AT_LEAST_EVERY, on_error=tracer.failed)
     if poller is not None:
         warm_up(loop, poller, clock)
+        poller.listen(refresher.wake)
         poller.start()
-    tracer = DecisionTracer(log, timezone=timezone)
-    every = tick.as_timedelta()
-
-    def decide() -> None:
-        started = clock.read()
-        decision = loop.decide(started.utc)
-        tracer.decided(decision, took=clock.monotonic().since(started.monotonic), next_at=started.utc + every)
-
-    Repeating("decide", clock, every, decide, on_error=tracer.failed).start()
+    refresher.start()
     frames = Pacer(clock, timedelta(seconds=1.0 / fps))
     while True:
-        tracer.painted(loop.paint(clock.now()))
+        tracer.painted(loop.paint(clock.read()))
         frames.wait()

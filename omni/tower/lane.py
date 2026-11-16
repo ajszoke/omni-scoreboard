@@ -31,7 +31,7 @@ from datetime import timedelta
 from enum import Enum
 from typing import Generic
 
-from omni.app.clock import ClockReading, MonotonicTime
+from omni.core.clock import ClockReading, MonotonicTime
 from omni.core.enum import StrEnumMixin
 from omni.tower.segment import Cue, PayloadT, Segment, SegmentKey, Surface
 
@@ -66,6 +66,7 @@ class LaneChange(Generic[PayloadT]):
     at: ClockReading
     frame: int = 0
     reason: EndReason | None = None
+    aired: timedelta | None = None  # for a segment coming down: how long its last frame was up
 
 
 class Lane(Generic[PayloadT]):
@@ -213,7 +214,8 @@ class Lane(Generic[PayloadT]):
         current = self._current
         assert current is not None
         kind = ChangeKind.DOWN if self._aired else ChangeKind.DROPPED
-        self._changes.append(LaneChange(kind, current, at, frame=self._frame, reason=reason))
+        aired = at.monotonic.since(self._since) if self._since is not None else None
+        self._changes.append(LaneChange(kind, current, at, frame=self._frame, reason=reason, aired=aired))
         self._current = None
 
 

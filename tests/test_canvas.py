@@ -90,3 +90,36 @@ def test_pillow_canvas_clips_out_of_bounds_draws() -> None:
     assert image.getpixel((7, 3)) == (255, 0, 0)
     canvas.text(-50, -50, "1", RGBColor(0, 255, 0), font="4x6")  # fully off-screen: no error/no change
     assert image.getpixel((0, 0)) == (255, 0, 0)
+
+
+def test_a_dimmed_canvas_draws_every_color_at_a_fraction_of_its_brightness() -> None:
+    import pytest
+
+    from omni.renderers.canvas import DimmedCanvas
+
+    inner = RecordingCanvas(64, 32)
+    dimmed = DimmedCanvas(inner, brightness=0.5)
+    assert isinstance(dimmed, Canvas) and (dimmed.width, dimmed.height) == (64, 32)
+    white, gray = RGBColor(255, 255, 255), RGBColor(128, 128, 128)
+    dimmed.fill(white)
+    dimmed.set_pixel(1, 2, white)
+    dimmed.fill_rect(0, 0, 4, 4, white)
+    dimmed.text(0, 0, "AB", white, font="5x7")
+    tile = LogoImage(key="t", width=2, height=1, pixels=(white, RGBColor(10, 20, 30)))
+    dimmed.draw_image(3, 4, tile)
+    dimmed.draw_image(5, 6, tile)  # the same tile again: dimmed once, then reused
+    assert {op.color for op in inner.ops if op.color is not None} == {gray}
+    assert [op.text for op in inner.texts()] == ["AB"] and inner.texts()[0].font == "5x7"
+    blits = inner.images()
+    assert [(op.x, op.y, op.key) for op in blits] == [(3, 4, "t@0.5"), (5, 6, "t@0.5")]
+    with pytest.raises(ValueError, match="brightness"):
+        DimmedCanvas(inner, brightness=0.0)
+
+
+def test_a_dimmed_tile_keeps_its_shape_and_scales_its_pixels() -> None:
+    from omni.renderers.canvas import DimmedCanvas
+
+    target = PillowCanvas(4, 4)
+    tile = LogoImage(key="u", width=1, height=1, pixels=(RGBColor(200, 100, 50),))
+    DimmedCanvas(target, brightness=0.4).draw_image(0, 0, tile)
+    assert target.image().getpixel((0, 0)) == (80, 40, 20)

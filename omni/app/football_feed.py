@@ -20,7 +20,7 @@ from datetime import datetime, timedelta
 from typing import Protocol
 
 from omni.app.background import Repeating
-from omni.app.clock import Clock
+from omni.core.clock import Clock
 from omni.domain.baseball import WinProbability
 from omni.domain.contest import TeamGame
 from omni.providers.base import ProviderError

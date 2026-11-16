@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from omni.app.__main__ import _parse_args
 from omni.app.display import RecordingDisplaySink
 from omni.app.runner import build_loop
+from omni.core.clock import ClockReading, MonotonicTime
 from omni.core.enum import GameStatus, League, PanelProfile
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.core.time import DurationSeconds
@@ -21,6 +22,10 @@ from omni.renderers.image import LogoStore
 _REG = MlbTeamRegistry.from_color_file()
 SOURCE = SourceRef("mlb_statsapi", "https://statsapi.mlb.com")
 T = datetime(2026, 6, 17, 23, 0, 0, tzinfo=timezone.utc)
+
+
+def _at(moment: datetime) -> ClockReading:
+    return ClockReading(moment, MonotonicTime((moment - T).total_seconds()))
 
 
 def _game() -> TeamGame:
@@ -60,7 +65,7 @@ def _fetch_feed(game: TeamGame, now: datetime) -> LiveBaseballFeed:
 def test_build_loop_produces_a_working_loop() -> None:
     sink = RecordingDisplaySink(PanelProfile.QUAD_128X64)
     loop = build_loop(_Provider(), _fetch_feed, sink, broadcast_lag=DurationSeconds(0))
-    result = loop.run_once(T)
+    result = loop.run_once(_at(T))
     assert result.shown is not None
     assert sink.committed == 1
 
@@ -68,16 +73,16 @@ def test_build_loop_produces_a_working_loop() -> None:
 def test_build_loop_wires_the_broadcast_delay() -> None:
     sink = RecordingDisplaySink(PanelProfile.QUAD_128X64)
     loop = build_loop(_Provider(), _fetch_feed, sink, broadcast_lag=DurationSeconds(30))
-    assert loop.run_once(T).shown is None  # inside the delay — nothing shown yet
-    assert loop.run_once(T + timedelta(seconds=30)).shown is not None
-    assert sink.committed == 1
+    assert loop.run_once(_at(T)).shown is None  # inside the delay — the held frame instead
+    assert loop.run_once(_at(T + timedelta(seconds=30))).shown is not None
+    assert sink.committed == 2
 
 
 def test_build_loop_threads_logos_through_to_the_rendered_frame() -> None:
     # A LogoStore handed to build_loop must reach rendering: the quad live card blits team tiles.
     sink = RecordingDisplaySink(PanelProfile.QUAD_128X64)
     loop = build_loop(_Provider(), _fetch_feed, sink, broadcast_lag=DurationSeconds(0), logos=LogoStore())
-    loop.run_once(T)
+    loop.run_once(_at(T))
     frame = sink.frames[-1]
     assert isinstance(frame, RecordingCanvas)
     assert frame.images()  # tiles blitted — the store reached the renderer end to end
@@ -87,7 +92,7 @@ def test_build_loop_without_logos_falls_back_to_colour_bars() -> None:
     # No store wired (a test/replay) → the renderer draws colour bars, never a tile blit.
     sink = RecordingDisplaySink(PanelProfile.QUAD_128X64)
     loop = build_loop(_Provider(), _fetch_feed, sink, broadcast_lag=DurationSeconds(0))
-    loop.run_once(T)
+    loop.run_once(_at(T))
     frame = sink.frames[-1]
     assert isinstance(frame, RecordingCanvas)
     assert not frame.images()  # colour-bar fallback, no blits
@@ -103,7 +108,7 @@ def test_build_loop_threads_the_win_probability_fetcher() -> None:
         return WinProbability(home=70.0, away=30.0)
 
     loop = build_loop(_Provider(), _fetch_feed, sink, broadcast_lag=DurationSeconds(0), fetch_win_probability=fetch_wp)
-    loop.run_once(T)
+    loop.run_once(_at(T))
     assert calls == ["g1"]  # the pipeline fetched win-prob for the live game
 
 
@@ -111,7 +116,7 @@ def test_parse_args_defaults() -> None:
     ns = _parse_args(["--profile", "quad_128x64", "--emulated"])
     assert ns.profile == "quad_128x64"
     assert ns.emulated is True
-    assert ns.favorite == [] and ns.delay == 45 and ns.tick == 12
+    assert ns.favorite == [] and ns.delay == 45 and ns.slot == 12
     assert ns.timezone == "America/New_York"
 
 
@@ -126,12 +131,13 @@ def test_parse_args_collects_favorites_and_overrides() -> None:
             "LAD",
             "--delay",
             "30",
-            "--tick",
+            "--slot",
             "8",
             "--timezone",
             "America/Denver",
         ]
     )
     assert ns.favorite == ["COL", "LAD"]
-    assert ns.delay == 30 and ns.tick == 8
+    assert ns.delay == 30 and ns.slot == 8
+    assert _parse_args(["--profile", "quad_128x64", "--tick", "9"]).slot == 9  # the flag's old name still works
     assert ns.timezone == "America/Denver"
