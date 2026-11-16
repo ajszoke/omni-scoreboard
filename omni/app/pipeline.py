@@ -57,7 +57,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import Callable, Iterable
 
-from omni.cards.base import CardId
+from omni.cards.base import CardId, DedupeKey
 from omni.cards.baseball import STATUS_CARD_STATUSES
 from omni.cards.factory import CardFactory
 from omni.core.enum import DisplayPriority, GameStatus
@@ -127,6 +127,10 @@ _BIG_PLAY_MIN_BAND = DisplayPriority.HIGH_LEVERAGE
 # earlier hitless innings are routine. Counted per side so it never triggers a half-inning early.
 _NO_HITTER_MIN_COMPLETED_INNINGS = 6
 
+# How long a game's cards stay up, marked stale, once its feed has stopped answering. Past it the
+# last-good state no longer says anything trustworthy about the game, so its cards come down.
+STALE_FOR = timedelta(minutes=2)
+
 
 class _MeterTrack:
     """One source's readings on their way to the meter: delayed like the score, held through a gap."""
@@ -184,6 +188,7 @@ class PipelineResult:
     removed: tuple[LeagueScopedId, ...]  # games no longer live whose card was dropped
     skipped: tuple[str, ...]  # per-game fetch failures — the game is dropped this pass
     warnings: tuple[str, ...] = ()  # non-fatal per-play parse drops — the game still shows
+    stale: tuple[LeagueScopedId, ...] = ()  # live games whose feed has stopped answering
 
 
 class LiveBaseballPipeline:
@@ -215,6 +220,7 @@ class LiveBaseballPipeline:
         # contest id -> when we first saw it final (the reveal's delay anchor; built from current state)
         self._final_pending: dict[LeagueScopedId, datetime] = {}
         self._final_keys: dict[LeagueScopedId, str] = {}  # contest id -> its (revealed) final card's key
+        self._stale: dict[LeagueScopedId, datetime] = {}  # contest id -> when its feed stopped answering
 
     def refresh(
         self,
@@ -277,7 +283,9 @@ class LiveBaseballPipeline:
                 feed = fetch_feed(game, now)
             except ProviderError as exc:
                 skipped.append(f"{game.id.raw}: {exc}")
+                self._go_stale(game.id, now)
                 continue
+            self._stale.pop(game.id, None)
             warnings.extend(f"{game.id.raw}: {warning}" for warning in feed.warnings)
 
             # Big-play path first, so it runs even when the state is still delay-held.
@@ -323,7 +331,7 @@ class LiveBaseballPipeline:
             # time, which is at or before the final's first-sight anchor — so it flashes, then
             # the final confirms it. (Surfacing here, before the reveal, keeps the stream alive.)
             big_plays.extend(self._surface_big_plays(game, feed.events, now=now))
-            revealed = self._surface_final(game, feed.state, feed.decisions, now=now)
+            revealed = self._surface_final(game, feed.state, feed.decisions, feed.events, now=now)
             if revealed is not None:
                 finals.append(revealed)
             else:
@@ -344,6 +352,7 @@ class LiveBaseballPipeline:
             removed=tuple(removed),
             skipped=tuple(skipped),
             warnings=tuple(warnings),
+            stale=tuple(sorted(self._stale, key=str)),
         )
 
     def _pregame_details_for(
@@ -479,7 +488,13 @@ class LiveBaseballPipeline:
         return card.id
 
     def _surface_final(
-        self, game: TeamGame, state: BaseballGameState, decisions: PitchingDecisions | None, *, now: datetime
+        self,
+        game: TeamGame,
+        state: BaseballGameState,
+        decisions: PitchingDecisions | None,
+        events: tuple[BaseballGameEvent, ...],
+        *,
+        now: datetime,
     ) -> CardId | None:
         """Reveal the final card once the result clears the post-game delay, or None while it is held.
 
@@ -489,12 +504,25 @@ class LiveBaseballPipeline:
         was dropped when it left the live set). The card is built from the *current* state and
         decisions at reveal — same final score, but the freshest W/L/S if the feed filled the
         decisions in a touch late.
+
+        A game's plays come before its final: the reveal also waits for every big play still inside
+        the delay, and the card airs only after the game's decisive play (a walk-off) has. It is
+        available from the reveal instant, which is when its game ended plus the delay, so finals air
+        in the order their games ended.
         """
         seen_at = self._final_pending.setdefault(game.id, now)
-        anchor = Observation(subject_id=game.id, source=game.id.source, observed_at=seen_at, value=state)
-        if self._delay.eligible_at(anchor) > now:
+        reveal = self._final_reveal(game.id, seen_at)
+        if reveal > now:
             return None  # inside the post-game delay — revealing the result now would spoil the ending
-        card = self._factory.final(game, state, decisions=decisions, now=now)
+        stream = self._event_streams.get(game.id)
+        if stream is not None and stream.pending():
+            return None  # a play from before the end is still inside the delay: it airs first
+        decisive = tuple(
+            self._factory.big_play_key(game, event)
+            for event in events
+            if event.payload.scoring_impact is not None and event.payload.scoring_impact.walk_off
+        )
+        card = self._factory.final(game, state, decisions=decisions, now=reveal, after=decisive)
         self._queue.ingest(card)
         self._final_keys[game.id] = card.dedupe_key.raw
         del self._final_pending[game.id]
@@ -557,4 +585,35 @@ class LiveBaseballPipeline:
                 self._queue.remove(no_hitter_key)
         for contest_id in set(self._event_streams) - (live_ids | final_ids):
             self._event_streams.pop(contest_id, None)
+        for contest_id in set(self._stale) - live_ids:
+            del self._stale[contest_id]
         return tuple(sorted(removed_cards, key=str))
+
+    def _go_stale(self, game_id: LeagueScopedId, now: datetime) -> None:
+        """A live game's feed didn't answer: its cards stay up marked stale, then come down after `STALE_FOR`."""
+        since = self._stale.setdefault(game_id, now)
+        keys = [key for key in (self._card_keys.get(game_id), self._no_hitter_keys.get(game_id)) if key is not None]
+        if now - since >= STALE_FOR:
+            for key in keys:
+                self._queue.remove(key)
+            self._card_keys.pop(game_id, None)
+            self._no_hitter_keys.pop(game_id, None)
+            return
+        for key in keys:
+            card = self._queue.card(key)
+            if card is not None and card.stale_since is None:
+                self._queue.ingest(replace(card, stale_since=since))
+
+    def _final_reveal(self, game_id: LeagueScopedId, seen_at: datetime) -> datetime:
+        """When a game first seen final at ``seen_at`` may show its result."""
+        anchor = Observation(subject_id=game_id, source=game_id.source, observed_at=seen_at, value=None)
+        return self._delay.eligible_at(anchor)
+
+    def next_deadline(self, now: datetime) -> datetime | None:
+        """When the pipeline would next surface or drop something by itself, as of ``now``: a state or a play
+        clearing the delay, a final's reveal, or a stale game's cards coming down."""
+        instants: list[datetime | None] = [feed.next_eligible(now) for feed in self._feeds.values()]
+        instants += [stream.next_eligible() for stream in self._event_streams.values()]
+        instants += [self._final_reveal(game_id, seen_at) for game_id, seen_at in self._final_pending.items()]
+        instants += [since + STALE_FOR for since in self._stale.values()]
+        return min((instant for instant in instants if instant is not None and instant > now), default=None)

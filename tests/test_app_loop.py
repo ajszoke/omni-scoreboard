@@ -1,4 +1,4 @@
-"""Integration tests for AppLoop.run_once: the whole spine, one deterministic tick."""
+"""Integration tests for the AppLoop: the whole spine, refreshed and painted deterministically."""
 
 from __future__ import annotations
 
@@ -8,9 +8,10 @@ from typing import Any
 
 from omni.app.contest_store import ContestStore
 from omni.app.display import RecordingDisplaySink
-from omni.app.loop import AppLoop, Painted, _treatment
+from omni.app.loop import AppLoop, _treatment
 from omni.app.pipeline import LiveBaseballPipeline
 from omni.app.supervisor import ProviderStatus, ProviderSupervisor
+from omni.core.clock import ClockReading, MonotonicTime
 from omni.cards.base import ScoreboardCard
 from omni.cards.factory import CardFactory
 from omni.core.enum import GameStatus, League, PanelProfile
@@ -24,15 +25,26 @@ from omni.providers.mlb_teams import MlbTeamRegistry
 from omni.queue.delay_policy import DelayPolicy
 from omni.queue.priority import PriorityScorer
 from omni.queue.scheduler import InterleavedCardQueue, SelectionReason
-from omni.renderers.canvas import Canvas
+from omni.renderers.canvas import Canvas, RecordingCanvas
 from omni.renderers.context import RenderContext
 from omni.renderers.image import LogoStore
 from omni.renderers.registry import RendererRegistry, default_registry
+from omni.tower.board import FrameKind, SourceHealth
+from omni.tower.lane import ChangeKind, EndReason
 
 _REG = MlbTeamRegistry.from_color_file()
 SOURCE = SourceRef("mlb_statsapi", "https://statsapi.mlb.com")
 T = datetime(2026, 6, 17, 23, 0, 0, tzinfo=timezone.utc)
 QUAD = PanelProfile.QUAD_128X64
+
+
+def _at(moment: datetime) -> ClockReading:
+    """``moment`` read both ways, the monotonic clock running alongside UTC."""
+    return ClockReading(moment, MonotonicTime((moment - T).total_seconds()))
+
+
+def _later(seconds: float) -> ClockReading:
+    return _at(T + timedelta(seconds=seconds))
 
 
 def _game(raw: str = "g1", status: GameStatus = GameStatus.LIVE) -> TeamGame:
@@ -74,7 +86,7 @@ class _Provider:
 
 
 def _fetch_feed(game: TeamGame, now: datetime) -> LiveBaseballFeed:
-    return LiveBaseballFeed(state=_state())
+    return LiveBaseballFeed(state=_state(), received_at=T)
 
 
 class _CapturingRegistry(RendererRegistry):
@@ -121,46 +133,81 @@ def _build(
 
 def test_run_once_shows_a_live_card_end_to_end() -> None:
     loop, sink, _ = _build(lag=0)
-    res = loop.run_once(T)
+    res = loop.run_once(_at(T))
     assert res.provider_status is ProviderStatus.FRESH
     assert res.reconciliation is not None and res.reconciliation.added == (_game().id,)
-    assert res.shown is not None and res.render_error is None
+    assert res.shown is not None and res.frame is None and res.render_error is None
     assert sink.committed == 1
 
 
-def test_run_once_buffers_within_delay_then_surfaces() -> None:
+def test_run_once_holds_the_board_within_the_delay_then_surfaces() -> None:
     loop, sink, _ = _build(lag=30)
-    first = loop.run_once(T)
-    assert first.shown is None and sink.committed == 0  # still inside the TV delay
-    second = loop.run_once(T + timedelta(seconds=30))
-    assert second.shown is not None and sink.committed == 1
+    first = loop.run_once(_at(T))
+    assert first.shown is None and first.frame is FrameKind.HELD  # the game's card is still inside the TV delay
+    second = loop.run_once(_later(30))
+    assert second.shown is not None and sink.committed == 2
 
 
-def test_run_once_survives_provider_outage_from_the_start() -> None:
+def test_run_once_survives_a_provider_outage_from_the_start() -> None:
     provider = _Provider(_game())
     provider.fail = True
     loop, sink, _ = _build(lag=0, provider=provider)
-    res = loop.run_once(T)
+    res = loop.run_once(_at(T))
     assert res.provider_status is ProviderStatus.NEVER_LOADED
     assert res.reconciliation is None  # nothing to apply
-    assert res.shown is None and res.render_error is None  # no crash, nothing to show
-    assert sink.committed == 0
+    assert res.shown is None and res.frame is FrameKind.OFFLINE and res.render_error is None
+    assert sink.committed == 1  # the offline frame, drawn on purpose
 
 
 def test_run_once_keeps_serving_last_known_good_when_provider_drops() -> None:
     provider = _Provider(_game())
     loop, sink, _ = _build(lag=0, provider=provider)
-    loop.run_once(T)  # success — card shown
-    assert sink.committed == 1
+    first = loop.run_once(_at(T))
     provider.fail = True
-    res = loop.run_once(T + timedelta(seconds=10))  # provider down, schedule cached
-    assert res.shown is not None  # still showing the game from last-known-good
+    res = loop.run_once(_later(10))  # provider down, schedule cached
+    assert res.shown == first.shown  # still showing the game from last-known-good
     assert sink.committed == 2
+
+
+def test_a_stale_source_dims_the_card_and_an_expired_one_takes_it_down() -> None:
+    provider = _Provider(_game())
+    loop, sink, _ = _build(lag=0, provider=provider)
+    fresh = loop.paint(_at(T)) if loop.refresh(T) else None
+    assert fresh is not None and not fresh.stale
+    provider.fail = True
+    stale = loop.refresh(T + timedelta(seconds=121))
+    assert (
+        stale.health.source is SourceHealth.STALE
+        and stale.health.reason == "no schedule for over 2m: ProviderError: schedule fetch down"
+    )
+    painted = loop.paint(_later(121))
+    assert painted.stale and painted.shown is not None
+    assert _colors(sink.frames[-1]) < _colors(sink.frames[0])  # the same card, dimmer
+    gone = loop.refresh(T + timedelta(seconds=601))
+    assert gone.health.source is SourceHealth.OFFLINE
+    assert gone.health.reason == "no schedule for over 10m: ProviderError: schedule fetch down"
+    assert loop.paint(_later(601)).frame is FrameKind.OFFLINE
+
+
+def test_the_refresh_deadline_names_the_source_s_next_change_and_the_delay_s_next_release() -> None:
+    loop, _, provider = _build(lag=30)
+    loop.refresh(T)
+    assert loop.refresh_deadline(_at(T)) == MonotonicTime(30.0)  # the state clears the delay
+    loop.refresh(T + timedelta(seconds=30))
+    assert loop.refresh_deadline(_later(30)) == MonotonicTime(151.0)  # the schedule goes stale
+    provider.fail = True
+    loop.refresh(T + timedelta(seconds=151))
+    assert loop.refresh_deadline(_later(151)) == MonotonicTime(631.0)  # and then offline
+    loop.refresh(T + timedelta(seconds=631))
+    assert loop.refresh_deadline(_later(631)) is None
+    assert loop.next_deadline(_later(631)) == MonotonicTime(631.0)  # nothing cued yet: the board is due now
+    assert loop.paint(_later(631)).frame is FrameKind.OFFLINE
+    assert loop.next_deadline(_later(631)) is None  # the offline frame waits for the source
 
 
 def test_run_once_isolates_a_render_failure() -> None:
     loop, sink, _ = _build(lag=0, registry=RendererRegistry())  # empty — no renderer registered
-    res = loop.run_once(T)
+    res = loop.run_once(_at(T))
     assert res.render_error is not None and "no renderer" in res.render_error
     assert res.shown is None
     assert sink.committed == 0  # nothing committed on failure
@@ -172,57 +219,57 @@ def test_run_once_threads_the_logo_store_into_the_render_context() -> None:
     capturing = _CapturingRegistry(default_registry())
     store = LogoStore()
     loop, _, _ = _build(lag=0, registry=capturing, logos=store)
-    loop.run_once(T)
+    loop.run_once(_at(T))
     assert capturing.last_context is not None
     assert capturing.last_context.logos is store
 
 
 def test_run_once_defaults_to_no_logo_store() -> None:
-    # A loop built without logos (a test/replay) renders with the colour-bar fallback.
+    # A loop built without logos (a test/replay) renders with the color-bar fallback.
     capturing = _CapturingRegistry(default_registry())
     loop, _, _ = _build(lag=0, registry=capturing)
-    loop.run_once(T)
+    loop.run_once(_at(T))
     assert capturing.last_context is not None
     assert capturing.last_context.logos is None
 
 
-def test_painting_waits_for_a_decision_then_draws_the_pick_every_frame() -> None:
+def test_painting_draws_what_the_board_has_up_and_presents_a_card_once() -> None:
     loop, sink, _ = _build(lag=0)
-    assert loop.paint(T) == Painted(shown=None, render_error=None, presented=None)  # nothing decided yet
-    decision = loop.decide(T)
-    assert decision.pick is not None and decision.pick.reason is SelectionReason.ROTATION
-    first = loop.paint(T)
-    assert first.shown == decision.pick.card.id
-    assert first.presented is not None and first.presented.card == decision.pick.card.id
+    before = loop.paint(_at(T))
+    assert before.shown is None and before.frame is FrameKind.IDLE  # nothing refreshed yet
+    loop.refresh(T)
+    first = loop.paint(_at(T))
+    assert first.shown is not None and first.reason is SelectionReason.ROTATION
+    assert first.presented is not None and first.presented.card == first.shown
     treatment = first.presented.treatment
     assert treatment is not None and not treatment.away.is_tile  # no logo store: color bars
-    later = loop.paint(T + timedelta(milliseconds=100))  # frames between decisions
-    assert later.shown == decision.pick.card.id and later.presented is None  # already up
-    assert sink.committed == 2
+    assert [change.kind for change in first.changes] == [ChangeKind.DOWN, ChangeKind.UP]  # the idle frame, then it
+    later = loop.paint(_later(0.1))  # frames between refreshes
+    assert later.shown == first.shown and later.presented is None and later.changes == ()
+    loop.refresh(T + timedelta(seconds=12))
+    again = loop.paint(_later(12))
+    assert again.shown == first.shown and again.presented is None  # a lone card stays up: no new presentation
+    assert sink.committed == 4
 
 
-def test_the_same_card_picked_again_is_a_new_presentation() -> None:
-    loop, _, _ = _build(lag=0)
-    loop.decide(T)
-    loop.paint(T)
-    loop.decide(T + timedelta(seconds=12))
-    again = loop.paint(T + timedelta(seconds=12))
-    assert again.presented is not None and again.presented.at == T + timedelta(seconds=12)
-
-
-def test_a_failed_paint_presents_nothing() -> None:
+def test_a_failed_paint_presents_nothing_and_starts_no_dwell() -> None:
     loop, sink, _ = _build(lag=0, registry=RendererRegistry())  # no renderers: every paint fails
-    loop.decide(T)
-    painted = loop.paint(T)
+    loop.refresh(T)
+    painted = loop.paint(_at(T))
     assert painted.render_error is not None and painted.shown is None and painted.presented is None
     assert sink.committed == 0
+    assert loop.next_deadline(_at(T)) == MonotonicTime(121.0)  # no dwell runs: only the source's next change
 
 
-def test_with_nothing_eligible_painting_stops_and_the_panel_keeps_its_frame() -> None:
-    loop, sink, _ = _build(lag=30)  # the only card is still inside the TV delay
-    assert loop.decide(T).pick is None
-    assert loop.paint(T).shown is None
-    assert sink.committed == 0
+def test_a_card_that_leaves_comes_down_and_the_board_says_why() -> None:
+    provider = _Provider(_game())
+    loop, _, _ = _build(lag=0, provider=provider)
+    loop.run_once(_at(T))
+    provider._contests = ()  # the game leaves the schedule
+    painted = loop.paint(_later(1)) if loop.refresh(T + timedelta(seconds=1)) else None
+    assert painted is not None and painted.frame is FrameKind.IDLE
+    down = [change for change in painted.changes if change.kind is ChangeKind.DOWN]
+    assert down[0].reason is EndReason.INVALIDATED
 
 
 def test_a_card_without_two_team_rows_has_no_matchup_treatment() -> None:
@@ -234,7 +281,14 @@ def test_a_card_without_two_team_rows_has_no_matchup_treatment() -> None:
         tournament_name="Open",
     )
     loop, _, _ = _build(lag=0)
-    pick = loop.decide(T).pick
-    assert pick is not None
-    card = dataclasses.replace(pick.card, contest=golf)
-    assert _treatment(card, RenderContext(profile=QUAD, now=T)) is None
+    loop.refresh(T)
+    card = loop._queue.card(f"{_game().id.raw}:live")
+    assert card is not None
+    golfing = dataclasses.replace(card, contest=golf)
+    assert _treatment(golfing, RenderContext(profile=QUAD, now=T)) is None
+
+
+def _colors(frame: Canvas) -> int:
+    """The sum of every channel drawn into a recorded frame: dimmer frames sum lower."""
+    assert isinstance(frame, RecordingCanvas)
+    return sum(op.color.r + op.color.g + op.color.b for op in frame.ops if op.color is not None)

@@ -14,6 +14,7 @@ from omni.app.planned_mlb import MLB_POLICIES, PlannedMlb
 from omni.app.poll_plan import PollPlan
 from omni.app.poller import Poller
 from omni.app.planned_mlb import NO_BACKOFF
+from omni.tower.board import FrameKind, SourceHealth
 from omni.app.runner import build_loop, warm_up
 from omni.core.enum import GameStatus, PanelProfile
 from omni.core.ids import SourceRef
@@ -182,9 +183,10 @@ def test_warming_up_takes_the_board_from_nothing_to_a_live_card() -> None:
     provider.slates = {TODAY: (_game("g1"),)}
     sink = RecordingDisplaySink(PanelProfile.QUAD_128X64)
     loop = build_loop(planned, planned.fetch_feed, sink, broadcast_lag=DurationSeconds(0), backoff=NO_BACKOFF)
-    assert loop.decide(clock.now()).pick is None
+    assert loop.refresh(clock.now()).health.source is SourceHealth.OFFLINE  # no schedule answered yet
+    assert loop.paint(clock.read()).frame is FrameKind.OFFLINE
     warm_up(loop, poller, clock)
-    assert loop.paint(clock.now()).shown is not None
+    assert loop.paint(clock.read()).shown is not None
 
 
 def test_without_an_answer_for_yesterday_the_slate_is_todays() -> None:

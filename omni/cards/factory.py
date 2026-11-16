@@ -209,12 +209,14 @@ class CardFactory:
         decisions: PitchingDecisions | None = None,
         now: datetime,
         priority: CardPriority | None = None,
+        after: tuple[DedupeKey, ...] = (),
     ) -> ScoreboardCard[FinalCardPayload]:
         """Build a final MLB card from a completed game's state and pitching decisions.
 
         The winner is derived from the score by the payload; `decisions` (winner/loser/save,
         None on a tie or an undecided feed) rides along for the W/L/S line. The card lingers
         for a finite postgame window (``final_postgame_window``), then expires from rotation.
+        `after` names the cards that air before it, such as the game's walk-off.
         """
         payload = FinalCardPayload(
             away_score=state.away_score,
@@ -239,6 +241,7 @@ class CardFactory:
             layout_support=LayoutSupport(profiles=_FINAL_PROFILES, compromise_notes=_FINAL_COMPROMISE),
             dedupe_key=DedupeKey(key),
             payload=payload,
+            after=after,
         )
 
     def big_play(
@@ -268,7 +271,7 @@ class CardFactory:
             home_score=home_score,
         )
         resolved_priority = priority if priority is not None else _big_play_priority(event)
-        key = f"{game.id.raw}:bigplay:{event.id.raw}"
+        key = self.big_play_key(game, event).raw
         return ScoreboardCard(
             id=CardId(key),
             kind=CardKind.BIG_PLAY,
@@ -286,6 +289,11 @@ class CardFactory:
             attention=_big_play_attention(resolved_priority.band),
             payload=payload,
         )
+
+    @staticmethod
+    def big_play_key(game: TeamGame, event: BaseballGameEvent) -> DedupeKey:
+        """The dedupe key of the big-play card for ``event``, whether or not it has been built."""
+        return DedupeKey(f"{game.id.raw}:bigplay:{event.id.raw}")
 
     def no_hitter(
         self,

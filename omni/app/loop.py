@@ -1,30 +1,36 @@
 """AppLoop: the deterministic orchestration passes (ROADMAP A0 spine capstone).
 
-The board decides and paints on separate cadences:
+The board refreshes and paints on separate cadences:
 
-- **`decide(now)`**, the decision pass, wires the spine end to end:
+- **`refresh(now)`**, the decision pass, wires the spine end to end:
   1. poll the provider (`ProviderSupervisor`, last-known-good on failure);
   2. reconcile the contest set (`ContestStore`);
-  3. run the live-card pipeline (`LiveBaseballPipeline`, delay-safe, no spoilers);
-  4. pick the next card fairly (`InterleavedCardQueue`), which the board then shows until the next
-     decision.
-- **`paint(now)`** draws the picked card through the `RendererRegistry` and commits it to the
-  `DisplaySink`. It runs at a frame rate, so scrolling lines, countdowns and blinks move between
-  decisions. Painting never fetches.
-- **`run_once(now)`** is one decision then one paint: the single deterministic pass replay drives.
+  3. run the live-card pipeline (`LiveBaseballPipeline`, delay-safe, no spoilers), which keeps the card
+     queue current;
+  4. tell the board how far its source can be trusted, and how many games have nothing to show because
+     they wait out the TV delay or their feed has stopped answering.
+- **`paint(at)`** asks the board (`BoardSession`) what should be up: a card, chosen by the queue and
+  held by its dwell, or an explicit frame (idle, held, offline). It draws that through the
+  `RendererRegistry`, a stale card dimmed, and commits it to the `DisplaySink`. The commit starts a
+  card's dwell and books its turn in the queue, so a card that never reached the panel spends none of
+  it. Painting runs at a frame rate, so scrolling lines, countdowns and blinks move, and never fetches.
+- **`run_once(at)`** is one refresh, then one paint: the single deterministic pass replay drives.
+- **`refresh_deadline(at)`** says when a refresh next has something to do by itself (a play clearing
+  the delay, the source going stale); **`next_deadline(at)`** adds the board's own (a card's minimum,
+  its turn, its expiry).
 
-Both passes are deterministic for a given ``now`` and collaborators, so the real-time runner is a thin
-wrapper and a `FakeClock` with a fixture timeline yields stable traces. Render and display failures are
-isolated: a paint reports its failure in `Painted.render_error` and the loop keeps going.
+Both passes are deterministic for a given clock reading and collaborators, so the real-time runner is a
+thin wrapper and a `FakeClock` with a fixture timeline yields stable traces. Render and display failures
+are isolated: a paint reports its failure in `Painted.render_error` and the loop keeps going.
 
-Each pick that reaches the panel is traced once, at its first committed frame, with how its matchup
-was drawn (`Presentation`).
+Each card that reaches the panel is traced at its first committed frame, with how its matchup was drawn
+(`Presentation`).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, tzinfo
+from datetime import datetime, timedelta, tzinfo
 from typing import Any
 
 from omni.app.contest_store import ContestStore, Reconciliation
@@ -37,33 +43,49 @@ from omni.app.pipeline import (
     PregameDetailsFetcher,
     WinProbFetcher,
 )
-from omni.app.supervisor import ProviderStatus, ProviderSupervisor
+from omni.app.supervisor import ProviderStatus, ProviderSupervisor, SupervisedSnapshot
 from omni.cards.base import CardId, ScoreboardCard
+from omni.core.clock import ClockReading, MonotonicTime
 from omni.domain.contest import TeamGame
-from omni.queue.scheduler import InterleavedCardQueue, Pick, SelectionReason
+from omni.queue.scheduler import InterleavedCardQueue, SelectionReason
+from omni.renderers.board_frame import BoardFrameRenderer
+from omni.renderers.canvas import DimmedCanvas
 from omni.renderers.context import RenderContext
 from omni.renderers.image import LogoStore
 from omni.renderers.registry import RendererRegistry
 from omni.renderers.text_lane import DEFAULT_MARQUEE, LaneClock, Marquee, MarqueeStyle
 from omni.renderers.visual_treatment import MatchupVisualTreatment, VisualContrastPolicy, resolve_matchup_treatment
+from omni.tower.board import (
+    BoardFrame,
+    BoardHealth,
+    BoardPayload,
+    BoardPolicy,
+    BoardSession,
+    FrameKind,
+    SourceHealth,
+)
+from omni.tower.lane import ChangeKind, LaneChange, earliest
 
-__all__ = ["AppLoop", "Decision", "Painted", "Presentation", "TickResult"]
+__all__ = ["OFFLINE_AFTER", "AppLoop", "Painted", "Presentation", "Refresh", "TickResult"]
+
+# How long the schedule may go unanswered before the board takes its cards down and says it's offline.
+OFFLINE_AFTER = timedelta(minutes=10)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class Decision:
-    """What one decision pass found and chose (deterministic for a given input)."""
+class Refresh:
+    """What one refresh found (deterministic for a given input)."""
 
     at: datetime
     provider_status: ProviderStatus
+    health: BoardHealth  # what the board was told: its source's health, and games held in the TV delay
     reconciliation: Reconciliation | None  # None when no snapshot was available to apply
     pipeline: PipelineResult
-    pick: Pick | None  # what the board shows until the next decision; None when nothing is eligible
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Presentation:
-    """A pick's first committed frame: what went up, why, and how its teams were drawn."""
+    """A card's first committed frame: what went up, why, and how its teams were drawn."""
 
     at: datetime
     card: CardId
@@ -76,24 +98,30 @@ class Presentation:
 class Painted:
     """What one paint did."""
 
-    shown: CardId | None  # the card committed this frame; None when nothing was drawn
-    render_error: str | None  # an isolated render or display failure, if any
-    presented: Presentation | None  # set on the first committed frame of a newly picked card
+    at: datetime
+    shown: CardId | None  # the card committed this frame; None for a frame, or when the paint failed
+    reason: SelectionReason | None = None  # why the queue chose the card shown
+    frame: FrameKind | None = None  # the explicit frame committed, when that's what is up
+    stale: bool = False  # the card was drawn marked stale
+    render_error: str | None = None  # an isolated render or display failure, if any
+    presented: Presentation | None = None  # set on a card's first committed frame
+    changes: tuple[LaneChange[BoardPayload], ...] = ()  # what the board did since the last paint
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class TickResult:
-    """A trace of one ``run_once`` pass: a decision, then a paint (deterministic for a given input)."""
+    """A trace of one ``run_once`` pass: a refresh, then a paint (deterministic for a given input)."""
 
     provider_status: ProviderStatus
     reconciliation: Reconciliation | None  # None when no snapshot was available to apply
     pipeline: PipelineResult
     shown: CardId | None  # the card committed to the display this tick
+    frame: FrameKind | None  # the explicit frame committed this tick
     render_error: str | None  # an isolated render/display failure, if any
 
 
 class AppLoop:
-    """Holds the spine's collaborators; decides and paints one pass at a time."""
+    """Holds the spine's collaborators; refreshes and paints one pass at a time."""
 
     def __init__(
         self,
@@ -112,6 +140,8 @@ class AppLoop:
         logos: LogoStore | None = None,
         display_timezone: tzinfo | None = None,
         marquee: MarqueeStyle = DEFAULT_MARQUEE,
+        policy: BoardPolicy = BoardPolicy(),
+        offline_after: timedelta = OFFLINE_AFTER,
     ) -> None:
         self._supervisor = supervisor
         self._store = store
@@ -127,13 +157,13 @@ class AppLoop:
         self._logos = logos  # ambient tile store handed to every RenderContext; None -> color-bar fallback
         self._marquee = Marquee(style=marquee, clock=LaneClock())  # how lines scroll, and when each went up
         self._display_timezone = display_timezone  # the zone board clocks read in; None -> the render clock's
-        # The decision pass hands its pick to the paint pass through this one reference; a pick is
-        # immutable, so the two can run on different threads.
-        self._pick: Pick | None = None
-        self._presented: Pick | None = None  # the last pick to reach the panel
+        self._offline_after = offline_after
+        self._board = BoardSession(queue, sink.profile, policy=policy)
+        self._frames = BoardFrameRenderer()
+        self._health_changes_at: datetime | None = None  # when the source's health next changes by itself
 
-    def decide(self, now: datetime) -> Decision:
-        """One decision pass as of ``now``: refresh what's known, then pick what the board shows."""
+    def refresh(self, now: datetime) -> Refresh:
+        """One refresh as of ``now``: bring the cards up to date, and tell the board how its source stands."""
         snapshot = self._supervisor.poll(now)
         reconciliation = self._store.apply(snapshot.update) if snapshot.update is not None else None
 
@@ -147,58 +177,109 @@ class AppLoop:
             fetch_pregame_details=self._fetch_pregame_details,
             fetch_game_lines=self._fetch_game_lines,
         )
-
-        pick = self._queue.pick(now, self._sink.profile)
-        self._pick = pick  # with nothing eligible, painting stops and the panel keeps its last frame
-        return Decision(
+        self._queue.prune(now)
+        health = self._health(snapshot, pipeline_result)
+        self._board.health = health
+        return Refresh(
             at=now,
             provider_status=snapshot.status,
+            health=health,
             reconciliation=reconciliation,
             pipeline=pipeline_result,
-            pick=pick,
         )
 
-    def paint(self, now: datetime) -> Painted:
-        """Draw the current pick as of ``now`` and commit it; nothing while there's no pick."""
-        pick = self._pick
-        if pick is None:
-            return Painted(shown=None, render_error=None, presented=None)
+    def paint(self, at: ClockReading) -> Painted:
+        """Draw what the board says should be up at ``at``, and commit it."""
+        cue = self._board.cue(at)
+        payload = cue.payload
         context = RenderContext(
             profile=self._sink.profile,
-            now=now,
+            now=at.utc,
             logos=self._logos,
             timezone=self._display_timezone,
             marquee=self._marquee,
         )
         try:
             frame = self._sink.new_frame()
-            self._registry.render(pick.card, context, frame)
+            canvas = DimmedCanvas(frame) if cue.stale else frame
+            if isinstance(payload, BoardFrame):
+                self._frames.render(payload, context, canvas)
+            else:
+                self._registry.render(payload, context, canvas)
             self._sink.commit(frame)
         except Exception as exc:  # isolate render/display failures — never crash the loop
-            return Painted(shown=None, render_error=f"{type(exc).__name__}: {exc}", presented=None)
+            changes = tuple(self._board.changes())
+            return Painted(at=at.utc, shown=None, render_error=f"{type(exc).__name__}: {exc}", changes=changes)
+        self._board.committed(cue, at)
+        changes = tuple(self._board.changes())
+        if isinstance(payload, BoardFrame):
+            return Painted(at=at.utc, shown=None, frame=payload.kind, changes=changes)
         presented = None
-        if pick is not self._presented:
-            self._presented = pick
+        if cue.reason is not None and any(change.kind is ChangeKind.UP for change in changes):
             presented = Presentation(
-                at=now,
-                card=pick.card.id,
-                reason=pick.reason,
-                treatment=_treatment(pick.card, context),
+                at=at.utc,
+                card=payload.id,
+                reason=cue.reason,
+                treatment=_treatment(payload, context),
                 contrast=context.contrast,
             )
-        return Painted(shown=pick.card.id, render_error=None, presented=presented)
+        return Painted(
+            at=at.utc, shown=payload.id, reason=cue.reason, stale=cue.stale, presented=presented, changes=changes
+        )
 
-    def run_once(self, now: datetime) -> TickResult:
-        """One decision, then one paint, as of ``now``."""
-        decision = self.decide(now)
-        painted = self.paint(now)
+    def run_once(self, at: ClockReading) -> TickResult:
+        """One refresh, then one paint, at ``at``."""
+        refresh = self.refresh(at.utc)
+        painted = self.paint(at)
         return TickResult(
-            provider_status=decision.provider_status,
-            reconciliation=decision.reconciliation,
-            pipeline=decision.pipeline,
+            provider_status=refresh.provider_status,
+            reconciliation=refresh.reconciliation,
+            pipeline=refresh.pipeline,
             shown=painted.shown,
+            frame=painted.frame,
             render_error=painted.render_error,
         )
+
+    def refresh_deadline(self, at: ClockReading) -> MonotonicTime | None:
+        """When a refresh would next find something changed by itself, as of ``at``: a state or play clearing
+        the delay, a final's reveal, a stale game's cards coming down, the source going stale or offline."""
+        instants = [self._pipeline.next_deadline(at.utc), self._health_changes_at]
+        return earliest(at.monotonic + (instant - at.utc) for instant in instants if instant is not None)
+
+    def next_deadline(self, at: ClockReading) -> MonotonicTime | None:
+        """When either pass next has something to do by itself, as of ``at``."""
+        return earliest((self.refresh_deadline(at), self._board.next_deadline(at)))
+
+    def _health(self, snapshot: SupervisedSnapshot, result: PipelineResult) -> BoardHealth:
+        """The board's view of its source, from the schedule's last-known-good, and how many games have nothing
+        on the board because their card is still inside the TV delay."""
+        carded = self._queue.contests()
+        held = sum(1 for game_id in result.held if game_id not in carded)
+        unfed = sum(1 for game_id in result.stale if game_id not in carded)
+        update, age = snapshot.update, snapshot.age
+        error = snapshot.last_error or "no answer"
+        if update is None or age is None:
+            self._health_changes_at = None
+            return BoardHealth(source=SourceHealth.OFFLINE, reason=f"no schedule yet: {error}", held=held, unfed=unfed)
+        # Ages are whole seconds, and a limit is passed only once a full second over it.
+        second = timedelta(seconds=1)
+        max_age = self._supervisor.max_age.as_timedelta()
+        if age.as_timedelta() > self._offline_after:
+            self._health_changes_at = None
+            reason = f"no schedule for over {_span(self._offline_after)}: {error}"
+            return BoardHealth(source=SourceHealth.OFFLINE, reason=reason, held=held, unfed=unfed)
+        if snapshot.status is ProviderStatus.STALE:
+            self._health_changes_at = update.observed_at + self._offline_after + second
+            reason = f"no schedule for over {_span(max_age)}: {error}"
+            return BoardHealth(source=SourceHealth.STALE, reason=reason, held=held, unfed=unfed)
+        self._health_changes_at = update.observed_at + max_age + second
+        return BoardHealth(source=SourceHealth.FRESH, held=held, unfed=unfed)
+
+
+def _span(span: timedelta) -> str:
+    """A limit as a log reads it: ``2m``, or ``90s`` when it isn't whole minutes."""
+    seconds = int(span.total_seconds())
+    return f"{seconds // 60}m" if seconds % 60 == 0 else f"{seconds}s"
 
 
 def _treatment(card: ScoreboardCard[Any], context: RenderContext) -> MatchupVisualTreatment | None:

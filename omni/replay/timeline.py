@@ -18,7 +18,8 @@ An `Outage` is a span when every source fails: the schedule and every game's fee
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from bisect import bisect_right
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from omni.core.enum import GameStatus
@@ -74,10 +75,22 @@ class Timeline:
 
     frames: tuple[GameFrame, ...]
     outages: tuple[Outage, ...] = ()
+    # Each game's frames in time order, with their instants beside them for a binary search.
+    _by_game: dict[LeagueScopedId, tuple[list[datetime], list[GameFrame]]] = field(
+        init=False, repr=False, compare=False, hash=False
+    )
 
     def __post_init__(self) -> None:
         if not self.frames:
             raise ValueError("a timeline needs at least one frame")
+        by_game: dict[LeagueScopedId, list[GameFrame]] = {}
+        for frame in self.frames:
+            by_game.setdefault(frame.game.id, []).append(frame)
+        index = {}
+        for game_id, frames in by_game.items():
+            frames.sort(key=lambda frame: frame.at)  # stable: of two frames at one instant, the later listed wins
+            index[game_id] = ([frame.at for frame in frames], frames)
+        object.__setattr__(self, "_by_game", index)
 
     @property
     def start(self) -> datetime:
@@ -97,16 +110,16 @@ class Timeline:
 
     def frame_at(self, game_id: LeagueScopedId, now: datetime) -> GameFrame | None:
         """The latest frame for ``game_id`` at or before ``now`` (None before its first)."""
-        candidates = [frame for frame in self.frames if frame.game.id == game_id and frame.at <= now]
-        return max(candidates, key=lambda frame: frame.at) if candidates else None
+        instants, frames = self._by_game.get(game_id, ([], []))
+        found = bisect_right(instants, now)
+        return frames[found - 1] if found else None
 
     def schedule_at(self, now: datetime) -> tuple[TeamGame, ...]:
         """Every game in the schedule as of ``now``, each at its effective status.
 
         Sorted by id so the provider snapshot — and the resulting trace — is stable.
         """
-        ids = {frame.game.id for frame in self.frames}
-        effective = [self.frame_at(game_id, now) for game_id in ids]
+        effective = [self.frame_at(game_id, now) for game_id in self._by_game]
         games = [frame.game for frame in effective if frame is not None]
         return tuple(sorted(games, key=lambda game: str(game.id)))
 

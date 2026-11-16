@@ -74,3 +74,7 @@ class DelayedEventStream(Generic[EventValueT]):
     def pending(self) -> int:
         """How many events are held, waiting for their TV-delay to elapse."""
         return len(self._pending)
+
+    def next_eligible(self) -> datetime | None:
+        """When the next held event clears the delay, or None if none is held."""
+        return min((self._policy.eligible_at(obs) for obs in self._pending), default=None)
