@@ -27,7 +27,7 @@ from datetime import date, datetime, timedelta
 from enum import Enum, IntEnum
 from typing import Any, Generic, TypeVar
 
-from omni.app.clock import ClockReading, MonotonicTime
+from omni.core.clock import ClockReading, MonotonicTime
 from omni.core.enum import StrEnumMixin
 from omni.core.ids import LeagueScopedId
 

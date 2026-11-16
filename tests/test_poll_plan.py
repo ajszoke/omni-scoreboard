@@ -6,7 +6,7 @@ from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
-from omni.app.clock import FakeClock
+from omni.core.clock import FakeClock
 from omni.app.poll_plan import PollKey, PollPlan, PollPolicy, PollPriority, PollSource
 
 T0 = datetime(2026, 6, 17, 23, 0, tzinfo=timezone.utc)

@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
-from omni.app.clock import SystemClock
+from omni.core.clock import SystemClock
 from omni.app.football_feed import RETRY_AFTER_FAILURE, BackgroundFeed, FeedResult, GameFeed
 from omni.providers.nfl_teams import NflTeamRegistry
 from omni.providers.nflmeta import NFLMETA_SOURCE, NflMetaLiveProvider

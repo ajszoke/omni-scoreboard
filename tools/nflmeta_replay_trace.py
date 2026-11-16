@@ -32,7 +32,7 @@ from typing import Any
 _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT))  # so `omni` resolves when this script is run directly
 
-from omni.app.clock import FakeClock
+from omni.core.clock import FakeClock
 from omni.app.football_feed import FeedResult, GameFeed
 from omni.domain.football import FootballGameState
 from omni.events.football import FootballEvent

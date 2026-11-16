@@ -13,7 +13,7 @@ import threading
 from collections.abc import Callable
 from datetime import timedelta
 
-from omni.app.clock import Clock, Pacer
+from omni.core.clock import Clock, Pacer
 
 __all__ = ["Repeating"]
 

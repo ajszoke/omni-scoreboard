@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections import Counter
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
@@ -17,13 +18,15 @@ from omni.core.ids import LeagueScopedId, SourceRef
 from omni.core.time import DurationSeconds
 from omni.domain.baseball import BaseballBaseState, BaseballCount, BaseballGameState, InningPhase
 from omni.domain.contest import TeamGame
+from omni.providers.base import ProviderError
 from omni.providers.mlb_teams import MlbTeamRegistry
-from omni.replay.harness import ReplayProvider, TraceEntry, replay
-from omni.replay.timeline import GameFrame, Timeline
+from omni.replay.harness import ReplayProvider, TraceEntry, decisions, replay
+from omni.replay.timeline import GameFrame, Outage, Timeline
 
 T0 = datetime(2026, 6, 17, 23, 0, tzinfo=timezone.utc)
 SOURCE = SourceRef("mlb_statsapi", "https://statsapi.mlb.com")
 QUAD = PanelProfile.QUAD_128X64
+SLATE_DECISIONS = Path(__file__).parent / "fixtures" / "replay" / "mlb-slate.decisions.txt"
 _REG = MlbTeamRegistry.from_color_file()
 
 
@@ -154,3 +157,53 @@ def test_replay_provider_serves_the_schedule_as_of_now() -> None:
     assert update.observed_at == T0
     assert tuple(c.id.raw for c in update.contests) == ("g1",)
     assert provider.refresh(T0 - timedelta(seconds=1)).contests == ()  # before the first frame
+
+
+def test_decisions_list_what_went_up_and_moments_with_nothing() -> None:
+    timeline = Timeline(frames=(_live(T0, "g1"),))
+    trace = replay(
+        timeline,
+        profile=QUAD,
+        tick=DurationSeconds(10),
+        until=T0 + timedelta(seconds=40),
+        broadcast_lag=DurationSeconds(30),
+    )
+    assert decisions(trace, start=T0) == [
+        "     0.0  source  fresh",
+        "     0.0  none    nothing eligible",
+        "    30.0  up      g1:live  (rotation)",
+    ]
+
+
+def test_an_outage_fails_the_schedule_and_every_feed() -> None:
+    timeline = Timeline(
+        frames=(_live(T0, "g1"),),
+        outages=(Outage(start=T0 + timedelta(seconds=10), end=T0 + timedelta(seconds=200)),),
+    )
+    provider = ReplayProvider(timeline)
+    with pytest.raises(ProviderError, match="outage"):
+        provider.refresh(T0 + timedelta(seconds=10))
+    trace = replay(timeline, profile=QUAD, tick=DurationSeconds(10), until=T0 + timedelta(seconds=200))
+    lines = decisions(trace, start=T0)
+    # The schedule's last answer (at 0 s) is past its age at 130 s, and the frozen live card stays up through
+    # it; the schedule answers again once the outage ends.
+    assert lines == [
+        "     0.0  source  fresh",
+        "     0.0  up      g1:live  (rotation)",
+        "   130.0  source  stale",
+        "   200.0  source  fresh",
+    ]
+
+
+def test_a_game_without_a_state_has_no_feed() -> None:
+    final_without_state = GameFrame(at=T0, game=_game("g1", GameStatus.FINAL))
+    trace = replay(Timeline(frames=(final_without_state,)), profile=QUAD, tick=DurationSeconds(10))
+    assert [entry.shown for entry in trace] == [None]  # the final can't be read, so it never reveals
+
+
+def test_the_slate_replays_to_its_recorded_decisions() -> None:
+    from tests.mlb_slate import END, FAVORITES, LAG, slate
+    from tests.mlb_slate import T0 as SLATE_T0
+
+    trace = replay(slate(), profile=QUAD, tick=DurationSeconds(12), until=END, broadcast_lag=LAG, favorites=FAVORITES)
+    assert decisions(trace, start=SLATE_T0) == SLATE_DECISIONS.read_text().splitlines()

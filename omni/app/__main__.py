@@ -22,7 +22,7 @@ import subprocess
 from pathlib import Path
 from typing import Sequence, cast
 
-from omni.app.clock import SystemClock
+from omni.core.clock import SystemClock
 from omni.app.display import MatrixDevice, MatrixDisplaySink
 from omni.app.runner import build_loop, run_forever
 from omni.core.enum import PanelProfile

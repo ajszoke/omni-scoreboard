@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from omni.app.clock import ClockReading, MonotonicTime
+from omni.core.clock import ClockReading, MonotonicTime
 from omni.app.display import RecordingDisplaySink
 from omni.app.football import _parse_args
 from omni.app.football_feed import GameFeed

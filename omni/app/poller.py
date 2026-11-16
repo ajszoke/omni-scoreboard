@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 
 from omni.app.background import Repeating
-from omni.app.clock import Clock
+from omni.core.clock import Clock
 from omni.app.poll_plan import Ask, PollPlan
 
 __all__ = ["Poller"]

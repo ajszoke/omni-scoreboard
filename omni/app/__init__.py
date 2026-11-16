@@ -11,7 +11,7 @@ runner that powers ``python -m omni.app``.
 
 from __future__ import annotations
 
-from omni.app.clock import Clock, ClockReading, FakeClock, MonotonicTime, Pacer, SystemClock
+from omni.core.clock import Clock, ClockReading, FakeClock, MonotonicTime, Pacer, SystemClock
 from omni.app.contest_store import ContestStore, Reconciliation
 from omni.app.display import DisplaySink, MatrixDevice, MatrixDisplaySink, RecordingDisplaySink
 from omni.app.loop import AppLoop, Decision, Painted, Presentation, TickResult

@@ -31,7 +31,7 @@ from datetime import timedelta
 from enum import Enum
 from typing import Generic
 
-from omni.app.clock import ClockReading, MonotonicTime
+from omni.core.clock import ClockReading, MonotonicTime
 from omni.core.enum import StrEnumMixin
 from omni.tower.segment import Cue, PayloadT, Segment, SegmentKey, Surface
 

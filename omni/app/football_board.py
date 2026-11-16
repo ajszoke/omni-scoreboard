@@ -42,7 +42,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, tzinfo
 from typing import Any
 
-from omni.app.clock import ClockReading, MonotonicTime
+from omni.core.clock import ClockReading, MonotonicTime
 from omni.app.display import DisplaySink
 from omni.app.football_feed import AFTER_FINAL, FeedResult, FeedSource
 from omni.cards.base import CardId, CardKind, CardPriority, DedupeKey, DisplayTiming, LayoutSupport, ScoreboardCard

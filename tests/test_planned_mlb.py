@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from omni.app.clock import FakeClock
+from omni.core.clock import FakeClock
 from omni.app.display import RecordingDisplaySink
 from omni.app.planned_mlb import MLB_POLICIES, PlannedMlb
 from omni.app.poll_plan import PollPlan

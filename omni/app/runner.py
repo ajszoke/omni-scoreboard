@@ -15,7 +15,7 @@ from collections.abc import Callable
 from datetime import timedelta, tzinfo
 
 from omni.app.background import Repeating
-from omni.app.clock import Clock, Pacer
+from omni.core.clock import Clock, Pacer
 from omni.app.contest_store import ContestStore
 from omni.app.display import DisplaySink
 from omni.app.loop import AppLoop

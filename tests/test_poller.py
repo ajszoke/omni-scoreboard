@@ -6,7 +6,7 @@ import threading
 import time
 from datetime import date, datetime, timedelta, timezone
 
-from omni.app.clock import FakeClock, SystemClock
+from omni.core.clock import FakeClock, SystemClock
 from omni.app.poll_plan import PollKey, PollPlan, PollPolicy, PollPriority, PollSource
 from omni.app.poller import Poller
 

@@ -8,10 +8,10 @@ import pytest
 
 from omni.core.enum import GameStatus, League
 from omni.core.ids import LeagueScopedId, SourceRef
-from omni.domain.baseball import BaseballBaseState, BaseballCount, BaseballGameState, InningPhase
+from omni.domain.baseball import BaseballBaseState, BaseballCount, BaseballGameState, InningPhase, PitchingDecisions
 from omni.domain.contest import TeamGame
 from omni.providers.mlb_teams import MlbTeamRegistry
-from omni.replay.timeline import GameFrame, Timeline
+from omni.replay.timeline import GameFrame, Outage, Timeline
 
 T0 = datetime(2026, 6, 17, 23, 0, tzinfo=timezone.utc)
 SOURCE = SourceRef("mlb_statsapi", "https://statsapi.mlb.com")
@@ -109,3 +109,34 @@ def test_schedule_is_sorted_by_id_for_stable_traces() -> None:
     )
     raws = [game.id.raw for game in timeline.schedule_at(T0)]
     assert raws == sorted(raws)
+
+
+def test_an_outage_is_aware_and_ends_after_it_starts() -> None:
+    with pytest.raises(ValueError, match="timezone-aware"):
+        Outage(start=datetime(2026, 6, 17, 23, 0), end=T0)
+    with pytest.raises(ValueError, match="end after"):
+        Outage(start=T0, end=T0)
+
+
+def test_changes_list_every_frame_and_outage_boundary_once_in_order() -> None:
+    later = T0 + timedelta(minutes=5)
+    timeline = Timeline(
+        frames=(
+            GameFrame(at=later, game=_game("g1", GameStatus.PREGAME)),
+            GameFrame(at=T0, game=_game("g1", GameStatus.PREGAME)),
+            GameFrame(at=T0, game=_game("g2", GameStatus.PREGAME)),
+        ),
+        outages=(Outage(start=T0 + timedelta(minutes=1), end=later),),
+    )
+    assert timeline.changes == (T0, T0 + timedelta(minutes=1), later)
+    assert not timeline.down_at(T0)
+    assert timeline.down_at(T0 + timedelta(minutes=1)) and not timeline.down_at(later)
+
+
+def test_a_frame_carries_its_plays_and_decisions() -> None:
+    decisions = PitchingDecisions(winner="A. Winner", loser="B. Loser")
+    frame = GameFrame(at=T0, game=_game("g1", GameStatus.FINAL), state=_state(2, 1), decisions=decisions)
+    timeline = Timeline(frames=(frame,))
+    assert timeline.frame_at(_gid("g1"), T0) is frame
+    assert timeline.frame_at(_gid("g1"), T0 - timedelta(seconds=1)) is None
+    assert frame.events == () and frame.decisions == decisions

@@ -26,7 +26,7 @@ from datetime import date, datetime, timedelta
 from typing import Protocol
 from zoneinfo import ZoneInfo
 
-from omni.app.clock import Clock, ClockReading
+from omni.core.clock import Clock, ClockReading
 from omni.app.pipeline import WinProbFetcher
 from omni.app.poll_plan import PollKey, PollPlan, PollPolicy, PollPriority, PollSource
 from omni.app.supervisor import BackoffPolicy

@@ -6,7 +6,7 @@ import threading
 from datetime import timedelta
 
 from omni.app.background import Repeating
-from omni.app.clock import SystemClock
+from omni.core.clock import SystemClock
 
 _SOON = 5.0  # seconds a test waits for a thread before calling it stuck
 
