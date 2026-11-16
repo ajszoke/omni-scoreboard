@@ -3,7 +3,8 @@
 Status: **accepted in external review round 4** (2026-11-15). A1a is built as the tower's first slice
 (see "Steps"), and the head's rulings below amend the target. A1a step 1 is built (2026-11-16): the
 two-reading clock, decisions apart from frames, fetches and frame writes off the frame path, and basic
-traces; "Today" describes the result. This doc is the target that new timing code should move toward,
+traces. A1a step 2 is built too: MLB's fetches run from a typed `PollPlan`. "Today" describes the
+result. This doc is the target that new timing code should move toward,
 so that we don't add more one-off timers in the meantime.
 
 ## Why
@@ -21,8 +22,9 @@ has to be handled like flights at a control tower:
 
 | Where | What it times | Driven by |
 |---|---|---|
-| `omni/app/runner.py` `run_forever`, `AppLoop.decide` and `AppLoop.paint` (MLB) | decisions (polling, pipeline, card queue) on a worker thread; painting the current pick on the main thread | decisions once a tick, 12 s by default; frames at `--fps`, 10 by default |
-| `ProviderSupervisor` | backoff after failures | `now` passed per call |
+| `omni/app/runner.py` `run_forever`, `AppLoop.decide` and `AppLoop.paint` (MLB) | decisions (pipeline, card queue) on a worker thread, reading the plan's answers; painting the current pick on the main thread | decisions once a tick, 12 s by default; frames at `--fps`, 10 by default |
+| `PollPlan` + `Poller` + `PlannedMlb` (MLB) | what to ask when: slates for the previous and current local dates, each live game's feed, market and model probabilities; one ask in flight per key, priority cadence within a per-source quota, three quick retries, last good until `keep_for` | the plan on monotonic time; a poller thread checking every 250 ms, with four workers |
+| `ProviderSupervisor` | last-known-good and stale status for the slate (its backoff is off for a planned slate) | `now` passed per call |
 | `LiveBaseballPipeline` (`DelayPolicy`, `DelayedFeed`, `DelayedEventStream`) | TV delay anchored to when a play happened; meter readings; the final's embargo | `now` per tick |
 | `InterleavedCardQueue` | which card next: two-level rotation, BURST takeover windows, RECURRING cooldowns | `now` per tick; **dwell is "the render loop's job", and no such loop exists** |
 | `FootballBoard.step` (single-game NFL) | a receipt-anchored `--delay` buffer, meter lag, closing out a period before a break | ~10 fps frame loop, taking whatever answers have arrived |
@@ -131,10 +133,10 @@ Round 4 groups the first five as A1a:
    Small. *Done in A1a step 1.*
 2. **Take provider fetches off the frame thread**, in both football and MLB. A worker posts
    observations and drawing never blocks. Small to medium. *A1a step 1 moved them off the frame
-   paths; the `PollPlan` (A1a step 2) gives the fetches their own plan.*
+   paths. In A1a step 2, MLB's fetches left the decision pass too: the `PollPlan` says what is due,
+   the poller's workers ask it, and decisions read the answers.*
 3. **One clock seam everywhere.** The football launcher uses `SystemClock`, and monotonic time is
-   used only to pace sleeps. Small. *Done in A1a step 1, except stamping MLB's receipts, which comes
-   with the `PollPlan`.*
+   used only to pace sleeps. Small. *Done in A1a steps 1 and 2: MLB states are now dated by receipt.*
 4. **Build the scheduling primitives** (segment, surface/lane, timer heap, tower interface) with
    `PlayStrip` as the first consumer. Behavior stays identical, proven by replaying the recorded
    PIT@CIN game frame for frame. Medium.

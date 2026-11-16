@@ -4,7 +4,9 @@
 feed fetcher, and a display sink — the one place the standard wiring lives, so the
 emulator entry, a future hardware entry, and tests all build the loop the same way.
 `run_forever` is the thin real-time wrapper: decisions on a thread of their own, once a
-tick, and frames on this one at a steady rate, so a slow fetch never freezes the panel.
+tick, and frames on this one at a steady rate, so a slow fetch never freezes the panel. Given
+a `Poller`, it warms the plan up first (the slate, then its games, then a pass that can show
+them) and then leaves the fetching to the poller's workers.
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ from omni.app.clock import Clock, Pacer
 from omni.app.contest_store import ContestStore
 from omni.app.display import DisplaySink
 from omni.app.loop import AppLoop
+from omni.app.poller import Poller
 from omni.app.pipeline import (
     FeedFetcher,
     GameLinesFetcher,
@@ -36,7 +39,9 @@ from omni.renderers.image import LogoStore
 from omni.renderers.registry import default_registry
 from omni.renderers.text_lane import DEFAULT_MARQUEE, MarqueeStyle
 
-__all__ = ["build_loop", "run_forever"]
+__all__ = ["build_loop", "run_forever", "warm_up"]
+
+_WARM_UP_PASSES = 3  # the slate, then its games' feeds, then a pass that can show them
 
 
 def build_loop(
@@ -92,6 +97,13 @@ def build_loop(
     )
 
 
+def warm_up(loop: AppLoop, poller: Poller, clock: Clock) -> None:
+    """Fill the plan before the board starts: decide, then ask what that decision wanted, a few times."""
+    for _ in range(_WARM_UP_PASSES):
+        loop.decide(clock.now())
+        poller.run_due()
+
+
 def run_forever(
     loop: AppLoop,
     clock: Clock,
@@ -100,8 +112,12 @@ def run_forever(
     fps: float = 10.0,
     log: Callable[[str], None] = print,
     timezone: tzinfo | None = None,
+    poller: Poller | None = None,
 ) -> None:  # pragma: no cover - real-time loop
     """Decide once a `tick` on a worker thread, and paint the current pick `fps` times a second here."""
+    if poller is not None:
+        warm_up(loop, poller, clock)
+        poller.start()
     tracer = DecisionTracer(log, timezone=timezone)
     every = tick.as_timedelta()
 

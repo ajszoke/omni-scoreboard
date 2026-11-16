@@ -7,6 +7,8 @@ emulator (browser at http://localhost:8888/). This is the thin I/O shell around 
 deterministic `AppLoop`; everything testable lives in `runner.py` / `loop.py`.
 Decisions run once a ``--tick``; frames draw ``--fps`` times a second in between, so
 scrolling lines and countdowns move. Each decision that changes something is traced.
+The network is read by a poller on its own threads, on the cadences in
+`omni.app.planned_mlb.MLB_POLICIES`; decisions read its latest answers.
 
 With ``OMNI_CLOUD_URL`` and ``OMNI_CLOUD_TOKEN`` in the environment or a git-ignored ``.env``, the
 win meter reads Omni's market service (``cloud/``); without them it reads Polymarket's public quotes.
@@ -20,17 +22,12 @@ import subprocess
 from pathlib import Path
 from typing import Sequence, cast
 
-from datetime import datetime
-
 from omni.app.clock import SystemClock
 from omni.app.display import MatrixDevice, MatrixDisplaySink
 from omni.app.runner import build_loop, run_forever
 from omni.core.enum import PanelProfile
 from omni.core.env import read_env_file
 from omni.core.time import DurationSeconds
-from omni.domain.baseball import WinProbability
-from omni.domain.contest import TeamGame
-from omni.events.baseball import LiveBaseballFeed
 from omni.panels.geometry import geometry_for
 from omni.renderers.image import LogoStore
 from omni.renderers.text_lane import DEFAULT_MARQUEE, ScrollSpeed
@@ -116,11 +113,13 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
         fetch_market_win_probability = PolymarketUsProvider().win_probability
         meter = "Polymarket public quotes"
 
-    def fetch_feed(game: TeamGame, now: datetime) -> LiveBaseballFeed:
-        return provider.fetch_live_feed(game, now=now)
+    from omni.app.planned_mlb import MLB_POLICIES, NO_BACKOFF, PlannedMlb
+    from omni.app.poll_plan import PollPlan
+    from omni.app.poller import Poller
 
-    def fetch_model_win_probability(game: TeamGame, _now: datetime) -> WinProbability | None:
-        return provider.fetch_win_probability(game)
+    clock = SystemClock()
+    plan = PollPlan(MLB_POLICIES)
+    planned = PlannedMlb(plan, clock, provider, market=fetch_market_win_probability, favorites=frozenset(args.favorite))
 
     from RGBMatrixEmulator import RGBMatrix, RGBMatrixOptions
 
@@ -136,13 +135,14 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
     # protocol. Assert the boundary match precisely instead of blanket-ignoring the whole call.
     sink = MatrixDisplaySink(cast(MatrixDevice, matrix), profile)
     loop = build_loop(
-        provider,
-        fetch_feed,
+        planned,  # the slate, from the plan
+        planned.fetch_feed,
         sink,
         favorites=frozenset(args.favorite),
         broadcast_lag=DurationSeconds(args.delay),
-        fetch_win_probability=fetch_market_win_probability,  # per-team meter, delayed with the score
-        fetch_fallback_win_probability=fetch_model_win_probability,  # when the market goes quiet or has no game
+        backoff=NO_BACKOFF,  # the plan does the retrying
+        fetch_win_probability=planned.fetch_win_probability,  # per-team meter, delayed with the score
+        fetch_fallback_win_probability=planned.fetch_fallback_win_probability,  # when the market goes quiet
         fetch_pregame_details=provider.fetch_pregame_details,
         fetch_game_lines=odds.lines_for if odds is not None else None,
         logos=LogoStore(),  # resolve committed team tiles from assets/ (lazy, cached)
@@ -155,11 +155,12 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
     )
     run_forever(
         loop,
-        SystemClock(),
+        clock,
         tick=DurationSeconds(args.tick),
         fps=args.fps,
         log=lambda line: print(line, flush=True),
         timezone=zone,
+        poller=Poller(plan, clock),
     )
     return 0
 
