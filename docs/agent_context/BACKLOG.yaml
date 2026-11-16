@@ -241,16 +241,28 @@ milestones:
   - id: M6
     name: nfl_support
     goal: "First non-MLB league."
+    notes:
+      - "Started 2026-11-15 by the user's call, ahead of the A1 cutover: MLB is off until spring, and NFL Sundays are the live field for multi-game work."
+      - "Legacy salvage (legacy/master data/nfl, renderers/nfl, Jan-Feb 2023): the play-banner spec and summarizers, banner tones, possession sprite and timeout pips carry over; its NFL.com private-API client does not. Its 14 recorded 2022 games stay a local test corpus."
     tasks:
       - id: M6-001
-        title: "ESPN NFL provider spike"
-        labels: [nfl, provider, p1]
+        title: "NFL live data provider (NFLMeta Builder, polled once in the cloud)"
+        labels: [nfl, provider, cloud, p1]
+        notes:
+          - "Chosen 2026-11-15 over ESPN (Disney's terms bar automated access) and pricier licensed feeds; see SOURCES.md. Spike recorded with tools/nflmeta_record.py. Live plays carried no timeouts in the first game, so check before relying on them."
       - id: M6-002
         title: "NFL domain/events/cards"
         labels: [nfl, typing, rendering, p1]
+        notes:
+          - "Done 2026-11-15: FootballGameState, the live card on all three profiles, NFL team registry, palette and logo tiles. Remaining: pregame, final and big-play cards, and the play summarizer from the legacy spec."
       - id: M6-003
         title: "NFL red-zone/scoring/turnover priority"
         labels: [nfl, priority, p2]
+      - id: M6-004
+        title: "Multi-league plumbing before NFL runs in the app"
+        labels: [nfl, app, p1]
+        notes:
+          - "ContestStore replaces all contests per update; the loop has one supervisor and one baseball pipeline; card keys use only the raw game id; favorites match bare abbreviations, which collide across leagues (DET, MIN, KC)."
 
   - id: M7
     name: nba_support

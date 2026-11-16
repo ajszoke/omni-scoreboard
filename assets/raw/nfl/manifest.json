@@ -1,0 +1,295 @@
+{
+  "ARI": {
+    "sources": {
+      "primary.svg": {
+        "sha256": "51d92710c6a9c2cdf6a98b2d002dbb558aa7876b00500eadd9b36aa0b62bb940",
+        "source": "wikimedia",
+        "url": "https://upload.wikimedia.org/wikipedia/en/7/72/Arizona_Cardinals_logo.svg?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=original"
+      }
+    }
+  },
+  "ATL": {
+    "sources": {
+      "primary.svg": {
+        "sha256": "6a0d10b4ec820fdaace92fbfff183e4012b96088757dbc9518a9f0c9eb27bfda",
+        "source": "wikimedia",
+        "url": "https://upload.wikimedia.org/wikipedia/en/c/c5/Atlanta_Falcons_logo.svg?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=original"
+      }
+    }
+  },
+  "BAL": {
+    "sources": {
+      "primary.svg": {
+        "sha256": "b432c1fb09256b73e37c33682a3fa31279f1ab4c3358db222e9d742008b8e471",
+        "source": "wikimedia",
+        "url": "https://upload.wikimedia.org/wikipedia/en/1/16/Baltimore_Ravens_logo.svg?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=original"
+      }
+    }
+  },
+  "BUF": {
+    "sources": {
+      "primary.svg": {
+        "sha256": "df357c101de528965bfdad731dbd2923182dae40e95d42ddf6b74b638e12106f",
+        "source": "wikimedia",
+        "url": "https://upload.wikimedia.org/wikipedia/commons/a/a9/Buffalo_Bills_logo_1974-present.svg?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=original"
+      }
+    }
+  },
+  "CAR": {
+    "sources": {
+      "primary.svg": {
+        "sha256": "98cbb23978b3df1254c16a50f470719cb73f9dd5ecc355970a0a4fdcfd6decfd",
+        "source": "wikimedia",
+        "url": "https://upload.wikimedia.org/wikipedia/en/1/1c/Carolina_Panthers_logo.svg?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=original"
+      }
+    }
+  },
+  "CHI": {
+    "sources": {
+      "primary.svg": {
+        "sha256": "199a573e4b11fb7fbd37557c98598f1426304e60ad60742aaf4586f93c22f5a8",
+        "source": "wikimedia",
+        "url": "https://upload.wikimedia.org/wikipedia/commons/5/5c/Chicago_Bears_logo.svg?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=original"
+      }
+    }
+  },
+  "CIN": {
+    "sources": {
+      "primary.svg": {
+        "sha256": "ea9dd831e4b669839eaf2379ae6ea2f14e11ba744075e70e010f8720db1f1593",
+        "source": "wikimedia",
+        "url": "https://upload.wikimedia.org/wikipedia/commons/8/81/Cincinnati_Bengals_logo.svg?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=original"
+      }
+    }
+  },
+  "CLE": {
+    "sources": {
+      "primary.svg": {
+        "sha256": "772a3e82aed540570fbef8a367940f2b4d1cd4f858ed7bdd6fb3cc4081aa7ad9",
+        "source": "wikimedia",
+        "url": "https://upload.wikimedia.org/wikipedia/en/d/d9/Cleveland_Browns_logo.svg?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=original"
+      }
+    }
+  },
+  "DAL": {
+    "sources": {
+      "primary.svg": {
+        "sha256": "ec3d0499cd11ba6cf60cca8a37bc188f64794cfce9f51544d1526971a75e7bb2",
+        "source": "wikimedia",
+        "url": "https://upload.wikimedia.org/wikipedia/commons/1/15/Dallas_Cowboys.svg?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=original"
+      }
+    }
+  },
+  "DEN": {
+    "sources": {
+      "primary.svg": {
+        "sha256": "20527ac2c38c7d38d3ec9f7f003702df1b4f085cb88df0399cd9abd7b2276dfe",
+        "source": "wikimedia",
+        "url": "https://upload.wikimedia.org/wikipedia/en/4/44/Denver_Broncos_logo.svg?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=original"
+      }
+    }
+  },
+  "DET": {
+    "sources": {
+      "primary.svg": {
+        "sha256": "dcd4dd917280a47cbaf1b4674a205e618f199e95c46e7e4badccab99d62bc114",
+        "source": "wikimedia",
+        "url": "https://upload.wikimedia.org/wikipedia/en/7/71/Detroit_Lions_logo.svg?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=original"
+      }
+    }
+  },
+  "GB": {
+    "sources": {
+      "primary.svg": {
+        "sha256": "8c15f9d8e337f5d2244b85a5ead37b9a76a03e68c40bb7a7026a52578d5f95a8",
+        "source": "wikimedia",
+        "url": "https://upload.wikimedia.org/wikipedia/commons/5/50/Green_Bay_Packers_logo.svg?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=original"
+      }
+    }
+  },
+  "HOU": {
+    "sources": {
+      "primary.svg": {
+        "sha256": "60803124feb00a4b878f58d67a5765cf403ae122fc50ff03b32ce38348d35428",
+        "source": "wikimedia",
+        "url": "https://upload.wikimedia.org/wikipedia/en/2/28/Houston_Texans_logo.svg?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=original"
+      }
+    }
+  },
+  "IND": {
+    "sources": {
+      "primary.svg": {
+        "sha256": "0b2f28f6f9b98f299c7a9939f111090bb8a0ae748a3ba046649ce9ef64712324",
+        "source": "wikimedia",
+        "url": "https://upload.wikimedia.org/wikipedia/commons/0/00/Indianapolis_Colts_logo.svg?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=original"
+      }
+    }
+  },
+  "JAX": {
+    "sources": {
+      "primary.svg": {
+        "sha256": "af514b6ffc661d33dc759f3ad7158ae9e8085373e1a21a4e9f101fe00dbebd2b",
+        "source": "wikimedia",
+        "url": "https://upload.wikimedia.org/wikipedia/en/7/74/Jacksonville_Jaguars_logo.svg?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=original"
+      }
+    }
+  },
+  "KC": {
+    "sources": {
+      "primary.svg": {
+        "sha256": "37babd334452218aff6c59474c1e7faae63678df2e9c30af7222899be2ed088a",
+        "source": "wikimedia",
+        "url": "https://upload.wikimedia.org/wikipedia/commons/e/e1/Kansas_City_Chiefs_logo.svg?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=original"
+      }
+    }
+  },
+  "LAC": {
+    "sources": {
+      "primary.svg": {
+        "sha256": "e60b7068b5cf2975ad65c143e7a30f1471b09efca86571c9d8b661c0fe6a5e1d",
+        "source": "wikimedia",
+        "url": "https://upload.wikimedia.org/wikipedia/en/7/72/NFL_Chargers_logo.svg?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=original"
+      }
+    }
+  },
+  "LAR": {
+    "sources": {
+      "primary.svg": {
+        "sha256": "4d0cc37efcc30eadfd40fd518b710f7d433bf5b1837baa27b312e658f278a30f",
+        "source": "wikimedia",
+        "url": "https://upload.wikimedia.org/wikipedia/en/1/14/LA_Rams_logo.svg?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=original"
+      }
+    }
+  },
+  "LV": {
+    "sources": {
+      "primary.svg": {
+        "sha256": "b5c6fb2bc80efbf98de5482e1992598a811997b592aa7b94895c3f5e56c36329",
+        "source": "wikimedia",
+        "url": "https://upload.wikimedia.org/wikipedia/en/4/48/Las_Vegas_Raiders_logo.svg?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=original"
+      }
+    }
+  },
+  "MIA": {
+    "sources": {
+      "primary.svg": {
+        "sha256": "d863b73f86baf0675045a2beceeb275bd046305469f775d093df0671dd6acb9d",
+        "source": "wikimedia",
+        "url": "https://upload.wikimedia.org/wikipedia/en/3/37/Miami_Dolphins_logo.svg?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=original"
+      }
+    }
+  },
+  "MIN": {
+    "sources": {
+      "primary.svg": {
+        "sha256": "165aa105949afbd5f5ed6ba48fb23cfab7ad46009eb310f3efac69e17221d0b8",
+        "source": "wikimedia",
+        "url": "https://upload.wikimedia.org/wikipedia/en/4/48/Minnesota_Vikings_logo.svg?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=original"
+      }
+    }
+  },
+  "NE": {
+    "sources": {
+      "primary.svg": {
+        "sha256": "ed83650e14e1719256177f9f321bbb7df367eb005459f59e48c38a870c8e1188",
+        "source": "wikimedia",
+        "url": "https://upload.wikimedia.org/wikipedia/en/b/b9/New_England_Patriots_logo.svg?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=original"
+      }
+    }
+  },
+  "NO": {
+    "sources": {
+      "primary.svg": {
+        "sha256": "d60da303f4cbb557e5973aa0ac30c71de0505927b5da3f5180acc5dd33e63be4",
+        "source": "wikimedia",
+        "url": "https://upload.wikimedia.org/wikipedia/commons/5/50/New_Orleans_Saints_logo.svg?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=original"
+      }
+    }
+  },
+  "NYG": {
+    "sources": {
+      "primary.svg": {
+        "sha256": "6abe4c098c4f0747e794597fc19944d45217805c9b2a2118c9b432d0468666be",
+        "source": "wikimedia",
+        "url": "https://upload.wikimedia.org/wikipedia/commons/6/60/New_York_Giants_logo.svg?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=original"
+      }
+    }
+  },
+  "NYJ": {
+    "sources": {
+      "primary.svg": {
+        "sha256": "6f5e972e9cb0cbad3199bec99eedd6632b3a0620a55590a7b08ce61aa85b5b7e",
+        "source": "wikimedia",
+        "url": "https://upload.wikimedia.org/wikipedia/en/6/6b/New_York_Jets_logo.svg?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=original"
+      }
+    }
+  },
+  "PHI": {
+    "sources": {
+      "primary.svg": {
+        "sha256": "3e9c3bbf850721be97c22d68d23748b2a3887540cb27c0addf5225f4e91bbbab",
+        "source": "wikimedia",
+        "url": "https://upload.wikimedia.org/wikipedia/en/8/8e/Philadelphia_Eagles_logo.svg?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=original"
+      }
+    }
+  },
+  "PIT": {
+    "sources": {
+      "primary.svg": {
+        "sha256": "d5bf31a941253c691cf1961bc4c0afcfb2c1f21f91a337827259dd5fe9b4a27f",
+        "source": "wikimedia",
+        "url": "https://upload.wikimedia.org/wikipedia/commons/d/de/Pittsburgh_Steelers_logo.svg?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=original"
+      }
+    }
+  },
+  "SEA": {
+    "sources": {
+      "primary.svg": {
+        "sha256": "dd9832cd6dc07ce42f50e3dec7649076616ceaa9d9cfb22db8e4c6f7ac680438",
+        "source": "wikimedia",
+        "url": "https://upload.wikimedia.org/wikipedia/en/8/8e/Seattle_Seahawks_logo.svg?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=original"
+      }
+    }
+  },
+  "SF": {
+    "sources": {
+      "primary.svg": {
+        "sha256": "d3ae8fd9ca796f940e6215df987a2949bdc5825a23f589105afee71bef3c7d9d",
+        "source": "wikimedia",
+        "url": "https://upload.wikimedia.org/wikipedia/commons/3/3a/San_Francisco_49ers_logo.svg?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=original"
+      }
+    }
+  },
+  "TB": {
+    "sources": {
+      "primary.svg": {
+        "sha256": "3d372481ce0e7a7d7ca24d8afff731d97074c12bd3d002c8ea689a9d160909fa",
+        "source": "wikimedia",
+        "url": "https://upload.wikimedia.org/wikipedia/en/a/a2/Tampa_Bay_Buccaneers_logo.svg?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=original"
+      }
+    }
+  },
+  "TEN": {
+    "sources": {
+      "primary.svg": {
+        "sha256": "3c4911318e1c3d4afe94af5f2cb8439b8b1602afb911801c57036943ed5a89e0",
+        "source": "wikimedia",
+        "url": "https://upload.wikimedia.org/wikipedia/en/5/53/Tennessee_Titans_Logo_2026.svg?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=original"
+      }
+    }
+  },
+  "WAS": {
+    "sources": {
+      "primary.svg": {
+        "sha256": "ac025f70149b69d5bfe37eafa697e4c256d300493c2be50b0bba866fc3fba90a",
+        "source": "wikimedia",
+        "url": "https://upload.wikimedia.org/wikipedia/commons/e/e2/Washington_commanders.svg?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=original"
+      }
+    }
+  },
+  "_team_table": {
+    "license": "CC BY 4.0 (nflverse); the logos themselves are team trademarks",
+    "sha256": "4eab559fcf89cb4eaf61cb63a88abc47b01b6c9049187c59f3efe95888c3d048",
+    "url": "https://github.com/nflverse/nflverse-data/releases/download/teams/teams_colors_logos.csv"
+  }
+}

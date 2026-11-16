@@ -18,41 +18,22 @@ runtime never renders SVG). Run ``fetch_mlb_logos`` first, then this, from the r
 
 from __future__ import annotations
 
-import io
 import os
 import sys
-from dataclasses import dataclass
 
-import cairosvg
 import numpy as np
-from PIL import Image
-from scipy import ndimage
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # repo root, for `omni`
 
 from omni.core.colors import RGBColor  # noqa: E402
 from omni.providers.mlb_palette import LOGO_ALT_COLOR  # noqa: E402
 from omni.providers.mlb_teams import _TEAM_ID_INFO  # noqa: E402
+from tools.logo_tiles import Treatment, rasterize, tile  # noqa: E402
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _RAW = os.path.join(_ROOT, "assets", "raw", "mlb")
 _OUT = os.path.join(_ROOT, "assets", "logos", "mlb")
-_RENDER_PX = 240
-_SIZE = 20
-_PAD = 2
 _DARK_LUMA = 0.45  # below this a background takes the light (cap-on-dark) mark
-
-
-@dataclass(frozen=True, slots=True)
-class Treatment:
-    """How one tile variant is built: which source, on what background, adjusted how."""
-
-    bg: RGBColor
-    source: str | None = None  # source stem; None -> cap polarity chosen by bg luminance
-    recolors: tuple[tuple[RGBColor, RGBColor, int], ...] = ()  # (from, to, tolerance)
-    knockout: RGBColor | None = None  # make this colour transparent before cropping
-    dx: int = 0  # nudge the centred mark horizontally
-    pad: int = _PAD  # margin inside the tile (smaller -> larger mark)
 
 
 # The primary background each base tile renders on (the liked set + TEX/PIT/CWS fixes).
@@ -129,75 +110,13 @@ def _treatment(team_id: int, slot: str) -> Treatment:
 
 def _render(team_id: int, treatment: Treatment) -> np.ndarray:
     """Rasterize the source — an SVG via cairosvg, or a pre-rendered Wikimedia PNG."""
-    stem = treatment.source or _surface(treatment.bg)
-    folder = os.path.join(_RAW, str(team_id))
-    png_path = os.path.join(folder, f"{stem}.png")
-    if os.path.exists(png_path):
-        return np.array(Image.open(png_path).convert("RGBA"))
-    png = cairosvg.svg2png(url=os.path.join(folder, f"{stem}.svg"), output_width=_RENDER_PX, output_height=_RENDER_PX)
-    return np.array(Image.open(io.BytesIO(png)).convert("RGBA"))
-
-
-def _knockout(rgba: np.ndarray, color: RGBColor, tol: int = 45) -> np.ndarray:
-    """Make a baked-in background colour transparent (so the crop is the mark, not a square)."""
-    rgb = rgba[:, :, :3].astype(int)
-    near = np.sqrt(((rgb - [color.r, color.g, color.b]) ** 2).sum(2)) <= tol
-    out = rgba.copy()
-    out[near, 3] = 0
-    return out
-
-
-def _detrademark(rgba: np.ndarray, min_frac: float = 0.04) -> np.ndarray:
-    """Drop a tiny isolated component only in the bottom-right (the (TM)/(R) zone).
-
-    Position-gating keeps legitimate small body parts — the apostrophe of "A's" sits
-    mid-mark, so it survives while the corner trademark glyph is removed.
-    """
-    height, width = rgba.shape[:2]
-    solid = rgba[:, :, 3] > 30
-    labels, count = ndimage.label(solid)
-    if count <= 1:
-        return rgba
-    areas = ndimage.sum(solid, labels, range(1, count + 1))
-    centroids = ndimage.center_of_mass(solid, labels, range(1, count + 1))
-    out = rgba.copy()
-    for index, (area, (cy, cx)) in enumerate(zip(areas, centroids), start=1):
-        in_corner = cy > 0.62 * height and cx > 0.55 * width
-        if area < min_frac * areas.max() and in_corner:
-            out[labels == index, 3] = 0
-    return out
-
-
-def _recolor(rgba: np.ndarray, recolors: tuple[tuple[RGBColor, RGBColor, int], ...]) -> np.ndarray:
-    # Masks are computed against the ORIGINAL so rules can't chain — a two-colour swap
-    # (NYM orange<->white) works because each side keys off the unmodified image.
-    out = rgba.copy()
-    rgb = rgba[:, :, :3].astype(int)
-    opaque = rgba[:, :, 3] > 30
-    for frm, to, tol in recolors:
-        near = np.sqrt(((rgb - [frm.r, frm.g, frm.b]) ** 2).sum(2)) <= tol
-        out[opaque & near, :3] = [to.r, to.g, to.b]
-    return out
-
-
-def _compose(rgba: np.ndarray, bg: RGBColor, dx: int, pad: int) -> Image.Image:
-    alpha = rgba[:, :, 3]
-    ys, xs = np.where(alpha > 30)
-    mark = Image.fromarray(rgba[ys.min() : ys.max() + 1, xs.min() : xs.max() + 1])
-    mark.thumbnail((_SIZE - 2 * pad, _SIZE - 2 * pad), Image.Resampling.LANCZOS)
-    tile = Image.new("RGBA", (_SIZE, _SIZE), (bg.r, bg.g, bg.b, 255))
-    tile.alpha_composite(mark, ((_SIZE - mark.width) // 2 + dx, (_SIZE - mark.height) // 2))
-    return tile.convert("RGB")
+    return rasterize(os.path.join(_RAW, str(team_id)), treatment.source or _surface(treatment.bg))
 
 
 def build(team_id: int, abbr: str) -> None:
     for slot, suffix in (("base", ""), ("alt", "-alt")):
         t = _treatment(team_id, slot)
-        rgba = _render(team_id, t)
-        if t.knockout is not None:
-            rgba = _knockout(rgba, t.knockout)
-        rgba = _recolor(_detrademark(rgba), t.recolors)
-        _compose(rgba, t.bg, t.dx, t.pad).save(os.path.join(_OUT, f"{abbr}{suffix}.png"))
+        tile(_render(team_id, t), t).save(os.path.join(_OUT, f"{abbr}{suffix}.png"))
 
 
 def main() -> None:
