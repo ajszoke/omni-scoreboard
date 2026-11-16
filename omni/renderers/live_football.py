@@ -17,13 +17,17 @@ beside the score of the side with the ball.
   column on the right stacking quarter, clock, down and distance, and the spot. No last-play strip.
 
 At an interval (end of a quarter, halftime) there is no next snap, so the down, distance, spot and
-clock give way to a label.
+clock give way to a label. Halftime keeps the challenges (they last the game) but not the timeouts,
+which start over. A final settles the meter, full for the winner (even on a tie), and dims the loser's
+abbreviation and score as the baseball final does; the marks stay in full color.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+import functools
+import math
+from datetime import datetime, timedelta
 from enum import Enum
 from typing import assert_never
 
@@ -31,6 +35,7 @@ from omni.cards.base import ScoreboardCard
 from omni.cards.football import LiveFootballCardPayload
 from omni.core.colors import RGBColor
 from omni.core.enum import HomeAway, PanelProfile
+from omni.domain.baseball import WinProbability
 from omni.domain.contest import TeamGame
 from omni.domain.football import (
     CHALLENGES_PER_GAME,
@@ -38,13 +43,15 @@ from omni.domain.football import (
     FootballInterval,
     PlaySummary,
     PlayTone,
+    SetPiece,
 )
 from omni.renderers.canvas import Canvas
+from omni.renderers.font import rasterize
 from omni.renderers.context import RenderContext
 from omni.renderers.line_score import RHE_BIG_FONT
 from omni.renderers.team_row import draw_treated_mark
 from omni.renderers.text import draw_centered, draw_right_aligned, text_width
-from omni.renderers.text_lane import TextLane, draw_text_lane
+from omni.renderers.text_lane import Marquee, TextLane, draw_text_lane
 from omni.renderers.visual_treatment import resolve_matchup_treatment
 from omni.renderers.win_meter import draw_win_meter
 
@@ -54,6 +61,7 @@ _BLACK = RGBColor(0, 0, 0)
 _WHITE = RGBColor(255, 255, 255)
 _YELLOW = RGBColor(255, 215, 0)  # the same state yellow the baseball card uses
 _RED = RGBColor(255, 50, 50)  # the legacy board's turnover red
+_LOSER = RGBColor(110, 110, 110)  # a final's loser, dimmed as on the baseball final but still legible
 _GREEN = RGBColor(60, 220, 90)
 _DIM = RGBColor(60, 60, 60)
 _BALL = RGBColor(255, 120, 0)  # the legacy possession marker's orange
@@ -134,6 +142,9 @@ _STATE_FONT = "8x13"
 _SMALL_FONT = "5x7"
 _TINY_FONT = "4x6"
 _SUFFIX_DROP = {_STATE_FONT: 1, _SCORE_FONT: 0, _SMALL_FONT: 0}  # where a raised suffix sits on each face
+_MICRO_FONT = "tom-thumb"
+# The next face down, for a label set a size smaller than the line it stands in for.
+_SIZE_DOWN = {_STATE_FONT: _SCORE_FONT, _SCORE_FONT: _SMALL_FONT, _SMALL_FONT: _TINY_FONT, _TINY_FONT: _MICRO_FONT}
 
 
 def period_parts(period: int) -> tuple[str, str]:
@@ -179,12 +190,17 @@ class _Suffix(Enum):
 _STACK_SUFFIX = _Suffix.INLINE  # at the stack's size a raised suffix is barely smaller than the number
 
 
-def _down_pieces(state: FootballGameState, font: str, *, suffix: _Suffix, goal: str = "Goal") -> list[_Piece] | None:
+def _down_pieces(
+    state: FootballGameState, font: str, *, suffix: _Suffix, goal: str = "Goal", kickoff: str = "KICKOFF"
+) -> list[_Piece] | None:
     """The down and distance, ``3rd & 7``, with ``goal`` standing in for the distance at goal to go.
 
-    None with no live down. The ampersand keeps a pixel of air either side, so ``2&3`` can't run
-    together into ``283``.
+    A kickoff names itself (``kickoff``) in the down's place. None with no live down. The ampersand
+    keeps a pixel of air either side, so ``2&3`` can't run together into ``283``.
     """
+    if state.set_piece is SetPiece.KICKOFF:
+        smaller = _SIZE_DOWN[font]  # a size down, on the down line's bottom row
+        return [_Piece(kickoff, smaller, drop=_bottom_row(font) - _bottom_row(smaller))]
     if state.down is None or state.distance is None:
         return None
     number, ordinal = period_parts(state.down)
@@ -195,6 +211,13 @@ def _down_pieces(state: FootballGameState, font: str, *, suffix: _Suffix, goal: 
         pieces.append(_Piece(ordinal, font))
     rest = goal if state.goal_to_go else str(state.distance)
     return [*pieces, _Piece("&", font, gap=_AMP_GAP), _Piece(rest, font, gap=_AMP_GAP)]
+
+
+@functools.cache
+def _bottom_row(font: str) -> int:
+    """The lowest lit row of a capital in ``font``, counted from its cell's top."""
+    rows = rasterize(font, "E")
+    return max(i for i, row in enumerate(rows) if any(row))
 
 
 def _spot_pieces(game: TeamGame, state: FootballGameState, font: str, *, gap: int) -> list[_Piece] | None:
@@ -230,12 +253,56 @@ def _draw_pieces_centered(canvas: Canvas, left: int, right: int, y: int, pieces:
     _draw_pieces(canvas, left + (right - left - _pieces_width(pieces)) // 2, y, pieces, color)
 
 
-def _interval_words(state: FootballGameState) -> tuple[str, str]:
-    """An interval as two words to stack or set side by side: ``HALF`` / ``TIME``, or ``END`` / ``1st``."""
+def _winner(state: FootballGameState) -> HomeAway | None:
+    """The side a final went to; None while the game goes on, or for a tie."""
+    if state.interval is not FootballInterval.FINAL or state.away_score == state.home_score:
+        return None
+    return HomeAway.AWAY if state.away_score > state.home_score else HomeAway.HOME
+
+
+def _meter(state: FootballGameState, payload: LiveFootballCardPayload) -> WinProbability | None:
+    """The win meter: the market's reading while the game goes on, then the result, full for the winner."""
+    if state.interval is not FootballInterval.FINAL:
+        return payload.win_probability
+    winner = _winner(state)
+    if winner is None:
+        return WinProbability(home=50.0, away=50.0)  # a tie splits it
+    won = 100.0 if winner is HomeAway.HOME else 0.0
+    return WinProbability(home=won, away=100.0 - won)
+
+
+def _side_color(state: FootballGameState, side: HomeAway) -> RGBColor:
+    """White for a side's abbreviation and score; dimmed for a final's loser."""
+    winner = _winner(state)
+    return _LOSER if winner is not None and side is not winner else _WHITE
+
+
+def _interval_words(state: FootballGameState, payload: LiveFootballCardPayload, now: datetime) -> tuple[str, ...]:
+    """A break as words to stack or set side by side: ``HALF`` / ``TIME``, ``END`` / ``1st``, ``FINAL`` / ``OT``.
+
+    A halftime whose end the payload knows counts down to it instead, ``HALF`` / ``12:34``.
+    """
     if state.interval is FootballInterval.HALFTIME:
-        return "HALF", "TIME"
+        ends = payload.break_ends_at
+        return ("HALF", _countdown(ends - now)) if ends is not None and now < ends else ("HALF", "TIME")
+    if state.interval is FootballInterval.FINAL:
+        return ("FINAL", "OT") if state.is_overtime else ("FINAL",)
     number, suffix = period_parts(state.period)
     return "END", number + suffix
+
+
+def _countdown(left: timedelta) -> str:
+    """Time left on a running clock, ``12:34``, its colon blinking once a second to show it's running."""
+    seconds = left.total_seconds()
+    shown = clock_text(math.ceil(seconds))
+    return shown if seconds % 1.0 >= 0.5 else shown.replace(":", " ")  # the same width: the digits hold still
+
+
+def _word_rows(words: tuple[str, ...], rows: tuple[int, int]) -> list[tuple[str, int]]:
+    """Words against two row positions; a lone word sits midway between them."""
+    if len(words) == 1:
+        return [(words[0], sum(rows) // 2)]
+    return list(zip(words, rows))
 
 
 class LiveFootballRenderer:
@@ -281,20 +348,23 @@ class LiveFootballRenderer:
         for side, team, mark, top, score in rows:
             draw_treated_mark(canvas, context, team, mark)
             lane_x = _QUAD_TILE_LANE_X
+            color = _side_color(state, side)
             if not mark.is_tile:  # a bare color bar can't name the club, so the abbreviation stays
-                canvas.text(_BAR_ABBR_X, top + 5, team.abbreviation, _WHITE, font=_SCORE_FONT)
+                canvas.text(_BAR_ABBR_X, top + 5, team.abbreviation, color, font=_SCORE_FONT)
                 lane_x = _QUAD_BAR_LANE_X
             self._allowances(canvas, state, side, x=lane_x, row_top=top, row_height=_QUAD_ROW_HEIGHT)
-            draw_right_aligned(canvas, _QUAD_SCORE_RIGHT, top + 1, str(score), _WHITE, RHE_BIG_FONT)
+            draw_right_aligned(canvas, _QUAD_SCORE_RIGHT, top + 1, str(score), color, RHE_BIG_FONT)
             if state.possession is side:
                 _sprite(canvas, _QUAD_BALL_X, top + 8, _BALL_SPRITE, _BALL)
-        if payload.win_probability is not None:
-            draw_win_meter(canvas, treatment, payload.win_probability)
-        self._quad_state_module(canvas, game, state)
+        if (meter := _meter(state, payload)) is not None:
+            draw_win_meter(canvas, treatment, meter)
+        self._quad_state_module(canvas, game, state, _interval_words(state, payload, context.now))
         if payload.last_play is not None:
-            self._play_strip(canvas, payload.last_play, now=context.now)
+            self._play_strip(canvas, payload.last_play, now=context.now, marquee=context.marquee)
 
-    def _quad_state_module(self, canvas: Canvas, game: TeamGame, state: FootballGameState) -> None:
+    def _quad_state_module(
+        self, canvas: Canvas, game: TeamGame, state: FootballGameState, words: tuple[str, ...]
+    ) -> None:
         """Quarter and clock over the down and distance over the spot, right of the score block.
 
         The quarter's suffix is raised beside its number, the way a broadcast bug writes it, and the
@@ -302,7 +372,7 @@ class LiveFootballRenderer:
         """
         left, right = _QUAD_MODULE_LEFT, _QUAD_MODULE_RIGHT
         if state.interval is not None:
-            for word, y in zip(_interval_words(state), _QUAD_INTERVAL_Y):
+            for word, y in _word_rows(words, _QUAD_INTERVAL_Y):
                 draw_centered(canvas, left, right, y, word, _YELLOW, _STATE_FONT)
             return
         clock = clock_text(state.clock_seconds)
@@ -316,13 +386,13 @@ class LiveFootballRenderer:
         if spot is not None:
             _draw_pieces_centered(canvas, left, right, _QUAD_SPOT_Y, spot, _RED if state.in_red_zone else _YELLOW)
 
-    def _play_strip(self, canvas: Canvas, play: PlaySummary, *, now: datetime) -> None:
+    def _play_strip(self, canvas: Canvas, play: PlaySummary, *, now: datetime, marquee: Marquee) -> None:
         """The last play across the bottom: its headline in the play's color, the detail a size down in white."""
-        headline = TextLane(x=0, y=_QUAD_HEADLINE_Y, width=128, font=_SCORE_FONT)
-        draw_text_lane(canvas, headline, play.headline, _TONE_COLOR[play.tone], now=now)
+        headline = TextLane(x=0, y=_QUAD_HEADLINE_Y, width=128, font=_SCORE_FONT, style=marquee.style)
+        draw_text_lane(canvas, headline, play.headline, _TONE_COLOR[play.tone], now=now, clock=marquee.clock)
         if play.detail:
-            detail = TextLane(x=0, y=_QUAD_DETAIL_Y, width=128, font=_SMALL_FONT)
-            draw_text_lane(canvas, detail, play.detail, _WHITE, now=now)
+            detail = TextLane(x=0, y=_QUAD_DETAIL_Y, width=128, font=_SMALL_FONT, style=marquee.style)
+            draw_text_lane(canvas, detail, play.detail, _WHITE, now=now, clock=marquee.clock)
 
     # --- stack --------------------------------------------------------------------------------------
 
@@ -346,21 +416,21 @@ class LiveFootballRenderer:
         )
         for side, team, mark, top, score in rows:
             draw_treated_mark(canvas, context, team, mark)
+            color = _side_color(state, side)
             if not mark.is_tile:
-                canvas.text(_STACK_ABBR_X, top + 5, team.abbreviation, _WHITE, font=_SCORE_FONT)
+                canvas.text(_STACK_ABBR_X, top + 5, team.abbreviation, color, font=_SCORE_FONT)
             self._allowances(canvas, state, side, x=25, row_top=top, row_height=_QUAD_ROW_HEIGHT)
-            draw_centered(canvas, _STACK_SCORE_LEFT, _STACK_SCORE_RIGHT, top + 1, str(score), _WHITE, RHE_BIG_FONT)
+            draw_centered(canvas, _STACK_SCORE_LEFT, _STACK_SCORE_RIGHT, top + 1, str(score), color, RHE_BIG_FONT)
             if state.possession is side:
                 _sprite(canvas, _STACK_BALL_X, top + 8, _BALL_SPRITE, _BALL)
-        if payload.win_probability is not None:
-            draw_win_meter(canvas, treatment, payload.win_probability)
-        self._stack_band(canvas, game, state)
+        if (meter := _meter(state, payload)) is not None:
+            draw_win_meter(canvas, treatment, meter)
+        self._stack_band(canvas, game, state, _interval_words(state, payload, context.now))
 
-    def _stack_band(self, canvas: Canvas, game: TeamGame, state: FootballGameState) -> None:
+    def _stack_band(self, canvas: Canvas, game: TeamGame, state: FootballGameState, words: tuple[str, ...]) -> None:
         """The quarter and clock, then the down and distance beside the spot, each line centered."""
         if state.interval is not None:
-            first, second = _interval_words(state)
-            label = first + second if state.interval is FootballInterval.HALFTIME else f"{first} {second}"
+            label = "".join(words) if words == ("HALF", "TIME") else " ".join(words)
             draw_centered(canvas, 0, 64, _STACK_INTERVAL_Y, label, _YELLOW, _SCORE_FONT)
             return
         clock = _Piece(clock_text(state.clock_seconds), _SCORE_FONT, gap=text_width(" ", _SCORE_FONT))
@@ -368,22 +438,21 @@ class LiveFootballRenderer:
             canvas, 0, 64, _STACK_PERIOD_Y, [*_period_pieces(state.period, _SCORE_FONT), clock], _YELLOW
         )
         spot = _spot_pieces(game, state, _SMALL_FONT, gap=_STACK_SPOT_GAP)
-        if spot is None and state.down is None:
-            return
         spot_color = _RED if state.in_red_zone else _YELLOW
-        # The full down, "3rd & 7"; at goal to go "& Goal" can crowd the spot off the board, so it shortens to "& G".
-        runs = self._stack_runs(state, spot, spot_color, goal="Goal")
+        # The full down, "3rd & 7"; at goal to go "& Goal" can crowd the spot off the board, so it shortens to
+        # "& G", as "KICKOFF" does to "KICK".
+        runs = self._stack_runs(state, spot, spot_color, goal="Goal", kickoff="KICKOFF")
         if _runs_width(runs) > 64:
-            runs = self._stack_runs(state, spot, spot_color, goal="G")
+            runs = self._stack_runs(state, spot, spot_color, goal="G", kickoff="KICK")
         x = (64 - _runs_width(runs)) // 2
         for pieces, color in runs:
             x = _draw_pieces(canvas, x, _STACK_DOWN_Y, pieces, color) + _STACK_RUN_GAP
 
     @staticmethod
     def _stack_runs(
-        state: FootballGameState, spot: list[_Piece] | None, spot_color: RGBColor, *, goal: str
+        state: FootballGameState, spot: list[_Piece] | None, spot_color: RGBColor, *, goal: str, kickoff: str
     ) -> list[tuple[list[_Piece], RGBColor]]:
-        down = _down_pieces(state, _SMALL_FONT, suffix=_STACK_SUFFIX, goal=goal)
+        down = _down_pieces(state, _SMALL_FONT, suffix=_STACK_SUFFIX, goal=goal, kickoff=kickoff)
         return [(pieces, color) for pieces, color in ((down, _YELLOW), (spot, spot_color)) if pieces]
 
     # --- single -------------------------------------------------------------------------------------
@@ -412,23 +481,25 @@ class LiveFootballRenderer:
             self._single_dots(canvas, state, side, row_top=top)
             if state.possession is side:
                 _sprite(canvas, _SINGLE_BALL_X, top + 6, _BALL_SPRITE_SMALL, _BALL)
-            canvas.text(_SINGLE_ABBR_X, top + 5, team.abbreviation, _WHITE, font=abbr_font)
-            draw_right_aligned(canvas, _SINGLE_SCORE_RIGHT, top + 3, str(score), _WHITE, _SCORE_FONT)
-        if payload.win_probability is not None:
-            draw_win_meter(canvas, treatment, payload.win_probability)
-        self._single_column(canvas, game, state)
+            color = _side_color(state, side)
+            canvas.text(_SINGLE_ABBR_X, top + 5, team.abbreviation, color, font=abbr_font)
+            draw_right_aligned(canvas, _SINGLE_SCORE_RIGHT, top + 3, str(score), color, _SCORE_FONT)
+        if (meter := _meter(state, payload)) is not None:
+            draw_win_meter(canvas, treatment, meter)
+        self._single_column(canvas, game, state, _interval_words(state, payload, context.now))
 
-    def _single_column(self, canvas: Canvas, game: TeamGame, state: FootballGameState) -> None:
+    def _single_column(self, canvas: Canvas, game: TeamGame, state: FootballGameState, words: tuple[str, ...]) -> None:
         """Quarter, clock, down and distance, and spot, stacked and centered in the right-hand column."""
         left, right = _SINGLE_COLUMN_LEFT, _SINGLE_COLUMN_RIGHT
         if state.interval is not None:
-            for word, y in zip(_interval_words(state), _SINGLE_INTERVAL_Y):
-                draw_centered(canvas, left, right, y, word, _YELLOW, _SMALL_FONT)
+            for word, y in _word_rows(words, _SINGLE_INTERVAL_Y):
+                font = _SMALL_FONT if text_width(word, _SMALL_FONT) <= right - left else _TINY_FONT
+                draw_centered(canvas, left, right, y, word, _YELLOW, font)
             return
         period_y, clock_y, down_y, spot_y = _SINGLE_LINES_Y
         _draw_pieces_centered(canvas, left, right, period_y, _period_pieces(state.period, _SMALL_FONT), _YELLOW)
         draw_centered(canvas, left, right, clock_y, clock_text(state.clock_seconds), _YELLOW, _TINY_FONT)
-        down = _down_pieces(state, _TINY_FONT, suffix=_Suffix.NONE, goal="G")
+        down = _down_pieces(state, _TINY_FONT, suffix=_Suffix.NONE, goal="G", kickoff="KICK")
         if down is not None:
             _draw_pieces_centered(canvas, left, right, down_y, down, _YELLOW)
         spot = _spot_pieces(game, state, _TINY_FONT, gap=_SINGLE_SPOT_GAP)  # a pixel apart: PIT 8, not PIT8

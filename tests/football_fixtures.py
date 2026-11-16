@@ -43,6 +43,7 @@ def live_football_card(
     last_play: PlaySummary | None = None,
     win_probability: WinProbability | None = None,
     game: TeamGame | None = None,
+    break_ends_at: datetime | None = None,
 ) -> ScoreboardCard[LiveFootballCardPayload]:
     return ScoreboardCard(
         id=CardId("nfl-g1:live"),
@@ -52,5 +53,7 @@ def live_football_card(
         priority=CardPriority(band=DisplayPriority.FAVORITE, score=50.0),
         layout_support=LayoutSupport(profiles=frozenset(ALL_PROFILES)),
         dedupe_key=DedupeKey("nfl-g1:live"),
-        payload=LiveFootballCardPayload(state=state, last_play=last_play, win_probability=win_probability),
+        payload=LiveFootballCardPayload(
+            state=state, last_play=last_play, win_probability=win_probability, break_ends_at=break_ends_at
+        ),
     )

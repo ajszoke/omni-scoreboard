@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import dataclasses
 import os
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -17,6 +19,7 @@ from omni.domain.football import (
     FootballInterval,
     PlaySummary,
     PlayTone,
+    SetPiece,
     TeamChallenges,
     TeamTimeouts,
 )
@@ -24,6 +27,10 @@ from omni.panels.geometry import geometry_for
 from omni.renderers.canvas import RecordingCanvas
 from omni.renderers.context import RenderContext
 from omni.renderers.image import LogoStore
+from omni.renderers.live_football import _LOSER as LOSER
+from omni.renderers.live_football import _RED as RED
+from omni.renderers.live_football import _WHITE as WHITE
+from omni.renderers.live_football import _YELLOW as YELLOW
 from omni.renderers.live_football import LiveFootballRenderer, clock_text, period_parts
 from omni.renderers.pillow_canvas import PillowCanvas
 from tests.football_fixtures import ALL_PROFILES, T, live_football_card, nfl_game
@@ -93,6 +100,26 @@ STATES = {
         ),
         PlaySummary(tone=PlayTone.SCORE, headline="FG GOOD", detail="C.Boswell (52 yds)"),
         WinProbability(home=31.0, away=69.0),
+    ),
+    "kickoff": (
+        FootballGameState(
+            period=3,
+            clock_seconds=900,
+            away_score=3,
+            home_score=24,
+            possession=H,  # the kicking side, from its own 35
+            yards_to_goal=65,
+            set_piece=SetPiece.KICKOFF,
+            timeouts=TeamTimeouts(away=3, home=3),
+            challenges=TeamChallenges(away=2, home=0),
+        ),
+        None,  # a fresh half: nothing on the strip yet
+        WinProbability(home=97.0, away=3.0),
+    ),
+    "final": (
+        FootballGameState(period=4, clock_seconds=0, away_score=27, home_score=24, interval=FootballInterval.FINAL),
+        None,
+        None,
     ),
     "overtime": (
         FootballGameState(
@@ -260,3 +287,115 @@ def test_a_club_whose_tile_is_missing_falls_back_to_a_color_bar_and_its_abbrevia
 
     assert row_labels(without) == {"PIT", "CIN"}
     assert not row_labels(with_tiles)  # the logo names the club
+
+
+# How each board names a kickoff, a size smaller than its down line: the single's 23px column can't
+# take KICKOFF even then, so it says KICK.
+_KICKOFF_WITH_SPOT = {
+    PanelProfile.QUAD_128X64: "KICKOFF",
+    PanelProfile.STACK_64X64: "KICKOFF",
+    PanelProfile.SINGLE_64X32: "KICK",
+}
+_KICKOFF_ALONE = _KICKOFF_WITH_SPOT
+
+
+@pytest.mark.parametrize("profile", ALL_PROFILES)
+def test_a_kickoff_names_itself_in_the_downs_place_with_the_spot_its_kicked_from(profile: PanelProfile) -> None:
+    state, _, _ = STATES["kickoff"]
+    texts = _texts(state, profile)
+    assert _KICKOFF_WITH_SPOT[profile] in texts and "35" in texts
+    assert "&" not in texts
+
+
+@pytest.mark.parametrize("profile", ALL_PROFILES)
+def test_a_kickoff_whose_kicker_is_unknown_still_names_itself(profile: PanelProfile) -> None:
+    toss = FootballGameState(period=5, clock_seconds=600, away_score=20, home_score=20, set_piece=SetPiece.KICKOFF)
+    texts = _texts(toss, profile)
+    assert _KICKOFF_ALONE[profile] in texts and "35" not in texts
+
+
+@pytest.mark.parametrize("profile", ALL_PROFILES)
+def test_the_final_says_so_and_names_overtime(profile: PanelProfile) -> None:
+    state, _, _ = STATES["final"]
+    assert "FINAL" in " ".join(_texts(state, profile))
+    overtime = FootballGameState(
+        period=5, clock_seconds=0, away_score=23, home_score=20, interval=FootballInterval.FINAL
+    )
+    joined = " ".join(_texts(overtime, profile))
+    assert "FINAL" in joined and "OT" in joined
+
+
+_HALF = FootballGameState(
+    period=2,
+    clock_seconds=0,
+    away_score=3,
+    home_score=24,
+    interval=FootballInterval.HALFTIME,
+    possession=HomeAway.AWAY,  # the second half's receiver
+    challenges=TeamChallenges(away=2, home=1),  # they last the game; the timeouts start over, so none show
+)
+_HALF_METER = WinProbability(home=97.0, away=3.0)
+
+
+@pytest.mark.parametrize("profile", ALL_PROFILES)
+def test_a_halftime_hold_counts_down_with_a_blinking_colon(profile: PanelProfile) -> None:
+    lit = " ".join(_texts(_HALF, profile, break_ends_at=T + timedelta(seconds=754.7)))
+    dark = " ".join(_texts(_HALF, profile, break_ends_at=T + timedelta(seconds=754.3)))
+    assert "HALF" in lit and "12:35" in lit  # the colon lit for the first half of each second
+    assert "12 35" in dark and "12:35" not in dark  # and dark for the second, the digits held still
+    done = " ".join(_texts(_HALF, profile, break_ends_at=T - timedelta(seconds=1)))
+    assert "TIME" in done  # past its end: plain halftime again
+
+
+@pytest.mark.parametrize("profile", ALL_PROFILES)
+def test_golden_halftime_countdown(profile: PanelProfile) -> None:
+    width, height = geometry_for(profile).size
+    canvas = PillowCanvas(width, height)
+    card = live_football_card(_HALF, break_ends_at=T + timedelta(seconds=754.7), win_probability=_HALF_METER)
+    LiveFootballRenderer().render(card, RenderContext(profile=profile, now=T, logos=LOGOS), canvas)
+    _assert_matches_golden(canvas.image(), f"live_football_halftime_countdown_{profile.to_json_value()}.png")
+
+
+def _ops(state: FootballGameState, profile: PanelProfile, **card: object) -> RecordingCanvas:
+    width, height = geometry_for(profile).size
+    canvas = RecordingCanvas(width, height)
+    LiveFootballRenderer().render(live_football_card(state, **card), RenderContext(profile=profile, now=T), canvas)  # type: ignore[arg-type]
+    return canvas
+
+
+@pytest.mark.parametrize("profile", ALL_PROFILES)
+def test_halftime_keeps_the_challenges_and_the_meter_but_not_the_timeouts(profile: PanelProfile) -> None:
+    fills = {op.color for op in _ops(_HALF, profile, win_probability=_HALF_METER).rects()}
+    bare = {op.color for op in _ops(dataclasses.replace(_HALF, challenges=None), profile).rects()}
+    assert RED in fills - bare  # the challenge pips
+    assert YELLOW not in fills  # no timeouts over the break (and no red zone)
+
+
+@pytest.mark.parametrize("profile", ALL_PROFILES)
+def test_a_final_fills_the_winners_meter_and_dims_the_loser(profile: PanelProfile) -> None:
+    state, _, _ = STATES["final"]  # PIT 27, CIN 24
+    canvas = _ops(state, profile, win_probability=WinProbability(home=80.0, away=20.0))  # the market is moot now
+    scores = {op.text: op.color for op in canvas.texts() if op.text in ("27", "24")}
+    assert scores == {"27": WHITE, "24": LOSER}
+    settled = _ops(state, profile, win_probability=WinProbability(home=0.0, away=100.0))
+    assert canvas.rects() == settled.rects()  # the meter reads the result, not the market
+
+
+@pytest.mark.parametrize("profile", ALL_PROFILES)
+def test_a_tie_dims_neither_side_and_splits_the_meter(profile: PanelProfile) -> None:
+    tie = FootballGameState(period=5, clock_seconds=0, away_score=20, home_score=20, interval=FootballInterval.FINAL)
+    canvas = _ops(tie, profile)
+    assert {op.color for op in canvas.texts() if op.text == "20"} == {WHITE}
+    assert canvas.rects() == _ops(tie, profile, win_probability=WinProbability(home=50.0, away=50.0)).rects()
+
+
+@pytest.mark.parametrize("profile", ALL_PROFILES)
+def test_a_kickoff_label_is_a_size_down_on_the_down_lines_bottom_row(profile: PanelProfile) -> None:
+    state, _, _ = STATES["kickoff"]
+    width, height = geometry_for(profile).size
+    canvas = RecordingCanvas(width, height)
+    LiveFootballRenderer().render(live_football_card(state), RenderContext(profile=profile, now=T), canvas)
+    label = next(op for op in canvas.texts() if op.text in ("KICKOFF", "KICK"))
+    down_face = {PanelProfile.QUAD_128X64: "8x13", PanelProfile.STACK_64X64: "5x7", PanelProfile.SINGLE_64X32: "4x6"}
+    smaller = {"8x13": "6x10", "5x7": "4x6", "4x6": "tom-thumb"}[down_face[profile]]
+    assert label.font == smaller

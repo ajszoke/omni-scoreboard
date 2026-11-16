@@ -19,6 +19,7 @@ __all__ = [
     "FootballInterval",
     "PlaySummary",
     "PlayTone",
+    "SetPiece",
     "TeamChallenges",
     "TeamTimeouts",
     "other_side",
@@ -32,10 +33,17 @@ CHALLENGES_PER_GAME = 2  # a third is earned only by winning both, by which poin
 
 
 class FootballInterval(StrEnumMixin, str, Enum):
-    """A pause between periods, when there is no live down to show."""
+    """A pause between periods, or the end of the game: no live down to show."""
 
     END_OF_QUARTER = "end_of_quarter"
     HALFTIME = "halftime"
+    FINAL = "final"
+
+
+class SetPiece(StrEnumMixin, str, Enum):
+    """A restart with no down, which a board names in the down's place."""
+
+    KICKOFF = "kickoff"
 
 
 class PlayTone(StrEnumMixin, str, Enum):
@@ -110,8 +118,9 @@ class FootballGameState:
     """One moment of a live football game.
 
     ``possession``, ``down``, ``distance`` and ``yards_to_goal`` describe the next snap and are all None
-    when there isn't one to describe: a kickoff, a try after a score, an interval, or a feed that
-    hasn't said. Overtime periods count on past 4.
+    when there isn't one to describe: a try after a score, an interval, or a feed that hasn't said. A
+    kickoff is a ``set_piece``: the kicking side has the ball, ``yards_to_goal`` counted from where it
+    kicks (65 from its own 35). Overtime periods count on past 4.
     """
 
     period: int
@@ -125,6 +134,7 @@ class FootballGameState:
     timeouts: TeamTimeouts | None = None
     challenges: TeamChallenges | None = None
     interval: FootballInterval | None = None
+    set_piece: SetPiece | None = None
 
     def __post_init__(self) -> None:
         if self.period < 1:
@@ -156,7 +166,12 @@ class FootballGameState:
 
     @property
     def in_red_zone(self) -> bool:
-        return self.possession is not None and self.yards_to_goal is not None and self.yards_to_goal <= _RED_ZONE
+        return (
+            self.set_piece is None
+            and self.possession is not None
+            and self.yards_to_goal is not None
+            and self.yards_to_goal <= _RED_ZONE
+        )
 
     @property
     def ball_on(self) -> FieldPosition | None:

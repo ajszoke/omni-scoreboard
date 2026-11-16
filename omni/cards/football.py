@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 
 from omni.cards.base import ScoreboardCard
 from omni.domain.baseball import WinProbability
@@ -18,6 +19,7 @@ class LiveFootballCardPayload:
     state: FootballGameState
     last_play: PlaySummary | None = None  # None hides the play strip
     win_probability: WinProbability | None = None  # drives the per-team meter; None hides it
+    break_ends_at: datetime | None = None  # when a break is expected to end; halftime counts down to it
 
 
 LiveFootballCard = ScoreboardCard[LiveFootballCardPayload]

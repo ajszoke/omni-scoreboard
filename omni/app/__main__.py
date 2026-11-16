@@ -31,6 +31,7 @@ from omni.domain.contest import TeamGame
 from omni.events.baseball import LiveBaseballFeed
 from omni.panels.geometry import geometry_for
 from omni.renderers.image import LogoStore
+from omni.renderers.text_lane import DEFAULT_MARQUEE, ScrollSpeed
 
 __all__ = ["main"]
 
@@ -55,6 +56,12 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         help="IANA zone for the schedule day and board clocks, e.g. America/Denver (default America/New_York)",
     )
     parser.add_argument("--no-odds", action="store_true", help="leave sportsbook odds off the pregame card")
+    parser.add_argument(
+        "--scroll-speed",
+        choices=["slow", "medium", "fast"],
+        default="slow",
+        help="how fast scrolling lines move at their peak: slow, medium (1.25x) or fast (1.5x)",
+    )
     return parser.parse_args(argv)
 
 
@@ -135,6 +142,7 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
         fetch_game_lines=odds.lines_for if odds is not None else None,
         logos=LogoStore(),  # resolve committed team tiles from assets/ (lazy, cached)
         display_timezone=zone,
+        marquee=DEFAULT_MARQUEE.at(ScrollSpeed(args.scroll_speed)),
     )
     print(
         f"omni.app: {profile.value}, delay {args.delay}s, favorites {sorted(args.favorite)}, meter {meter}"

@@ -50,6 +50,7 @@ from omni.renderers.team_row import draw_treated_mark
 from omni.renderers.visual_treatment import resolve_matchup_treatment
 from omni.renderers.win_meter import draw_win_meter
 from omni.renderers.text import draw_centered, draw_right_aligned, text_width
+from omni.renderers.text_lane import Marquee
 
 __all__ = ["LiveBaseballRenderer"]
 
@@ -201,13 +202,13 @@ class LiveBaseballRenderer:
         if payload.phase.is_break:  # between halves: no at-bat, no bases — just the inning
             label = f"{_break_word(payload.phase)} {payload.inning}"
             draw_centered(canvas, 0, LINE_SCORE_RIGHT, _BREAK_LABEL_Y, label, _YELLOW, _STATE_FONT)
-            self._due_up(canvas, payload, now=context.now)
+            self._due_up(canvas, payload, now=context.now, marquee=context.marquee)
             return
         self._state_module(canvas, payload)
         self._pitch_line(canvas, payload)
-        self._batter_pitcher_strip(canvas, payload, now=context.now)
+        self._batter_pitcher_strip(canvas, payload, now=context.now, marquee=context.marquee)
 
-    def _due_up(self, canvas: Canvas, payload: LiveBaseballCardPayload, *, now: datetime) -> None:
+    def _due_up(self, canvas: Canvas, payload: LiveBaseballCardPayload, *, now: datetime, marquee: Marquee) -> None:
         """Who bats next, down the right of the board: each batter's lineup spot and name in yellow,
         with the day's line in white in the gap below."""
         if payload.due_up is None:
@@ -221,7 +222,7 @@ class LiveBaseballRenderer:
                 stats=self._batter_line(batter),
                 stats_color=_WHITE,
             )
-            draw_panel_entry(canvas, entry, y=_DUE_UP_NAMES_Y + i * _DUE_UP_PITCH, now=now)
+            draw_panel_entry(canvas, entry, y=_DUE_UP_NAMES_Y + i * _DUE_UP_PITCH, now=now, marquee=marquee)
 
     def _line_scores(
         self, canvas: Canvas, game: TeamGame, payload: LiveBaseballCardPayload, *, away_logo: bool, home_logo: bool
@@ -289,7 +290,9 @@ class LiveBaseballRenderer:
             token = f"{pitch.velocity_mph}mph{_THIN}{pitch.pitch_type.short}"
             draw_right_aligned(canvas, _PITCH_RIGHT, _PITCH_LINE_Y, token, _WHITE, _LABEL_FONT)
 
-    def _batter_pitcher_strip(self, canvas: Canvas, payload: LiveBaseballCardPayload, *, now: datetime) -> None:
+    def _batter_pitcher_strip(
+        self, canvas: Canvas, payload: LiveBaseballCardPayload, *, now: datetime, marquee: Marquee
+    ) -> None:
         """The bottom strip: the pitcher's line, then the batter's, each flush to the left edge.
 
         ``P:`` leads the pitcher and the lineup spot (``4.``) the batter; the name is white and the
@@ -300,7 +303,7 @@ class LiveBaseballRenderer:
         pitcher = payload.pitcher
         if pitcher is not None:
             stats = f"{pitcher.innings_pitched}IP{_THIN}{pitcher.strikeouts}K"
-            self._roster_line(canvas, "P:", pitcher.name, stats, y=43, right=_STRIP_RIGHT, now=now)
+            self._roster_line(canvas, "P:", pitcher.name, stats, y=43, right=_STRIP_RIGHT, now=now, marquee=marquee)
         batter = payload.batter
         if batter is not None:
             self._roster_line(
@@ -311,6 +314,7 @@ class LiveBaseballRenderer:
                 y=54,
                 right=_STRIP_RIGHT,
                 now=now,
+                marquee=marquee,
             )
 
     @staticmethod
@@ -334,7 +338,16 @@ class LiveBaseballRenderer:
         return _THIN.join(parts)
 
     def _roster_line(
-        self, canvas: Canvas, leader: str, name: str, stats: str, *, y: int, right: int, now: datetime
+        self,
+        canvas: Canvas,
+        leader: str,
+        name: str,
+        stats: str,
+        *,
+        y: int,
+        right: int,
+        now: datetime,
+        marquee: Marquee,
     ) -> None:
         """A strip line: ``leader`` and ``name`` in white, then ``stats`` in yellow a size smaller beside it."""
         draw_name_with_stats(
@@ -348,6 +361,7 @@ class LiveBaseballRenderer:
             name_color=_WHITE,
             stats_color=_YELLOW,
             now=now,
+            marquee=marquee,
         )
 
     def _render_stack(

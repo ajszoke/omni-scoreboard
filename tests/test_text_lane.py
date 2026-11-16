@@ -7,7 +7,8 @@ the determinism tests below pin that down.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import math
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -19,6 +20,9 @@ from omni.renderers.text_lane import (
     LaneAnchor,
     MarqueePlan,
     MarqueeStyle,
+    LaneClock,
+    Marquee,
+    ScrollSpeed,
     TextLane,
     _clip_to_lane,
     draw_text_lane,
@@ -27,9 +31,10 @@ from omni.renderers.text_lane import (
 NOW = datetime(2026, 6, 17, 23, 30, tzinfo=timezone.utc)
 _WHITE = RGBColor(255, 255, 255)
 
-# A style with exact arithmetic so the offset math can be asserted to the pixel.
-_EXACT = MarqueeStyle(speed_px_per_s=10.0, start_dwell_s=2.0, end_dwell_s=3.0)
-_PLAN = MarqueePlan(distance=50, style=_EXACT)  # scroll 5.0s, period 10.0s
+# A style with exact arithmetic so the offset math can be asserted to the pixel: it reaches 10 px/s
+# over a 1 s ramp (covering 5 px), and holds 2 s at each end.
+_EXACT = MarqueeStyle(cruise_px_per_s=10.0, ramp_s=1.0, hold_s=2.0)
+_PLAN = MarqueePlan(distance=50, style=_EXACT)  # ramp 1 s, cruise 4 s, ramp 1 s: a 6 s trip
 
 
 # --- timing knobs validate their inputs -------------------------------------------------------
@@ -39,21 +44,18 @@ def test_default_marquee_is_the_zero_arg_style() -> None:
     assert DEFAULT_MARQUEE == MarqueeStyle()
 
 
-@pytest.mark.parametrize("speed", [0.0, -1.0])
-def test_a_non_positive_speed_is_rejected(speed: float) -> None:
-    with pytest.raises(ValueError, match="speed"):
-        MarqueeStyle(speed_px_per_s=speed)
-
-
-def test_a_non_positive_minimum_trip_is_rejected() -> None:
-    with pytest.raises(ValueError, match="min_travel"):
-        MarqueeStyle(min_travel_s=0.0)
-
-
-@pytest.mark.parametrize("start, end", [(-1.0, 0.0), (0.0, -1.0)])
-def test_a_negative_dwell_is_rejected(start: float, end: float) -> None:
-    with pytest.raises(ValueError, match="dwell"):
-        MarqueeStyle(start_dwell_s=start, end_dwell_s=end)
+@pytest.mark.parametrize(
+    ("knobs", "complaint"),
+    [
+        ({"cruise_px_per_s": 0.0}, "cruise"),
+        ({"cruise_px_per_s": -1.0}, "cruise"),
+        ({"ramp_s": 0.0}, "ramp"),
+        ({"hold_s": -1.0}, "hold"),
+    ],
+)
+def test_a_bad_knob_is_rejected(knobs: dict[str, float], complaint: str) -> None:
+    with pytest.raises(ValueError, match=complaint):
+        MarqueeStyle(**knobs)
 
 
 def test_a_plan_needs_a_positive_distance() -> None:
@@ -70,11 +72,8 @@ def test_a_lane_needs_a_positive_width() -> None:
 
 
 def test_period_and_travel_durations() -> None:
-    assert (_PLAN.travel_s, _PLAN.period_s) == (5.0, 15.0)  # hold 2, out 5, hold 3, back 5
-
-
-def test_a_short_overflow_takes_at_least_the_minimum_trip() -> None:
-    assert MarqueePlan(distance=2, style=_EXACT).travel_s == _EXACT.min_travel_s
+    assert (_EXACT.acceleration, _EXACT.ramp_px) == (10.0, 5.0)
+    assert (_PLAN.ramp_time_s, _PLAN.travel_s, _PLAN.period_s) == (1.0, 6.0, 16.0)  # hold 2, out 6, hold 2, back 6
 
 
 @pytest.mark.parametrize(
@@ -83,32 +82,48 @@ def test_a_short_overflow_takes_at_least_the_minimum_trip() -> None:
         (0.0, 0),  # holding at the head
         (1.9, 0),  # still holding
         (2.0, 0),  # the trip out begins at the head
-        (3.25, 7),  # a quarter of the way in time, but well under a quarter of the way in distance
-        (4.5, 25),  # halfway in time is halfway in distance
-        (5.75, 43),  # eases into the far end the same way it left the near one
-        (7.0, 50),  # arrived -> holding at the tail
+        (2.5, 1),  # speeding up along the ramp
+        (3.0, 5),  # at cruising speed, one ramp's worth along
+        (5.0, 25),  # halfway in time is halfway in distance
+        (7.0, 45),  # the slowing ramp begins
+        (7.5, 49),
+        (8.0, 50),  # arrived -> holding at the tail
         (9.9, 50),  # still holding
         (10.0, 50),  # the trip back begins at the tail
-        (11.25, 43),  # a mirror of the trip out
-        (12.5, 25),
-        (13.75, 7),
-        (15.0, 0),  # home, and the cycle repeats
+        (10.5, 49),  # a mirror of the trip out
+        (13.0, 25),
+        (15.5, 1),
+        (16.0, 0),  # home, and the cycle repeats
     ],
 )
-def test_offset_holds_at_each_end_and_eases_there_and_back(clock_s: float, offset: int) -> None:
+def test_offset_holds_ramps_cruises_and_comes_back(clock_s: float, offset: int) -> None:
     assert _PLAN.offset_at(clock_s) == offset
+
+
+def test_every_length_holds_and_ramps_the_same_way() -> None:
+    short, long = MarqueePlan(distance=30, style=_EXACT), MarqueePlan(distance=300, style=_EXACT)
+    head = [step / 10 for step in range(31)]  # the hold and the whole ramp
+    assert [short.offset_at(t) for t in head] == [long.offset_at(t) for t in head]
+    assert long.travel_s - short.travel_s == pytest.approx(27.0)  # only the cruise stretches
+
+
+def test_a_trip_too_short_to_reach_cruising_speed_turns_around_in_the_middle() -> None:
+    plan = MarqueePlan(distance=2, style=_EXACT)
+    assert plan.ramp_time_s == pytest.approx(0.2**0.5)
+    assert plan.travel_s == pytest.approx(2 * 0.2**0.5)
+    assert plan.offset_at(_EXACT.hold_s + plan.ramp_time_s) == 1  # halfway, at the turn
 
 
 def test_offset_is_cyclic_with_the_period() -> None:
     # Same phase one and two periods later -> identical offset (no drift, no accumulation).
-    assert _PLAN.offset_at(4.5) == _PLAN.offset_at(19.5) == _PLAN.offset_at(34.5) == 25
+    assert _PLAN.offset_at(5.0) == _PLAN.offset_at(21.0) == _PLAN.offset_at(37.0) == 25
 
 
 def test_offset_never_jumps_on_the_way_back() -> None:
     # The return trip retraces the path, rather than the text snapping back to the head.
-    samples = [_PLAN.offset_at(10.0 + i * 0.05) for i in range(101)]
+    samples = [_PLAN.offset_at(10.0 + i * 0.05) for i in range(121)]
     assert samples == sorted(samples, reverse=True)
-    assert max(abs(a - b) for a, b in zip(samples, samples[1:])) <= 2  # 0.05s is one or two pixels at most
+    assert max(abs(a - b) for a, b in zip(samples, samples[1:])) <= 1  # 0.05s at 10 px/s is half a pixel
 
 
 def test_offset_is_pure_in_its_argument() -> None:
@@ -191,3 +206,82 @@ def test_a_lane_narrower_than_its_glyphs_draws_blank_rather_than_spilling() -> N
     canvas = RecordingCanvas(64, 16)
     draw_text_lane(canvas, lane, "AB", _WHITE, now=NOW)
     assert canvas.texts() == []
+
+
+def _drawn(lane: TextLane, text: str, at: datetime, clock: LaneClock) -> tuple[int, str] | None:
+    canvas = RecordingCanvas(64, 8)
+    draw_text_lane(canvas, lane, text, _WHITE, now=at, clock=clock)
+    texts = [op for op in canvas.ops if op.text]
+    return (texts[0].x, texts[0].text) if texts else None
+
+
+_LONG = "A LONG LINE THAT OVERFLOWS ITS LANE"
+_LANE = TextLane(x=0, y=0, width=20, font="4x6")
+
+
+def test_with_a_lane_clock_a_line_starts_at_its_head_whatever_the_clock_says() -> None:
+    for start in (NOW, datetime(2026, 11, 16, 2, 7, 33, 300000, tzinfo=timezone.utc)):
+        clock = LaneClock()
+        first = _drawn(_LANE, _LONG, start, clock)
+        assert first is not None and first[0] == 0 and _LONG.startswith(first[1])
+        moving = [_drawn(_LANE, _LONG, start + timedelta(seconds=t / 10), clock) for t in range(1, 60)]
+        assert moving[15] == first  # still holding at 1.6s
+        assert moving[-1] != first  # moving by 6s
+
+
+def test_a_changed_line_starts_over_and_a_replaced_scroll_leaves_a_beat_of_nothing() -> None:
+    clock = LaneClock()
+    for tenth in range(80):  # the first line scrolls a while
+        _drawn(_LANE, _LONG, NOW + timedelta(seconds=tenth / 10), clock)
+    swap = NOW + timedelta(seconds=8)
+    assert _drawn(_LANE, "AND ANOTHER LONG LINE ENTIRELY", swap, clock) is None  # the beat between lines
+    after = _drawn(_LANE, "AND ANOTHER LONG LINE ENTIRELY", swap + timedelta(seconds=0.3), clock)
+    assert after is not None and after[0] == 0 and after[1].startswith("AND")  # at its own head
+    short = _drawn(_LANE, "OK", swap + timedelta(seconds=0.4), clock)
+    assert short is None  # still a beat: the line it replaced scrolled
+    assert _drawn(_LANE, "OK", swap + timedelta(seconds=0.7), clock) == (0, "OK")
+    assert _drawn(_LANE, "NO", swap + timedelta(seconds=0.8), clock) == (0, "NO")  # a short line swaps at once
+
+
+def test_a_lane_not_drawn_for_a_while_starts_over() -> None:
+    clock = LaneClock()
+    _drawn(_LANE, _LONG, NOW, clock)
+    later = NOW + timedelta(seconds=30)
+    assert _drawn(_LANE, _LONG, later, clock) == _drawn(_LANE, _LONG, later, LaneClock())
+
+
+def test_speeds_raise_the_top_speed_at_one_acceleration_and_keep_the_holds() -> None:
+    styles = {speed: DEFAULT_MARQUEE.at(speed) for speed in ScrollSpeed}
+    assert [styles[speed].cruise_px_per_s for speed in ScrollSpeed] == [10.0, 12.5, 15.0]
+    assert [styles[speed].ramp_s for speed in ScrollSpeed] == [2.0, 2.5, 3.0]
+    assert {style.acceleration for style in styles.values()} == {5.0}
+    assert {style.hold_s for style in styles.values()} == {2.0}
+    assert Marquee() == Marquee(style=DEFAULT_MARQUEE, clock=None)
+
+
+def test_a_short_trip_turns_at_its_midpoint_without_overshooting() -> None:
+    plan = MarqueePlan(distance=5)  # too short for the default ramp to reach cruising speed
+    assert plan._along(plan.ramp_time_s) == pytest.approx(2.5)  # exactly halfway, not a full ramp's 10px
+    assert plan.offset_at(DEFAULT_MARQUEE.hold_s + plan.travel_s / 2) in (2, 3)
+    back = 2 * DEFAULT_MARQUEE.hold_s + plan.travel_s + plan.travel_s / 2
+    assert plan.offset_at(back) in (2, 3)  # and the return trip doesn't swing past the head
+
+
+@pytest.mark.parametrize("speed", list(ScrollSpeed))
+@pytest.mark.parametrize("distance", [1, 2, 5, 9, 10, 11, 19, 20, 21, 40, 75])
+def test_every_trip_moves_one_way_at_a_time_and_stays_in_bounds(speed: ScrollSpeed, distance: int) -> None:
+    plan = MarqueePlan(distance=distance, style=DEFAULT_MARQUEE.at(speed))
+    hold, travel = plan.style.hold_s, plan.travel_s
+    steps = 200
+    outward = [hold + travel * i / steps for i in range(steps + 1)]
+    inward = [2 * hold + travel + travel * i / steps for i in range(steps + 1)]
+    out = [plan.offset_at(t) for t in outward]
+    back = [plan.offset_at(t) for t in inward]
+    assert out == sorted(out) and back == sorted(back, reverse=True)
+    assert min(out + back) >= 0 and max(out + back) <= distance
+    assert out[-1] == distance and back[-1] in (0, distance)  # the tail at the end of the way out
+    tick = travel / steps  # the largest step a frame of this length can take, at top speed
+    top = plan.style.acceleration * plan.ramp_time_s
+    limit = math.ceil(top * tick) + 1  # rounding can add a pixel
+    assert max(abs(a - b) for a, b in zip(out, out[1:])) <= limit
+    assert max(abs(a - b) for a, b in zip(back, back[1:])) <= limit
