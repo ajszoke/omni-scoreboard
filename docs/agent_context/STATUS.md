@@ -20,12 +20,14 @@ _Living status doc. Keep it short; update whenever project state changes (branch
   - **Start-up:** a warm-up fills the plan before the board starts; a real past day's 15 finals were up in about 3 s.
   - **Not yet planned:** pregame details and odds keep their own pacing, and football's single-game feed keeps its own cadence until it joins the shared path.
   - **Next:** step 3, `PlayStrip` as the first session on the shared primitives, checked on the PIT@CIN replay.
-- **2026-11-16, A1a step 3 (branch `agent/a1a-playstrip`):** the football play strip runs on the tower's shared primitives, and a PIT@CIN replay checks its decisions.
+- **2026-11-16, A1a step 3 (PR #105, merged):** the football play strip runs on the tower's shared primitives, and a PIT@CIN replay checks its decisions.
   - **Primitives** (`omni/tower`): a `Segment` carries the presentation contract (identity and revision, surface and parent, frames and provenance, availability, latest start, expiry, dwell, hold). A `Lane` airs segments in order, one frame at a time. A frame's dwell runs on monotonic time from its first committed frame. A lane, and the board, publish `next_deadline`.
   - **Replay:** `tools/nflmeta_replay_trace.py` replays the PIT@CIN recording through today's provider and writes a minimized trace (`tests/fixtures/replay/`). It holds no NFLMeta text, ids or raw rows; the snap and the clock are stand-ins that change when the real ones did. `omni/replay/football.py` runs a board over a trace and lists its decisions.
   - **Parity:** the 564 decisions the board made before the port are made again after it. Stepped only at arrivals and deadlines, the board decides as it does stepped every 10 ms.
   - **Log:** a strip entry the field took down early now gets an `x` line.
   - **Deferred to step 4:** the marquee epoch at commit (R4-6), keyed by card occurrence.
+  - **The recording:** the PIT@CIN recording (git-ignored) stays for development and evaluation until 2026-11-23, by the user's call. Then it and its local full trace are deleted.
+  - **Next:** step 4, the board's card rotation on the same primitives. The plan is in `CLOCK_AND_SCHEDULING.md`, "Steps", item 5.
 - **2026-11-15, external review round 4: conditional yes.** The head chose sequence (A): A1a is the tower's first slice. It blessed NFL-before-A1, the cloud market service, NFLMeta and the SSH frame bridge (for the experiment), and redirected the separate football loop and the `LaneClock` into A1a. The branch ships as a single-game dogfood tool once its findings H1–H3 and M1 are fixed and the goldens are approved. Adjudication: `~/omni-review/plans/omni-build-fidelity-REVIEWS.md` (round 4).
   - **Fixed on the branch:**
     - **H1:** play-feed reads keep what arrived and carry on after a failure; "caught up" counts only kept rows; a refused cursor (400/410) restarts quietly.
@@ -67,7 +69,7 @@ _Living status doc. Keep it short; update whenever project state changes (branch
 - **2026-11-01, live-card design round + market data (branch `agent/quad-pitch-lane`):** ABS lane and small-board layouts, home-keeps-primary clash rule, full pregame + final quad cards, Due Up. The live meter reads Polymarket US first, with MLB's model after 3 quiet minutes; Bovada supplies pregame odds. Sources and terms: `SOURCES.md`. Next: the keyed Polymarket US WebSocket for a real-time meter; a shared AWS service is `M5-006`, later.
 - **Operating mode: the external-review cadence is live** (head/hand — the flagship/CGPT plans, Claude Code implements; *not* `/code-review`). **Round 1 (2026-06-23) → conditional pass; Round 2 (2026-06-24) → conditional pass: architecture signed off, appliance ship deferred.** Adjudication: `~/omni-review/plans/omni-build-fidelity-REVIEWS.md`; verdicts verbatim at `~/omni-review/rounds/round-{1,2}-verdict.md` (the round-2 verdict file is UTC-stamped 06-25 = 06-24 local — keep TZ in mind: the board clock is Eastern, the user is Mountain). State + how-to: the `omni-review-cadence` auto-memory + the `external-review` skill.
 - **Round-2 verdict:** **A0 = complete as orchestration architecture** (six gates verified faithful); **B1 = lifecycle-card breadth, NOT "MLB excellence"** (the live card is below the kernel's profile-density contract); **logo/win-prob color direction blessed** with three integration constraints (one asset-aware `MatchupVisualTreatment`/frame; a hardware-tunable `VisualContrastPolicy`; **delay-safe probability** — never attach fresh win-prob to a delayed score). New sequence below. NFL deferred; **PGA before NCAA**.
-- Revived repo **bootstrapped from upstream MLB-LED-Scoreboard v9.1.5**; `main` @ `687c0ee` = upstream + **PRs #1–#103 merged** (through B1.5c #94, the AWS market service #96–#98, the NFL display #99, the NFL live board #100, A1a step 1 #101, the NBA research #102 and A1a step 2 #103). **Tests: 1,758 passing, `omni/` + `cloud.market_service` at 100% line+branch behind `fail_under=100`; `mypy`/`black` clean** (2026-11-16). **Round 3 reviewed 2026-06-26 → conditional yes**; B1.5c then landed in #94. **Round 4 briefed 2026-11-15** (NFL live board, the central-clock plan, providers).
+- Revived repo **bootstrapped from upstream MLB-LED-Scoreboard v9.1.5**; `main` @ `932027e` = upstream + **PRs #1–#105 merged** (through B1.5c #94, the AWS market service #96–#98, the NFL display #99, the NFL live board #100, A1a steps 1–3 #101, #103 and #105, and NBA's research and probe #102 and #104). **Tests: 1,782 passing, `omni/` + `cloud.market_service` at 100% line+branch behind `fail_under=100`; `mypy`/`black` clean** (2026-11-16). **Round 3 reviewed 2026-06-26 → conditional yes**; B1.5c then landed in #94. **Round 4 briefed 2026-11-15** (NFL live board, the central-clock plan, providers).
 - Remotes: `origin` = `ajszoke/omni-scoreboard` (HTTPS), `upstream` = `MLB-LED-Scoreboard/mlb-led-scoreboard` (branch `master`), `legacy` = `ajszoke/omni-scoreboard-legacy` (pre-revival Omni work: `legacy/master`, `legacy/dev`).
 - **Known integration gaps (round-2 Highs):** **✅ H4 closed** — `LogoStore` is wired into `RenderContext` (#68) and `win_probability` is populated **delay-safe** (a per-game delay feed pushed in lockstep with the state, so the meter never leads the score; #69); the redundant abbr is dropped when a logo resolves (M4, #71). **✅ H6 closed for MLB** — a typed `PollPlan` paces every MLB fetch, the win probability included (#103). Still open: no dwell-enforcing display-state machine (H1 → A1a step 4). **✅ closed earlier:** provider boundary (H2, #58); contextual scoring (H3, #59); no-hitter/perfect-game progress (H5, #61).
 - Dev env: **uv + `.venv`** (Py 3.12); emulator runs headless (`http://localhost:8888/`). `pytest`/`pytest-cov` pinned in `requirements.dev.txt`; `starter_code/` excluded from `mypy`/`black`; `*/__main__.py` omitted from coverage. Coverage: `--cov=omni --cov-branch` (see `test` skill). See `docs/dev_setup.md`.
@@ -79,13 +81,14 @@ _Living status doc. Keep it short; update whenever project state changes (branch
 - **A1a, the tower's first slice** (`CLOCK_AND_SCHEDULING.md`, M11):
   1. ✅ (#101) paint apart from decision ticks, with fetches off both frame paths; first, the MLB 12-second paint (M11-001). One clock seam gives two readings: UTC for event and release times, monotonic for dwell, backoff and pacing. Basic decision traces start here.
   2. ✅ (#103) a typed `PollPlan`: single-flight fetches, priority cadence within quota, bounded retries, per-game last-good expiry, and the previous and current local dates in the schedule window.
-  3. Port `PlayStrip` as the first session, and compare its decisions on the PIT@CIN replay.
-  4. Put the board's card rotation behind the same presentation contract:
+  3. ✅ (#105) port `PlayStrip` as the first session, and compare its decisions on the PIT@CIN replay.
+  4. Put the board's card rotation behind the same presentation contract (the plan: `CLOCK_AND_SCHEDULING.md`, "Steps", item 5):
      - dwell starts at the first committed frame;
      - selection is acknowledged at commit (round-4 H4);
      - finals are ordered;
      - takeovers are bounded;
-     - held, idle, stale and offline frames are explicit.
+     - held, idle, stale and offline frames are explicit;
+     - a lane's marquee epoch is set at commit (R4-6).
 - **Before mixed-league operation** (round-4 H5; M6-004, M7, L5):
   - partitioned snapshots per provider, league and scope;
   - full typed ids in card keys, favorites and market joins;

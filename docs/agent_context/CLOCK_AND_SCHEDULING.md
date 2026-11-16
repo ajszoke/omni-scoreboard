@@ -154,7 +154,49 @@ Round 4 groups the first five as A1a:
    - Stepped only at arrivals and deadlines, the board decides as it does stepped every 10 ms, which
      shows its deadlines miss nothing.
 5. **Port the board's card queue onto the tower** and enforce minimum and maximum display there.
-   Medium.
+   Medium. *This is A1a step 4. The plan below was drawn from the code on 2026-11-16:*
+   - **Today:**
+     - `AppLoop.decide` (`omni/app/loop.py`) asks `InterleavedCardQueue.pick`
+       (`omni/queue/scheduler.py`) for a card at every decision tick (12 s by default), and `paint`
+       shows that card until the next tick.
+     - `pick` books group rotation, last-shown and the RECURRING count and cooldown when it selects
+       (`scheduler.py:144-149`), before the card has rendered (round-4 H4).
+     - Nothing enforces `DisplayTiming.min_display` and `max_display`; the queue leaves dwell to "the
+       render loop".
+     - With nothing eligible, painting stops and the panel keeps its last frame (`loop.py:152`).
+   - **Target:** cards become segments on `Surface.BOARD`, scheduled by the same pieces as the strip.
+     - **Choosing the next card:** the strip's lane takes the next segment in order; the board takes
+       the queue's pick. So `Lane` gains a pluggable choice of the next segment, or a board session
+       wraps it.
+     - **Booking at commit:** selection is booked at the first committed frame. The queue's
+       last-shown, group rotation and RECURRING count and cooldown move from `pick` to that commit.
+     - **Dwell:** it counts from the first committed frame. Ordinary priority never cuts a visible
+       minimum. Factual invalidation (a card removed or replaced), hard expiry and device controls
+       may.
+     - **When to choose:** a new card is chosen when the one on air has had its minimum with
+       something better waiting, or has had its maximum. Decisions can then run when due
+       (`next_deadline`), with the `PollPlan`'s `next_due` as the other deadline, instead of on a
+       fixed tick.
+     - **Bounded takeovers:** BURST takeovers get an aggregate cap in seconds, even back to back,
+       then a base rotation slot.
+     - **Ordered finals:** a game's decisive play (a walk-off) is an explicit predecessor of its
+       FINAL card, and finals air in the order their games ended (round 4's question 4 asks for the
+       exact final-order decisions).
+     - **Explicit frames:** when nothing should hold the panel, the board shows idle (nothing
+       eligible), held (the last frame, kept on purpose while a source recovers), stale (last-good
+       past its age) or offline (its source expired), each traced with its reason.
+   - **The marquee epoch at commit (R4-6):**
+     - Each lane's epoch is keyed by surface, card occurrence and lane, and passed into the render
+       math in place of the `LaneClock`'s geometry key and its 5 s forgetting.
+     - Animation runs on monotonic time, so the render context carries the clock reading.
+     - The strip's `Lane` already records each frame's first commit.
+   - **Import order:** `omni.tower` imports `omni.app.clock`. Before `omni.app.loop` imports the tower,
+     move the clock to `omni/core/clock.py`, keeping `omni.app.clock` as a re-export. Otherwise
+     importing `omni.tower` first would cycle through `omni.app`'s package init.
+   - **Checking it:** as in step 3, record the MLB replay's decisions (`omni/replay/harness.py`
+     timelines) before the change. Unlike step 3, differences are expected (dwell, booking at commit,
+     idle frames), and each one gets explained. Representative frames are compared on all three
+     profiles. A fixed mixed MLB/NFL fixture through the same scheduler is round 5's question 4.
 6. **Build the air clock and per-source lag models.** Fold football's delay and the meter lag into
    it, with lags measured from recordings (e.g., market jumps against NFLMeta's play times). Medium.
 7. **The value squeeze:** freshness decay by segment kind, preemption classes, and fairness across
