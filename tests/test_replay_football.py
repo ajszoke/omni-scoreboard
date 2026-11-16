@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -98,6 +99,23 @@ def test_the_board_decides_pit_cin_as_it_did() -> None:
     decisions = replay_board(load_trace(PIT_CIN.read_text().splitlines()))
     expected = (FIXTURES / "football-2026-11-15-pit-cin.decisions.txt").read_text().splitlines()
     assert decisions == expected
+
+
+def test_a_board_stepped_only_when_something_is_due_decides_as_one_stepped_every_frame() -> None:
+    """Its deadlines miss nothing. On PIT@CIN through the first quarter's close-out, stepping at each
+    arrival and each deadline gives what stepping every 10 ms gives, to within that frame."""
+    trace = load_trace(PIT_CIN.read_text().splitlines())
+    cut = trace.start + timedelta(seconds=2900)
+    part = dataclasses.replace(trace, answers=tuple(a for a in trace.answers if a.received_at <= cut))
+    framed = replay_board(part, fps=100, tail=timedelta(seconds=60))
+    stepped = replay_board(part, fps=None, tail=timedelta(seconds=60))
+    assert [line[9:] for line in stepped] == [line[9:] for line in framed]
+    assert all(abs(_centiseconds(a) - _centiseconds(b)) <= 1 for a, b in zip(stepped, framed, strict=True))
+    assert any(line.endswith("end_of_quarter") for line in stepped)
+
+
+def _centiseconds(line: str) -> int:
+    return round(float(line[:9]) * 100)
 
 
 def test_a_trace_reads_back_every_answer_as_written() -> None:
@@ -207,7 +225,8 @@ def test_a_replay_lists_each_change_of_strip_and_field_and_each_drop() -> None:
 
 
 def test_a_replay_of_no_answers_decides_nothing() -> None:
-    assert replay_board(FootballTrace(start=START, game=GAME, answers=()), tail=S) == []
+    empty = FootballTrace(start=START, game=GAME, answers=())
+    assert replay_board(empty, tail=S) == [] and replay_board(empty, fps=None) == []
 
 
 def test_the_stand_in_renderer_draws_for_its_profile() -> None:

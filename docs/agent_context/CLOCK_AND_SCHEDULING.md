@@ -3,8 +3,10 @@
 Status: **accepted in external review round 4** (2026-11-15). A1a is built as the tower's first slice
 (see "Steps"), and the head's rulings below amend the target. A1a step 1 is built (2026-11-16): the
 two-reading clock, decisions apart from frames, fetches and frame writes off the frame path, and basic
-traces. A1a step 2 is built too: MLB's fetches run from a typed `PollPlan`. "Today" describes the
-result. This doc is the target that new timing code should move toward,
+traces. A1a step 2 is built too: MLB's fetches run from a typed `PollPlan`. So is step 3: the scheduling
+primitives (`omni/tower`: segments and the lane), with the football play strip as their first user,
+checked on the PIT@CIN replay. "Today" describes the result. This doc is the target that new timing code
+should move toward,
 so that we don't add more one-off timers in the meantime.
 
 ## Why
@@ -27,10 +29,10 @@ has to be handled like flights at a control tower:
 | `ProviderSupervisor` | last-known-good and stale status for the slate (its backoff is off for a planned slate) | `now` passed per call |
 | `LiveBaseballPipeline` (`DelayPolicy`, `DelayedFeed`, `DelayedEventStream`) | TV delay anchored to when a play happened; meter readings; the final's embargo | `now` per tick |
 | `InterleavedCardQueue` | which card next: two-level rotation, BURST takeover windows, RECURRING cooldowns | `now` per tick; **dwell is "the render loop's job", and no such loop exists** |
-| `FootballBoard.step` (single-game NFL) | a receipt-anchored `--delay` buffer, meter lag, closing out a period before a break | ~10 fps frame loop, taking whatever answers have arrived |
+| `FootballBoard.step` (single-game NFL) | a receipt-anchored `--delay` buffer, meter lag, closing out a period before a break | ~10 fps frame loop on `ClockReading`s, taking whatever answers have arrived; publishes `next_deadline` |
 | `GameFeed` in a `BackgroundFeed` (`football_feed.py`) | poll cadence, retry after failure, parking after the final; answers dated by arrival | its own thread, checking every 250 ms whether an ask is due |
 | `BackgroundFrameWriter` (`frame_stream.py`) | writing frames to the display process, retrying until one lands | its own thread; only the newest frame waits |
-| `PlayStrip` | frames (10 s min, 20 s max each), stoppage holds, clearing on a field change, close-out | `now` per frame |
+| The play strip, a `Lane` of segments (`omni/tower`) | frames (10 s min, 20 s max each), stoppage holds, invalidation on a field change, close-out; availability, latest start, expiry, edits by revision | dwell on monotonic time from each frame's first commit; `next_deadline` |
 | `NflMetaLiveProvider` | halftime hold (plus its grace), correction watch, score backstop, injury news window | private datetimes on per-game state |
 | Market (`PolymarketUsProvider`, the market-service client, the heartbeat thread, the cloud poller) | 30 s REST refresh; 10 s/60 s freshness; 30 s retry; 300 s heartbeat; 1 min cloud schedule | each its own |
 | Rendering (`text_lane.py`, `LaneClock`, the halftime countdown) | marquee offsets, line start times, the colon blink | `RenderContext.now`; `LaneClock` keeps render-side memory |
@@ -57,7 +59,8 @@ has to be handled like flights at a control tower:
    viewer's delay.
 4. **The same scheduling problem is solved twice.** The card queue picks which card comes next; the
    football strip picks which line comes next. Both need slots with minimum and maximum dwell,
-   priority, freshness and preemption.
+   priority, freshness and preemption. Since A1a step 3 the strip runs on the shared lane; the card
+   queue moves onto it in step 4.
 
 ## Target
 
@@ -111,9 +114,9 @@ has to be handled like flights at a control tower:
 - `DelayPolicy`, `DelayedFeed` and `DelayedEventStream` become the air clock and eligibility.
 - `InterleavedCardQueue`'s rotation, BURST takeovers and RECURRING cooldowns become the tower's
   selection policy for the board surface, with dwell finally enforced there.
-- `PlayStrip`'s rules (frames, stoppage holds, clearing on a field change, close-out) become the
-  tower's policy for a card lane. The same machinery should drive baseball's Due Up and at-bat lines
-  and any future ticker.
+- `PlayStrip`'s rules (frames, stoppage holds, clearing on a field change, close-out) became the
+  lane's (A1a step 3). The same machinery should drive baseball's Due Up and at-bat lines and any
+  future ticker.
 - Provider-side timers (halftime hold, correction watch, score backstop) and supervisor backoff
   become poll plans registered in the timer heap.
 - `LaneClock` stays render-side as pure presentation. Once segments exist, it is keyed by segment
@@ -139,7 +142,17 @@ Round 4 groups the first five as A1a:
    used only to pace sleeps. Small. *Done in A1a steps 1 and 2: MLB states are now dated by receipt.*
 4. **Build the scheduling primitives** (segment, surface/lane, timer heap, tower interface) with
    `PlayStrip` as the first consumer. Behavior stays identical, proven by replaying the recorded
-   PIT@CIN game frame for frame. Medium.
+   PIT@CIN game frame for frame. Medium. *Done in A1a step 3, checked on decisions rather than frames
+   (round 4):*
+   - `omni/tower/segment.py` holds the presentation contract, and `omni/tower/lane.py` one surface's
+     schedule with its `next_deadline`. The board publishes its own `next_deadline`: a strip frame's
+     time, a reading clearing the delay, a break's wait.
+   - `omni/replay/football.py` replays a football trace through the board and lists its decisions.
+     `tools/nflmeta_replay_trace.py` builds the PIT@CIN trace from the recording, minimized: no
+     NFLMeta text or ids, with stand-ins for the snap and the clock.
+   - Before the port, the board made 564 decisions on that trace. The ported board makes the same 564.
+   - Stepped only at arrivals and deadlines, the board decides as it does stepped every 10 ms, which
+     shows its deadlines miss nothing.
 5. **Port the board's card queue onto the tower** and enforce minimum and maximum display there.
    Medium.
 6. **Build the air clock and per-source lag models.** Fold football's delay and the meter lag into
@@ -207,3 +220,16 @@ Round 4 groups the first five as A1a:
 
   Commit acknowledges first presentation, repeat and cooldown use, and a lane's start. On a failed
   frame or a reconnect, the last known presentation is kept and the current image re-sent.
+
+  As built in A1a step 3 (`omni/tower`), for a lane:
+  - A segment carries all of the above.
+  - A lane cues one frame at a time; the display's commit starts that frame's dwell, so a frame
+    that never drew spends none of it.
+  - A newer revision replaces a waiting segment in its place, or swaps the frames of the one on air
+    and keeps its dwell; an edit to one already gone doesn't bring it back.
+  - Latest start and expiry drop a segment unseen, with the reason traced.
+  - A football board counts a frame committed once its sink takes it; proof that it reached the
+    matrix is round 4's open question 2.
+  - Repeat and cooldown use come with the card rotation (step 4).
+  - So does the marquee epoch at commit (R4-6), keyed by card occurrence. The lane already records
+    each frame's first commit.

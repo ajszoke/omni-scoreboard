@@ -62,6 +62,7 @@ __all__ = [
 TRACE_VERSION = 1
 REPLAY_SOURCE = SourceRef("replay", "fixture://football-trace")
 _STATUS = {NflPhase.PRE: GameStatus.PREGAME, NflPhase.IN: GameStatus.LIVE, NflPhase.POST: GameStatus.FINAL}
+_NUDGE = timedelta(milliseconds=1)  # a step on its deadline is due; the next is always a little later
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,28 +151,45 @@ class ReplayFeed:
             self._next += 1
         return list(self._answers[first : self._next])
 
+    def next_arrival(self) -> datetime | None:
+        """When the next answer arrives, if any is left."""
+        return self._answers[self._next].received_at if self._next < len(self._answers) else None
+
 
 def replay_board(
     trace: FootballTrace,
     *,
-    fps: float = 4.0,
+    fps: float | None = 4.0,
     delay: timedelta = timedelta(0),
     tail: timedelta = timedelta(minutes=2),
     profile: PanelProfile = PanelProfile.QUAD_128X64,
 ) -> list[str]:
-    """Run a board over ``trace`` from its start to ``tail`` past its last answer; its decisions."""
+    """Run a board over ``trace`` from its start to ``tail`` past its last answer; its decisions.
+
+    With ``fps`` the board steps at that frame rate, as it does live. With None it steps only when
+    something is due: the next answer's arrival, or the board's own next deadline.
+    """
     clock = FakeClock(trace.start)
     cards = _Cards(profile)
     logs: list[str] = []
-    board = FootballBoard(ReplayFeed(trace.answers), _NullSink(profile), delay=delay, renderer=cards, log=logs.append)
+    feed = ReplayFeed(trace.answers)
+    board = FootballBoard(feed, _NullSink(profile), delay=delay, renderer=cards, log=logs.append)
     decisions = _Decisions(trace.start)
     end = (trace.answers[-1].received_at if trace.answers else trace.start) + delay + tail
-    frame = timedelta(seconds=1 / fps)
     while clock.now() <= end:
-        board.step(clock.now())
-        decisions.take(clock.now(), cards.take(), logs)
+        at = clock.read()
+        board.step(at)
+        decisions.take(at.utc, cards.take(), logs)
         logs.clear()
-        clock.advance(frame)
+        if fps is not None:
+            clock.advance(timedelta(seconds=1 / fps))
+            continue
+        deadline, arrival = board.next_deadline(at), feed.next_arrival()
+        waits = [deadline.since(at.monotonic)] if deadline is not None else []
+        waits += [arrival - at.utc] if arrival is not None else []
+        if not waits:
+            break
+        clock.advance(max(min(waits), _NUDGE))
     return decisions.lines
 
 

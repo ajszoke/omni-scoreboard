@@ -18,6 +18,12 @@ _Living status doc. Keep it short; update whenever project state changes (branch
   - **Start-up:** a warm-up fills the plan before the board starts; a real past day's 15 finals were up in about 3 s.
   - **Not yet planned:** pregame details and odds keep their own pacing, and football's single-game feed keeps its own cadence until it joins the shared path.
   - **Next:** step 3, `PlayStrip` as the first session on the shared primitives, checked on the PIT@CIN replay.
+- **2026-11-16, A1a step 3 (branch `agent/a1a-playstrip`):** the football play strip runs on the tower's shared primitives, and a PIT@CIN replay checks its decisions.
+  - **Primitives** (`omni/tower`): a `Segment` carries the presentation contract (identity and revision, surface and parent, frames and provenance, availability, latest start, expiry, dwell, hold). A `Lane` airs segments in order, one frame at a time. A frame's dwell runs on monotonic time from its first committed frame. A lane, and the board, publish `next_deadline`.
+  - **Replay:** `tools/nflmeta_replay_trace.py` replays the PIT@CIN recording through today's provider and writes a minimized trace (`tests/fixtures/replay/`). It holds no NFLMeta text, ids or raw rows; the snap and the clock are stand-ins that change when the real ones did. `omni/replay/football.py` runs a board over a trace and lists its decisions.
+  - **Parity:** the 564 decisions the board made before the port are made again after it. Stepped only at arrivals and deadlines, the board decides as it does stepped every 10 ms.
+  - **Log:** a strip entry the field took down early now gets an `x` line.
+  - **Deferred to step 4:** the marquee epoch at commit (R4-6), keyed by card occurrence.
 - **2026-11-15, external review round 4: conditional yes.** The head chose sequence (A): A1a is the tower's first slice. It blessed NFL-before-A1, the cloud market service, NFLMeta and the SSH frame bridge (for the experiment), and redirected the separate football loop and the `LaneClock` into A1a. The branch ships as a single-game dogfood tool once its findings H1–H3 and M1 are fixed and the goldens are approved. Adjudication: `~/omni-review/plans/omni-build-fidelity-REVIEWS.md` (round 4).
   - **Fixed on the branch:**
     - **H1:** play-feed reads keep what arrived and carry on after a failure; "caught up" counts only kept rows; a refused cursor (400/410) restarts quietly.
