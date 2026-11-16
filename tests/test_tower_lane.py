@@ -307,6 +307,57 @@ def test_an_edit_on_air_swaps_the_frames_and_keeps_the_dwell() -> None:
     assert _air(lane, T0 + 4 * MAX) is None
 
 
+def test_a_commit_of_an_older_revision_than_the_one_on_air_starts_no_dwell() -> None:
+    lane = _lane(_segment("1", "RUN +4"))
+    drawn = lane.cue(_at(T0))
+    assert drawn is not None
+    lane.offer([_segment("1", "RUN +6", revision=1)])  # edited before the display showed it
+    lane.committed(drawn, _at(T0 + S))  # the display showed the older revision
+    assert not lane.dwelling and lane.next_deadline(_at(T0 + S)) is None
+    assert _air(lane, T0 + 2 * S) == ("RUN +6", "RUN +6 detail")
+    assert lane.dwelling and lane.next_deadline(_at(T0 + 2 * S)) == MonotonicTime(22)
+
+
+def test_a_blanked_frame_goes_up_again_from_its_next_commit_with_its_whole_dwell() -> None:
+    lane = _lane(_segment("1"))
+    _air(lane, T0)
+    lane.blanked(_at(T0 + 5 * S))  # the display went away: the panel no longer shows it
+    assert not lane.dwelling and lane.next_deadline(_at(T0 + 5 * S)) is None  # no time runs on a blank panel
+    cue = lane.cue(_at(T0 + timedelta(minutes=1)))
+    assert cue is not None and cue.frame == 0  # still on air, waiting
+    lane.committed(cue, _at(T0 + timedelta(minutes=1)))  # a new display shows it
+    later = T0 + timedelta(minutes=1)
+    assert lane.next_deadline(_at(later)) == MonotonicTime(80)  # its whole 20 s, from the new commit
+    assert _air(lane, later + MAX) == ("RUN +4", "C.Brown 4 YDS 1 CAR")  # then on as usual
+    changes = lane.changes()
+    assert [(change.kind, change.frame, change.aired) for change in changes] == [
+        (ChangeKind.UP, 0, None),
+        (ChangeKind.BLANKED, 0, 5 * S),  # how long it was up before the display went
+        (ChangeKind.AGAIN, 0, None),
+        (ChangeKind.FRAME, 1, None),
+    ]
+
+
+def test_blanking_what_never_drew_changes_nothing_and_a_new_segment_goes_up_as_new() -> None:
+    lane = _lane()
+    lane.blanked(_at(T0))  # nothing on air
+    lane.offer([_segment("1"), _segment("2")])
+    lane.cue(_at(T0))
+    lane.blanked(_at(T0))  # on air, never drawn
+    assert lane.changes() == []
+    _air(lane, T0 + S)
+    lane.blanked(_at(T0 + 2 * S))
+    lane.clear(_at(T0 + 3 * S))  # it aired, so it comes down, not dropped unseen
+    lane.offer([_segment("3")])
+    _air(lane, T0 + 4 * S)
+    assert [(change.kind, change.segment.key.subject) for change in lane.changes()] == [
+        (ChangeKind.UP, "1"),
+        (ChangeKind.BLANKED, "1"),
+        (ChangeKind.DOWN, "1"),
+        (ChangeKind.UP, "3"),
+    ]
+
+
 def test_a_lane_takes_only_its_own_surface() -> None:
     with pytest.raises(ValueError, match="board segment offered to the play_strip lane"):
         _lane(_segment("1", surface=Surface.BOARD))

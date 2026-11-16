@@ -12,7 +12,8 @@ a line each:
 - the field it draws (the score, the period, and the next snap or the break);
 - each entry dropped unseen, and why.
 Two boards that decide alike on a trace give the same lines, so a change to the board is checked on
-them. The clock alone, the meter and the pixels are not decisions.
+them. The clock alone, the meter and the pixels are not decisions. The replay's display shows each
+frame the moment it's handed over, and says so at once.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from typing import Any
 from omni.core.clock import FakeClock
 from omni.app.football_board import FootballBoard
 from omni.app.football_feed import FeedResult
+from omni.app.frame_stream import DisplayReceipt, FrameShown
 from omni.cards.base import ScoreboardCard
 from omni.cards.football import LiveFootballCardPayload
 from omni.core.enum import GameStatus, HomeAway, League, PanelProfile
@@ -241,12 +243,15 @@ class _Cards:
 
 
 class _NullSink:
-    """A display that takes every frame and keeps none: replay decides, it doesn't draw."""
+    """A display that shows every frame as it takes it, says so at once, and keeps none: replay decides,
+    it doesn't draw."""
 
     def __init__(self, profile: PanelProfile) -> None:
         self._profile = profile
         geometry = geometry_for(profile)
         self._canvas = RecordingCanvas(geometry.width, geometry.height)
+        self._last = 0
+        self._shown: list[DisplayReceipt] = []
 
     @property
     def profile(self) -> PanelProfile:
@@ -255,8 +260,14 @@ class _NullSink:
     def new_frame(self) -> Canvas:
         return self._canvas
 
-    def commit(self, frame: Canvas) -> None:
-        return None
+    def send(self, frame: Canvas) -> int:
+        self._last += 1
+        self._shown.append(FrameShown(self._last, generation=1))
+        return self._last
+
+    def receipts(self) -> list[DisplayReceipt]:
+        shown, self._shown = self._shown, []
+        return shown
 
 
 def _field_label(state: FootballGameState) -> str:

@@ -10,8 +10,14 @@ The play strip is a lane on the tower's shared primitives (`omni.tower`): each e
 of the strip, in frames: its description, then the named players' lines for the game. Each frame gets
 10 seconds, and 20 while nothing else is waiting; then the strip goes blank until the next event. A
 stoppage (a timeout, a TV timeout, an injury, a review's ruling) is held instead, until play resumes.
-A frame's time counts from when the display first took it, so a frame that failed to draw keeps its
-time.
+
+A strip frame's time counts from when the display first showed it, by the display's own word: each frame
+drawn is handed over with an id, and the board credits the strip frame (and the marquee's start) only
+when the display says it showed that frame. A frame that failed to draw, or was replaced before it was
+shown, keeps the strip frame's time. While the display is slow to answer, what it showed last stays up
+and keeps its time. When the display goes away (its panel goes blank), the strip frame it showed loses
+its credit, and gets its whole time again once a new display shows it. A display that never answers (an
+older display process) is credited a few seconds in with each frame written to it, unconfirmed.
 
 A field change shows at once. If its play comes with it, the play comes straight up; if not, what the
 strip still shows no longer describes the field, so it clears (once its frame has had 10 seconds) and
@@ -28,9 +34,9 @@ from `meter_lag` before it instead, and none at all once the market has been qui
 past that. The lag is measured from when each price was asked for, not from when the market set it, so
 it can still run ahead of the feed: the meter is opt-in until it's anchored to the market's own clock.
 
-The log keeps apart what arrives (`>`), what the strip puts up (`=`), what it clears early because the
-field moved on without its play (`x`), and what it drops unseen (`-`), with notes on the feed itself
-(`!`).
+The log keeps apart what arrives (`>`), what the strip puts up (`=`, when the display shows it), what it
+clears early because the field moved on without its play (`x`), what a display that went away took off
+the panel (`~`), and what it drops unseen (`-`), with notes on the feed itself (`!`).
 """
 
 from __future__ import annotations
@@ -45,6 +51,7 @@ from typing import Any
 from omni.core.clock import ClockReading, MonotonicTime
 from omni.app.display import DisplaySink
 from omni.app.football_feed import AFTER_FINAL, FeedResult, FeedSource
+from omni.app.frame_stream import AcknowledgingSink, DisplayLost, DisplayReceipt, FrameShown
 from omni.cards.base import CardId, CardKind, CardPriority, DedupeKey, DisplayTiming, LayoutSupport, ScoreboardCard
 from omni.cards.football import LiveFootballCardPayload
 from omni.core.enum import DisplayPriority, PanelProfile
@@ -54,10 +61,11 @@ from omni.domain.football import FootballGameState, PlaySummary
 from omni.events.football import FootballEvent
 from omni.providers.nflmeta import NflLiveSnapshot
 from omni.renderers.base import Renderer
+from omni.renderers.canvas import Canvas
 from omni.renderers.context import RenderContext
 from omni.renderers.image import LogoStore
 from omni.renderers.live_football import NO_STRIP_NOTE, STRIP_PROFILES, LiveFootballRenderer
-from omni.renderers.text_lane import DEFAULT_MARQUEE, LaneClock, Marquee, MarqueeStyle
+from omni.renderers.text_lane import DEFAULT_MARQUEE, LaneClock, LaneFrame, Marquee, MarqueeStyle
 from omni.tower import ChangeKind, Cue, Dwell, EndReason, Hold, Lane, LaneChange, Provenance, Segment, SegmentKey
 from omni.tower import Surface, earliest
 
@@ -68,6 +76,8 @@ __all__ = [
     "FRAME_MAX",
     "FRAME_MIN",
     "STRIP_DWELL",
+    "UNCONFIRMED_NOTE",
+    "UNSHOWN_AFTER",
     "FootballBoard",
 ]
 
@@ -77,6 +87,10 @@ METER_LAG = timedelta(seconds=15)
 METER_MAX_AGE = timedelta(seconds=60)  # a price this much older than its lag is no reading at all
 CLOSING_WAIT = timedelta(seconds=30)  # longest a break waits for the play that ended the period
 STRIP_DWELL = Dwell(minimum=FRAME_MIN, maximum=FRAME_MAX)
+UNSHOWN_AFTER = timedelta(seconds=30)  # a frame the display hasn't shown this long after it was drawn
+UNCONFIRMED_NOTE = (
+    "display: no frame acknowledgements; showing frames unconfirmed (update board_frame_sink.py on the board)"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,13 +103,50 @@ class _Reading:
     win_probability: WinProbability | None
 
 
+@dataclass(frozen=True, slots=True)
+class _Handed:
+    """A frame handed to the display, and what to credit once the display shows it."""
+
+    frame: int  # its id
+    drawn: ClockReading
+    cue: Cue[PlaySummary] | None  # the strip frame it carried
+    lanes: LaneFrame  # its marquee lines' starts
+    lanes_version: int  # how many line starts had been committed when it was drawn
+
+
+class _ShownOnCommit:
+    """A display whose commit shows the frame before it returns: the word that it did comes at once."""
+
+    def __init__(self, sink: DisplaySink) -> None:
+        self._sink = sink
+        self._last = 0
+        self._shown: list[DisplayReceipt] = []
+
+    @property
+    def profile(self) -> PanelProfile:
+        return self._sink.profile
+
+    def new_frame(self) -> Canvas:
+        return self._sink.new_frame()
+
+    def send(self, frame: Canvas) -> int:
+        self._sink.commit(frame)
+        self._last += 1
+        self._shown.append(FrameShown(self._last, generation=1))
+        return self._last
+
+    def receipts(self) -> list[DisplayReceipt]:
+        shown, self._shown = self._shown, []
+        return shown
+
+
 class FootballBoard:
     """One game on one display."""
 
     def __init__(
         self,
         feed: FeedSource,
-        sink: DisplaySink,
+        sink: DisplaySink | AcknowledgingSink,
         *,
         delay: timedelta = timedelta(0),
         meter_lag: timedelta = METER_LAG,
@@ -106,17 +157,20 @@ class FootballBoard:
         renderer: Renderer[LiveFootballCardPayload] | None = None,
     ) -> None:
         self._feed = feed
-        self._sink = sink
+        self._display = sink if isinstance(sink, AcknowledgingSink) else _ShownOnCommit(sink)
+        self._handed: deque[_Handed] = deque()  # frames handed over, not yet shown, oldest first
+        self._unconfirmed = False  # the display has been credited without its word
         self._delay = delay
         self._meter_lag = meter_lag
         self._logos = logos
         self._timezone = timezone
         self._marquee = marquee  # how lines scroll
         self._lanes = LaneClock()  # when each line went up, by the strip frame it belongs to
+        self._lanes_version = 0  # line starts committed so far
         self._log = log
         self._renderer: Renderer[LiveFootballCardPayload] = renderer or LiveFootballRenderer()
         self._strip: Lane[PlaySummary] = Lane(Surface.PLAY_STRIP)
-        self._strip_drawn = sink.profile in STRIP_PROFILES  # the small profiles' cards have no strip to fill
+        self._strip_drawn = self._display.profile in STRIP_PROFILES  # the small profiles' cards have no strip
         self._paint_error: str | None = None
         self._pending: deque[_Reading] = deque()
         self._showing: _Reading | None = None
@@ -131,7 +185,9 @@ class FootballBoard:
         return self._showing.snapshot if self._showing is not None else None
 
     def step(self, at: ClockReading) -> None:
-        """Take the feed's new answers, then draw what the broadcast has caught up to."""
+        """Take what the display showed and the feed's new answers, then draw what the broadcast has caught
+        up to."""
+        self._credit(at)
         for result in self._feed.collect(at.utc):
             self._absorb(result)
         while self._pending and self._pending[0].show_at <= at.utc:
@@ -152,6 +208,7 @@ class FootballBoard:
                 self._draw(showing, showing.snapshot.state, cue, at)
             else:
                 self._draw(showing, showing.snapshot.state, None, at)
+        self._credit(at)  # a display that shows a frame as it takes it already has
         self._trace(self._strip.changes())
 
     def next_deadline(self, at: ClockReading) -> MonotonicTime | None:
@@ -196,11 +253,51 @@ class FootballBoard:
         for segment in segments:
             self._log(f"  - {_words(segment.frames[0])} (unseen: {why})")
 
-    def _trace(self, changes: list[LaneChange[PlaySummary]]) -> None:
-        """The strip's changes in the log: what went up, what the field cleared early, what went unseen."""
+    def _credit(self, at: ClockReading) -> None:
+        """Credit what the display says it showed since the last ask, as of ``at``, when the board learns
+        of it: the strip frame each shown frame carried, and its marquee starts. A frame handed over before
+        one that was shown, and not shown itself, was replaced: it's never credited."""
+        for receipt in self._display.receipts():
+            if isinstance(receipt, DisplayLost):
+                self._handed.clear()  # anything in flight went to the display that's gone
+                self._lanes, self._lanes_version = LaneClock(), self._lanes_version + 1  # lines restart
+                self._strip.blanked(at)
+                self._trace(self._strip.changes())
+                continue
+            if not receipt.confirmed and not self._unconfirmed:
+                self._unconfirmed = True
+                self._log(UNCONFIRMED_NOTE)
+            handed = self._shown(receipt.frame)
+            if handed is None:
+                continue
+            if handed.lanes_version == self._lanes_version:  # drawn on the starts now standing
+                handed.lanes.commit()
+                self._lanes_version += 1
+            if handed.cue is not None:
+                self._strip.committed(handed.cue, at)
+            self._trace(self._strip.changes(), unconfirmed=not receipt.confirmed)
+        while self._handed and at.monotonic.since(self._handed[0].drawn.monotonic) >= UNSHOWN_AFTER:
+            self._handed.popleft()
+
+    def _shown(self, frame: int) -> _Handed | None:
+        """The frame handed over with id ``frame``, once shown; any handed over before it go unshown."""
+        if all(handed.frame != frame for handed in self._handed):
+            return None  # not one the board is waiting on (drawn before the display went away, or long ago)
+        while self._handed[0].frame != frame:
+            self._handed.popleft()
+        return self._handed.popleft()
+
+    def _trace(self, changes: list[LaneChange[PlaySummary]], *, unconfirmed: bool = False) -> None:
+        """The strip's changes in the log: what went up, what the field cleared early, what a display that
+        went away lost, what went unseen."""
+        mark = " (unconfirmed)" if unconfirmed else ""
         for change in changes:
             if change.kind is ChangeKind.UP:
-                self._log(f"  = {_words(change.segment.frames[0])}")
+                self._log(f"  = {_words(change.segment.frames[0])}{mark}")
+            elif change.kind is ChangeKind.AGAIN:
+                self._log(f"  = {_words(change.segment.frames[0])} (again, on the new display){mark}")
+            elif change.kind is ChangeKind.BLANKED:
+                self._log(f"  ~ {_words(change.segment.frames[0])} (blanked: the display went away)")
             elif change.kind is ChangeKind.DOWN and change.reason is EndReason.INVALIDATED:
                 self._log(f"  x {_words(change.segment.frames[0])} (cleared: the field moved on without its play)")
             elif change.kind is ChangeKind.DROPPED:
@@ -254,7 +351,7 @@ class FootballBoard:
     def _draw(
         self, reading: _Reading, state: FootballGameState, cue: Cue[PlaySummary] | None, at: ClockReading
     ) -> None:
-        """Draw the card, and tell the strip which of its frames went up."""
+        """Draw the card and hand it to the display, noting the strip frame it carries for when it's shown."""
         game = reading.snapshot.game
         key = _card_key(reading)
         card = ScoreboardCard(
@@ -274,16 +371,18 @@ class FootballBoard:
                 break_ends_at=_delayed(reading.snapshot.break_ends_at, self._delay),
             ),
         )
-        # The strip's lines belong to the strip frame up: a new one starts its lines at their heads.
-        lanes = self._lanes.frame((cue.segment.key, cue.frame) if cue is not None else None, at.monotonic)
+        # The strip's lines belong to the strip frame up: a new one starts its lines at their heads, and
+        # again once the display has shown it, so a frame shown late doesn't scroll in midway.
+        presentation = (cue.segment.key, cue.frame, self._strip.dwelling) if cue is not None else None
+        lanes = self._lanes.frame(presentation, at.monotonic)
         marquee = Marquee(style=self._marquee, clock=lanes)
         context = RenderContext(
-            profile=self._sink.profile, now=at.utc, logos=self._logos, timezone=self._timezone, marquee=marquee
+            profile=self._display.profile, now=at.utc, logos=self._logos, timezone=self._timezone, marquee=marquee
         )
         try:
-            frame = self._sink.new_frame()
+            frame = self._display.new_frame()
             self._renderer.render(card, context, frame)
-            self._sink.commit(frame)
+            handed = self._display.send(frame)
         except Exception as exc:  # a frame nobody saw spends no strip time, and never stops the board
             error = f"{type(exc).__name__}: {exc}"
             if error != self._paint_error:
@@ -293,9 +392,7 @@ class FootballBoard:
         if self._paint_error is not None:
             self._paint_error = None
             self._log("paint recovered")
-        lanes.commit()
-        if cue is not None:
-            self._strip.committed(cue, at)
+        self._handed.append(_Handed(handed, at, cue, lanes, self._lanes_version))
 
 
 def _delayed(instant: datetime | None, delay: timedelta) -> datetime | None:

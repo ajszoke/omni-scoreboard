@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import struct
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any
-
-import pytest
 
 from omni.core.clock import ClockReading, MonotonicTime
 from omni.app.display import RecordingDisplaySink
@@ -18,20 +16,25 @@ from omni.app.football_board import (
     FRAME_MAX,
     FRAME_MIN,
     METER_MAX_AGE,
+    UNCONFIRMED_NOTE,
+    UNSHOWN_AFTER,
     FootballBoard,
 )
-from omni.app.frame_stream import FRAME_MAGIC, DisplayUnavailable, StreamDisplaySink, encode_frame
+from omni.app.frame_stream import DisplayLink, DisplayUnavailable, StreamDisplaySink, StreamFrame
+from omni.cards.base import ScoreboardCard
+from omni.cards.football import LiveFootballCardPayload
 from omni.core.colors import RGBColor
 from omni.core.enum import PanelProfile
 from omni.domain.baseball import WinProbability
 from omni.domain.contest import TeamGame
 from omni.domain.football import FootballInterval, PlaySummary, PlayTone
-from omni.renderers.text_lane import DEFAULT_MARQUEE, ScrollSpeed
+from omni.renderers.context import RenderContext
+from omni.renderers.text_lane import DEFAULT_MARQUEE, ScrollSpeed, TextLane
 from omni.events.football import FootballEvent, FootballEventKind
 from omni.providers.base import ProviderError
 from omni.providers.nfl_teams import NflTeamRegistry
 from omni.providers.nflmeta import FINAL_DRAIN, HALFTIME_HOLD, NFLMETA_SOURCE, NflMetaLiveProvider
-from omni.renderers.canvas import Canvas, RecordingCanvas
+from omni.renderers.canvas import Canvas
 from omni.tower import ChangeKind, EndReason, LaneChange, Provenance, Segment, SegmentKey, Surface
 from tests.test_nflmeta import GAME, FakeFeed, _change, _page, _row, _scores, _synced
 
@@ -226,33 +229,6 @@ def test_logs_a_live_game_with_no_down_to_describe() -> None:
     assert lines == ["PIT @ CIN 0-10 Q2 13:09 [in] | TO 3-3 CH 2-2"]
 
 
-def test_streams_each_new_frame_once() -> None:
-    sent: list[bytes] = []
-    delivered = [True, False, True]
-
-    def write(frame: bytes) -> bool:
-        sent.append(frame)
-        return delivered.pop(0)
-
-    sink = StreamDisplaySink(PanelProfile.SINGLE_64X32, write)
-    assert sink.profile is PanelProfile.SINGLE_64X32
-    for _ in range(2):
-        sink.commit(sink.new_frame())
-    assert len(sent) == 1
-    assert sent[0][:4] == FRAME_MAGIC and struct.unpack("<HH", sent[0][4:8]) == (64, 32)
-    assert len(sent[0]) == 8 + 64 * 32 * 3
-    lit = sink.new_frame()
-    lit.set_pixel(0, 0, RGBColor(255, 0, 0))
-    with pytest.raises(DisplayUnavailable):
-        sink.commit(lit)  # not delivered: the board shouldn't count it as shown, and it goes again
-    sink.commit(lit)
-    assert len(sent) == 3 and sent[1] == sent[2]
-    with pytest.raises(TypeError):
-        sink.commit(RecordingCanvas(64, 32))
-    with pytest.raises(ValueError):
-        encode_frame(2, 2, b"\x00")
-
-
 def test_the_launcher_takes_a_game_and_a_display() -> None:
     args = _parse_args(["--profile", "quad_128x64", "--teams", "PIT,CIN", "--sink-command", "cat"])
     assert (args.teams, args.delay, args.meter_lag, args.fps, args.emulated) == ("PIT,CIN", 0, 15, 10.0, False)
@@ -437,24 +413,6 @@ def test_logs_the_feeds_own_trouble() -> None:
     assert lines[-1] == "  ! play read failed: NFLMeta fetch failed for /api/v1/games/22920/play-changes: timed out"
 
 
-def test_a_new_display_process_gets_the_frame_again() -> None:
-    sent: list[bytes] = []
-    generation = [1]
-
-    def write(frame: bytes) -> bool:
-        sent.append(frame)
-        return True
-
-    sink = StreamDisplaySink(PanelProfile.SINGLE_64X32, write, lambda: generation[0])
-    sink.commit(sink.new_frame())
-    sink.commit(sink.new_frame())
-    assert len(sent) == 1
-    generation[0] = 2  # the display process was restarted, and its panel starts blank
-    sink.commit(sink.new_frame())
-    sink.commit(sink.new_frame())
-    assert len(sent) == 2
-
-
 def test_the_next_deadline_is_the_soonest_thing_the_board_would_do_by_itself() -> None:
     feed = FakeFeed()
     feed.scores = [_scores(_row(clock="13:09"))]
@@ -491,3 +449,191 @@ def test_the_log_names_an_entry_the_strip_dropped_unseen() -> None:
         ]
     )
     assert lines[-2:] == ["  - PUNT (unseen: expired)", "  - PUNT (unseen: dropped)"]
+
+
+# Drawing through the frame stream: the strip counts a frame as shown only on the display's word.
+
+PUNT = "PUNT | C.Johnston punts 44 yards to CIN 18."
+_STRIP_LANE = TextLane(x=0, y=56, width=128, font="5x7")
+
+
+class _Stream:
+    """The frame stream to a display process, with the process played by the test.
+
+    The board draws through a real `StreamDisplaySink` and `DisplayLink`. The writer keeps each frame
+    handed to it as written to the current display process; the test says when a display process starts
+    (and whether it acknowledges frames), which frame it shows, and when it goes away.
+    """
+
+    def __init__(self, *, now: Callable[[], float] = lambda: 0.0) -> None:
+        self.link = DisplayLink(monotonic=now)
+        self.frames: list[StreamFrame] = []
+        self.sink = StreamDisplaySink(PanelProfile.QUAD_128X64, self._write, self.link)
+        self.generation = 0
+
+    def _write(self, frame: StreamFrame) -> bool:
+        self.frames.append(frame)
+        self.link.written(self.generation, frame.id)
+        return True
+
+    def start(self, *, acknowledges: bool = True) -> None:
+        self.generation += 1
+        self.link.started(self.generation)
+        if acknowledges:
+            self.link.ready(self.generation)
+
+    def show_newest(self) -> None:
+        self.link.shown(self.generation, self.frames[-1].id)
+
+    def go_away(self) -> None:
+        self.link.ended(self.generation)
+
+
+class _Ticking:
+    """Stands in for the renderer: each frame it draws differs from the last, and it notes how long the
+    strip's line had been up in each one."""
+
+    def __init__(self) -> None:
+        self._drawn = 0
+        self.strip_up: list[float | None] = []
+
+    @property
+    def supported_profiles(self) -> frozenset[PanelProfile]:
+        return frozenset(PanelProfile)
+
+    def render(self, card: ScoreboardCard[LiveFootballCardPayload], context: RenderContext, canvas: Canvas) -> None:
+        canvas.set_pixel(self._drawn % canvas.width, self._drawn // canvas.width % canvas.height, RGBColor(255, 0, 0))
+        self._drawn += 1
+        play, clock = card.payload.last_play, context.marquee.clock
+        if play is not None and clock is not None:
+            self.strip_up.append(clock.elapsed(_STRIP_LANE, play.headline, overflows=True))
+
+
+def _streamed(feed: FakeFeed, stream: _Stream) -> tuple[FootballBoard, _Ticking, list[str]]:
+    provider = NflMetaLiveProvider(NflTeamRegistry.default(source=NFLMETA_SOURCE), fetch=feed)
+    lines: list[str] = []
+    renderer = _Ticking()
+    board = FootballBoard(GameFeed(provider, GAME), stream.sink, log=lines.append, renderer=renderer)
+    return board, renderer, lines
+
+
+def _punt() -> FakeFeed:
+    feed = FakeFeed()
+    feed.scores = [_scores(_synced("p1"))]
+    feed.plays = [_page(_change("p1", 1, "C.Johnston punts 44 yards to CIN 18.", play_type="punt"))]
+    return feed
+
+
+def test_a_strip_frame_counts_its_time_from_when_the_display_shows_it_not_from_when_it_was_drawn() -> None:
+    stream = _Stream()
+    stream.start()
+    board, _, lines = _streamed(_punt(), stream)
+    board.step(_at(T0))  # drawn and handed over
+    assert board.next_deadline(_at(T0)) is None  # the strip waits for the display's word
+    first = stream.frames[0].id
+    for second in range(1, 5):
+        board.step(_at(T0 + second * S))
+    assert not any(line.startswith("  =") for line in lines)  # handed over is not shown
+    stream.link.shown(1, first)  # the display's word on the first frame comes 5 s after it was drawn
+    board.step(_at(T0 + 5 * S))
+    assert lines[-1] == f"  = {PUNT}"
+    assert board.next_deadline(_at(T0 + 5 * S)) == MonotonicTime(25)  # its 20 s from the word, not the draw
+    stream.link.shown(1, stream.frames[2].id)  # word on a frame drawn before: the dwell already runs
+    board.step(_at(T0 + 6 * S))
+    assert board.next_deadline(_at(T0 + 6 * S)) == MonotonicTime(25)
+
+
+def test_the_strips_marquee_starts_when_the_display_shows_its_frame() -> None:
+    stream = _Stream()
+    stream.start()
+    board, renderer, _ = _streamed(_punt(), stream)
+    for second in range(0, 5):  # five seconds of frames the display doesn't confirm: each starts at the head
+        board.step(_at(T0 + second * S))
+    stream.link.shown(1, stream.frames[0].id)
+    for second in range(5, 8):
+        board.step(_at(T0 + second * S))
+        stream.show_newest()
+    assert renderer.strip_up == [0.0] * 6 + [1.0, 2.0]  # counted from when it was shown (5 s), not drawn (0 s)
+
+
+def _two_plays() -> FakeFeed:
+    feed = _punt()
+    feed.scores = [_scores(_synced("p1")), _scores(_synced("p2"))]
+    pass_play = _change("p2", 2, "J.Burrow pass short right to J.Chase for 9 yards.", play_type="pass_reception")
+    feed.plays = [feed.plays[0], _page(pass_play)]
+    return feed
+
+
+def test_a_short_stall_keeps_the_caption_on_the_panel_on_its_time_and_credits_nothing_new() -> None:
+    stream = _Stream()
+    stream.start()
+    board, _, lines = _streamed(_two_plays(), stream)
+    board.step(_at(T0))
+    stream.show_newest()
+    board.step(_at(T0 + S))  # the punt is up, from now
+    for second in range(2, 16):  # the display goes quiet: frames are handed over, and none is confirmed
+        board.step(_at(T0 + second * S))
+        if second == 10:  # the pass has arrived: the punt goes once it has had 10 s from when it went up
+            assert board.next_deadline(_at(T0 + 10 * S)) == MonotonicTime(11)
+    assert [line for line in lines if line.startswith("  =")] == [f"  = {PUNT}"]  # the pass isn't up yet
+    assert board.next_deadline(_at(T0 + 15 * S)) is None  # it waits for the display
+    stream.show_newest()
+    board.step(_at(T0 + 16 * S))
+    assert lines[-1] == "  = PASS | J.Burrow pass short right to J.Chase for 9 yards."
+    assert board.next_deadline(_at(T0 + 16 * S)) == MonotonicTime(36)
+
+
+def test_a_lost_display_takes_the_captions_time_back_and_a_new_one_gives_it_all_again() -> None:
+    stream = _Stream()
+    stream.start()
+    board, _, lines = _streamed(_punt(), stream)
+    board.step(_at(T0))
+    stream.show_newest()
+    board.step(_at(T0 + S))
+    assert board.next_deadline(_at(T0 + S)) == MonotonicTime(21)
+    board.step(_at(T0 + 5 * S))
+    in_flight = stream.frames[-1].id  # handed over to the display ...
+    stream.go_away()  # ... when it went away
+    board.step(_at(T0 + 6 * S))
+    assert lines[-1] == f"  ~ {PUNT} (blanked: the display went away)"
+    assert board.next_deadline(_at(T0 + 6 * S)) is None  # no time runs on a blank panel
+    stream.link.shown(1, in_flight)  # the old display's word, late: dropped
+    stream.start()  # a new display process, its panel blank
+    stream.link.shown(2, in_flight)  # it shows the old frame after all, but that frame was drawn for the old one
+    board.step(_at(T0 + 8 * S))
+    assert lines[-1] == f"  ~ {PUNT} (blanked: the display went away)" and board.next_deadline(_at(T0 + 8 * S)) is None
+    stream.show_newest()  # a frame drawn since: current and complete
+    board.step(_at(T0 + 9 * S))
+    assert lines[-1] == f"  = {PUNT} (again, on the new display)"
+    assert board.next_deadline(_at(T0 + 9 * S)) == MonotonicTime(29)  # the whole 20 s again, from the new word
+
+
+def test_a_display_that_never_answers_is_credited_unconfirmed_after_a_few_seconds() -> None:
+    now = [0.0]
+    stream = _Stream(now=lambda: now[0])
+    stream.start(acknowledges=False)  # a display process from before the acknowledgements
+    board, _, lines = _streamed(_punt(), stream)
+    for second in range(0, 5):
+        now[0] = float(second)
+        board.step(_at(T0 + second * S))
+    assert not any(line.startswith("  =") or line.startswith("display:") for line in lines)
+    for second in range(5, 7):
+        now[0] = float(second)
+        board.step(_at(T0 + second * S))
+    assert lines[-2:] == [UNCONFIRMED_NOTE, f"  = {PUNT} (unconfirmed)"]  # the note, once
+    assert board.next_deadline(_at(T0 + 6 * S)) == MonotonicTime(25)
+
+
+def test_frames_the_display_never_shows_are_forgotten_after_a_while() -> None:
+    stream = _Stream()
+    stream.start()
+    board, _, lines = _streamed(_punt(), stream)
+    board.step(_at(T0))
+    stale = stream.frames[0].id
+    board.step(_at(T0 + UNSHOWN_AFTER))  # drawn too long ago to credit now
+    stream.link.shown(1, stale)
+    board.step(_at(T0 + UNSHOWN_AFTER + S))
+    assert not any(line.startswith("  =") for line in lines)
+    stream.show_newest()
+    board.step(_at(T0 + UNSHOWN_AFTER + 2 * S))
+    assert lines[-1] == f"  = {PUNT}"

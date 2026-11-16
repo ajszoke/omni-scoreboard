@@ -8,8 +8,10 @@ nothing is pending; after that comes its next frame, or the next segment. Someth
 A held segment stays past its maximum until something is pending.
 
 The display says what it actually showed. `cue` names the frame that should be on air, and `committed`
-is the display's word that it drew that frame. A frame's dwell counts from its first commit, so a
-frame that never drew spends none of its time.
+is the display's word that it drew that frame: that segment, at that revision, that frame. A frame's
+dwell counts from its first commit, so a frame that never drew spends none of its time. When the display
+loses what it showed (its panel went blank), `blanked` takes that credit back: the frame on air goes up
+again from its next commit, with its whole dwell.
 
 Availability, latest start and expiry are UTC instants. Dwell runs on the monotonic clock.
 
@@ -19,7 +21,8 @@ An edit to one that has already aired doesn't bring it back: a material correcti
 of its own.
 
 `changes` reports, for the trace, what happened since it was last asked: a segment up (its first
-frame committed), a later frame up, a segment down and why, a segment dropped unseen and why.
+frame committed), a later frame up, a frame blanked and up again, a segment down and why, a segment
+dropped unseen and why.
 """
 
 from __future__ import annotations
@@ -54,6 +57,8 @@ class EndReason(StrEnumMixin, str, Enum):
 class ChangeKind(StrEnumMixin, str, Enum):
     UP = "up"  # its first frame was committed
     FRAME = "frame"  # a later frame was committed
+    BLANKED = "blanked"  # the display lost the frame on air: it counts from its next commit
+    AGAIN = "again"  # a blanked frame was committed again
     DOWN = "down"  # it came down, having aired
     DROPPED = "dropped"  # it came down, or was passed over, without airing
 
@@ -81,6 +86,7 @@ class Lane(Generic[PayloadT]):
         self._frame = 0
         self._since: MonotonicTime | None = None  # when the frame on air was first committed
         self._aired = False  # whether any frame of the segment on air has been committed
+        self._blanked = False  # the frame on air was committed, then blanked (so it waits for a commit)
         self._stale = False
         self._brief = False
         self._changes: list[LaneChange[PayloadT]] = []
@@ -89,6 +95,11 @@ class Lane(Generic[PayloadT]):
     def idle(self) -> bool:
         """Nothing on air and nothing waiting."""
         return self._current is None and not self._waiting
+
+    @property
+    def dwelling(self) -> bool:
+        """The frame on air has been committed, so its dwell runs."""
+        return self._current is not None and self._since is not None
 
     def offer(self, segments: Iterable[Segment[PayloadT]]) -> None:
         """Queue segments behind any waiting. One already offered changes only by a newer revision."""
@@ -121,6 +132,16 @@ class Lane(Generic[PayloadT]):
     def resume(self) -> None:
         """Frames get their full time again."""
         self._brief = False
+
+    def blanked(self, at: ClockReading) -> None:
+        """The display lost what it showed: the frame on air, if it had been committed, goes up again from
+        its next commit, with its whole dwell."""
+        current = self._current
+        if current is None or self._since is None:
+            return
+        aired = at.monotonic.since(self._since)
+        self._changes.append(LaneChange(ChangeKind.BLANKED, current, at, frame=self._frame, aired=aired))
+        self._since, self._blanked = None, True
 
     def clear(self, at: ClockReading) -> list[Segment[PayloadT]]:
         """Empty the lane; returns what goes unseen (everything waiting, and anything on air not yet drawn)."""
@@ -159,16 +180,19 @@ class Lane(Generic[PayloadT]):
                 self._changes.append(LaneChange(ChangeKind.DROPPED, segment, at, reason=reason))
                 continue
             self._current, self._frame, self._since, self._aired, self._stale = segment, 0, None, False, False
+            self._blanked = False
         return Cue(self._current, self._frame) if self._current is not None else None
 
     def committed(self, cue: Cue[PayloadT], at: ClockReading) -> None:
         """The display drew ``cue`` at ``at``. The first commit of a frame starts its dwell."""
         current = self._current
-        if current is None or cue.segment.key != current.key or cue.frame != self._frame or self._since is not None:
-            return  # no longer on air, or its dwell already runs
+        if current is None or self._since is not None:
+            return  # nothing on air, or its dwell already runs
+        if cue.segment.key != current.key or cue.segment.revision != current.revision or cue.frame != self._frame:
+            return  # not what's on air now: another segment, an older revision, another frame
         self._since = at.monotonic
-        kind = ChangeKind.FRAME if self._aired else ChangeKind.UP
-        self._aired = True
+        kind = ChangeKind.AGAIN if self._blanked else ChangeKind.FRAME if self._aired else ChangeKind.UP
+        self._aired, self._blanked = True, False
         self._changes.append(LaneChange(kind, current, at, frame=self._frame))
 
     def next_deadline(self, at: ClockReading) -> MonotonicTime | None:
