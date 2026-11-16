@@ -283,6 +283,7 @@ milestones:
         labels: [nba, provider, p2]
         notes:
           - "2026-11-15: the user put NBA next once A1a lands and leagues can mix. Research thread briefed for the head: ~/omni-review/research/nba-providers-prompt.md (fields, terms, slate-night cost, NFLMeta's lessons). File the answer as research/nba-providers-research.md, then fold it into SOURCES.md."
+          - "2026-11-16: the head's report is in (research/nba-providers-research.md) and folded into SOURCES.md. Front-runner: BALLDONTLIE. Its Free games endpoint carries score, period, clock string, timeouts left and bonus for a whole slate in one request (5 a minute, so every 12 s), and its terms allow a central poller serving every board. ALL-STAR ($9.99) adds player stats; GOAT ($39.99) adds plays and live box scores. No budget feed has a running clock, possession or challenge count. Provider pick is the user's call."
       - id: M7-002
         title: "NBA live/final/clutch cards"
         labels: [nba, rendering, p2]
