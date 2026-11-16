@@ -10,6 +10,7 @@ import pytest
 
 from omni.app.display import RecordingDisplaySink
 from omni.app.football import _parse_args
+from omni.app.football_feed import GameFeed
 from omni.app.football_board import (
     CLOSING_WAIT,
     FRAME_MAX,
@@ -91,7 +92,8 @@ def _board(feed: FakeFeed, **kwargs: Any) -> tuple[FootballBoard, RecordingDispl
     provider = NflMetaLiveProvider(NflTeamRegistry.default(source=NFLMETA_SOURCE), fetch=feed)
     lines: list[str] = []
     sink = RecordingDisplaySink(PanelProfile.QUAD_128X64)
-    return FootballBoard(provider, GAME, sink, log=lines.append, **kwargs), sink, lines
+    source = GameFeed(provider, GAME, win_probability=kwargs.pop("win_probability", None))
+    return FootballBoard(source, sink, log=lines.append, **kwargs), sink, lines
 
 
 def test_polls_when_due_and_draws_every_step() -> None:

@@ -334,7 +334,9 @@ milestones:
       - id: M11-001
         title: "Split frames from ticks in the MLB app (draw at a frame rate; run_once on its own cadence)"
         labels: [app, clock, rendering, p1]
+        status: done  # A1a step 1, 2026-11-16
         notes:
+          - "Done in A1a step 1: AppLoop.decide runs once a --tick on its own thread (fetches included), and AppLoop.paint draws the current pick --fps times a second (default 10). run_once is one of each, for replay."
           - "run_forever draws once per 12 s tick, so marquees are sampled far below their motion and can jump backward (the baseball jerk), and countdowns/blinks can't animate."
           - "Round 4 R4-8: the first A1a change. Since the LaneClock forgets a lane after 5 s, a 12 s paint restarts every MLB line at its head."
       - id: M11-002
@@ -342,11 +344,13 @@ milestones:
         labels: [app, clock, providers, p1]
         notes:
           - "Round 4 (A1a step 2): a typed PollPlan for slate, per-game and optional sources; single-flight fetches; priority cadence within quota; bounded retries; per-game last-good expiry; previous and current local dates in the schedule window. Isolate render and sink failures (H4)."
+          - "A1a step 1 took the fetches off both frame paths: MLB decisions (fetches included) run on a worker thread; football asks NFLMeta and the market on a feed thread (football_feed.BackgroundFeed); the stream sink writes on its own thread (frame_stream.BackgroundFrameWriter), so a stalled SSH link can't stop drawing. The PollPlan is still to come."
       - id: M11-003
         title: "One clock seam everywhere (football launcher on SystemClock; monotonic only for pacing)"
         labels: [app, clock, p2]
         notes:
           - "Round 4: one injected seam, two readings: UTC dates observations and release times; monotonic measures dwell, freshness since receipt, backoff, cooldown, animation and pacing. Replay advances both and can jump the wall clock alone. Stamp actual receipts: MLB fallbacks stamp the pass's start (pipeline.py:288)."
+          - "A1a step 1: Clock.read() gives ClockReading(utc, monotonic); FakeClock.advance moves both and FakeClock.set jumps the wall clock alone; Pacer paces loops on monotonic time; the football launcher reads SystemClock, and its answers are dated by arrival. Still open: MLB receipt stamps (pipeline.py:288), with the PollPlan. The dev machine's wall clock (WSL2) was seen jumping back about 2.4 s mid-run, while the monotonic beat held."
       - id: M11-004
         title: "Scheduling primitives (segment, surface/lane, timer heap, tower) with PlayStrip as first consumer, replay-parity tested"
         labels: [queue, clock, p2]
@@ -376,3 +380,4 @@ milestones:
         labels: [queue, tooling, p2]
         notes:
           - "Round 4: publish next_deadline and basic decision traces in A1a step 1, including the contrast treatment (round-3 Q3); a standalone inspector can follow."
+          - "A1a step 1: omni/app/trace.py writes a decision line when the pick, its reason (takeover, reminder, rotation) or the provider status changes, naming the next decision; and a presentation line at a new card's first committed frame, with each side's logo variant, tile or bar, meter color and the contrast policy."

@@ -6,7 +6,8 @@
 Reads NFLMeta with ``NFLMETA_API_KEY`` (environment or the git-ignored ``.env``); ``--odds`` adds the win
 meter from Polymarket US's public quotes (off by default: see `omni.app.football_board`). Frames go to
 the display process the sink command starts, which is restarted if it drops; ``--emulated`` draws on the
-RGBMatrixEmulator instead. ``--record`` appends every NFLMeta response to a recording under
+RGBMatrixEmulator instead. The feed is read on one thread and frames are written on another, so neither
+a slow request nor a stalled display holds up drawing. ``--record`` appends every NFLMeta response to a recording under
 ``build/recordings/nflmeta/``, for diagnosing the feed; NFLMeta's terms allow ordinary caching but not
 a standing copy of its data, so keep recordings to what a diagnosis needs and delete them after.
 """
@@ -24,7 +25,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import IO, Any, cast
 
+from omni.app.clock import Pacer, SystemClock
 from omni.app.football_board import FootballBoard
+from omni.app.football_feed import BackgroundFeed, GameFeed
 from omni.core.enum import PanelProfile
 from omni.core.env import read_env_file
 from omni.providers.nflmeta import PlayFeedPace
@@ -152,7 +155,7 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
     from zoneinfo import ZoneInfo
 
     from omni.app.display import DisplaySink, MatrixDevice, MatrixDisplaySink
-    from omni.app.frame_stream import StreamDisplaySink
+    from omni.app.frame_stream import BackgroundFrameWriter, StreamDisplaySink
     from omni.panels.geometry import geometry_for
     from omni.providers.nfl_teams import NflTeamRegistry
     from omni.providers.nflmeta import HALFTIME_HOLD, NFLMETA_SOURCE, NflMetaLiveProvider
@@ -178,8 +181,10 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
     if game_id is None:
         raise SystemExit(f"omni.app.football: no game today between {away} and {home}")
 
+    clock = SystemClock()
     sink: DisplaySink
     pipe: SinkProcess | None = None
+    writer: BackgroundFrameWriter | None = None
     if args.emulated:
         from RGBMatrixEmulator import RGBMatrix, RGBMatrixOptions
 
@@ -188,31 +193,36 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
         sink = MatrixDisplaySink(cast(MatrixDevice, RGBMatrix(options=options)), profile)
     else:
         pipe = SinkProcess(shlex.split(args.sink_command))
-        sink = StreamDisplaySink(profile, pipe.write, pipe.generation)
+        writer = BackgroundFrameWriter(pipe.write)
+        sink = StreamDisplaySink(profile, writer, pipe.generation)
 
     market = PolymarketUsProvider().win_probability if args.odds else None
+    feed = BackgroundFeed(GameFeed(provider, game_id, win_probability=market), clock)
     board = FootballBoard(
-        provider,
-        game_id,
+        feed,
         sink,
-        win_probability=market,
         delay=timedelta(seconds=args.delay),
         meter_lag=timedelta(seconds=args.meter_lag),
         logos=LogoStore(),
         timezone=ZoneInfo(args.timezone),
         marquee=DEFAULT_MARQUEE.at(ScrollSpeed(args.scroll_speed)),
-        log=lambda line: print(f"{datetime.now():%H:%M:%S}  {line}", flush=True),
+        log=lambda line: print(f"{clock.now().astimezone():%H:%M:%S}  {line}", flush=True),
     )
     print(f"omni.app.football: {away} @ {home} (game {game_id}), {profile.value}, delay {args.delay}s", flush=True)
-    frame_gap = 1.0 / args.fps
+    if writer is not None:
+        writer.start()
+    feed.start()
+    frames = Pacer(clock, timedelta(seconds=1.0 / args.fps))
     try:
         while True:
-            started = time.monotonic()
-            board.step(datetime.now(timezone.utc))
-            time.sleep(max(0.0, frame_gap - (time.monotonic() - started)))
+            board.step(clock.now())
+            frames.wait()
     except KeyboardInterrupt:
         pass
     finally:
+        feed.stop(timeout=10)
+        if writer is not None:
+            writer.stop(timeout=5)
         if pipe is not None:
             pipe.close()
     return 0

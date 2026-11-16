@@ -1,8 +1,9 @@
 """Follow one live football game: poll it, hold it back to the broadcast, and draw it.
 
-The single-game loop the board runs until football joins the multi-league pipeline. Each `step` polls
-the game when its feed is due, reads the market's win probability with it, and draws the newest reading
-whose broadcast delay has passed. It draws every step, so a marqueeing strip keeps moving; the sink
+The single-game loop the board runs until football joins the multi-league pipeline. Each `step` takes
+whatever answers its feed has collected (`omni.app.football_feed`, which asks NFLMeta and the market
+off the frame path), and draws the newest reading whose broadcast delay has passed. Readings are dated
+from when each answer arrived. It draws every step, so a marqueeing strip keeps moving; the sink
 decides whether a frame is new enough to send.
 
 The play strip keeps its own schedule (`PlayStrip`). An event shows in frames: its description, then
@@ -40,23 +41,21 @@ from datetime import datetime, timedelta, tzinfo
 from typing import Any
 
 from omni.app.display import DisplaySink
+from omni.app.football_feed import AFTER_FINAL, FeedResult, FeedSource
 from omni.cards.base import CardId, CardKind, CardPriority, DedupeKey, DisplayTiming, LayoutSupport, ScoreboardCard
 from omni.cards.football import LiveFootballCardPayload
 from omni.core.enum import DisplayPriority, PanelProfile
 from omni.core.time import DurationSeconds
 from omni.domain.baseball import WinProbability
-from omni.domain.contest import TeamGame
 from omni.domain.football import FootballGameState, PlaySummary
 from omni.events.football import FootballEvent
-from omni.providers.base import ProviderError
-from omni.providers.nflmeta import NflLiveSnapshot, NflMetaLiveProvider
+from omni.providers.nflmeta import NflLiveSnapshot
 from omni.renderers.context import RenderContext
 from omni.renderers.image import LogoStore
 from omni.renderers.live_football import LiveFootballRenderer
 from omni.renderers.text_lane import DEFAULT_MARQUEE, LaneClock, Marquee, MarqueeStyle
 
 __all__ = [
-    "AFTER_FINAL",
     "CLOSING_WAIT",
     "METER_LAG",
     "METER_MAX_AGE",
@@ -64,18 +63,13 @@ __all__ = [
     "FRAME_MIN",
     "FootballBoard",
     "PlayStrip",
-    "WinProbabilityFetcher",
 ]
-
-WinProbabilityFetcher = Callable[[TeamGame, datetime], WinProbability | None]
 
 FRAME_MIN = timedelta(seconds=10)  # every frame of the strip (a description, a players' line) gets this
 FRAME_MAX = timedelta(seconds=20)  # and keeps going to this while nothing else is pending
 METER_LAG = timedelta(seconds=15)
 METER_MAX_AGE = timedelta(seconds=60)  # a price this much older than its lag is no reading at all
 CLOSING_WAIT = timedelta(seconds=30)  # longest a break waits for the play that ended the period
-AFTER_FINAL = timedelta(hours=12)  # once the final and its last play are in, there's nothing left to ask
-_RETRY_AFTER_FAILURE = timedelta(seconds=30)
 
 
 class _Frame(Enum):
@@ -181,11 +175,9 @@ class FootballBoard:
 
     def __init__(
         self,
-        provider: NflMetaLiveProvider,
-        game_id: int,
+        feed: FeedSource,
         sink: DisplaySink,
         *,
-        win_probability: WinProbabilityFetcher | None = None,
         delay: timedelta = timedelta(0),
         meter_lag: timedelta = METER_LAG,
         logos: LogoStore | None = None,
@@ -193,10 +185,8 @@ class FootballBoard:
         marquee: MarqueeStyle = DEFAULT_MARQUEE,
         log: Callable[[str], None] = print,
     ) -> None:
-        self._provider = provider
-        self._game_id = game_id
+        self._feed = feed
         self._sink = sink
-        self._win_probability = win_probability
         self._delay = delay
         self._meter_lag = meter_lag
         self._logos = logos
@@ -209,7 +199,6 @@ class FootballBoard:
         self._showing: _Reading | None = None
         self._closing: _Reading | None = None  # a break, waiting for the plays that led to it
         self._closing_since: datetime | None = None
-        self._next_poll: datetime | None = None
         self._holding = False
         self._last_line: str | None = None
         self._prices: deque[tuple[datetime, WinProbability | None]] = deque()  # the market's readings, oldest first
@@ -219,9 +208,9 @@ class FootballBoard:
         return self._showing.snapshot if self._showing is not None else None
 
     def step(self, now: datetime) -> None:
-        """Poll if due, then draw what the broadcast has caught up to."""
-        if self._next_poll is None or now >= self._next_poll:
-            self._poll(now)
+        """Take the feed's new answers, then draw what the broadcast has caught up to."""
+        for result in self._feed.collect(now):
+            self._absorb(result)
         while self._pending and self._pending[0].show_at <= now:
             self._take(self._pending.popleft(), now)
         lines = self._strip.showing(now)
@@ -270,26 +259,21 @@ class FootballBoard:
         for event in events:
             self._log(f"  - {_words(event)} (unseen: {why})")
 
-    def _poll(self, now: datetime) -> None:
-        held = self._provider.holding(self._game_id, now)  # a held poll repeats the last answer, unasked
-        try:
-            snapshot = self._provider.poll(self._game_id, now)
-        except ProviderError as exc:
-            self._log(f"feed: {exc}")
-            self._next_poll = now + _RETRY_AFTER_FAILURE
+    def _absorb(self, result: FeedResult) -> None:
+        """An answer from the feed: queue its reading behind the broadcast delay, and log what came."""
+        snapshot = result.snapshot
+        if snapshot is None:
+            self._log(f"feed: {result.error}")
             return
-        self._next_poll = now + snapshot.poll_every.as_timedelta()
-        if snapshot.settled:
-            self._next_poll = now + AFTER_FINAL
         for note in snapshot.notes:
             self._log(f"  ! {note.kind.value}: {note.detail}")
-        if held:
+        if result.held:
             return
         if self._holding:
             self._holding = False
             self._log("halftime hold over: polling again")
-        probability = self._probability(snapshot.game, now)
-        self._pending.append(_Reading(now + self._delay, snapshot, probability))
+        probability = self._probability(result)
+        self._pending.append(_Reading(result.received_at + self._delay, snapshot, probability))
         meter = f" | meter {probability.away:.0f}-{probability.home:.0f}" if probability is not None else ""
         line = _describe(snapshot) + meter
         if line != self._last_line:
@@ -297,20 +281,22 @@ class FootballBoard:
             self._log(line)
         for event in snapshot.events:
             self._log(f"  > {_words(event)}")
-        if self._provider.holding(self._game_id, now):
+        if result.holding:
             self._holding = True
             self._log("halftime: holding off the feed")
-        if self._next_poll - now >= AFTER_FINAL:
+        if result.next_ask - result.asked_at >= AFTER_FINAL:
             self._log("final: no more polling")
 
-    def _probability(self, game: TeamGame, now: datetime) -> WinProbability | None:
-        if self._win_probability is None:
+    def _probability(self, result: FeedResult) -> WinProbability | None:
+        """The market's price from `meter_lag` before this answer arrived, if it's fresh enough."""
+        quote = result.quote
+        if quote is None:
             return None
-        try:
-            self._prices.append((now, self._win_probability(game, now)))
-        except ProviderError as exc:
-            self._log(f"market: {exc}")
-        cutoff = now - self._meter_lag
+        if quote.error is not None:
+            self._log(f"market: {quote.error}")
+        else:
+            self._prices.append((result.received_at, quote.probability))
+        cutoff = result.received_at - self._meter_lag
         while len(self._prices) > 1 and self._prices[1][0] <= cutoff:
             self._prices.popleft()
         if self._prices and cutoff - METER_MAX_AGE <= self._prices[0][0] <= cutoff:

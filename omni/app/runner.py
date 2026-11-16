@@ -3,16 +3,17 @@
 `build_loop` wires the spine's collaborators into an `AppLoop` from a provider, a
 feed fetcher, and a display sink — the one place the standard wiring lives, so the
 emulator entry, a future hardware entry, and tests all build the loop the same way.
-`run_forever` is the thin real-time wrapper: tick the clock,
-run one deterministic pass, sleep.
+`run_forever` is the thin real-time wrapper: decisions on a thread of their own, once a
+tick, and frames on this one at a steady rate, so a slow fetch never freezes the panel.
 """
 
 from __future__ import annotations
 
-import time
-from datetime import datetime, tzinfo
+from collections.abc import Callable
+from datetime import timedelta, tzinfo
 
-from omni.app.clock import Clock
+from omni.app.background import Repeating
+from omni.app.clock import Clock, Pacer
 from omni.app.contest_store import ContestStore
 from omni.app.display import DisplaySink
 from omni.app.loop import AppLoop
@@ -24,6 +25,7 @@ from omni.app.pipeline import (
     WinProbFetcher,
 )
 from omni.app.supervisor import BackoffPolicy, ProviderSupervisor
+from omni.app.trace import DecisionTracer
 from omni.cards.factory import CardFactory
 from omni.core.time import DurationSeconds
 from omni.providers.base import Provider
@@ -90,10 +92,26 @@ def build_loop(
     )
 
 
-def run_forever(loop: AppLoop, clock: Clock, *, tick: DurationSeconds) -> None:  # pragma: no cover - real-time loop
-    """Drive `loop.run_once` on real wall-time forever, sleeping `tick` between passes."""
-    interval = tick.as_timedelta().total_seconds()
+def run_forever(
+    loop: AppLoop,
+    clock: Clock,
+    *,
+    tick: DurationSeconds,
+    fps: float = 10.0,
+    log: Callable[[str], None] = print,
+    timezone: tzinfo | None = None,
+) -> None:  # pragma: no cover - real-time loop
+    """Decide once a `tick` on a worker thread, and paint the current pick `fps` times a second here."""
+    tracer = DecisionTracer(log, timezone=timezone)
+    every = tick.as_timedelta()
+
+    def decide() -> None:
+        started = clock.read()
+        decision = loop.decide(started.utc)
+        tracer.decided(decision, took=clock.monotonic().since(started.monotonic), next_at=started.utc + every)
+
+    Repeating("decide", clock, every, decide, on_error=tracer.failed).start()
+    frames = Pacer(clock, timedelta(seconds=1.0 / fps))
     while True:
-        now: datetime = clock.now()
-        loop.run_once(now)
-        time.sleep(interval)
+        tracer.painted(loop.paint(clock.now()))
+        frames.wait()

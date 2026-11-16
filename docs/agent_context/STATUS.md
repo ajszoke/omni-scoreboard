@@ -2,8 +2,14 @@
 
 _Living status doc. Keep it short; update whenever project state changes (branch, PR, milestone). This is the first thing an agent should read after `AGENTS.md`._
 
-## Now (2026-11-15)
+## Now (2026-11-16)
 
+- **2026-11-16, A1a step 1 (PR #101, branch `agent/a1a-tower`):** the board decides and paints on separate cadences.
+  - **MLB:** decisions (fetches included) run once a `--tick` on their own thread, and frames draw `--fps` times a second (default 10), so marquees, countdowns and blinks move between decisions. This fixes the 12-second paint (M11-001).
+  - **Football:** NFLMeta and the market are asked on a feed thread, with answers dated by when they arrived, and frames go to the display process on a writer thread. A slow request or a stalled SSH link no longer stops drawing.
+  - **Clock:** one seam, two readings (`ClockReading`: UTC and monotonic). Loops are paced on monotonic time. The dev machine's wall clock (WSL2) was seen jumping back about 2.4 s mid-run; the monotonic beat held.
+  - **Traces:** `omni/app/trace.py` writes each decision that changes the pick (with its reason and the next decision) and each card's first committed frame, with how its teams were drawn (round-3 Q3).
+  - **Next:** A1a step 2, the typed `PollPlan`, which also stamps MLB's receipts.
 - **2026-11-15, external review round 4: conditional yes.** The head chose sequence (A): A1a is the tower's first slice. It blessed NFL-before-A1, the cloud market service, NFLMeta and the SSH frame bridge (for the experiment), and redirected the separate football loop and the `LaneClock` into A1a. The branch ships as a single-game dogfood tool once its findings H1–H3 and M1 are fixed and the goldens are approved. Adjudication: `~/omni-review/plans/omni-build-fidelity-REVIEWS.md` (round 4).
   - **Fixed on the branch:**
     - **H1:** play-feed reads keep what arrived and carry on after a failure; "caught up" counts only kept rows; a refused cursor (400/410) restarts quietly.
@@ -24,10 +30,10 @@ _Living status doc. Keep it short; update whenever project state changes (branch
     - FINAL fills the winner's meter and dims the loser's abbreviation and score, as the baseball final does;
     - HALF keeps the challenges, the meter and the receiver's ball, but not the timeouts.
   - **Still open:**
-    - the MLB app paints every 12 s, so its marquee lines restart at their head each frame (A1a step 1, M11-001);
     - the NFL meter's lag is measured from request time, not the market's own clock (air clock, M11-006).
+    - (The MLB app's 12-second paint was fixed in A1a step 1.)
 - **2026-11-15, central clock plan:** `CLOCK_AND_SCHEDULING.md` surveys every timer in the app and plans one clock and one scheduler (the "tower") for multi-league airtime. Backlog: `M11`. Its first step is a real bug: the MLB app draws only once per 12-second tick.
-- **2026-11-15, NFL live on the board (PR #100, branch `agent/nfl-live-board`):** `python -m omni.app.football` followed PIT@CIN live on the 2x2.
+- **2026-11-15, NFL live on the board (PR #100, merged):** `python -m omni.app.football` followed PIT@CIN live on the 2x2.
   - **Feed:** `omni/providers/nflmeta.py` reads one game from NFLMeta. It reads the play feed once the scoreboard matches a play, watches for corrections when the scoreboard moves on its own, and polls the injury list. Once a game reaches halftime and its last play has landed, it makes no requests for 15 minutes.
   - **Plays:** `omni/events/football.py` types the plays and summarizes them ("4 YARD RUN"). `football_ledger.py` derives events (plays, timeouts, TV timeouts, review rulings, tries, injuries), players' game lines, timeout and challenge pips, and who kicks off from where; the live feed carries no counts.
   - **Strip:** each event shows its description for 20 seconds, then its players' lines for 20, then nothing. A stoppage (timeout, TV timeout, injury, review ruling) holds until play resumes. Events that arrive together get 10 seconds each, and the strip clears when the field moves on. A period's last plays get 10 seconds each before the break or FINAL, and the strip stays empty through breaks.
@@ -45,7 +51,7 @@ _Living status doc. Keep it short; update whenever project state changes (branch
 - **2026-11-01, live-card design round + market data (branch `agent/quad-pitch-lane`):** ABS lane and small-board layouts, home-keeps-primary clash rule, full pregame + final quad cards, Due Up. The live meter reads Polymarket US first, with MLB's model after 3 quiet minutes; Bovada supplies pregame odds. Sources and terms: `SOURCES.md`. Next: the keyed Polymarket US WebSocket for a real-time meter; a shared AWS service is `M5-006`, later.
 - **Operating mode: the external-review cadence is live** (head/hand — the flagship/CGPT plans, Claude Code implements; *not* `/code-review`). **Round 1 (2026-06-23) → conditional pass; Round 2 (2026-06-24) → conditional pass: architecture signed off, appliance ship deferred.** Adjudication: `~/omni-review/plans/omni-build-fidelity-REVIEWS.md`; verdicts verbatim at `~/omni-review/rounds/round-{1,2}-verdict.md` (the round-2 verdict file is UTC-stamped 06-25 = 06-24 local — keep TZ in mind: the board clock is Eastern, the user is Mountain). State + how-to: the `omni-review-cadence` auto-memory + the `external-review` skill.
 - **Round-2 verdict:** **A0 = complete as orchestration architecture** (six gates verified faithful); **B1 = lifecycle-card breadth, NOT "MLB excellence"** (the live card is below the kernel's profile-density contract); **logo/win-prob color direction blessed** with three integration constraints (one asset-aware `MatchupVisualTreatment`/frame; a hardware-tunable `VisualContrastPolicy`; **delay-safe probability** — never attach fresh win-prob to a delayed score). New sequence below. NFL deferred; **PGA before NCAA**.
-- Revived repo **bootstrapped from upstream MLB-LED-Scoreboard v9.1.5**; `main` @ `0402d19` = upstream + **PRs #1–#99 merged** (through B1.5c #94, the AWS market service #96–#98 and the NFL display #99). The NFL live-board work is in PR #100 (`agent/nfl-live-board`). **Tests: 1,699 passing, `omni/` + `cloud.market_service` at 100% line+branch behind `fail_under=100`; `mypy`/`black` clean** (2026-11-15). **Round 3 reviewed 2026-06-26 → conditional yes**; B1.5c then landed in #94. **Round 4 briefed 2026-11-15** (NFL live board, the central-clock plan, providers).
+- Revived repo **bootstrapped from upstream MLB-LED-Scoreboard v9.1.5**; `main` @ `b2db70c` = upstream + **PRs #1–#100 merged** (through B1.5c #94, the AWS market service #96–#98, the NFL display #99 and the NFL live board #100). A1a step 1 is in PR #101 (`agent/a1a-tower`). **Tests: 1,729 passing, `omni/` + `cloud.market_service` at 100% line+branch behind `fail_under=100`; `mypy`/`black` clean** (2026-11-16). **Round 3 reviewed 2026-06-26 → conditional yes**; B1.5c then landed in #94. **Round 4 briefed 2026-11-15** (NFL live board, the central-clock plan, providers).
 - Remotes: `origin` = `ajszoke/omni-scoreboard` (HTTPS), `upstream` = `MLB-LED-Scoreboard/mlb-led-scoreboard` (branch `master`), `legacy` = `ajszoke/omni-scoreboard-legacy` (pre-revival Omni work: `legacy/master`, `legacy/dev`).
 - **Known integration gaps (round-2 Highs):** **✅ H4 closed** — `LogoStore` is wired into `RenderContext` (#68) and `win_probability` is populated **delay-safe** (a per-game delay feed pushed in lockstep with the state, so the meter never leads the score; #69); the redundant abbr is dropped when a logo resolves (M4, #71). Still open: no dwell-enforcing display-state machine (H1 → A1a); every-tick fetch, no `PollPlan` (H6 → A1a — the win-prob fetch is also every-tick for now, to be throttled together). **✅ closed earlier:** provider boundary (H2, #58); contextual scoring (H3, #59); no-hitter/perfect-game progress (H5, #61).
 - Dev env: **uv + `.venv`** (Py 3.12); emulator runs headless (`http://localhost:8888/`). `pytest`/`pytest-cov` pinned in `requirements.dev.txt`; `starter_code/` excluded from `mypy`/`black`; `*/__main__.py` omitted from coverage. Coverage: `--cov=omni --cov-branch` (see `test` skill). See `docs/dev_setup.md`.
@@ -53,9 +59,9 @@ _Living status doc. Keep it short; update whenever project state changes (branch
 
 ## Next — round-4 sequence (2026-11-15): NFL dogfood ship → A1a (the tower's first slice) → mixed-league prerequisites → A1b → A1c
 
-- **NFL dogfood ship:** golden sheets approved 2026-11-15; PR #100 (`agent/nfl-live-board`). The single-game runner stays as a dogfood entry point until the shared path replays PIT@CIN.
+- **NFL dogfood ship: ✅ done** (golden sheets approved and PR #100 merged, 2026-11-15). The single-game runner stays as a dogfood entry point until the shared path replays PIT@CIN.
 - **A1a, the tower's first slice** (`CLOCK_AND_SCHEDULING.md`, M11):
-  1. paint apart from decision ticks, with fetches off both frame paths; first, the MLB 12-second paint (M11-001). One clock seam gives two readings: UTC for event and release times, monotonic for dwell, backoff and pacing. Basic decision traces start here.
+  1. ✅ (PR #101) paint apart from decision ticks, with fetches off both frame paths; first, the MLB 12-second paint (M11-001). One clock seam gives two readings: UTC for event and release times, monotonic for dwell, backoff and pacing. Basic decision traces start here.
   2. A typed `PollPlan`: single-flight fetches, priority cadence within quota, bounded retries, per-game last-good expiry, and the previous and current local dates in the schedule window.
   3. Port `PlayStrip` as the first session, and compare its decisions on the PIT@CIN replay.
   4. Put the board's card rotation behind the same presentation contract:

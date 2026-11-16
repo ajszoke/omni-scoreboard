@@ -7,19 +7,25 @@ that owns the panel. The two can share a board, or the display process can sit a
 Each frame is the 4-byte magic ``OMNF``, the width and height as little-endian 16-bit integers, then the
 pixels row by row, three bytes each. A frame identical to the last one sent isn't sent again, unless the
 display process on the other end is a new one (a new ``generation``), which starts with a blank panel.
+
+Writing to a pipe can block: across SSH, a stalled link stops the other end reading. A
+`BackgroundFrameWriter` takes the writing off the frame loop, so drawing goes on while a frame waits to
+go out.
 """
 
 from __future__ import annotations
 
 import struct
+import threading
 from collections.abc import Callable
+from datetime import timedelta
 
 from omni.core.enum import PanelProfile
 from omni.panels.geometry import geometry_for
 from omni.renderers.canvas import Canvas
 from omni.renderers.pillow_canvas import PillowCanvas
 
-__all__ = ["FRAME_MAGIC", "StreamDisplaySink", "encode_frame"]
+__all__ = ["FRAME_MAGIC", "BackgroundFrameWriter", "StreamDisplaySink", "encode_frame"]
 
 FRAME_MAGIC = b"OMNF"
 
@@ -64,3 +70,56 @@ class StreamDisplaySink:
         delivered = self._write(encode_frame(frame.width, frame.height, pixels))
         self._sent = pixels if delivered else None
         self._sent_to = generation
+
+
+class BackgroundFrameWriter:
+    """A `FrameWriter` that writes on its own thread, newest frame first.
+
+    Only the newest frame waits: one handed over while another is going out replaces any still waiting.
+    A frame that doesn't arrive is tried again until it does, or until a newer one replaces it, so the
+    display ends up on the newest frame either way. Handing a frame over never blocks, and it reports
+    the frame as delivered, since delivery is now the writer's job.
+    """
+
+    def __init__(self, write: FrameWriter, *, retry_every: timedelta = timedelta(milliseconds=500)) -> None:
+        self._write = write
+        self._retry_every = retry_every.total_seconds()
+        self._lock = threading.Lock()
+        self._waiting: bytes | None = None
+        self._ready = threading.Event()  # a frame is waiting, or the writer should stop
+        self._stopped = threading.Event()
+        self._thread = threading.Thread(target=self._run, name="frame-writer", daemon=True)
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self, timeout: float | None = None) -> None:
+        """Stop after the frame going out now, if any; a frame still waiting is dropped."""
+        self._stopped.set()
+        self._ready.set()
+        if self._thread.is_alive():
+            self._thread.join(timeout)
+
+    def __call__(self, frame: bytes) -> bool:
+        with self._lock:
+            self._waiting = frame
+            self._ready.set()
+        return True
+
+    def _run(self) -> None:
+        # `_ready` is set only alongside a waiting frame, both under the lock, or by `stop`.
+        while True:
+            self._ready.wait()
+            if self._stopped.is_set():
+                return
+            with self._lock:
+                frame, self._waiting = self._waiting, None
+                self._ready.clear()
+            assert frame is not None
+            if self._write(frame):
+                continue
+            with self._lock:
+                if self._waiting is None:
+                    self._waiting = frame  # try it again, unless a newer one came meanwhile
+                    self._ready.set()
+            self._stopped.wait(self._retry_every)
