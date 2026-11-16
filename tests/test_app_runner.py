@@ -170,9 +170,9 @@ def test_a_slow_swap_moves_the_dwell_the_booking_and_the_marquee_to_when_the_fra
     booked: list[ClockReading] = []
     book = loop._queue.book
 
-    def spy(pick: Pick, at: ClockReading) -> None:
+    def spy(pick: Pick, at: ClockReading) -> bool:
         booked.append(at)
-        book(pick, at)
+        return book(pick, at)
 
     monkeypatch.setattr(loop._queue, "book", spy)
     loop.refresh(clock.now())

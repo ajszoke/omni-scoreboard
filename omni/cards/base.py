@@ -1,4 +1,4 @@
-"""Core card types: kind, identity, timing, layout support, priority, ScoreboardCard."""
+"""Core card types: kind, identity, timing, layout support, priority, a game's end, ScoreboardCard."""
 
 from __future__ import annotations
 
@@ -20,6 +20,8 @@ __all__ = [
     "DisplayTiming",
     "LayoutSupport",
     "CardPriority",
+    "EndBasis",
+    "GameEnd",
     "CardPayloadT",
     "ScoreboardCard",
 ]
@@ -95,6 +97,25 @@ class CardPriority:
     reasons: tuple[str, ...] = ()
 
 
+class EndBasis(StrEnumMixin, str, Enum):
+    """What a game's end time rests on."""
+
+    DECISIVE_PLAY = "its decisive play"  # the time of the play that ended it, such as a walk-off
+    FIRST_SEEN = "first seen final"  # when the board first saw it final: later than the end, but stable
+
+
+@dataclass(frozen=True, slots=True)
+class GameEnd:
+    """When a game ended, as far as the board can tell, and what that rests on. Finals air in this order."""
+
+    at: datetime
+    basis: EndBasis
+
+    def __post_init__(self) -> None:
+        if self.at.tzinfo is None:
+            raise ValueError("a game's end must be timezone-aware")
+
+
 CardPayloadT = TypeVar("CardPayloadT")
 
 
@@ -113,6 +134,8 @@ class ScoreboardCard(Generic[CardPayloadT]):
     source_event_ids: tuple[LeagueScopedId, ...] = ()
     attention: AttentionPolicy = NORMAL_ATTENTION
     after: tuple[DedupeKey, ...] = ()  # cards that air first while they're eligible (a decisive play before FINAL)
+    replaces: DedupeKey | None = None  # the card it takes the place of on the board (a final, its game's live card)
+    ended: GameEnd | None = None  # a final: when its game ended, which orders the finals
     stale_since: datetime | None = None  # when its source stopped answering; None while it's current
 
     def __post_init__(self) -> None:

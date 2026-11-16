@@ -5,10 +5,11 @@ The board refreshes and paints on separate cadences:
 - **`refresh(now)`**, the decision pass, wires the spine end to end:
   1. poll the provider (`ProviderSupervisor`, last-known-good on failure);
   2. reconcile the contest set (`ContestStore`);
-  3. run the live-card pipeline (`LiveBaseballPipeline`, delay-safe, no spoilers), which keeps the card
-     queue current;
-  4. tell the board how far its source can be trusted, and how many games have nothing to show because
-     they wait out the TV delay or their feed has stopped answering.
+  3. run the live-card pipeline (`LiveBaseballPipeline`, delay-safe, no spoilers), which stages the
+     card queue's changes, and drop what can no longer air;
+  4. publish the staged cards to the board together with how far their source can be trusted, and how
+     many games have nothing to show because they wait out the TV delay or their feed has stopped
+     answering: one numbered input, so a paint on the frame thread sees all of a refresh or none of it.
 - **`paint(at)`** asks the board (`BoardSession`) what should be up: a card, chosen by the queue and
   held by its dwell, or an explicit frame (idle, held, offline). It draws that through the
   `RendererRegistry`, a stale card dimmed, and commits it to the `DisplaySink`. The commit starts a
@@ -19,8 +20,8 @@ The board refreshes and paints on separate cadences:
   at a frame rate, so scrolling lines, countdowns and blinks move, and never fetches.
 - **`run_once(at)`** is one refresh, then one paint: the single deterministic pass replay drives.
 - **`refresh_deadline(at)`** says when a refresh next has something to do by itself (a play clearing
-  the delay, the source going stale); **`next_deadline(at)`** adds the board's own (a card's minimum,
-  its turn, its expiry).
+  the delay, the source going stale, a card running out of time to air); **`next_deadline(at)`** adds
+  the board's own (a card's minimum, its turn, its expiry).
 
 Both passes are deterministic for a given clock reading and collaborators, so the real-time runner is a
 thin wrapper and a `FakeClock` with a fixture timeline yields stable traces. Render and display failures
@@ -51,7 +52,7 @@ from omni.app.supervisor import ProviderStatus, ProviderSupervisor, SupervisedSn
 from omni.cards.base import CardId, ScoreboardCard
 from omni.core.clock import Clock, ClockReading, MonotonicTime
 from omni.domain.contest import TeamGame
-from omni.queue.scheduler import InterleavedCardQueue, SelectionReason
+from omni.queue.scheduler import InterleavedCardQueue, Missed, SelectionReason
 from omni.renderers.board_frame import BoardFrameRenderer
 from omni.renderers.canvas import DimmedCanvas
 from omni.renderers.context import RenderContext
@@ -62,6 +63,7 @@ from omni.renderers.visual_treatment import MatchupVisualTreatment, VisualContra
 from omni.tower.board import (
     BoardFrame,
     BoardHealth,
+    BoardNote,
     BoardPayload,
     BoardPolicy,
     BoardSession,
@@ -86,7 +88,7 @@ class Refresh:
     health: BoardHealth  # what the board was told: its source's health, and games held in the TV delay
     reconciliation: Reconciliation | None  # None when no snapshot was available to apply
     pipeline: PipelineResult
-    unseen: tuple[CardId, ...] = ()  # cards that expired before they ever aired
+    unseen: tuple[Missed, ...] = ()  # cards that left before they ever aired, and why
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -112,6 +114,7 @@ class Painted:
     render_error: str | None = None  # an isolated render or display failure, if any
     presented: Presentation | None = None  # set on a card's first committed frame
     changes: tuple[LaneChange[BoardPayload], ...] = ()  # what the board did since the last paint
+    notes: tuple[BoardNote, ...] = ()  # what the board noted since the last paint
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -184,9 +187,9 @@ class AppLoop:
             fetch_pregame_details=self._fetch_pregame_details,
             fetch_game_lines=self._fetch_game_lines,
         )
-        unseen = tuple(card.id for card in self._queue.prune(now))
+        unseen = tuple(self._queue.prune(now))
         health = self._health(snapshot, pipeline_result)
-        self._board.health = health
+        self._board.publish(health)
         return Refresh(
             at=now,
             provider_status=snapshot.status,
@@ -239,9 +242,9 @@ class AppLoop:
             shown = clock.read()
             lanes.shown(shown.monotonic)
         self._board.committed(cue, shown)
-        changes = tuple(self._board.changes())
+        changes, notes = tuple(self._board.changes()), tuple(self._board.notes())
         if isinstance(payload, BoardFrame):
-            return Painted(at=shown.utc, shown=None, frame=payload.kind, changes=changes)
+            return Painted(at=shown.utc, shown=None, frame=payload.kind, changes=changes, notes=notes)
         presented = None
         if cue.reason is not None and any(change.kind is ChangeKind.UP for change in changes):
             presented = Presentation(
@@ -252,12 +255,19 @@ class AppLoop:
                 contrast=context.contrast,
             )
         return Painted(
-            at=shown.utc, shown=payload.id, reason=cue.reason, stale=cue.stale, presented=presented, changes=changes
+            at=shown.utc,
+            shown=payload.id,
+            reason=cue.reason,
+            stale=cue.stale,
+            presented=presented,
+            changes=changes,
+            notes=notes,
         )
 
     def _failed(self, at: ClockReading, exc: Exception) -> Painted:
-        changes = tuple(self._board.changes())
-        return Painted(at=at.utc, shown=None, render_error=f"{type(exc).__name__}: {exc}", changes=changes)
+        changes, notes = tuple(self._board.changes()), tuple(self._board.notes())
+        error = f"{type(exc).__name__}: {exc}"
+        return Painted(at=at.utc, shown=None, render_error=error, changes=changes, notes=notes)
 
     def run_once(self, at: ClockReading) -> TickResult:
         """One refresh, then one paint, at ``at``."""
@@ -274,8 +284,9 @@ class AppLoop:
 
     def refresh_deadline(self, at: ClockReading) -> MonotonicTime | None:
         """When a refresh would next find something changed by itself, as of ``at``: a state or play clearing
-        the delay, a final's reveal, a stale game's cards coming down, the source going stale or offline."""
-        instants = [self._pipeline.next_deadline(at.utc), self._health_changes_at]
+        the delay, a final's reveal, a stale game's cards coming down, the source going stale or offline, or
+        a card that hasn't aired running out of time to (it's dropped then, and traced as missed)."""
+        instants = [self._pipeline.next_deadline(at.utc), self._health_changes_at, self._queue.next_miss(at.utc)]
         return earliest(at.monotonic + (instant - at.utc) for instant in instants if instant is not None)
 
     def next_deadline(self, at: ClockReading) -> MonotonicTime | None:

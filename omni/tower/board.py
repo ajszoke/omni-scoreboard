@@ -7,18 +7,29 @@ queue what should air (`InterleavedCardQueue.peek`), and books the card in the q
 frame is committed. So a card's rotation turn, a reminder's cooldown and a takeover are spent only on
 airtime the viewer actually got.
 
+A refresh publishes the board's input whole (`publish`): the queue's cards as one numbered view, and the
+source's health with them. The board decides against the latest input only, so it never sees half a
+refresh: a final without the one that ended earlier, or new cards beside old health. A card drawn from
+one view is booked only if the latest still holds it as drawn; one that changed or left in the meantime
+books nothing, and its newer version, if any, counts from its own first frame.
+
 A card on air:
 - comes down at once if it leaves the queue (its game moved on: factual invalidation), if it expires,
-  or if its source goes offline;
+  or if its source goes offline. A live card its own final replaced is the game's last delay-safe frame:
+  it keeps the board through its minimum, then hands off, to its final if that may air now;
 - yields, once it has had its minimum, to a card with a stronger claim: a takeover over a reminder or
   rotation, a reminder over rotation;
 - yields, once it has had its turn (its *slot*), to any other card the queue offers, or to nothing if
-  the queue no longer offers it (a reminder whose beat has passed);
-- otherwise stays. A card with nothing else waiting isn't taken down to show nothing.
+  the queue no longer offers it (a reminder whose beat has passed). A takeover or a reminder leaves at
+  its turn even with nothing else waiting, and the board then shows its explicit frame;
+- otherwise stays. A rotation card with nothing else waiting isn't taken down to show nothing.
 
 A card's slot is the board's rotation slot, or a takeover's own `takeover_for`, held within the card's
 minimum and maximum display. Takeovers back to back are bounded: once they have run the policy's cap,
-a rotation card airs before the next one may start.
+the takeover up finishes its turn, and a base card (neither a takeover nor a reminder) is owed a full
+turn of its own before the next one may start. A due reminder can't take that turn or cut it short;
+only the card leaving, expiring or the source going offline can, and then the turn is still owed. With
+no base card to give it to, the board says so (`BoardNote.NO_BASE_CARD`) and airs what it has.
 
 A card the display can't draw comes down unseen (or at once, if it was already up) and is set aside
 until it changes or a minute passes, so one bad payload never holds the board. A display that fails
@@ -30,7 +41,8 @@ its limit or never answered, or a game's feed has stopped answering and its card
 whose data is past its age airs marked *stale*.
 
 Availability and expiry are UTC instants; dwell and slots run on the monotonic clock. The session runs
-on the frame thread; the decision thread updates the queue (which is thread-safe) and the health.
+on the frame thread, but for `publish`, which the decision thread calls once a refresh is done; the
+queue is thread-safe, and the input it publishes is replaced whole.
 """
 
 from __future__ import annotations
@@ -44,7 +56,7 @@ from omni.cards.base import ScoreboardCard
 from omni.core.clock import ClockReading, MonotonicTime
 from omni.core.enum import PanelProfile, StrEnumMixin
 from omni.core.ids import SourceRef
-from omni.queue.scheduler import InterleavedCardQueue, Pick, SelectionReason
+from omni.queue.scheduler import CardView, InterleavedCardQueue, Pick, SelectionReason
 from omni.tower.lane import ChangeKind, EndReason, LaneChange, earliest
 from omni.tower.segment import Dwell, Provenance, Segment, SegmentKey, Surface
 
@@ -52,6 +64,8 @@ __all__ = [
     "BoardCue",
     "BoardFrame",
     "BoardHealth",
+    "BoardInput",
+    "BoardNote",
     "BoardPayload",
     "BoardPolicy",
     "BoardSession",
@@ -114,6 +128,21 @@ class BoardHealth:
     unfed: int = 0  # games with nothing on the board because their feed has stopped answering
 
 
+@dataclass(frozen=True, slots=True)
+class BoardInput:
+    """One refresh's whole word to the board, published at once: the cards it may air, as a numbered view,
+    and how far their source can be trusted."""
+
+    cards: CardView
+    health: BoardHealth
+
+
+class BoardNote(StrEnumMixin, str, Enum):
+    """Something the board decided that isn't a card or a frame going up or down, for the trace."""
+
+    NO_BASE_CARD = "no base card for the recovery turn"  # takeovers ran their cap, but only transients can air
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class BoardPolicy:
     """How the board shares its airtime."""
@@ -159,33 +188,38 @@ class BoardSession:
         self._queue = queue
         self._profile = profile
         self._policy = policy
-        self._health = BoardHealth()
+        self._input = BoardInput(queue.published, BoardHealth())
         self._on_air: _OnAir | None = None
         self._occurrences = 0
         self._takeover_run = timedelta(0)  # takeover airtime since the last rotation card or frame went up
+        self._handoff: str | None = None  # the card that takes the place of one just handed off: it may go first
         self._changes: list[LaneChange[BoardPayload]] = []
+        self._notes: list[BoardNote] = []
         self._undrawn: dict[str, tuple[ScoreboardCard[Any], MonotonicTime]] = {}  # set aside: the card, and until
 
     @property
     def health(self) -> BoardHealth:
-        return self._health
+        """The source's health, as last published."""
+        return self._input.health
 
-    @health.setter
-    def health(self, health: BoardHealth) -> None:
-        self._health = health
+    def publish(self, health: BoardHealth) -> None:
+        """A refresh is done: the queue's staged cards and the source's ``health`` become the board's input
+        together, as one numbered view."""
+        self._input = BoardInput(self._queue.publish(), health)
 
     def cue(self, at: ClockReading) -> BoardCue:
         """What should be on the board at ``at``, once the rules have run: the card up, the next card, or
         an explicit frame."""
-        health = self._health
+        board = self._input  # one input for the whole decision, whatever a refresh publishes meanwhile
+        health = board.health
         on = self._on_air
         if on is not None and on.pick is not None:
-            self._review(on, health, at)
+            self._review(on, board, at)
         on = self._on_air
         if on is None or on.pick is None:
             pick = None
             if health.source is not SourceHealth.OFFLINE:
-                pick = self._peek(at)
+                pick = self._choose(board.cards, at)
             if pick is not None:
                 self._air_card(pick, at)
             elif health.source is SourceHealth.OFFLINE:
@@ -200,15 +234,20 @@ class BoardSession:
         return self._cue(health)
 
     def committed(self, cue: BoardCue, at: ClockReading) -> None:
-        """The display drew ``cue`` at ``at``. A card's first commit starts its dwell and books it."""
+        """The display drew ``cue`` at ``at``. A card's first commit starts its dwell and books it, if the
+        latest published view still holds the card as drawn; otherwise it counts for nothing, and the next
+        cue takes up the change."""
         on = self._on_air
         if on is None or cue.occurrence != on.occurrence or on.since is not None:
             return  # no longer on air, or its dwell already runs
-        on.since = at.monotonic
-        if on.pick is not None:
-            self._queue.book(on.pick, at)
-        else:
+        if on.pick is None:
             self._takeover_run = timedelta(0)  # a quiet board: takeovers before it weren't back to back
+        else:
+            drawn = cue.payload
+            assert not isinstance(drawn, BoardFrame)
+            if not self._queue.book(Pick(drawn, on.pick.reason), at):
+                return  # it changed or left while it was drawn
+        on.since = at.monotonic
         self._changes.append(LaneChange(ChangeKind.UP, on.segment, at))
 
     def failed(self, cue: BoardCue, at: ClockReading) -> None:
@@ -219,6 +258,7 @@ class BoardSession:
             return
         card = on.pick.card
         self._undrawn[card.dedupe_key.raw] = (card, at.monotonic + UNDRAWN_RETRY)
+        self._queue.undrawn(card)
         self._down(EndReason.UNDRAWN, at)
 
     def next_deadline(self, at: ClockReading) -> MonotonicTime | None:
@@ -229,7 +269,10 @@ class BoardSession:
         on = self._on_air
         if on is None:
             return at.monotonic  # nothing has been cued yet
-        upcoming = earliest((self._queue.next_deadline(at, self._profile), *self._set_aside(at).values()))
+        view = self._input.cards
+        upcoming = earliest(
+            (self._queue.next_deadline(at, self._profile, view=view), *self._set_aside(view, at).values())
+        )
         if on.pick is None or on.since is None:
             return upcoming  # a frame stays until a card can replace it; a card's dwell waits on its commit
         deadlines = [upcoming, on.since + on.segment.dwell.minimum, on.since + on.slot]
@@ -243,53 +286,75 @@ class BoardSession:
         changes, self._changes = self._changes, []
         return changes
 
-    def _review(self, on: _OnAir, health: BoardHealth, at: ClockReading) -> None:
+    def notes(self) -> list[BoardNote]:
+        """What the board noted since the last ask, oldest first."""
+        notes, self._notes = self._notes, []
+        return notes
+
+    def _review(self, on: _OnAir, board: BoardInput, at: ClockReading) -> None:
         """Take the card on air down if its time is up, or keep it with its newest version."""
         assert on.pick is not None
-        if health.source is SourceHealth.OFFLINE:
+        if board.health.source is SourceHealth.OFFLINE:
             self._down(EndReason.CLEARED, at)
             return
         expires = on.segment.expires_at
         if expires is not None and at.utc >= expires:
             self._down(EndReason.EXPIRED, at)  # whether or not a refresh has pruned it yet
             return
-        latest = self._queue.card(on.segment.key.subject)
+        key = on.segment.key.subject
+        latest = board.cards.card(key)
         if latest is None:
-            self._down(EndReason.INVALIDATED, at)
+            self._leave(on, board.cards.successor(key), at)
             return
         if latest is not on.segment.frames[0]:
             on.segment = _card_segment(latest, revision=on.segment.revision + 1)  # same dwell: a cosmetic edit
+            on.pick = Pick(latest, on.pick.reason)
         if on.since is None:
             return  # not drawn yet: no time has run
         up = at.monotonic.since(on.since)
         if up < on.segment.dwell.minimum:
             return  # ordinary priority never cuts a visible minimum
-        best = self._peek(at)
-        if best is None:
-            if up >= on.slot:
-                self._down(EndReason.RAN_ITS_TIME, at)  # the queue no longer offers it, and its turn is over
-        elif best.card.dedupe_key.raw == on.segment.key.subject:
-            return  # nothing else wants the board
-        elif best.reason.rank > on.pick.reason.rank:
+        best = self._peek(board.cards, at, recovery=self._owes_recovery(at))
+        offered = best is not None and best.card.dedupe_key.raw == key
+        if best is not None and not offered and best.reason.rank > on.pick.reason.rank:
             self._down(EndReason.NEXT_WAITING, at)  # a stronger claim, once this had its minimum
-        elif up >= on.slot:
+        elif up >= on.slot and (on.pick.reason is not SelectionReason.ROTATION or not offered):
+            # Its turn is over, and something else is waiting, or the queue no longer offers it, or it's a
+            # takeover or a reminder, which leaves at its turn even with nothing else waiting.
             self._down(EndReason.RAN_ITS_TIME, at)
 
-    def _peek(self, at: ClockReading) -> Pick | None:
-        return self._queue.peek(
-            at, self._profile, takeovers=self._takeovers_allowed(at), skip=frozenset(self._set_aside(at))
-        )
+    def _leave(self, on: _OnAir, successor: ScoreboardCard[Any] | None, at: ClockReading) -> None:
+        """The card on air has left the queue. Replaced by its own final, it's the game's last delay-safe frame:
+        it keeps the board through its minimum, then hands off, its final first if that may air. Otherwise
+        it's no longer current, and comes down at once."""
+        if successor is not None and on.since is not None and at.monotonic.since(on.since) < on.segment.dwell.minimum:
+            return
+        self._handoff = successor.dedupe_key.raw if successor is not None else None
+        self._down(EndReason.INVALIDATED, at)
 
-    def _set_aside(self, at: ClockReading) -> dict[str, MonotonicTime]:
+    def _choose(self, view: CardView, at: ClockReading) -> Pick | None:
+        """The card to put up next, with nothing on air: a card handed off to first, if it may air."""
+        owed = self._owes_recovery(at)
+        pick = self._peek(view, at, recovery=owed, prefer=self._handoff)
+        self._handoff = None
+        if owed and pick is not None and pick.reason is not SelectionReason.ROTATION:
+            self._notes.append(BoardNote.NO_BASE_CARD)  # a base card is owed its turn, but none can air
+        return pick
+
+    def _peek(self, view: CardView, at: ClockReading, *, recovery: bool, prefer: str | None = None) -> Pick | None:
+        skip = frozenset(self._set_aside(view, at))
+        return self._queue.peek(at, self._profile, view=view, recovery=recovery, prefer=prefer, skip=skip)
+
+    def _set_aside(self, view: CardView, at: ClockReading) -> dict[str, MonotonicTime]:
         """The cards set aside after failing to draw, with when each may be tried again; forgets the rest."""
         for key, (card, until) in list(self._undrawn.items()):
-            if self._queue.card(key) is not card or at.monotonic >= until:
+            if view.card(key) is not card or at.monotonic >= until:
                 del self._undrawn[key]  # it changed, left the queue, or has waited long enough: try it again
         return {key: until for key, (_, until) in self._undrawn.items()}
 
-    def _takeovers_allowed(self, at: ClockReading) -> bool:
-        """Whether a takeover may start: the takeover airtime back to back, the one up included, is under the
-        cap, or the board's own rotation turn has run since."""
+    def _owes_recovery(self, at: ClockReading) -> bool:
+        """Whether a base card is owed a full turn: the takeover airtime back to back, the one up included, has
+        reached the cap, and no rotation card has had its full turn since."""
         run = self._takeover_run
         on = self._on_air
         if on is not None and on.pick is not None and on.since is not None:
@@ -298,7 +363,7 @@ class BoardSession:
                 run += up
             elif on.pick.reason is SelectionReason.ROTATION and up >= on.slot:
                 run = timedelta(0)
-        return run < self._policy.takeover_cap
+        return run >= self._policy.takeover_cap
 
     def _air_card(self, pick: Pick, at: ClockReading) -> None:
         if self._on_air is not None:

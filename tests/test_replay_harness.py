@@ -226,15 +226,17 @@ def test_replay_samples_what_the_panel_showed_and_why() -> None:
 
 def test_a_card_that_never_drew_is_listed_as_dropped() -> None:
     from omni.replay.harness import _describe
-    from omni.tower.board import BoardPolicy, BoardSession
+    from omni.tower.board import BoardHealth, BoardPolicy, BoardSession
     from omni.tower.lane import ChangeKind, EndReason
 
     queue = InterleavedCardQueue()
     queue.ingest(CardFactory().pregame(_game("g1", GameStatus.PREGAME), now=T0))
     board = BoardSession(queue, QUAD, policy=BoardPolicy())
+    board.publish(BoardHealth())
     reading = ClockReading(T0, MonotonicTime(0.0))
     board.cue(reading)
     queue.remove("g1:pregame")
+    board.publish(BoardHealth())
     board.cue(reading)
     (dropped,) = board.changes()
     assert dropped.kind is ChangeKind.DROPPED and dropped.reason is EndReason.INVALIDATED

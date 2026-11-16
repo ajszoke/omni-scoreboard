@@ -5,7 +5,10 @@ from __future__ import annotations
 import dataclasses
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from omni.app.pipeline import LiveBaseballPipeline, PipelineResult
+from omni.cards.base import CardId, DedupeKey, EndBasis, GameEnd
 from omni.cards.baseball import PregameCardPayload
 from omni.cards.factory import CardFactory
 from omni.core.clock import ClockReading, MonotonicTime
@@ -1014,6 +1017,38 @@ def test_a_final_waits_for_its_plays_and_airs_after_its_walk_off() -> None:
     final = queue.card("g1:final")
     assert final is not None and final.after == (CardFactory.big_play_key(_game("g1"), walk_off),)
     assert final.timing.available_at == T + timedelta(seconds=33)  # available from when its result could show
+    # A walk-off stamped after the game was first seen final isn't a credible end: first sight orders it.
+    ended = GameEnd(T + timedelta(seconds=3), EndBasis.FIRST_SEEN)
+    assert final.ended == ended and res.ends == ((CardId("g1:final"), ended),)
+
+
+def test_a_final_is_ordered_by_its_walk_off_and_replaces_its_game_s_live_card() -> None:
+    pipe, queue = _setup(lag=0)
+    fetch = _Fetch()
+    fetch.set("g1", _state(away=2, home=3))
+    pipe.refresh([_game("g1")], now=T, fetch_feed=fetch)  # live; first sight primes the backlog
+    walk_off = _walk_off("g1:ab:99", source_time=T + timedelta(seconds=2))
+    fetch.set_events("g1", (walk_off,))
+    res = pipe.refresh([_game("g1", GameStatus.FINAL)], now=T + timedelta(seconds=5), fetch_feed=fetch)
+    final = queue.card("g1:final")
+    ended = GameEnd(T + timedelta(seconds=2), EndBasis.DECISIVE_PLAY)  # the play that ended it
+    assert final is not None and final.ended == ended and res.ends == ((CardId("g1:final"), ended),)
+    assert final.replaces == DedupeKey("g1:live") and queue.card("g1:live") is None  # it takes the live card's place
+
+
+def test_a_final_with_no_live_card_up_replaces_nothing() -> None:
+    pipe, queue = _setup(lag=0)
+    fetch = _Fetch()
+    fetch.set("g1", _state(away=2, home=3))
+    res = pipe.refresh([_game("g1", GameStatus.FINAL)], now=T, fetch_feed=fetch)  # first seen already final
+    final = queue.card("g1:final")
+    assert final is not None and final.replaces is None
+    assert res.ends == ((CardId("g1:final"), GameEnd(T, EndBasis.FIRST_SEEN)),)
+
+
+def test_a_game_s_end_must_be_timezone_aware() -> None:
+    with pytest.raises(ValueError, match="timezone-aware"):
+        GameEnd(datetime(2026, 6, 17, 23, 0), EndBasis.FIRST_SEEN)
 
 
 def test_a_game_whose_feed_stops_answering_goes_stale_then_comes_down() -> None:
