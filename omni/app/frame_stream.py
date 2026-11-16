@@ -11,12 +11,17 @@ display process on the other end is a new one (a new ``generation``), which star
 Writing to a pipe can block: across SSH, a stalled link stops the other end reading. A
 `BackgroundFrameWriter` takes the writing off the frame loop, so drawing goes on while a frame waits to
 go out.
+
+A frame counts as shown only while the display is taking frames: `StreamDisplaySink.commit` raises
+`DisplayUnavailable` when the writer says a frame didn't go out, so a board spends no airtime on frames
+nobody saw. (That a frame reached the LEDs themselves is the display process's to prove.)
 """
 
 from __future__ import annotations
 
 import struct
 import threading
+import time
 from collections.abc import Callable
 from datetime import timedelta
 
@@ -25,7 +30,7 @@ from omni.panels.geometry import geometry_for
 from omni.renderers.canvas import Canvas
 from omni.renderers.pillow_canvas import PillowCanvas
 
-__all__ = ["FRAME_MAGIC", "BackgroundFrameWriter", "StreamDisplaySink", "encode_frame"]
+__all__ = ["FRAME_MAGIC", "BackgroundFrameWriter", "DisplayUnavailable", "StreamDisplaySink", "encode_frame"]
 
 FRAME_MAGIC = b"OMNF"
 
@@ -33,6 +38,10 @@ FRAME_MAGIC = b"OMNF"
 FrameWriter = Callable[[bytes], bool]
 # Which display process is on the other end: a change means a fresh one that has drawn nothing yet.
 SinkGeneration = Callable[[], int]
+
+
+class DisplayUnavailable(OSError):
+    """The display isn't taking frames: the frame just committed won't be seen."""
 
 
 def encode_frame(width: int, height: int, pixels: bytes) -> bytes:
@@ -70,6 +79,8 @@ class StreamDisplaySink:
         delivered = self._write(encode_frame(frame.width, frame.height, pixels))
         self._sent = pixels if delivered else None
         self._sent_to = generation
+        if not delivered:
+            raise DisplayUnavailable("the display isn't taking frames")
 
 
 class BackgroundFrameWriter:
@@ -77,14 +88,27 @@ class BackgroundFrameWriter:
 
     Only the newest frame waits: one handed over while another is going out replaces any still waiting.
     A frame that doesn't arrive is tried again until it does, or until a newer one replaces it, so the
-    display ends up on the newest frame either way. Handing a frame over never blocks, and it reports
-    the frame as delivered, since delivery is now the writer's job.
+    display ends up on the newest frame either way. Handing a frame over never blocks. It reports the
+    frame as going out unless the writer is failing (its last write didn't arrive) or stalled (a write
+    has been going out for `stall_after` or longer), so the caller knows when the display isn't taking
+    frames.
     """
 
-    def __init__(self, write: FrameWriter, *, retry_every: timedelta = timedelta(milliseconds=500)) -> None:
+    def __init__(
+        self,
+        write: FrameWriter,
+        *,
+        retry_every: timedelta = timedelta(milliseconds=500),
+        stall_after: timedelta = timedelta(seconds=2),
+        monotonic: Callable[[], float] = time.monotonic,
+    ) -> None:
         self._write = write
         self._retry_every = retry_every.total_seconds()
+        self._stall_after = stall_after.total_seconds()
+        self._monotonic = monotonic
         self._lock = threading.Lock()
+        self._failing = False  # the last write didn't arrive, and none has since
+        self._writing_since: float | None = None  # when the write going out now began
         self._waiting: bytes | None = None
         self._ready = threading.Event()  # a frame is waiting, or the writer should stop
         self._stopped = threading.Event()
@@ -104,7 +128,9 @@ class BackgroundFrameWriter:
         with self._lock:
             self._waiting = frame
             self._ready.set()
-        return True
+            since = self._writing_since
+            stalled = since is not None and self._monotonic() - since >= self._stall_after
+            return not (self._failing or stalled)
 
     def _run(self) -> None:
         # `_ready` is set only alongside a waiting frame, both under the lock, or by `stop`.
@@ -115,8 +141,12 @@ class BackgroundFrameWriter:
             with self._lock:
                 frame, self._waiting = self._waiting, None
                 self._ready.clear()
+                self._writing_since = self._monotonic()
             assert frame is not None
-            if self._write(frame):
+            delivered = self._write(frame)
+            with self._lock:
+                self._writing_since, self._failing = None, not delivered
+            if delivered:
                 continue
             with self._lock:
                 if self._waiting is None:

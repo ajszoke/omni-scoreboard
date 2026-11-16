@@ -29,11 +29,11 @@ has to be handled like flights at a control tower:
 | Where | What it times | Driven by |
 |---|---|---|
 | `omni/app/runner.py` `run_forever`, `AppLoop.refresh` and `AppLoop.paint` (MLB) | refreshes (pipeline into the card queue, the source's health) on a worker thread, reading the plan's answers; painting what the board has up on the main thread | a refresh when an answer lands, at the pipeline's or the source's next deadline, and at least every 5 s; frames at `--fps`, 10 by default |
-| `PollPlan` + `Poller` + `PlannedMlb` (MLB) | what to ask when: slates for the previous and current local dates, each live game's feed, market and model probabilities; one ask in flight per key, priority cadence within a per-source quota, three quick retries, last good until `keep_for` | the plan on monotonic time; a poller thread checking every 250 ms, with four workers |
+| `PollPlan` + `Poller` + `PlannedMlb` (MLB) | what to ask when: slates for the previous and current local dates, each live game's feed, market and model probabilities; one ask in flight per key (given up on after `answer_within`, 30 s), priority cadence within a per-source quota, three quick retries, last good until `keep_for` | the plan on monotonic time; a poller thread checking every 250 ms, with four workers |
 | `ProviderSupervisor` | last-known-good and stale status for the slate (its backoff is off for a planned slate) | `now` passed per call |
 | `LiveBaseballPipeline` (`DelayPolicy`, `DelayedFeed`, `DelayedEventStream`) | TV delay anchored to when a play happened; meter readings; the final's embargo | `now` per tick |
 | `InterleavedCardQueue` | which card should air next (`peek`): eligibility, required order (finals by when their games ended, a final after its walk-off), a usable window, then a takeover, a due reminder, or two-level rotation; `book` records a turn at commit | UTC for availability and expiry; reminder cooldowns on monotonic time |
-| The board, a `BoardSession` (`omni/tower/board.py`) | one card at a time: dwell from the first committed frame, preemption after a minimum, a turn (`--slot`, 12 s) within the card's min and max, a cap on takeovers back to back, explicit idle, held and offline frames, stale cards dimmed | the frame thread; dwell on monotonic time; `next_deadline` |
+| The board, a `BoardSession` (`omni/tower/board.py`) | one card at a time: dwell from the first committed frame, preemption after a minimum, a turn (`--slot`, 12 s) within the card's min and max, a cap on takeovers back to back, explicit idle, held and offline frames, stale cards dimmed; a card the display can't draw set aside for a minute or until it changes | the frame thread; dwell on monotonic time; `next_deadline` |
 | `FootballBoard.step` (single-game NFL) | a receipt-anchored `--delay` buffer, meter lag, closing out a period before a break | ~10 fps frame loop on `ClockReading`s, taking whatever answers have arrived; publishes `next_deadline` |
 | `GameFeed` in a `BackgroundFeed` (`football_feed.py`) | poll cadence, retry after failure, parking after the final; answers dated by arrival | its own thread, checking every 250 ms whether an ask is due |
 | `BackgroundFrameWriter` (`frame_stream.py`) | writing frames to the display process, retrying until one lands | its own thread; only the newest frame waits |
@@ -283,3 +283,40 @@ Round 4 groups the first five as A1a:
     its frame's commit.
   - A refreshed card on air swaps in place and keeps its dwell; one that leaves the queue comes down at
     once, as a factual invalidation.
+
+## After A1a: the rulings still open (self-review for round 5, 2026-11-16)
+
+An audit of A1a against the round-4 rulings found four defects, fixed before round 5:
+- **A card the display can't draw** held the board: it was cued again every frame and nothing else
+  aired. Now it comes down (`drop … (failed to draw)`) and is set aside until it changes or a minute
+  passes. A display that fails outright still spends nothing.
+- **A request that never returns** held its poll key forever (StatsAPI sets no timeout). Now an ask is
+  given up on after its source's `answer_within` (30 s), and whatever it brings back late is ignored.
+  StatsAPI's requests also get a 15 s timeout.
+- **The football board spent strip time on frames nobody saw**: a failed or stalled write to the
+  display process still counted. Now a frame counts only while the display is taking frames.
+- **A football draw that raised stopped the app.** Now it's logged, and the strip waits.
+
+Fixed with them:
+- the stack and single no longer "show" strip entries their card doesn't draw;
+- timeouts and challenges stay unknown until the play feed has been read through;
+- a card that expires before it ever airs is traced (`unseen`);
+- a rotation card cut short no longer restarts the takeover run.
+
+Still open, with where each lands:
+
+| Ruling (round 4) | Today | Lands with |
+|---|---|---|
+| Latest start apart from hard end (about 60 s routine, 120 s major, from eligibility) | `Segment.latest_start` exists, but no card sets it. A big play can start up to about 114 s after release (its expiry is 120 s) | step 7 (freshness), or sooner as a small change |
+| Airtime debt across leagues | one league's weighted rotation | step 7, after the mixed-league identity work (M6-004) |
+| Clamp release against a wall-clock jump | releases are pure UTC, so a forward jump releases early | step 6 (the air clock) |
+| Decisions never fetch | slates, feeds and probabilities come from the plan; pregame details and odds are still fetched inline, under their timeouts | the `PollPlan`, next time pregame is touched |
+| Device contrast from config (round-4 L2) | the default policy everywhere | A1b, with the hardware |
+| Football: revisions replace what's pending; corrections and retractions explicit (round-4 M2) | the lane supports revisions, but `FootballEvent` carries none. Only review and conversion corrections are announced | NFL onto the shared board |
+| Football: field and caption move together; an invalid caption clears at once | the caption keeps its 10 s minimum while the field moves | NFL onto the shared board |
+| Football: a stoppage ends on credible resumption or a traced stale-source timeout; a dead feed is shown as such | any new entry ends a hold; the football board has no stale or offline state | NFL onto the shared board |
+| A stalled display link recovers in bounded time (R4-5) | no frame counts while it's stalled, but nothing restarts it | A1b (the app on the Pi) |
+
+The takeover cap bounds back-to-back takeovers at the cap plus one takeover's turn ("after 30 s of
+takeovers, a rotation card gets a full turn": the default the user ratified, 2026-11-16).
+

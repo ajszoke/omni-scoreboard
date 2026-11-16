@@ -70,8 +70,8 @@ class Poller:
         try:
             value = ask.fetch(asked.utc)
         except Exception as exc:  # any failure is this ask's, filed for the decision pass to see
-            self._plan.failed(ask.key, f"{type(exc).__name__}: {exc}", self._clock.read())
+            self._plan.failed(ask.key, f"{type(exc).__name__}: {exc}", self._clock.read(), ask=ask.number)
         else:
-            self._plan.answered(ask.key, value, self._clock.read())
+            self._plan.answered(ask.key, value, self._clock.read(), ask=ask.number)
         for listener in self._listeners:
             listener()

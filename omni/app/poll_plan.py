@@ -1,9 +1,13 @@
 """PollPlan: what to ask each source, when, and what it last answered.
 
-The decision pass no longer fetches. It reads answers from the plan, and each read also tells the
-plan what is still wanted. Workers (`omni.app.poller`) ask whatever the plan says is due, and file
+The decision pass no longer fetches its slates, game feeds or win probabilities. It reads their answers
+from the plan, and each read also tells the plan what is still wanted. (A pregame card's details and
+odds are still fetched inline, on their own slow pacing and under their requests' timeouts, until they
+join the plan.) Workers (`omni.app.poller`) ask whatever the plan says is due, and file
 the answers back. The plan keeps the rules in one place:
-- **One ask in flight per key.** A slow source never stacks a second request on the first.
+- **One ask in flight per key.** A slow source never stacks a second request on the first. An ask
+  with no answer within its source's `answer_within` counts as failed, so a hung request can't hold its
+  key forever; whatever it brings back late is ignored.
 - **Priority cadence within quota.** A key is due again after its source's cadence for its priority
   (a favorite's live game sooner than another game's). A source's per-minute quota is shared out in
   priority order, so when asks queue, the most important go first.
@@ -65,9 +69,10 @@ class PollPolicy:
     background_every: timedelta | None = None  # a slower cadence for background keys
     retries: tuple[timedelta, ...] = (timedelta(seconds=2), timedelta(seconds=5), timedelta(seconds=15))
     per_minute: int | None = None  # this source's quota; None for none
+    answer_within: timedelta = timedelta(seconds=30)  # an ask still out after this has failed
 
     def __post_init__(self) -> None:
-        spans = (self.every, self.keep_for, self.focus_every, self.background_every, *self.retries)
+        spans = (self.every, self.keep_for, self.focus_every, self.background_every, self.answer_within, *self.retries)
         if any(span is not None and span <= timedelta(0) for span in spans):
             raise ValueError("a poll policy's spans must be positive")
         if self.per_minute is not None and self.per_minute < 1:
@@ -104,6 +109,7 @@ class Ask:
     key: PollKey[Any]
     fetch: Callable[[datetime], Any]
     priority: PollPriority
+    number: int = 0  # which ask of its key this is: an answer to an ask given up on is ignored
 
 
 @dataclass(slots=True)
@@ -113,6 +119,8 @@ class _Entry:
     wanted: MonotonicTime  # when a decision last asked about it
     due: MonotonicTime
     in_flight: bool = False
+    asked: MonotonicTime | None = None  # when the ask in flight was handed out
+    asks: int = 0  # asks handed out (or given up on) so far: the number of the one in flight
     failures: int = 0
     error: str | None = None
     answers: deque[Answer[Any]] = field(default_factory=lambda: deque(maxlen=_HISTORY))
@@ -194,45 +202,65 @@ class PollPlan:
         now = at.monotonic
         with self._lock:
             self._forget(now)
+            for key, entry in self._entries.items():
+                within = self._policy(key).answer_within
+                if entry.in_flight and entry.asked is not None and now >= entry.asked + within:
+                    entry.asks += 1  # given up on: whatever it brings back late is ignored
+                    self._give_up(key, entry, f"no answer within {within.total_seconds():g}s", at)
             due = [(key, entry) for key, entry in self._entries.items() if not entry.in_flight and entry.due <= now]
             due.sort(key=lambda item: (-item[1].priority, item[1].due.seconds))
             asks: list[Ask] = []
             for key, entry in due:
                 if not self._spend(key.source, now):
                     continue  # over quota: it stays due, and goes first when a token frees up
-                entry.in_flight = True
-                asks.append(Ask(key=key, fetch=entry.fetch, priority=entry.priority))
+                entry.in_flight, entry.asked = True, now
+                entry.asks += 1
+                asks.append(Ask(key=key, fetch=entry.fetch, priority=entry.priority, number=entry.asks))
             return asks
 
-    def answered(self, key: PollKey[T], value: T, received: ClockReading) -> None:
+    def answered(self, key: PollKey[T], value: T, received: ClockReading, *, ask: int | None = None) -> None:
+        """File an answer; ``ask`` is the number of the ask it answers (an answer to one given up on is
+        ignored). None files it regardless."""
         with self._lock:
             entry = self._entries.get(key)
-            if entry is None:
-                return  # forgotten while in flight
-            entry.in_flight, entry.failures, entry.error = False, 0, None
+            if entry is None or (ask is not None and ask != entry.asks):
+                return  # forgotten while in flight, or given up on
+            entry.in_flight, entry.asked, entry.failures, entry.error = False, None, 0, None
             entry.answers.append(Answer(value, received))
             entry.due = received.monotonic + self._policy(key).cadence(entry.priority)
 
-    def failed(self, key: PollKey[Any], error: str, at: ClockReading) -> None:
+    def failed(self, key: PollKey[Any], error: str, at: ClockReading, *, ask: int | None = None) -> None:
+        """File a failure; ``ask`` as for `answered`."""
         with self._lock:
             entry = self._entries.get(key)
-            if entry is None:
-                return  # forgotten while in flight
-            policy = self._policy(key)
-            entry.in_flight, entry.error = False, error
-            entry.failures += 1
-            retry = policy.retries[entry.failures - 1] if entry.failures <= len(policy.retries) else None
-            entry.due = at.monotonic + (retry if retry is not None else policy.cadence(entry.priority))
+            if entry is None or (ask is not None and ask != entry.asks):
+                return  # forgotten while in flight, or given up on
+            self._give_up(key, entry, error, at)
 
     def next_due(self) -> MonotonicTime | None:
-        """When the next ask falls due, among keys not already in flight; the poller's next deadline."""
+        """When the next ask falls due, or the next one in flight is given up on; the poller's next deadline."""
         with self._lock:
-            waiting = [entry.due for entry in self._entries.values() if not entry.in_flight]
+            waiting = [
+                (
+                    entry.asked + self._policy(key).answer_within
+                    if entry.in_flight and entry.asked is not None
+                    else entry.due
+                )
+                for key, entry in self._entries.items()
+            ]
             return min(waiting) if waiting else None
 
     def __len__(self) -> int:
         with self._lock:
             return len(self._entries)
+
+    def _give_up(self, key: PollKey[Any], entry: _Entry, error: str, at: ClockReading) -> None:
+        """The ask in flight failed: retry on the short schedule, then at the normal cadence."""
+        policy = self._policy(key)
+        entry.in_flight, entry.asked, entry.error = False, None, error
+        entry.failures += 1
+        retry = policy.retries[entry.failures - 1] if entry.failures <= len(policy.retries) else None
+        entry.due = at.monotonic + (retry if retry is not None else policy.cadence(entry.priority))
 
     def _policy(self, key: PollKey[Any]) -> PollPolicy:
         return self._policies[key.source]

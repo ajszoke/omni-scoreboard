@@ -162,7 +162,7 @@ def test_the_next_deadline_is_the_earliest_idle_due_time() -> None:
     first, second = _key(1), _key(2)
     _want(plan, clock, first)
     plan.take_due(clock.read())
-    assert plan.next_due() is None  # the only key is in flight
+    assert plan.next_due() == clock.monotonic() + 30 * S  # the only key is in flight: when it's given up on
     plan.answered(first, "a", clock.read())
     clock.advance(3 * S)
     _want(plan, clock, second, PollPriority.BACKGROUND)
@@ -172,7 +172,30 @@ def test_the_next_deadline_is_the_earliest_idle_due_time() -> None:
     assert due is not None and due.seconds == 15.0
 
 
+def test_an_ask_with_no_answer_in_time_is_given_up_on_and_its_late_answer_ignored() -> None:
+    plan, clock = _plan()
+    key = _key(1)
+    _want(plan, clock, key)
+    [hung] = plan.take_due(clock.read())
+    clock.advance(29 * S)
+    assert plan.take_due(clock.read()) == []  # still in flight
+    clock.advance(1 * S)
+    assert plan.take_due(clock.read()) == []  # given up on: retried on the short schedule
+    assert plan.last_error(key) == "no answer within 30s"
+    clock.advance(2 * S)
+    [retry] = plan.take_due(clock.read())
+    assert retry.number == hung.number + 2
+    plan.answered(key, "late", clock.read(), ask=hung.number)  # the hung request finally returns
+    plan.failed(key, "late failure", clock.read(), ask=hung.number)
+    assert plan.latest(key, clock.read()) is None and plan.last_error(key) == "no answer within 30s"
+    plan.answered(key, "fresh", clock.read(), ask=retry.number)
+    answer = plan.latest(key, clock.read())
+    assert answer is not None and answer.value == "fresh" and plan.last_error(key) is None
+
+
 def test_a_poll_policy_needs_positive_spans_and_a_usable_quota() -> None:
+    with pytest.raises(ValueError, match="positive"):
+        PollPolicy(every=S, keep_for=S, answer_within=timedelta(0))
     with pytest.raises(ValueError, match="positive"):
         PollPolicy(every=timedelta(0), keep_for=S)
     with pytest.raises(ValueError, match="positive"):

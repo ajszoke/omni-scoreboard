@@ -213,9 +213,17 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
         writer.start()
     feed.start()
     frames = Pacer(clock, timedelta(seconds=1.0 / args.fps))
+    failing: str | None = None
     try:
         while True:
-            board.step(clock.read())
+            try:
+                board.step(clock.read())
+            except Exception as exc:  # a bug in one step never stops the board: the next one tries again
+                if f"{exc!r}" != failing:
+                    failing = f"{exc!r}"
+                    print(f"step failed: {type(exc).__name__}: {exc}", flush=True)
+            else:
+                failing = None
             frames.wait()
     except KeyboardInterrupt:
         pass

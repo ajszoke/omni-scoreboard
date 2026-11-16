@@ -192,6 +192,46 @@ def test_a_card_cued_but_gone_before_it_drew_is_dropped_unbooked() -> None:
     assert [change.kind for change in dropped] == [ChangeKind.DROPPED] and dropped[0].aired is None
 
 
+def test_a_card_the_display_cant_draw_is_set_aside_and_the_next_one_airs() -> None:
+    queue = InterleavedCardQueue()
+    queue.ingest_all((_card("g1"), _card("g2")))
+    board = BoardSession(queue, QUAD)
+    bad = board.cue(_at(0))
+    board.failed(bad, _at(0))
+    [dropped] = board.changes()
+    assert (dropped.kind, dropped.reason, dropped.aired) == (ChangeKind.DROPPED, EndReason.UNDRAWN, None)
+    other = _air(board, 0)
+    assert _name(other) != _name(bad)
+    assert board.next_deadline(_at(0)) == MonotonicTime(8)  # its minimum; the retry (60 s) is later
+    assert _air(board, 12).occurrence == other.occurrence  # the set-aside card can't take its turn: a lone card stays
+    assert _name(_air(board, 60)) == _name(bad)  # a minute on, it is tried again
+
+
+def test_a_card_up_that_stops_drawing_comes_down_and_a_changed_one_is_tried_again() -> None:
+    queue = InterleavedCardQueue()
+    queue.ingest_all((_card("g1"), _card("g2")))
+    board = BoardSession(queue, QUAD)
+    first = _air(board, 0)
+    board.failed(first, _at(3))
+    up, down = board.changes()
+    assert down.kind is ChangeKind.DOWN and down.reason is EndReason.UNDRAWN and down.aired == timedelta(seconds=3)
+    board.failed(first, _at(3))  # no longer on air: nothing more happens
+    assert board.changes() == []
+    card = first.payload
+    assert not isinstance(card, BoardFrame)
+    second = _air(board, 3)
+    assert _name(second) != _name(first)
+    queue.ingest(dataclasses.replace(card, priority=CardPriority(band=DisplayPriority.NORMAL, score=1.0)))
+    assert _name(_air(board, 15)) == _name(first)  # a new version gets its chance at once
+
+
+def test_a_frame_that_fails_to_draw_is_tried_again() -> None:
+    board = _board()
+    idle = board.cue(_at(0))
+    board.failed(idle, _at(0))
+    assert board.changes() == [] and board.cue(_at(1)).occurrence == idle.occurrence
+
+
 def test_a_newer_version_of_the_card_up_swaps_in_and_keeps_its_dwell() -> None:
     queue = InterleavedCardQueue()
     queue.ingest_all((_card("g1"), _card("g2")))
@@ -219,6 +259,23 @@ def test_takeovers_back_to_back_stop_at_the_cap_for_a_full_rotation_turn() -> No
     assert _air(board, 40).occurrence == base.occurrence  # no takeover cuts the base turn short
     resumed = _air(board, 44)
     assert resumed.reason is SelectionReason.TAKEOVER  # the run starts over once that turn has run
+
+
+def test_a_rotation_card_cut_short_does_not_restart_the_takeover_run() -> None:
+    queue = InterleavedCardQueue()
+    queue.ingest_all((_card("g1"), _card("g2")))
+    board = BoardSession(queue, QUAD, policy=BoardPolicy(takeover_cap=timedelta(seconds=20)))
+    _air(board, 0)
+    queue.ingest_all(_card(f"b{n}", attention=_BURST, band=DisplayPriority.ALERT) for n in range(3))
+    _air(board, 8)
+    _air(board, 20)  # two takeovers: 24 s, past the cap
+    base = _air(board, 32)
+    assert base.reason is SelectionReason.ROTATION
+    card = base.payload
+    assert not isinstance(card, BoardFrame)
+    queue.remove(card.dedupe_key.raw)  # its game moved on 3 s into its turn
+    after = _air(board, 35)
+    assert after.reason is SelectionReason.ROTATION and _name(after) != _name(base)  # still owed a full turn
 
 
 def test_with_nothing_to_show_the_board_says_why() -> None:

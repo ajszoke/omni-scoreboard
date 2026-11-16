@@ -140,8 +140,8 @@ def replay_decisions(
 
     ``up`` names a card that went up and why the queue chose it; ``down`` one that came down, why,
     and how long it was up; ``drop`` one that came down before it drew; ``frame`` an explicit frame
-    and why; ``stale`` a card on air whose data passed its age; ``source`` a change in how far the
-    board trusts its source.
+    and why; ``stale`` a card on air whose data passed its age; ``unseen`` one that expired before it
+    ever aired; ``source`` a change in how far the board trusts its source.
     """
     lines: list[str] = []
     seen: dict[str, object] = {"source": None, "stale": None}
@@ -153,6 +153,7 @@ def replay_decisions(
             seen["source"] = source
             reason = f"  ({refresh.health.reason})" if refresh.health.reason else ""
             lines.append(f"{seconds}  source  {refresh.health.source.value}{reason}")
+        lines.extend(f"{seconds}  unseen  {card.raw}  (expired before it aired)" for card in refresh.unseen)
         chosen = painted.presented.reason if painted.presented is not None else None
         lines.extend(
             f"{seconds}  {line}" for line in map(lambda change: _describe(change, chosen), painted.changes) if line

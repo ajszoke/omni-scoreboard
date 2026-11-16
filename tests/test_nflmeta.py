@@ -680,6 +680,21 @@ def test_a_first_look_that_fails_partway_announces_nothing_until_the_game_is_all
     assert [event.summary.headline for event in second.events] == ["INCOMPLETE"]  # the latest, not a replay
 
 
+def test_timeouts_and_challenges_stay_unknown_until_the_play_feed_is_all_in() -> None:
+    feed = FakeFeed()
+    feed.scores = [_scores(_synced("p1"))]
+    feed.plays = [
+        _page(_change("p0", 100, "C.Brown up the middle for 4 yards."), more=True, cursor="c1"),
+        RuntimeError("connection reset"),
+        _page(_change("p1", 200, "S.Perine right guard for 2 yards.", yards_gained=2)),
+    ]
+    provider = _provider(feed)
+    first = provider.poll(GAME, T0)
+    assert first.state is not None and first.state.timeouts is None and first.state.challenges is None
+    second = provider.poll(GAME, T0 + S10)
+    assert second.state is not None and second.state.timeouts is not None and second.state.challenges is not None
+
+
 class _Gone(Exception):
     code = 410
 

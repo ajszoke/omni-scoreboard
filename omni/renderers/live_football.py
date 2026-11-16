@@ -55,7 +55,7 @@ from omni.renderers.text_lane import Marquee, TextLane, draw_text_lane
 from omni.renderers.visual_treatment import resolve_matchup_treatment
 from omni.renderers.win_meter import draw_win_meter
 
-__all__ = ["LiveFootballRenderer", "clock_text", "period_parts"]
+__all__ = ["NO_STRIP_NOTE", "STRIP_PROFILES", "LiveFootballRenderer", "clock_text", "period_parts"]
 
 _BLACK = RGBColor(0, 0, 0)
 _WHITE = RGBColor(255, 255, 255)
@@ -303,6 +303,11 @@ def _word_rows(words: tuple[str, ...], rows: tuple[int, int]) -> list[tuple[str,
     if len(words) == 1:
         return [(words[0], sum(rows) // 2)]
     return list(zip(words, rows))
+
+
+# The profiles whose card draws the last-play strip; the others make the documented compromise without one.
+STRIP_PROFILES = frozenset({PanelProfile.QUAD_128X64})
+NO_STRIP_NOTE = "stack and single: no last-play strip (plays are logged, not shown)"
 
 
 class LiveFootballRenderer:

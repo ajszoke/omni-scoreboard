@@ -253,13 +253,54 @@ def test_painting_draws_what_the_board_has_up_and_presents_a_card_once() -> None
     assert sink.committed == 4
 
 
-def test_a_failed_paint_presents_nothing_and_starts_no_dwell() -> None:
-    loop, sink, _ = _build(lag=0, registry=RendererRegistry())  # no renderers: every paint fails
+def test_a_card_that_cant_be_drawn_is_set_aside_and_spends_no_dwell() -> None:
+    loop, sink, _ = _build(lag=0, registry=RendererRegistry())  # no renderers: every card fails to draw
     loop.refresh(T)
     painted = loop.paint(_at(T))
     assert painted.render_error is not None and painted.shown is None and painted.presented is None
     assert sink.committed == 0
-    assert loop.next_deadline(_at(T)) == MonotonicTime(121.0)  # no dwell runs: only the source's next change
+    [dropped] = painted.changes
+    assert dropped.kind is ChangeKind.DROPPED and dropped.reason is EndReason.UNDRAWN
+    after = loop.paint(_later(0.1))  # the board moves on rather than retrying the card every frame
+    assert after.frame is FrameKind.IDLE and sink.committed == 1
+    assert loop.next_deadline(_later(0.1)) == MonotonicTime(60.0)  # when it may be tried again
+    assert loop.paint(_later(60)).render_error is not None  # tried again, and set aside again
+
+
+class _FailingSink(RecordingDisplaySink):
+    """A display that fails to commit until told otherwise."""
+
+    failing = True
+
+    def commit(self, frame: Canvas) -> None:
+        if self.failing:
+            raise OSError("display gone")
+        super().commit(frame)
+
+
+def test_a_display_that_fails_spends_no_airtime_and_keeps_the_card_cued() -> None:
+    loop, _, _ = _build(lag=0)
+    sink = _FailingSink(QUAD)
+    loop._sink = sink
+    loop.refresh(T)
+    failed = loop.paint(_at(T))
+    assert failed.render_error == "OSError: display gone" and failed.changes == ()
+    sink.failing = False
+    drawn = loop.paint(_later(5))
+    assert drawn.presented is not None and drawn.presented.at == T + timedelta(seconds=5)  # its dwell starts here
+
+
+class _NoFrames(RecordingDisplaySink):
+    def new_frame(self) -> Canvas:
+        raise OSError("no buffer")
+
+
+def test_a_display_with_no_frame_to_draw_on_spends_nothing() -> None:
+    loop, _, _ = _build(lag=0)
+    loop._sink = _NoFrames(QUAD)
+    loop.refresh(T)
+    painted = loop.paint(_at(T))
+    assert painted.render_error == "OSError: no buffer" and painted.changes == ()
 
 
 def test_a_card_that_leaves_comes_down_and_the_board_says_why() -> None:

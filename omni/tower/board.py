@@ -20,6 +20,10 @@ A card's slot is the board's rotation slot, or a takeover's own `takeover_for`, 
 minimum and maximum display. Takeovers back to back are bounded: once they have run the policy's cap,
 a rotation card airs before the next one may start.
 
+A card the display can't draw comes down unseen (or at once, if it was already up) and is set aside
+until it changes or a minute passes, so one bad payload never holds the board. A display that fails
+outright spends nothing: the card stays cued, and its dwell starts at the first frame that lands.
+
 When no card should be up, the board says so with an explicit frame: *idle* (nothing to show), *held*
 (games are on, but nothing has cleared the TV delay yet) or *offline* (the source has gone quiet past
 its limit or never answered, or a game's feed has stopped answering and its card has come down). A card
@@ -53,10 +57,12 @@ __all__ = [
     "BoardSession",
     "FrameKind",
     "SourceHealth",
+    "UNDRAWN_RETRY",
 ]
 
 _BOARD_SOURCE = SourceRef("board")
 _NO_DWELL = Dwell(minimum=timedelta(0), maximum=timedelta(0))
+UNDRAWN_RETRY = timedelta(minutes=1)  # how long a card the display couldn't draw is set aside, unless it changes
 
 
 class FrameKind(StrEnumMixin, str, Enum):
@@ -158,6 +164,7 @@ class BoardSession:
         self._occurrences = 0
         self._takeover_run = timedelta(0)  # takeover airtime since the last rotation card or frame went up
         self._changes: list[LaneChange[BoardPayload]] = []
+        self._undrawn: dict[str, tuple[ScoreboardCard[Any], MonotonicTime]] = {}  # set aside: the card, and until
 
     @property
     def health(self) -> BoardHealth:
@@ -178,7 +185,7 @@ class BoardSession:
         if on is None or on.pick is None:
             pick = None
             if health.source is not SourceHealth.OFFLINE:
-                pick = self._queue.peek(at, self._profile, takeovers=self._takeovers_allowed(at))
+                pick = self._peek(at)
             if pick is not None:
                 self._air_card(pick, at)
             elif health.source is SourceHealth.OFFLINE:
@@ -204,6 +211,16 @@ class BoardSession:
             self._takeover_run = timedelta(0)  # a quiet board: takeovers before it weren't back to back
         self._changes.append(LaneChange(ChangeKind.UP, on.segment, at))
 
+    def failed(self, cue: BoardCue, at: ClockReading) -> None:
+        """The display couldn't draw ``cue``'s card at ``at``: take it down, and set it aside until it changes
+        or `UNDRAWN_RETRY` passes. A frame that fails is simply tried again."""
+        on = self._on_air
+        if on is None or cue.occurrence != on.occurrence or on.pick is None:
+            return
+        card = on.pick.card
+        self._undrawn[card.dedupe_key.raw] = (card, at.monotonic + UNDRAWN_RETRY)
+        self._down(EndReason.UNDRAWN, at)
+
     def next_deadline(self, at: ClockReading) -> MonotonicTime | None:
         """When the board will next change by itself, as of ``at``.
 
@@ -212,7 +229,7 @@ class BoardSession:
         on = self._on_air
         if on is None:
             return at.monotonic  # nothing has been cued yet
-        upcoming = self._queue.next_deadline(at, self._profile)
+        upcoming = earliest((self._queue.next_deadline(at, self._profile), *self._set_aside(at).values()))
         if on.pick is None or on.since is None:
             return upcoming  # a frame stays until a card can replace it; a card's dwell waits on its commit
         deadlines = [upcoming, on.since + on.segment.dwell.minimum, on.since + on.slot]
@@ -247,7 +264,7 @@ class BoardSession:
         up = at.monotonic.since(on.since)
         if up < on.segment.dwell.minimum:
             return  # ordinary priority never cuts a visible minimum
-        best = self._queue.peek(at, self._profile, takeovers=self._takeovers_allowed(at))
+        best = self._peek(at)
         if best is None:
             if up >= on.slot:
                 self._down(EndReason.RAN_ITS_TIME, at)  # the queue no longer offers it, and its turn is over
@@ -257,6 +274,18 @@ class BoardSession:
             self._down(EndReason.NEXT_WAITING, at)  # a stronger claim, once this had its minimum
         elif up >= on.slot:
             self._down(EndReason.RAN_ITS_TIME, at)
+
+    def _peek(self, at: ClockReading) -> Pick | None:
+        return self._queue.peek(
+            at, self._profile, takeovers=self._takeovers_allowed(at), skip=frozenset(self._set_aside(at))
+        )
+
+    def _set_aside(self, at: ClockReading) -> dict[str, MonotonicTime]:
+        """The cards set aside after failing to draw, with when each may be tried again; forgets the rest."""
+        for key, (card, until) in list(self._undrawn.items()):
+            if self._queue.card(key) is not card or at.monotonic >= until:
+                del self._undrawn[key]  # it changed, left the queue, or has waited long enough: try it again
+        return {key: until for key, (_, until) in self._undrawn.items()}
 
     def _takeovers_allowed(self, at: ClockReading) -> bool:
         """Whether a takeover may start: the takeover airtime back to back, the one up included, is under the
@@ -314,8 +343,8 @@ class BoardSession:
         if aired is not None and on.pick is not None:
             if on.pick.reason is SelectionReason.TAKEOVER:
                 self._takeover_run += aired
-            elif on.pick.reason is SelectionReason.ROTATION:
-                self._takeover_run = timedelta(0)  # the board's own turn has run: takeovers may start again
+            elif on.pick.reason is SelectionReason.ROTATION and aired >= on.slot:
+                self._takeover_run = timedelta(0)  # the board's own turn has run in full: takeovers may start again
         kind = ChangeKind.DOWN if aired is not None else ChangeKind.DROPPED
         self._changes.append(LaneChange(kind, on.segment, at, reason=reason, aired=aired))
         self._on_air = None

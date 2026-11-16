@@ -84,6 +84,7 @@ class Refresh:
     health: BoardHealth  # what the board was told: its source's health, and games held in the TV delay
     reconciliation: Reconciliation | None  # None when no snapshot was available to apply
     pipeline: PipelineResult
+    unseen: tuple[CardId, ...] = ()  # cards that expired before they ever aired
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -181,7 +182,7 @@ class AppLoop:
             fetch_pregame_details=self._fetch_pregame_details,
             fetch_game_lines=self._fetch_game_lines,
         )
-        self._queue.prune(now)
+        unseen = tuple(card.id for card in self._queue.prune(now))
         health = self._health(snapshot, pipeline_result)
         self._board.health = health
         return Refresh(
@@ -190,6 +191,7 @@ class AppLoop:
             health=health,
             reconciliation=reconciliation,
             pipeline=pipeline_result,
+            unseen=unseen,
         )
 
     def paint(self, at: ClockReading) -> Painted:
@@ -204,17 +206,25 @@ class AppLoop:
             timezone=self._display_timezone,
             marquee=Marquee(style=self._marquee, clock=lanes),
         )
+        # Isolate render and display failures: never crash the loop. A card that can't be drawn is set
+        # aside so the board moves on; a display that fails spends no airtime, and the cue is tried again.
         try:
             frame = self._sink.new_frame()
-            canvas = DimmedCanvas(frame) if cue.stale else frame
+        except Exception as exc:
+            return self._failed(at, exc)
+        canvas = DimmedCanvas(frame) if cue.stale else frame
+        try:
             if isinstance(payload, BoardFrame):
                 self._frames.render(payload, context, canvas)
             else:
                 self._registry.render(payload, context, canvas)
+        except Exception as exc:
+            self._board.failed(cue, at)
+            return self._failed(at, exc)
+        try:
             self._sink.commit(frame)
-        except Exception as exc:  # isolate render/display failures — never crash the loop
-            changes = tuple(self._board.changes())
-            return Painted(at=at.utc, shown=None, render_error=f"{type(exc).__name__}: {exc}", changes=changes)
+        except Exception as exc:
+            return self._failed(at, exc)
         lanes.commit()
         self._board.committed(cue, at)
         changes = tuple(self._board.changes())
@@ -232,6 +242,10 @@ class AppLoop:
         return Painted(
             at=at.utc, shown=payload.id, reason=cue.reason, stale=cue.stale, presented=presented, changes=changes
         )
+
+    def _failed(self, at: ClockReading, exc: Exception) -> Painted:
+        changes = tuple(self._board.changes())
+        return Painted(at=at.utc, shown=None, render_error=f"{type(exc).__name__}: {exc}", changes=changes)
 
     def run_once(self, at: ClockReading) -> TickResult:
         """One refresh, then one paint, at ``at``."""
