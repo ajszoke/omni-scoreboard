@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from typing import Any
+
+import pytest
 
 from omni.app.__main__ import _parse_args
 from omni.app.display import RecordingDisplaySink
-from omni.app.runner import build_loop
-from omni.core.clock import ClockReading, MonotonicTime
+from omni.app.runner import build_loop, paint_frame
+from omni.cards.base import ScoreboardCard
+from omni.core.clock import ClockReading, FakeClock, MonotonicTime
 from omni.core.enum import GameStatus, League, PanelProfile
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.core.time import DurationSeconds
@@ -16,8 +20,13 @@ from omni.domain.contest import TeamGame
 from omni.events.baseball import LiveBaseballFeed
 from omni.providers.base import ProviderUpdate
 from omni.providers.mlb_teams import MlbTeamRegistry
-from omni.renderers.canvas import RecordingCanvas
+from omni.queue.scheduler import Pick
+from omni.renderers.canvas import Canvas, RecordingCanvas
+from omni.renderers.context import RenderContext
 from omni.renderers.image import LogoStore
+from omni.renderers.registry import RendererRegistry, default_registry
+from omni.renderers.text_lane import TextLane
+from omni.tower.lane import ChangeKind
 
 _REG = MlbTeamRegistry.from_color_file()
 SOURCE = SourceRef("mlb_statsapi", "https://statsapi.mlb.com")
@@ -28,9 +37,9 @@ def _at(moment: datetime) -> ClockReading:
     return ClockReading(moment, MonotonicTime((moment - T).total_seconds()))
 
 
-def _game() -> TeamGame:
+def _game(raw: str = "g1") -> TeamGame:
     return TeamGame(
-        id=LeagueScopedId(League.MLB, SOURCE, "g1"),
+        id=LeagueScopedId(League.MLB, SOURCE, raw),
         league=League.MLB,
         status=GameStatus.LIVE,
         scheduled_start=T,
@@ -110,6 +119,88 @@ def test_build_loop_threads_the_win_probability_fetcher() -> None:
     loop = build_loop(_Provider(), _fetch_feed, sink, broadcast_lag=DurationSeconds(0), fetch_win_probability=fetch_wp)
     loop.run_once(_at(T))
     assert calls == ["g1"]  # the pipeline fetched win-prob for the live game
+
+
+class _TwoGames:
+    source = SOURCE
+    league = League.MLB
+
+    def refresh(self, now: datetime) -> ProviderUpdate:
+        return ProviderUpdate(source=SOURCE, observed_at=now, contests=(_game("g1"), _game("g2")))
+
+
+class _SlowSink(RecordingDisplaySink):
+    """A display whose swaps take time: each commit lets the clock run on by the next of ``delays``."""
+
+    def __init__(self, clock: FakeClock, *delays: float) -> None:
+        super().__init__(PanelProfile.QUAD_128X64)
+        self._clock = clock
+        self._delays = list(delays)
+
+    def commit(self, frame: Canvas) -> None:
+        self._clock.advance(timedelta(seconds=self._delays.pop(0) if self._delays else 0.0))
+        super().commit(frame)
+
+
+_LONG = TextLane(x=0, y=0, width=8, font="4x6")
+
+
+class _Scrolling(RendererRegistry):
+    """Today's renderers, plus one line too long for its lane in every frame: when it went up, as each frame
+    reads it."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._real = default_registry()
+        self.elapsed: list[float | None] = []
+
+    def render(self, card: ScoreboardCard[Any], context: RenderContext, canvas: Canvas) -> None:
+        self._real.render(card, context, canvas)
+        assert context.marquee.clock is not None
+        self.elapsed.append(context.marquee.clock.elapsed(_LONG, "a line too long for its lane", overflows=True))
+
+
+def test_a_slow_swap_moves_the_dwell_the_booking_and_the_marquee_to_when_the_frame_was_shown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = FakeClock(T)
+    sink = _SlowSink(clock, 5.0)  # the first frame takes 5 s to reach the panel; the rest are instant
+    scrolling = _Scrolling()
+    loop = build_loop(_TwoGames(), _fetch_feed, sink, broadcast_lag=DurationSeconds(0), registry=scrolling)
+    booked: list[ClockReading] = []
+    book = loop._queue.book
+
+    def spy(pick: Pick, at: ClockReading) -> None:
+        booked.append(at)
+        book(pick, at)
+
+    monkeypatch.setattr(loop._queue, "book", spy)
+    loop.refresh(clock.now())
+    first = paint_frame(loop, clock)
+    shown = T + timedelta(seconds=5)
+    assert first.presented is not None and first.presented.at == shown and first.at == shown
+    [up] = [change for change in first.changes if change.kind is ChangeKind.UP]
+    assert up.at == ClockReading(shown, MonotonicTime(5.0))  # the dwell starts when the frame was shown
+    assert booked == [up.at]  # and the turn is booked then
+    assert loop.next_deadline(clock.read()) == MonotonicTime(13.0)  # its minimum, from delivery
+    clock.advance(timedelta(seconds=0.1))
+    assert paint_frame(loop, clock).shown == first.shown
+    assert scrolling.elapsed == [0.0, pytest.approx(0.1)]  # the line started at delivery, not at drawing
+    clock.advance(timedelta(seconds=11.8))  # 16.9 s: 11.9 s after delivery
+    assert paint_frame(loop, clock).shown == first.shown
+    clock.advance(timedelta(seconds=0.1))  # 12 s after delivery
+    turned = paint_frame(loop, clock)
+    assert turned.shown != first.shown
+    [down] = [change for change in turned.changes if change.kind is ChangeKind.DOWN]
+    assert down.aired == timedelta(seconds=12)
+
+
+def test_a_paint_without_a_clock_credits_the_frame_when_it_was_drawn() -> None:
+    clock = FakeClock(T)
+    loop = build_loop(_TwoGames(), _fetch_feed, _SlowSink(clock, 5.0), broadcast_lag=DurationSeconds(0))
+    loop.refresh(T)
+    painted = loop.paint(clock.read())
+    assert painted.presented is not None and painted.presented.at == T  # a replay: no time passes in a paint
 
 
 def test_parse_args_defaults() -> None:

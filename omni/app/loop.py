@@ -14,8 +14,9 @@ The board refreshes and paints on separate cadences:
   `RendererRegistry`, a stale card dimmed, and commits it to the `DisplaySink`. The commit starts a
   card's dwell, books its turn in the queue and starts its lines scrolling (each line's start is kept
   by the card's time on the board and its lane), so a card that never reached the panel spends none of
-  its turn. Painting runs at a frame rate, so scrolling lines, countdowns and blinks move, and never
-  fetches.
+  its turn. All three count from when the display took the frame: given the clock, the paint reads it
+  again once the commit returns, so a slow draw or swap doesn't eat into the card's time. Painting runs
+  at a frame rate, so scrolling lines, countdowns and blinks move, and never fetches.
 - **`run_once(at)`** is one refresh, then one paint: the single deterministic pass replay drives.
 - **`refresh_deadline(at)`** says when a refresh next has something to do by itself (a play clearing
   the delay, the source going stale); **`next_deadline(at)`** adds the board's own (a card's minimum,
@@ -31,6 +32,7 @@ Each card that reaches the panel is traced at its first committed frame, with ho
 
 from __future__ import annotations
 
+from collections.abc import Hashable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, tzinfo
 from typing import Any
@@ -47,7 +49,7 @@ from omni.app.pipeline import (
 )
 from omni.app.supervisor import ProviderStatus, ProviderSupervisor, SupervisedSnapshot
 from omni.cards.base import CardId, ScoreboardCard
-from omni.core.clock import ClockReading, MonotonicTime
+from omni.core.clock import Clock, ClockReading, MonotonicTime
 from omni.domain.contest import TeamGame
 from omni.queue.scheduler import InterleavedCardQueue, SelectionReason
 from omni.renderers.board_frame import BoardFrameRenderer
@@ -55,7 +57,7 @@ from omni.renderers.canvas import DimmedCanvas
 from omni.renderers.context import RenderContext
 from omni.renderers.image import LogoStore
 from omni.renderers.registry import RendererRegistry
-from omni.renderers.text_lane import DEFAULT_MARQUEE, LaneClock, Marquee, MarqueeStyle
+from omni.renderers.text_lane import DEFAULT_MARQUEE, LaneClock, LaneFrame, Marquee, MarqueeStyle, TextLane
 from omni.renderers.visual_treatment import MatchupVisualTreatment, VisualContrastPolicy, resolve_matchup_treatment
 from omni.tower.board import (
     BoardFrame,
@@ -194,11 +196,16 @@ class AppLoop:
             unseen=unseen,
         )
 
-    def paint(self, at: ClockReading) -> Painted:
-        """Draw what the board says should be up at ``at``, and commit it."""
+    def paint(self, at: ClockReading, *, clock: Clock | None = None) -> Painted:
+        """Draw what the board says should be up at ``at``, and commit it.
+
+        The frame counts from when the display took it: ``clock``, when given, is read again once the commit
+        returns, and that reading starts a card's dwell, books it and starts its lines. Without one (a replay,
+        a test), no time passes between the two.
+        """
         cue = self._board.cue(at)
         payload = cue.payload
-        lanes = self._lanes.frame((Surface.BOARD, cue.occurrence), at.monotonic)
+        lanes = _ShownLines(self._lanes, (Surface.BOARD, cue.occurrence), at.monotonic)
         context = RenderContext(
             profile=self._sink.profile,
             now=at.utc,
@@ -225,22 +232,27 @@ class AppLoop:
             self._sink.commit(frame)
         except Exception as exc:
             return self._failed(at, exc)
-        lanes.commit()
-        self._board.committed(cue, at)
+        shown = at
+        if clock is None:
+            lanes.commit()
+        else:
+            shown = clock.read()
+            lanes.shown(shown.monotonic)
+        self._board.committed(cue, shown)
         changes = tuple(self._board.changes())
         if isinstance(payload, BoardFrame):
-            return Painted(at=at.utc, shown=None, frame=payload.kind, changes=changes)
+            return Painted(at=shown.utc, shown=None, frame=payload.kind, changes=changes)
         presented = None
         if cue.reason is not None and any(change.kind is ChangeKind.UP for change in changes):
             presented = Presentation(
-                at=at.utc,
+                at=shown.utc,
                 card=payload.id,
                 reason=cue.reason,
                 treatment=_treatment(payload, context),
                 contrast=context.contrast,
             )
         return Painted(
-            at=at.utc, shown=payload.id, reason=cue.reason, stale=cue.stale, presented=presented, changes=changes
+            at=shown.utc, shown=payload.id, reason=cue.reason, stale=cue.stale, presented=presented, changes=changes
         )
 
     def _failed(self, at: ClockReading, exc: Exception) -> Painted:
@@ -303,6 +315,37 @@ class AppLoop:
             return BoardHealth(source=SourceHealth.STALE, reason=reason, held=held, held_until=held_until, unfed=unfed)
         self._health_changes_at = update.observed_at + max_age + second
         return BoardHealth(source=SourceHealth.FRESH, held=held, held_until=held_until, unfed=unfed)
+
+
+class _ShownLines(LaneFrame):
+    """A frame's view of the board's lane clock that remembers the lines drawn through it, so a line new in the
+    frame starts when the display took the frame rather than when it was drawn.
+
+    It draws through an ordinary view as of the frame's moment. Once the frame is shown, the same lines are
+    asked again through a view as of that moment, and that view's starts are the ones kept.
+    """
+
+    def __init__(self, lanes: LaneClock, presentation: Hashable, at: MonotonicTime) -> None:
+        super().__init__(lanes, presentation, at, {})
+        self._lanes = lanes
+        self._of = presentation
+        self._drawn = lanes.frame(presentation, at)
+        self._asked: list[tuple[TextLane, str, bool]] = []
+
+    def elapsed(self, lane: TextLane, text: str, *, overflows: bool) -> float | None:
+        self._asked.append((lane, text, overflows))
+        return self._drawn.elapsed(lane, text, overflows=overflows)
+
+    def commit(self) -> None:
+        """The display took this frame the moment it was drawn: its lines' starts stand as drawn."""
+        self._drawn.commit()
+
+    def shown(self, at: MonotonicTime) -> None:
+        """The display took this frame at ``at``: its lines' starts stand, a new one's counted from then."""
+        view = self._lanes.frame(self._of, at)
+        for lane, text, overflows in self._asked:
+            view.elapsed(lane, text, overflows=overflows)
+        view.commit()
 
 
 def _span(span: timedelta) -> str:

@@ -4,11 +4,12 @@
 feed fetcher, and a display sink — the one place the standard wiring lives, so the
 emulator entry, a future hardware entry, and tests all build the loop the same way.
 `run_forever` is the thin real-time wrapper: refreshes on a thread of their own, and frames on
-this one at a steady rate, so a slow fetch never freezes the panel. A refresh runs whenever a
-poll answer lands, when the last one said something would change by itself (a play clearing the
-delay, the source going stale), and at least every few seconds. Given a `Poller`, it warms the
-plan up first (the slate, then its games, then a pass that can show them) and then leaves the
-fetching to the poller's workers.
+this one at a steady rate, so a slow fetch never freezes the panel. Each frame (`paint_frame`)
+counts from when the display took it, so a slow draw or swap doesn't eat into a card's time. A
+refresh runs whenever a poll answer lands, when the last one said something would change by itself
+(a play clearing the delay, the source going stale), and at least every few seconds. Given a
+`Poller`, it warms the plan up first (the slate, then its games, then a pass that can show them)
+and then leaves the fetching to the poller's workers.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ from datetime import timedelta, tzinfo
 from omni.app.background import Waking
 from omni.app.contest_store import ContestStore
 from omni.app.display import DisplaySink
-from omni.app.loop import AppLoop
+from omni.app.loop import AppLoop, Painted
 from omni.app.poller import Poller
 from omni.app.pipeline import (
     FeedFetcher,
@@ -42,7 +43,7 @@ from omni.renderers.registry import RendererRegistry, default_registry
 from omni.renderers.text_lane import DEFAULT_MARQUEE, MarqueeStyle
 from omni.tower.board import BoardPolicy
 
-__all__ = ["build_loop", "run_forever", "warm_up"]
+__all__ = ["build_loop", "paint_frame", "run_forever", "warm_up"]
 
 _WARM_UP_PASSES = 3  # the slate, then its games' feeds, then a pass that can show them
 _REFRESH_AT_LEAST_EVERY = timedelta(seconds=5)  # for what changes with nothing to wake it (an answer expiring)
@@ -113,6 +114,11 @@ def warm_up(loop: AppLoop, poller: Poller, clock: Clock) -> None:
         poller.run_due()
 
 
+def paint_frame(loop: AppLoop, clock: Clock) -> Painted:
+    """One of the running board's frames: what should be up now, counted from when the display took it."""
+    return loop.paint(clock.read(), clock=clock)
+
+
 def run_forever(
     loop: AppLoop,
     clock: Clock,
@@ -141,5 +147,5 @@ def run_forever(
     refresher.start()
     frames = Pacer(clock, timedelta(seconds=1.0 / fps))
     while True:
-        tracer.painted(loop.paint(clock.read()))
+        tracer.painted(paint_frame(loop, clock))
         frames.wait()
