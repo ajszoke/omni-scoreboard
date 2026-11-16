@@ -50,6 +50,7 @@ from omni.domain.baseball import WinProbability
 from omni.domain.football import FootballGameState, PlaySummary
 from omni.events.football import FootballEvent
 from omni.providers.nflmeta import NflLiveSnapshot
+from omni.renderers.base import Renderer
 from omni.renderers.context import RenderContext
 from omni.renderers.image import LogoStore
 from omni.renderers.live_football import LiveFootballRenderer
@@ -184,6 +185,7 @@ class FootballBoard:
         timezone: tzinfo | None = None,
         marquee: MarqueeStyle = DEFAULT_MARQUEE,
         log: Callable[[str], None] = print,
+        renderer: Renderer[LiveFootballCardPayload] | None = None,
     ) -> None:
         self._feed = feed
         self._sink = sink
@@ -193,7 +195,7 @@ class FootballBoard:
         self._timezone = timezone
         self._marquee = Marquee(style=marquee, clock=LaneClock())  # one memory of lines for the board's life
         self._log = log
-        self._renderer = LiveFootballRenderer()
+        self._renderer: Renderer[LiveFootballCardPayload] = renderer or LiveFootballRenderer()
         self._strip = PlayStrip()
         self._pending: deque[_Reading] = deque()
         self._showing: _Reading | None = None
