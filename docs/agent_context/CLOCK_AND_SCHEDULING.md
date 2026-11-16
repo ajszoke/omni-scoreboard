@@ -1,9 +1,10 @@
 # Clock and scheduling: toward one clock and one "tower"
 
 Status: **accepted in external review round 4** (2026-11-15). A1a is built as the tower's first slice
-(see "Steps"), and the head's rulings below amend the target. Nothing here is built yet beyond what
-"Today" describes. This doc is the target that new timing code should move toward, so that we don't add
-more one-off timers in the meantime.
+(see "Steps"), and the head's rulings below amend the target. A1a step 1 is built (2026-11-16): the
+two-reading clock, decisions apart from frames, fetches and frame writes off the frame path, and basic
+traces; "Today" describes the result. This doc is the target that new timing code should move toward,
+so that we don't add more one-off timers in the meantime.
 
 ## Why
 
@@ -20,16 +21,18 @@ has to be handled like flights at a control tower:
 
 | Where | What it times | Driven by |
 |---|---|---|
-| `omni/app/runner.py` `run_forever` + `AppLoop.run_once` (MLB) | polling, pipeline, card queue **and rendering** | one fixed tick, 12 s by default |
+| `omni/app/runner.py` `run_forever`, `AppLoop.decide` and `AppLoop.paint` (MLB) | decisions (polling, pipeline, card queue) on a worker thread; painting the current pick on the main thread | decisions once a tick, 12 s by default; frames at `--fps`, 10 by default |
 | `ProviderSupervisor` | backoff after failures | `now` passed per call |
 | `LiveBaseballPipeline` (`DelayPolicy`, `DelayedFeed`, `DelayedEventStream`) | TV delay anchored to when a play happened; meter readings; the final's embargo | `now` per tick |
 | `InterleavedCardQueue` | which card next: two-level rotation, BURST takeover windows, RECURRING cooldowns | `now` per tick; **dwell is "the render loop's job", and no such loop exists** |
-| `FootballBoard.step` (single-game NFL) | poll cadence, a receipt-anchored `--delay` buffer, meter lag, closing out a period before a break | ~10 fps frame loop that **also polls, synchronously** |
+| `FootballBoard.step` (single-game NFL) | a receipt-anchored `--delay` buffer, meter lag, closing out a period before a break | ~10 fps frame loop, taking whatever answers have arrived |
+| `GameFeed` in a `BackgroundFeed` (`football_feed.py`) | poll cadence, retry after failure, parking after the final; answers dated by arrival | its own thread, checking every 250 ms whether an ask is due |
+| `BackgroundFrameWriter` (`frame_stream.py`) | writing frames to the display process, retrying until one lands | its own thread; only the newest frame waits |
 | `PlayStrip` | frames (10 s min, 20 s max each), stoppage holds, clearing on a field change, close-out | `now` per frame |
 | `NflMetaLiveProvider` | halftime hold (plus its grace), correction watch, score backstop, injury news window | private datetimes on per-game state |
 | Market (`PolymarketUsProvider`, the market-service client, the heartbeat thread, the cloud poller) | 30 s REST refresh; 10 s/60 s freshness; 30 s retry; 300 s heartbeat; 1 min cloud schedule | each its own |
 | Rendering (`text_lane.py`, `LaneClock`, the halftime countdown) | marquee offsets, line start times, the colon blink | `RenderContext.now`; `LaneClock` keeps render-side memory |
-| Launchers | time itself | `SystemClock` (MLB); raw `datetime.now`/`time.monotonic` (football) |
+| Launchers | time itself | `SystemClock` in both, read two ways (`ClockReading`: UTC and monotonic); loops paced by `Pacer` on monotonic time |
 
 ### What that adds up to
 
@@ -40,6 +43,9 @@ has to be handled like flights at a control tower:
      frames. That is the "baseball jerk", and countdowns and blinks can't animate there either.
    - Football separates frames but still polls on the frame thread, so a slow request freezes the
      board.
+   - A1a step 1 (2026-11-16) split these: MLB decides on its own thread and paints at a frame rate,
+     and football's feed and frame writes run on threads of their own. Decisions still run on a fixed
+     cadence rather than when something changes.
 2. **Timers are scattered.** A dozen objects each keep their own deadline. Nothing can answer "what
    happens next, and when?", which makes end-to-end replay and tuning by taste harder than they
    should be.
@@ -122,11 +128,13 @@ Round 4 groups the first five as A1a:
 
 1. **Split frames from ticks in the MLB app.** Draw the current card at a frame rate, and run
    `run_once` on its own cadence. This fixes the baseball jerk and makes countdowns and blinks live.
-   Small.
+   Small. *Done in A1a step 1.*
 2. **Take provider fetches off the frame thread**, in both football and MLB. A worker posts
-   observations and drawing never blocks. Small to medium.
+   observations and drawing never blocks. Small to medium. *A1a step 1 moved them off the frame
+   paths; the `PollPlan` (A1a step 2) gives the fetches their own plan.*
 3. **One clock seam everywhere.** The football launcher uses `SystemClock`, and monotonic time is
-   used only to pace sleeps. Small.
+   used only to pace sleeps. Small. *Done in A1a step 1, except stamping MLB's receipts, which comes
+   with the `PollPlan`.*
 4. **Build the scheduling primitives** (segment, surface/lane, timer heap, tower interface) with
    `PlayStrip` as the first consumer. Behavior stays identical, proven by replaying the recorded
    PIT@CIN game frame for frame. Medium.
@@ -138,7 +146,9 @@ Round 4 groups the first five as A1a:
    leagues. Large; needs M6-004's multi-league plumbing.
 8. **A plan inspector (a "departures board")**: a log or local view of the next N scheduled segments
    and why each is there, for tuning by taste and for debugging. Small and high-leverage. It can come
-   early.
+   early. *A1a step 1 added basic traces (`omni/app/trace.py`): each decision that changes the pick,
+   with its reason and the next decision, and each card's first committed frame with how its teams
+   were drawn.*
 
 ## Decisions (external review round 4, 2026-11-15)
 

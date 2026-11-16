@@ -24,15 +24,17 @@ loop's job.
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime
+from enum import Enum
 from typing import Any, Iterable
 
 from omni.cards.attention import AttentionMode
 from omni.cards.base import ScoreboardCard
-from omni.core.enum import DisplayPriority, PanelProfile
+from omni.core.enum import DisplayPriority, PanelProfile, StrEnumMixin
 from omni.core.ids import LeagueScopedId
 
-__all__ = ["InterleavedCardQueue"]
+__all__ = ["InterleavedCardQueue", "Pick", "SelectionReason"]
 
 # How much more airtime each band earns (multiplies time-since-last-shown).
 _BAND_WEIGHT: dict[DisplayPriority, int] = {
@@ -43,6 +45,22 @@ _BAND_WEIGHT: dict[DisplayPriority, int] = {
     DisplayPriority.ALERT: 4,
     DisplayPriority.STICKY: 5,
 }
+
+
+class SelectionReason(StrEnumMixin, str, Enum):
+    """Why the queue chose the card it did."""
+
+    TAKEOVER = "takeover"  # a BURST card inside its takeover window
+    REMINDER = "reminder"  # a RECURRING card on its cooldown beat
+    ROTATION = "rotation"  # the most overdue game, then its most overdue card
+
+
+@dataclass(frozen=True, slots=True)
+class Pick:
+    """The queue's choice, and why."""
+
+    card: ScoreboardCard[Any]
+    reason: SelectionReason
 
 
 class InterleavedCardQueue:
@@ -94,6 +112,11 @@ class InterleavedCardQueue:
 
     def next_card(self, now: datetime, profile: PanelProfile) -> ScoreboardCard[Any] | None:
         """Pick and record the next card to display, or None if nothing is eligible."""
+        pick = self.pick(now, profile)
+        return pick.card if pick is not None else None
+
+    def pick(self, now: datetime, profile: PanelProfile) -> Pick | None:
+        """Pick and record the next card to display, with the reason; None if nothing is eligible."""
         self.prune(now)
         pool = self.eligible(now, profile)
         if not pool:
@@ -103,10 +126,10 @@ class InterleavedCardQueue:
         due_recurring = [card for card in pool if self._is_recurring_due(card, now)]
         if bursting:
             # A bounded BURST takes over the screen for its window, then yields.
-            chosen = max(bursting, key=self._card_rank)
+            chosen, reason = max(bursting, key=self._card_rank), SelectionReason.TAKEOVER
         elif due_recurring:
             # A RECURRING card surfaces on its cooldown beat, ahead of normal rotation.
-            chosen = max(due_recurring, key=self._card_rank)
+            chosen, reason = max(due_recurring, key=self._card_rank), SelectionReason.REMINDER
         else:
             # Two-level rotation, with not-yet-due RECURRING cards held back this tick.
             rotating = [card for card in pool if card.attention.mode is not AttentionMode.RECURRING]
@@ -116,7 +139,7 @@ class InterleavedCardQueue:
             for card in rotating:
                 groups[card.contest.id].append(card)
             chosen_group = max(groups, key=lambda gid: self._group_rank(gid, groups[gid]))
-            chosen = max(groups[chosen_group], key=self._card_rank)
+            chosen, reason = max(groups[chosen_group], key=self._card_rank), SelectionReason.ROTATION
 
         self._tick += 1
         self._group_last_shown[chosen.contest.id] = self._tick
@@ -124,7 +147,7 @@ class InterleavedCardQueue:
         self._card_last_shown_at[chosen.dedupe_key.raw] = now
         if chosen.attention.mode is AttentionMode.RECURRING:
             self._recurring_count[chosen.dedupe_key.raw] = self._recurring_count.get(chosen.dedupe_key.raw, 0) + 1
-        return chosen
+        return Pick(chosen, reason)
 
     def _showable(self, card: ScoreboardCard[Any], now: datetime, profile: PanelProfile) -> bool:
         return card.timing.is_available(now) and card.layout_support.supports(profile)

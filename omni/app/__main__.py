@@ -5,6 +5,8 @@
 Polls the MLB StatsAPI, runs the delay-safe pipeline, and rotates cards on the
 emulator (browser at http://localhost:8888/). This is the thin I/O shell around the
 deterministic `AppLoop`; everything testable lives in `runner.py` / `loop.py`.
+Decisions run once a ``--tick``; frames draw ``--fps`` times a second in between, so
+scrolling lines and countdowns move. Each decision that changes something is traced.
 
 With ``OMNI_CLOUD_URL`` and ``OMNI_CLOUD_TOKEN`` in the environment or a git-ignored ``.env``, the
 win meter reads Omni's market service (``cloud/``); without them it reads Polymarket's public quotes.
@@ -48,7 +50,9 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         "--favorite", action="append", default=[], metavar="ABBR", help="favorite team abbreviation (repeatable)"
     )
     parser.add_argument("--delay", type=int, default=45, help="TV broadcast delay in seconds (default 45)")
-    parser.add_argument("--tick", type=int, default=12, help="seconds between display refreshes (default 12)")
+    parser.add_argument(
+        "--tick", type=int, default=12, help="seconds between decisions: poll, then pick the card (default 12)"
+    )
     parser.add_argument(
         "--timezone",
         default="America/New_York",
@@ -62,6 +66,7 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         default="slow",
         help="how fast scrolling lines move at their peak: slow, medium (1.25x) or fast (1.5x)",
     )
+    parser.add_argument("--fps", type=float, default=10.0, help="frames drawn a second (marquees move this fast)")
     return parser.parse_args(argv)
 
 
@@ -148,7 +153,14 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
         f"omni.app: {profile.value}, delay {args.delay}s, favorites {sorted(args.favorite)}, meter {meter}"
         " — http://localhost:8888/"
     )
-    run_forever(loop, SystemClock(), tick=DurationSeconds(args.tick))
+    run_forever(
+        loop,
+        SystemClock(),
+        tick=DurationSeconds(args.tick),
+        fps=args.fps,
+        log=lambda line: print(line, flush=True),
+        timezone=zone,
+    )
     return 0
 
 

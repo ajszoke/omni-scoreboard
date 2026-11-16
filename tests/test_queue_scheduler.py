@@ -16,7 +16,7 @@ from omni.core.time import DurationSeconds
 from omni.domain.baseball import BaseballBaseState, BaseballCount, BaseballGameState, InningPhase
 from omni.domain.contest import TeamGame
 from omni.providers.mlb_teams import MlbTeamRegistry
-from omni.queue.scheduler import InterleavedCardQueue
+from omni.queue.scheduler import InterleavedCardQueue, SelectionReason
 
 NOW = datetime(2026, 6, 17, 23, 30, tzinfo=timezone.utc)
 QUAD = PanelProfile.QUAD_128X64
@@ -281,3 +281,18 @@ def test_recurring_alone_and_not_due_shows_nothing() -> None:
     assert _shown(queue.next_card(NOW, QUAD)) == "nono"  # due on first sight
     # The only card, now within its cooldown: a periodic reminder is not a constant one.
     assert queue.next_card(NOW + timedelta(seconds=10), QUAD) is None
+
+
+def test_each_pick_names_why_it_was_chosen() -> None:
+    queue = InterleavedCardQueue()
+    queue.ingest(_card("live"))
+    queue.ingest(_recurring("nono"))
+    queue.ingest(_card("walkoff", band=DisplayPriority.ALERT, score=100.0, attention=_BURST_8S))
+    picks = [queue.pick(NOW + timedelta(seconds=s), QUAD) for s in (0, 10, 11)]
+    assert [(_shown(p.card), p.reason) for p in picks if p is not None][:2] == [
+        ("walkoff", SelectionReason.TAKEOVER),  # inside its burst window
+        ("nono", SelectionReason.REMINDER),  # due on first sight, once the burst is over
+    ]
+    assert picks[2] is not None and picks[2].reason is SelectionReason.ROTATION  # then the usual turns
+    assert queue.pick(NOW, PanelProfile.SINGLE_64X32) is not None
+    assert InterleavedCardQueue().pick(NOW, QUAD) is None
