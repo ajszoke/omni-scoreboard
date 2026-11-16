@@ -3,6 +3,8 @@
 `build_loop` wires the spine's collaborators into an `AppLoop` from a provider, a
 feed fetcher, and a display sink — the one place the standard wiring lives, so the
 emulator entry, a future hardware entry, and tests all build the loop the same way.
+`build_planned_loop` is the running MLB board's wiring on top of it: every source read from a
+`PlannedMlb`, so a refresh never waits on the network, and the live win meter off unless asked for.
 `run_forever` is the thin real-time wrapper: refreshes on a thread of their own, and frames on
 this one at a steady rate, so a slow fetch never freezes the panel. Each frame (`paint_frame`)
 counts from when the display took it, so a slow draw or swap doesn't eat into a card's time. A
@@ -21,6 +23,7 @@ from omni.app.background import Waking
 from omni.app.contest_store import ContestStore
 from omni.app.display import DisplaySink
 from omni.app.loop import AppLoop, Painted
+from omni.app.planned_mlb import NO_BACKOFF, PlannedMlb
 from omni.app.poller import Poller
 from omni.app.pipeline import (
     FeedFetcher,
@@ -43,7 +46,7 @@ from omni.renderers.registry import RendererRegistry, default_registry
 from omni.renderers.text_lane import DEFAULT_MARQUEE, MarqueeStyle
 from omni.tower.board import BoardPolicy
 
-__all__ = ["build_loop", "paint_frame", "run_forever", "warm_up"]
+__all__ = ["build_loop", "build_planned_loop", "paint_frame", "run_forever", "warm_up"]
 
 _WARM_UP_PASSES = 3  # the slate, then its games' feeds, then a pass that can show them
 _REFRESH_AT_LEAST_EVERY = timedelta(seconds=5)  # for what changes with nothing to wake it (an answer expiring)
@@ -104,6 +107,43 @@ def build_loop(
         display_timezone=display_timezone,
         marquee=marquee,
         policy=policy,
+    )
+
+
+def build_planned_loop(
+    planned: PlannedMlb,
+    sink: DisplaySink,
+    *,
+    meter: bool = False,
+    favorites: frozenset[str] = frozenset(),
+    broadcast_lag: DurationSeconds = DurationSeconds(45),
+    logos: LogoStore | None = None,
+    display_timezone: tzinfo | None = None,
+    marquee: MarqueeStyle = DEFAULT_MARQUEE,
+    policy: BoardPolicy = BoardPolicy(),
+    registry: RendererRegistry | None = None,
+) -> AppLoop:
+    """The running MLB board: the slate, feeds, pregame details and odds all read from ``planned``'s plan.
+
+    The live win meter (the market, then MLB's model) is on only with ``meter``. Each reading stands
+    beside a score only if it arrived no later than that score's feed answer.
+    """
+    return build_loop(
+        planned,  # the slate, from the plan
+        planned.fetch_feed,
+        sink,
+        favorites=favorites,
+        broadcast_lag=broadcast_lag,
+        backoff=NO_BACKOFF,  # the plan does the retrying
+        fetch_win_probability=planned.fetch_win_probability if meter else None,
+        fetch_fallback_win_probability=planned.fetch_fallback_win_probability if meter else None,
+        fetch_pregame_details=planned.fetch_pregame_details,
+        fetch_game_lines=planned.fetch_game_lines,
+        logos=logos,
+        display_timezone=display_timezone,
+        marquee=marquee,
+        policy=policy,
+        registry=registry,
     )
 
 

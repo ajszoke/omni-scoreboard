@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from omni.app.pipeline import LiveBaseballPipeline, PipelineResult
+from omni.app.pipeline import LiveBaseballPipeline, MeterReading, PipelineResult
 from omni.cards.base import CardId, DedupeKey, EndBasis, GameEnd
 from omni.cards.baseball import PregameCardPayload
 from omni.cards.factory import CardFactory
@@ -142,18 +142,33 @@ class _Fetch:
 
 
 class _WinProb:
-    """A configurable win-probability fetcher; can be set per refresh and made to fail."""
+    """A win-probability source, read as of an instant; can be made to fail.
+
+    Set ``value`` for a source that has answered all along with that reading (as of any instant, it
+    arrived then), or `arrive` readings at moments to give it a timeline: a read as of an instant gets
+    the last one to arrive by then. A reading of None is the source with nothing to say.
+    """
 
     def __init__(self) -> None:
         self.value: WinProbability | None = None
+        self.arrivals: list[tuple[datetime, WinProbability | None]] = []
         self.calls: list[str] = []
         self.fail: set[str] = set()
 
-    def __call__(self, game: TeamGame, now: datetime) -> WinProbability | None:
+    def arrive(self, value: WinProbability | None, at: datetime) -> None:
+        self.arrivals.append((at, value))
+
+    def __call__(self, game: TeamGame, as_of: datetime) -> MeterReading | None:
         self.calls.append(game.id.raw)
         if game.id.raw in self.fail:
             raise ProviderError("win-probability feed down")
-        return self.value
+        if not self.arrivals:
+            return MeterReading(self.value, as_of) if self.value is not None else None
+        arrived = [(at, value) for at, value in self.arrivals if at <= as_of]
+        if not arrived:
+            return None
+        at, value = arrived[-1]
+        return MeterReading(value, at) if value is not None else None
 
 
 def _setup(lag: int = 30) -> tuple[LiveBaseballPipeline, InterleavedCardQueue]:
@@ -197,29 +212,59 @@ def test_shows_lag_old_state_not_the_current_spoiler() -> None:
     assert card.payload.home_line.runs == 0  # the delayed 0-0, never the un-aired 0-1
 
 
-def test_win_probability_is_delay_safe_never_leads_the_score() -> None:
-    # The meter must show the reading from the same lag-old moment as the score, never a fresher one.
+def _meter(queue: InterleavedCardQueue, now: datetime) -> WinProbability | None:
+    card = queue.next_card(_at(now), QUAD)
+    assert card is not None
+    reading: WinProbability | None = card.payload.win_probability
+    return reading
+
+
+def test_win_probability_never_knows_more_than_the_score_beside_it() -> None:
+    # The meter shows the newest reading that arrived no later than the feed answer of the state on the card.
     pipe, queue = _setup(lag=30)
     fetch = _Fetch()
     fetch.set("g1", _state())
     wp = _WinProb()
-    early = WinProbability(home=60.0, away=40.0)
-    later = WinProbability(home=95.0, away=5.0)
+    early, later, leading = (WinProbability(home=h, away=100.0 - h) for h in (60.0, 75.0, 99.0))
+    wp.arrive(early, T)
+    wp.arrive(later, T + timedelta(seconds=5))
+    wp.arrive(leading, T + timedelta(seconds=11))
 
-    pipe.refresh([_game("g1")], now=T, fetch_feed=fetch, fetch_win_probability=wp)  # state held; no win-prob yet
-    assert wp.calls == []  # nothing fetched while the state is still buffering
-
-    wp.value = early
+    pipe.refresh([_game("g1")], now=T, fetch_feed=fetch, fetch_win_probability=wp)  # its answer arrives at T
+    assert wp.calls == []  # nothing read while the state is still inside the delay
+    pipe.refresh([_game("g1")], now=T + timedelta(seconds=10), fetch_feed=fetch, fetch_win_probability=wp)
     at30 = T + timedelta(seconds=30)
-    pipe.refresh([_game("g1")], now=at30, fetch_feed=fetch, fetch_win_probability=wp)  # state surfaces; early pushed
-    c1 = queue.next_card(_at(at30), QUAD)
-    assert c1 is not None and c1.payload.win_probability is None  # warm-up: early has not cleared the lag yet
+    pipe.refresh([_game("g1")], now=at30, fetch_feed=fetch, fetch_win_probability=wp)
+    assert _meter(queue, at30) == early  # beside the state that arrived at T, not `later` (T + 5)
+    at40 = T + timedelta(seconds=40)
+    pipe.refresh([_game("g1")], now=at40, fetch_feed=fetch, fetch_win_probability=wp)
+    assert _meter(queue, at40) == later  # beside the state from T + 10; `leading` (T + 11) never shows with it
 
-    wp.value = later  # a fresher reading arrives...
-    at60 = T + timedelta(seconds=60)
-    pipe.refresh([_game("g1")], now=at60, fetch_feed=fetch, fetch_win_probability=wp)
-    c2 = queue.next_card(_at(at60), QUAD)
-    assert c2 is not None and c2.payload.win_probability == early  # ...but the meter shows the delayed `early`
+
+def test_a_reading_dated_after_the_state_it_would_stand_beside_is_turned_away() -> None:
+    pipe, queue = _setup(lag=0)
+    fetch = _Fetch()
+    fetch.set("g1", _state())
+
+    def ahead(game: TeamGame, as_of: datetime) -> MeterReading:
+        return MeterReading(WinProbability(home=99.0, away=1.0), as_of + timedelta(seconds=1))
+
+    pipe.refresh([_game("g1")], now=T, fetch_feed=fetch, fetch_win_probability=ahead)
+    assert _meter(queue, T) is None
+
+
+def test_an_older_reading_never_replaces_a_newer_one_held() -> None:
+    pipe, queue = _setup(lag=0)
+    fetch = _Fetch()
+    fetch.set("g1", _state())
+    wp = _WinProb()
+    newer, older = WinProbability(home=70.0, away=30.0), WinProbability(home=50.0, away=50.0)
+    wp.arrive(newer, T)
+    pipe.refresh([_game("g1")], now=T, fetch_feed=fetch, fetch_win_probability=wp)
+    wp.arrive(older, T - timedelta(seconds=5))  # an answer that arrives out of order
+    at1 = T + timedelta(seconds=1)
+    pipe.refresh([_game("g1")], now=at1, fetch_feed=fetch, fetch_win_probability=wp)
+    assert _meter(queue, at1) == newer
 
 
 def test_win_probability_surfaces_once_clear_of_a_zero_lag() -> None:
@@ -430,53 +475,33 @@ def test_pregame_stays_plain_without_sources_or_when_a_game_is_off_the_board() -
     assert payload.away is None and payload.home is None
 
 
-def test_pregame_details_are_fetched_at_a_relaxed_pace() -> None:
-    pipe, _queue = _setup()
-    calls: list[str] = []
-
-    def details(game: TeamGame) -> PregameDetails:
-        calls.append(game.id.raw)
-        return DETAILS
-
-    games = [_game("g1", GameStatus.SCHEDULED)]
-    pipe.refresh(games, now=T, fetch_feed=_Fetch(), fetch_pregame_details=details)
-    pipe.refresh(games, now=T + timedelta(minutes=4), fetch_feed=_Fetch(), fetch_pregame_details=details)
-    assert calls == ["g1"]
-    pipe.refresh(games, now=T + timedelta(minutes=5), fetch_feed=_Fetch(), fetch_pregame_details=details)
-    assert calls == ["g1", "g1"]
-
-
-def test_a_full_slates_first_fetches_are_spread_over_several_passes() -> None:
-    pipe, _queue = _setup()
-    calls: list[str] = []
-
-    def details(game: TeamGame) -> PregameDetails:
-        calls.append(game.id.raw)
-        return DETAILS
-
-    games = [_game(f"g{i}", GameStatus.SCHEDULED) for i in range(5)]
-    pipe.refresh(games, now=T, fetch_feed=_Fetch(), fetch_pregame_details=details)
-    assert len(calls) == 3
-    pipe.refresh(games, now=T + timedelta(seconds=12), fetch_feed=_Fetch(), fetch_pregame_details=details)
-    assert sorted(calls) == ["g0", "g1", "g2", "g3", "g4"]
-
-
-def test_a_pregame_details_failure_warns_keeps_the_last_good_and_waits_to_retry() -> None:
+def test_pregame_details_are_read_every_pass_from_what_was_last_heard() -> None:
     pipe, queue = _setup()
-    games = [_game("g1", GameStatus.SCHEDULED)]
-    pipe.refresh(games, now=T, fetch_feed=_Fetch(), fetch_pregame_details=lambda _game: DETAILS)
     calls: list[str] = []
+    known: dict[str, PregameDetails] = {}
 
-    def down(game: TeamGame) -> PregameDetails:
+    def details(game: TeamGame) -> PregameDetails | None:
         calls.append(game.id.raw)
+        return known.get(game.id.raw)
+
+    games = [_game("g1", GameStatus.SCHEDULED)]
+    pipe.refresh(games, now=T, fetch_feed=_Fetch(), fetch_pregame_details=details)
+    assert _pregame_payload(queue, T).home is None  # nothing heard yet: the card stays plain
+    known["g1"] = DETAILS
+    later = T + timedelta(seconds=5)
+    pipe.refresh(games, now=later, fetch_feed=_Fetch(), fetch_pregame_details=details)
+    assert calls == ["g1", "g1"] and _pregame_payload(queue, later).home == LAD_SIDE
+
+
+def test_a_pregame_details_failure_warns_and_the_card_goes_without() -> None:
+    pipe, queue = _setup()
+
+    def down(game: TeamGame) -> PregameDetails | None:
         raise ProviderError("feed down")
 
-    later = T + timedelta(minutes=5)
-    res = pipe.refresh(games, now=later, fetch_feed=_Fetch(), fetch_pregame_details=down)
+    res = pipe.refresh([_game("g1", GameStatus.SCHEDULED)], now=T, fetch_feed=_Fetch(), fetch_pregame_details=down)
     assert any("pregame details fetch failed" in warning for warning in res.warnings)
-    assert _pregame_payload(queue, later).home == LAD_SIDE
-    pipe.refresh(games, now=later + timedelta(seconds=12), fetch_feed=_Fetch(), fetch_pregame_details=down)
-    assert calls == ["g1"]  # not retried on the very next pass
+    assert _pregame_payload(queue, T).home is None
 
 
 def test_an_odds_failure_warns_and_the_card_just_goes_without() -> None:
@@ -488,15 +513,6 @@ def test_an_odds_failure_warns_and_the_card_just_goes_without() -> None:
     res = pipe.refresh([_game("g1", GameStatus.SCHEDULED)], now=T, fetch_feed=_Fetch(), fetch_game_lines=down)
     assert any("odds fetch failed" in warning for warning in res.warnings)
     assert _pregame_payload(queue, T).home is None
-
-
-def test_pregame_details_are_forgotten_once_the_game_leaves_the_upcoming_slate() -> None:
-    pipe, _queue = _setup()
-    games = [_game("g1", GameStatus.SCHEDULED)]
-    pipe.refresh(games, now=T, fetch_feed=_Fetch(), fetch_pregame_details=lambda _game: DETAILS)
-    assert _id("g1") in pipe._pregame_details
-    pipe.refresh([], now=T + timedelta(seconds=1), fetch_feed=_Fetch())
-    assert _id("g1") not in pipe._pregame_details
 
 
 def test_a_non_carding_status_surfaces_nothing() -> None:

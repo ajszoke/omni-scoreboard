@@ -9,6 +9,7 @@ import pytest
 
 from omni.app.__main__ import _parse_args
 from omni.app.display import RecordingDisplaySink
+from omni.app.pipeline import MeterReading
 from omni.app.runner import build_loop, paint_frame
 from omni.cards.base import ScoreboardCard
 from omni.core.clock import ClockReading, FakeClock, MonotonicTime
@@ -112,9 +113,9 @@ def test_build_loop_threads_the_win_probability_fetcher() -> None:
     sink = RecordingDisplaySink(PanelProfile.QUAD_128X64)
     calls: list[str] = []
 
-    def fetch_wp(game: TeamGame, _now: datetime) -> WinProbability | None:
+    def fetch_wp(game: TeamGame, as_of: datetime) -> MeterReading | None:
         calls.append(game.id.raw)
-        return WinProbability(home=70.0, away=30.0)
+        return MeterReading(WinProbability(home=70.0, away=30.0), as_of)
 
     loop = build_loop(_Provider(), _fetch_feed, sink, broadcast_lag=DurationSeconds(0), fetch_win_probability=fetch_wp)
     loop.run_once(_at(T))
@@ -209,6 +210,11 @@ def test_parse_args_defaults() -> None:
     assert ns.emulated is True
     assert ns.favorite == [] and ns.delay == 45 and ns.slot == 12
     assert ns.timezone == "America/New_York"
+    assert ns.meter is False and ns.no_odds is False  # the live meter is opt-in; pregame odds are on
+
+
+def test_the_live_meter_is_asked_for_by_flag() -> None:
+    assert _parse_args(["--profile", "quad_128x64", "--meter"]).meter is True
 
 
 def test_parse_args_collects_favorites_and_overrides() -> None:
