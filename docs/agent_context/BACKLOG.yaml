@@ -367,9 +367,11 @@ milestones:
       - id: M11-005
         title: "Board card queue onto the tower; enforce min/max display there"
         labels: [queue, clock, p1]
+        status: done  # A1a step 4, 2026-11-16
         notes:
           - "Round 4 H4 (A1a step 4): selection is acknowledged at commit (scheduler.py:121 records a card as shown before it renders); an explicit idle frame when nothing is eligible (loop.py:107-110 leaves the last frame up); a minimum starts at the first committed frame and isn't spent by a failed render."
           - "Also step 4 (from M11-004): the marquee epoch at commit (R4-6), keyed by surface, card occurrence and lane, passed into pure render math; animation phase on monotonic time. The strip's Lane already records each frame's first commit."
+          - "A1a step 4 (2026-11-16): omni/tower/board.py (BoardSession) airs one card at a time from the queue's peek, booking it at the first commit. Dwell from commit; preemption after a minimum by rank (takeover > reminder > rotation); a turn (--slot) within min and max; at once on removal, expiry or the source going offline. Takeovers once each, capped at 30 s back to back, then a full rotation turn. Finals in end order, after their walk-off (ScoreboardCard.after). Idle, held and offline frames; stale cards dimmed. Refreshes on answers and deadlines. LaneClock keyed by presentation and lane, set at commit. Checked on tests/mlb_slate.py against a baseline recorded from the old loop."
       - id: M11-006
         title: "Air clock and per-source lag models; fold football's delay and the meter lag into it"
         labels: [queue, delay, clock, p2]

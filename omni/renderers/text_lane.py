@@ -6,16 +6,21 @@ still. When it is wider than the lane, it scrolls horizontally so the whole valu
 over time, and only the glyphs that fall wholly inside the lane are drawn — so the scroll
 never spills onto whatever sits beside the lane.
 
-The scroll position is a pure function of the render clock (`RenderContext.now`), not a counter
-the renderer bumps once per frame. A frame-counted scroller advances by however many times the
-render loop happened to fire, so its speed drifts with frame timing and it can jump or stutter;
-deriving the offset from wall-clock time instead means the same instant always yields the same
-frame and the text moves at the same pace no matter how the loop is paced. Each line's cycle starts
-when that line went up, holding at its head. A board keeps a `LaneClock`, which remembers when each
-lane's current text appeared; a lane whose text changes starts over, and a scrolling line that's
-replaced leaves the lane blank for a beat first, so the change reads as a new line rather than the
-old one jerking back. Without a clock (a still preview, a golden image), the cycle runs off the
-render clock itself.
+The scroll position is a pure function of time, not a counter the renderer bumps once per frame. A
+frame-counted scroller advances by however many times the render loop happened to fire, so its speed
+drifts with frame timing and it can jump or stutter; deriving the offset from time instead means the
+same instant always yields the same frame and the text moves at the same pace no matter how the loop
+is paced. Each line's cycle starts when that line went up, holding at its head.
+
+A board keeps a `LaneClock`: when each line went up, on the monotonic clock, by *presentation* and
+lane. A presentation is what the lines belong to: one card's time on the board, or one frame of the
+play strip. Each frame drawn gets a `LaneFrame` view of the clock to draw through. A line new to its
+lane starts with that frame; a lane whose text changes starts over, and a scrolling line that's
+replaced leaves the lane blank for a beat first, so the change reads as a new line rather than the old
+one jerking back. The starts a frame chooses stand only once the display took it (`LaneFrame.commit`),
+so a frame that failed to draw starts nothing; and a new presentation starts every line at its head,
+even one whose text and place match a line before it. Without a clock (a still preview, a golden image),
+the cycle runs off the render clock itself.
 
 Every marquee moves the same way, whatever its length. It holds at the head, speeds up along one
 fixed ramp to a cruising speed, cruises, slows along the same ramp mirrored, holds at the tail, then
@@ -27,10 +32,12 @@ from __future__ import annotations
 
 import dataclasses
 import math
+from collections.abc import Hashable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
 
+from omni.core.clock import MonotonicTime
 from omni.core.colors import RGBColor
 from omni.core.enum import StrEnumMixin
 from omni.renderers.canvas import Canvas
@@ -45,6 +52,7 @@ __all__ = [
     "TextLane",
     "DEFAULT_MARQUEE",
     "LaneClock",
+    "LaneFrame",
     "Marquee",
     "draw_text_lane",
 ]
@@ -192,47 +200,73 @@ class TextLane:
 
 
 _SWAP_GAP = timedelta(seconds=0.25)  # the beat of nothing between a scrolling line and its replacement
-_FORGET_AFTER = timedelta(seconds=5)  # a lane not drawn this long (longer than any loop stall) starts over
+
+_LaneKey = tuple[int, int, int, str]  # a lane within its presentation: where it sits, and its font
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class _Line:
     text: str
-    since: datetime  # when its marquee cycle starts
-    drawn_at: datetime
+    since: MonotonicTime  # when its marquee cycle starts
     overflows: bool
 
 
 class LaneClock:
-    """When each lane's current text went up, so every line's marquee starts at its own head.
+    """A board's memory of when each line went up, by presentation and then by lane.
 
-    A board keeps one for as long as it runs and hands it to every render. A lane is known by where it
-    sits and its font. When its text changes, the new line starts its cycle over; if the old line was
-    one that scrolled, the lane stays blank for a beat first.
+    A board keeps one for as long as it runs. For each frame it draws, it asks `frame` for the view its
+    renderer draws through, naming the presentation the frame belongs to and the frame's monotonic
+    moment. Only one presentation is remembered: a new one starts every line afresh.
     """
 
     def __init__(self) -> None:
-        self._lines: dict[tuple[int, int, int, str], _Line] = {}
+        self._presentation: Hashable | None = None
+        self._lines: dict[_LaneKey, _Line] = {}
 
-    def start(self, lane: TextLane, text: str, *, overflows: bool, now: datetime) -> datetime:
-        """When ``text``'s cycle in ``lane`` starts; a moment after ``now`` while the lane is blank."""
+    def frame(self, presentation: Hashable, at: MonotonicTime) -> LaneFrame:
+        """The view a frame of ``presentation``, drawn at ``at``, reads its lines' starts through."""
+        lines = self._lines if presentation == self._presentation else {}
+        return LaneFrame(self, presentation, at, lines)
+
+    def _commit(self, presentation: Hashable, lines: dict[_LaneKey, _Line]) -> None:
+        self._presentation, self._lines = presentation, lines
+
+
+class LaneFrame:
+    """One frame's view of a `LaneClock`: how long each of its lines has been up, as of the frame's moment.
+
+    A line new to its lane, or changed, starts with this frame; the starts stand once `commit` says the
+    display took the frame.
+    """
+
+    def __init__(self, clock: LaneClock, presentation: Hashable, at: MonotonicTime, lines: dict[_LaneKey, _Line]):
+        self._clock = clock
+        self._presentation = presentation
+        self._at = at
+        self._lines = dict(lines)  # this frame's own: the clock keeps its lines until the commit
+
+    def elapsed(self, lane: TextLane, text: str, *, overflows: bool) -> float | None:
+        """Seconds since ``text`` went up in ``lane``, or None during the beat before it shows."""
         key = (lane.x, lane.y, lane.width, lane.font)
         line = self._lines.get(key)
-        if line is not None and line.text == text and now - line.drawn_at <= _FORGET_AFTER:
-            line.drawn_at = now
-            return line.since
-        replacing_a_scroll = line is not None and now - line.drawn_at <= _FORGET_AFTER and line.overflows
-        since = now + _SWAP_GAP if replacing_a_scroll else now
-        self._lines[key] = _Line(text=text, since=since, drawn_at=now, overflows=overflows)
-        return since
+        if line is None or line.text != text:
+            gap = _SWAP_GAP if line is not None and line.overflows else timedelta(0)
+            line = _Line(text=text, since=self._at + gap, overflows=overflows)
+            self._lines[key] = line
+        seconds = self._at.since(line.since).total_seconds()
+        return seconds if seconds >= 0 else None
+
+    def commit(self) -> None:
+        """The display took this frame: the starts it chose stand."""
+        self._clock._commit(self._presentation, self._lines)
 
 
 @dataclass(frozen=True, slots=True)
 class Marquee:
-    """A board's scrolling: how its lines move, and its memory of when each went up."""
+    """A board's scrolling: how its lines move, and the frame's view of when each went up."""
 
     style: MarqueeStyle = DEFAULT_MARQUEE
-    clock: LaneClock | None = None
+    clock: LaneFrame | None = None
 
 
 def draw_text_lane(
@@ -242,23 +276,22 @@ def draw_text_lane(
     color: RGBColor,
     *,
     now: datetime,
-    clock: LaneClock | None = None,
+    clock: LaneFrame | None = None,
 ) -> None:
     """Draw ``text`` into ``lane``: anchored if it fits, else a clock-driven marquee clipped to the lane.
 
-    With a `LaneClock` the marquee starts at its head when the text went up, and a lane between a
+    With a `LaneFrame` the marquee starts at its head when the text went up, and a lane between a
     scrolling line and its replacement draws nothing; without one, the cycle runs off ``now``.
     """
     width = text_width(text, lane.font)
     overflows = width > lane.width
-    since = clock.start(lane, text, overflows=overflows, now=now) if clock is not None else None
-    if since is not None and now < since:
+    clock_s = clock.elapsed(lane, text, overflows=overflows) if clock is not None else now.timestamp()
+    if clock_s is None:
         return  # the beat between lines
     if not overflows:
         _draw_anchored(canvas, lane, text, color)
         return
     plan = MarqueePlan(distance=width - lane.width, style=lane.style)
-    clock_s = (now - since).total_seconds() if since is not None else now.timestamp()
     visible, vx = _clip_to_lane(text, lane, plan.offset_at(clock_s))
     if visible:
         canvas.text(vx, lane.y, visible, color, font=lane.font)

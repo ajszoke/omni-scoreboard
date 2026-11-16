@@ -12,8 +12,10 @@ The board refreshes and paints on separate cadences:
 - **`paint(at)`** asks the board (`BoardSession`) what should be up: a card, chosen by the queue and
   held by its dwell, or an explicit frame (idle, held, offline). It draws that through the
   `RendererRegistry`, a stale card dimmed, and commits it to the `DisplaySink`. The commit starts a
-  card's dwell and books its turn in the queue, so a card that never reached the panel spends none of
-  it. Painting runs at a frame rate, so scrolling lines, countdowns and blinks move, and never fetches.
+  card's dwell, books its turn in the queue and starts its lines scrolling (each line's start is kept
+  by the card's time on the board and its lane), so a card that never reached the panel spends none of
+  its turn. Painting runs at a frame rate, so scrolling lines, countdowns and blinks move, and never
+  fetches.
 - **`run_once(at)`** is one refresh, then one paint: the single deterministic pass replay drives.
 - **`refresh_deadline(at)`** says when a refresh next has something to do by itself (a play clearing
   the delay, the source going stale); **`next_deadline(at)`** adds the board's own (a card's minimum,
@@ -65,6 +67,7 @@ from omni.tower.board import (
     SourceHealth,
 )
 from omni.tower.lane import ChangeKind, LaneChange, earliest
+from omni.tower.segment import Surface
 
 __all__ = ["OFFLINE_AFTER", "AppLoop", "Painted", "Presentation", "Refresh", "TickResult"]
 
@@ -155,7 +158,8 @@ class AppLoop:
         self._fetch_pregame_details = fetch_pregame_details  # optional records + starters; None -> a plain pregame
         self._fetch_game_lines = fetch_game_lines  # optional pregame odds; None -> no odds
         self._logos = logos  # ambient tile store handed to every RenderContext; None -> color-bar fallback
-        self._marquee = Marquee(style=marquee, clock=LaneClock())  # how lines scroll, and when each went up
+        self._marquee = marquee  # how lines scroll
+        self._lanes = LaneClock()  # when each line went up, by the card's time on the board
         self._display_timezone = display_timezone  # the zone board clocks read in; None -> the render clock's
         self._offline_after = offline_after
         self._board = BoardSession(queue, sink.profile, policy=policy)
@@ -192,12 +196,13 @@ class AppLoop:
         """Draw what the board says should be up at ``at``, and commit it."""
         cue = self._board.cue(at)
         payload = cue.payload
+        lanes = self._lanes.frame((Surface.BOARD, cue.occurrence), at.monotonic)
         context = RenderContext(
             profile=self._sink.profile,
             now=at.utc,
             logos=self._logos,
             timezone=self._display_timezone,
-            marquee=self._marquee,
+            marquee=Marquee(style=self._marquee, clock=lanes),
         )
         try:
             frame = self._sink.new_frame()
@@ -210,6 +215,7 @@ class AppLoop:
         except Exception as exc:  # isolate render/display failures — never crash the loop
             changes = tuple(self._board.changes())
             return Painted(at=at.utc, shown=None, render_error=f"{type(exc).__name__}: {exc}", changes=changes)
+        lanes.commit()
         self._board.committed(cue, at)
         changes = tuple(self._board.changes())
         if isinstance(payload, BoardFrame):
