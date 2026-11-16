@@ -237,6 +237,8 @@ milestones:
           - "Open: doubleheaders can use the exchange's league listing rather than a guessed slug, which needs real MLB games to confirm. Bovada stays out of the cloud by the user's call, 2026-11-02, given its terms (SOURCES.md): a board keeps fetching it directly for now, and a second board could take pregame odds from Polymarket's price instead, a moneyline with no run line."
           - "User's call, 2026-11-01: settle the permission question when sharing actually starts, not before."
           - "Check first: feeding other people's boards from one Polymarket US account is the redistribution question in clause 22 of its participant agreement, so get its written permission before building on that. See SOURCES.md."
+          - "Round 4 M5 (before the NFL meter uses this path): the stream cache and REST path stamp an unchanged quote with each poll's time, and the board's freshness guard reads that stamp, so 'fresh' describes the poller, not the quote. Carry the quote's own time through MarketSample to the reading, and check quote age apart from poller liveness. Split board requests into batches of 30 or fewer, and rotate the poller's start so late games aren't starved."
+          - "Round 4 L2: board_digest (store.py:179) reads token rows without ConsistentRead, while auth.py:3-4 says deleting a row revokes at once. Add ConsistentRead, then verify rotation and revocation before a private fleet. Full CI deploys wait until the service contract settles."
 
   - id: M6
     name: nfl_support
@@ -249,12 +251,19 @@ milestones:
         title: "NFL live data provider (NFLMeta Builder, polled once in the cloud)"
         labels: [nfl, provider, cloud, p1]
         notes:
-          - "Chosen 2026-11-15 over ESPN (Disney's terms bar automated access) and pricier licensed feeds; see SOURCES.md. Spike recorded with tools/nflmeta_record.py. Live plays carried no timeouts in the first game, so check before relying on them."
+          - "Chosen 2026-11-15 over ESPN (Disney's terms bar automated access) and pricier licensed feeds; see SOURCES.md. Spike recorded with tools/nflmeta_record.py."
+          - "2026-11-15: board-side provider (omni/providers/nflmeta.py) and single-game runner (python -m omni.app.football) ran PIT@CIN live on the 2x2: events, players' lines, pips derived from play text, injuries, kickoff and final states, 15-minute halftime hold."
+          - "Remaining: poll once in the cloud (map NFLMeta game ids into the market slate); move the runner onto the Pi, where a full redraw costs ~93 ms (redraw only on change, or drop to ~5 fps); size the Free tier vs Builder (a game is ~1,500 requests at the recommended pace; Free allows 5,000 a month); poll off the render thread (a slow request stalls frames); try BALLDONTLIE GOAT's free trial (plays with wall-clock order) as the next provider to compare."
+          - "Round 4 (2026-11-15): H1 (reads keep their pages; retries; refused cursors restart quietly) and H2 (a bounded drain after the final) fixed. `--play-feed every-poll` reads the feed each tick (about 2x the requests): a quarter of play rows sat 15 s+ in the feed before the on-change gating read them, worst 274 s."
+          - "Round 4 plan: keep NFLMeta primary. Builder ($12: 75,000 requests and 250,000 rows a month) is an opt-in for regular Sundays and the user's call; Free is personal, non-commercial evaluation. Cloud polling is deferred: design the typed ingest boundary in A1a, and revisit when several devices are active and quota data justify it. Then keep the key server-side, give each game an atomic cursor commit, and settle the permitted remote display and retention before any family rollout."
+          - "Round 4: one BALLDONTLIE GOAT shadow trial on a nationally visible game, side by side with NFLMeta, comparing eight things: scoreboard delay, clock, scoring/try/reversal coverage, missing or late plays, possession after transfers, ordering and revision semantics, requests per game, and archive permission. A benchmark, not a commitment."
       - id: M6-002
         title: "NFL domain/events/cards"
         labels: [nfl, typing, rendering, p1]
         notes:
-          - "Done 2026-11-15: FootballGameState, the live card on all three profiles, NFL team registry, palette and logo tiles. Remaining: pregame, final and big-play cards, and the play summarizer from the legacy spec."
+          - "Done 2026-11-15: FootballGameState, the live card on all three profiles (with kickoff and final states), NFL team registry, palette and logo tiles, and a play summarizer (omni/events/football.py). Remaining: pregame and big-play cards; check the summarizer against the legacy banner spec."
+          - "Round 4: a minimal pregame card (teams, kickoff, records or odds when known) before mixed-league operation; the big-play card after revision-aware selection works, with small-panel goldens. Use the legacy summaries as a text corpus for terse banners and corner cases."
+          - "Round 4: kickoff spot, halftime receiver and possession stay provisional until checked against real kickoff-enforcement text (a re-kick, a kick after a score or safety, an unknown team or spot). Playoff overtime needs rule fixtures before the postseason; until then its pips are hidden and no kickoff or halftime is invented."
       - id: M6-003
         title: "NFL red-zone/scoring/turnover priority"
         labels: [nfl, priority, p2]
@@ -263,14 +272,17 @@ milestones:
         labels: [nfl, app, p1]
         notes:
           - "ContestStore replaces all contests per update; the loop has one supervisor and one baseball pipeline; card keys use only the raw game id; favorites match bare abbreviations, which collide across leagues (DET, MIN, KC)."
+          - "Round 4 H5 (gates mixed-league operation): partition snapshots by provider, league and coverage scope, and handle partial or failed reads without removals. Use full typed ids in storage, scheduling and market joins (14 abbreviations collide between the MLB and NFL registries). Make the contest-to-market mapping an explicit join, not a slug guess. Settle ProviderUpdate.events (L5): never filled or read today. Test simultaneous favorites, a repeated burst in one league, a final against a decisive play, and an outage in one league."
 
   - id: M7
     name: nba_support
     goal: "NBA favorite-team support."
     tasks:
       - id: M7-001
-        title: "ESPN NBA provider spike"
+        title: "NBA provider evaluation (licensed or explicitly documented endpoints; ESPN's terms bar automated access)"
         labels: [nba, provider, p2]
+        notes:
+          - "2026-11-15: the user put NBA next once A1a lands and leagues can mix. Research thread briefed for the head: ~/omni-review/research/nba-providers-prompt.md (fields, terms, slate-night cost, NFLMeta's lessons). File the answer as research/nba-providers-research.md, then fold it into SOURCES.md."
       - id: M7-002
         title: "NBA live/final/clutch cards"
         labels: [nba, rendering, p2]
@@ -291,7 +303,7 @@ milestones:
     goal: "PGA before NCAA."
     tasks:
       - id: M9-001
-        title: "ESPN PGA provider spike"
+        title: "PGA provider evaluation (licensed or explicitly documented endpoints; ESPN's terms bar automated access)"
         labels: [pga, provider, p2]
       - id: M9-002
         title: "Golf competitor/tournament/leaderboard model"
@@ -313,3 +325,54 @@ milestones:
       - id: M10-001
         title: "NCAAF/NCAAB provider and scope assessment"
         labels: [ncaa, provider, p4]
+
+  - id: M11
+    name: central_clock_and_scheduler
+    goal: "One clock and one scheduler (the 'tower') for every timed thing on the board: ingest off the render thread, an air clock for TV delay, and segments scheduled by priority x freshness. Plan: docs/agent_context/CLOCK_AND_SCHEDULING.md."
+    status: accepted  # round 4, 2026-11-15: A1a is the tower's first slice (steps 1-4 in STATUS "Next")
+    tasks:
+      - id: M11-001
+        title: "Split frames from ticks in the MLB app (draw at a frame rate; run_once on its own cadence)"
+        labels: [app, clock, rendering, p1]
+        notes:
+          - "run_forever draws once per 12 s tick, so marquees are sampled far below their motion and can jump backward (the baseball jerk), and countdowns/blinks can't animate."
+          - "Round 4 R4-8: the first A1a change. Since the LaneClock forgets a lane after 5 s, a 12 s paint restarts every MLB line at its head."
+      - id: M11-002
+        title: "Provider fetches off the frame thread (football and MLB)"
+        labels: [app, clock, providers, p1]
+        notes:
+          - "Round 4 (A1a step 2): a typed PollPlan for slate, per-game and optional sources; single-flight fetches; priority cadence within quota; bounded retries; per-game last-good expiry; previous and current local dates in the schedule window. Isolate render and sink failures (H4)."
+      - id: M11-003
+        title: "One clock seam everywhere (football launcher on SystemClock; monotonic only for pacing)"
+        labels: [app, clock, p2]
+        notes:
+          - "Round 4: one injected seam, two readings: UTC dates observations and release times; monotonic measures dwell, freshness since receipt, backoff, cooldown, animation and pacing. Replay advances both and can jump the wall clock alone. Stamp actual receipts: MLB fallbacks stamp the pass's start (pipeline.py:288)."
+      - id: M11-004
+        title: "Scheduling primitives (segment, surface/lane, timer heap, tower) with PlayStrip as first consumer, replay-parity tested"
+        labels: [queue, clock, p2]
+        notes:
+          - "Round 4 presentation contract: stable identity and revision; surface and parent; typed payload and provenance; availability; latest start and hard expiry where distinct; min/max dwell; typed prerequisites for closes and holds. A pending revision replaces the pending item; a material correction to an aired one airs as a correction; cosmetic edits keep dwell. Commit acknowledges first presentation, repeat and cooldown use, and lane start."
+          - "Round 4 R4-6: a lane's marquee epoch is chosen at commit, keyed by surface, card occurrence and lane, and passed into pure render math (replaces the LaneClock's geometry key and 5 s forget window). Compare decision transitions, not frame counts, on the PIT@CIN replay: a minimized trace (ids, revisions, write and receipt times, statuses, accept/skip reasons, presented frames), not raw NFLMeta rows."
+      - id: M11-005
+        title: "Board card queue onto the tower; enforce min/max display there"
+        labels: [queue, clock, p1]
+        notes:
+          - "Round 4 H4 (A1a step 4): selection is acknowledged at commit (scheduler.py:121 records a card as shown before it renders); an explicit idle frame when nothing is eligible (loop.py:107-110 leaves the last frame up); a minimum starts at the first committed frame and isn't spent by a failed render."
+      - id: M11-006
+        title: "Air clock and per-source lag models; fold football's delay and the meter lag into it"
+        labels: [queue, delay, clock, p2]
+        notes:
+          - "Round 4 viewer delay: explicit settings per board and league. Keep occurrence, upstream as-of and receipt apart. Release at the later of receipt and the latest credible event time plus the delay, or receipt plus the delay when occurrence is uncertain. A revision is a new observation. Clamp against a clock jump. Never shrink the embargo by a median provider lag. Hide a meter quote that can't be shown compatible with the visible score and play; shadow-record market leads first (H3, D5)."
+      - id: M11-007
+        title: "Value squeeze: freshness decay per segment kind, preemption classes, cross-league fairness (needs M6-004)"
+        labels: [queue, priority, clock, p3]
+        notes:
+          - "Round 4 rules:"
+          - "Preemption: ordinary sports priority never cuts a visible minimum; only factual invalidation, hard expiry and device controls may clear early."
+          - "Freshness: semantic expiry, traced. In rotation, start experiments at about 60 s for routine plays and 120 s for major ones, from air eligibility."
+          - "Fairness: filter for safety, eligibility, ordering and a usable dwell window. Then bound burst seconds, then pay airtime debt with a base slot after a burst and favorite weighting. An inactive league earns no debt, and every wait or expiry has a reason."
+      - id: M11-008
+        title: "Plan inspector ('departures board'): the next N scheduled segments and why"
+        labels: [queue, tooling, p2]
+        notes:
+          - "Round 4: publish next_deadline and basic decision traces in A1a step 1, including the contrast treatment (round-3 Q3); a standalone inspector can follow."

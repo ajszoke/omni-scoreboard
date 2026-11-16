@@ -15,7 +15,7 @@ wrappers that defer here: `CLAUDE.md` (Claude Code) and `.cursor/rules/` (Cursor
 config (permissions/skills) lives in `.claude/` but carries no project knowledge.
 
 - **Current status:** `docs/agent_context/STATUS.md` (living — update when state changes).
-- **Deep context:** `docs/agent_context/` — `ROADMAP.md`, `ARCHITECTURE_TYPED_DOMAIN.md`, `BACKLOG.yaml`, `SOURCES.md`.
+- **Deep context:** `docs/agent_context/` — `ROADMAP.md`, `ARCHITECTURE_TYPED_DOMAIN.md`, `CLOCK_AND_SCHEDULING.md` (planned central clock/scheduler), `BACKLOG.yaml`, `SOURCES.md`.
 - **Dev environment:** uv + project-local `.venv`; software emulator, no Pi needed — `docs/dev_setup.md`.
 - **Code:** `main.py` (entry), `renderers/`, `data/`, local packages `bullpen/ standings/ news/`; `starter_code/` holds typed-domain sketches to grow into `omni/`; `cloud/` is the AWS market service (see its `README.md`).
 - **Reference hardware:** a physical `quad_128x64` (2×2) board runs headless on the LAN (`screen` + `run.sh`); its SSH target is machine-local (`CLAUDE.local.md`, git-ignored). Use the `run-on-board` skill. It currently runs the pre-revival code.
@@ -81,7 +81,7 @@ Every spacing/animation bug fixed should get a fixture or golden-image snapshot 
 Free/low-cost by default:
 
 - MLB: upstream MLB StatsAPI integration.
-- NFL/NBA/NHL/PGA initial spike: ESPN site APIs, isolated behind provider interfaces.
+- NFL: NFLMeta (chosen 2026-11-15; ESPN's terms bar automated access), behind a provider. NBA/NHL/PGA: not yet chosen; candidates in `docs/agent_context/SOURCES.md`.
 - PGA probability/cut-line optional: DataGolf if worth the key/cost.
 - MLB pregame odds: Bovada's public coupon, behind a provider; it sits behind a 10-minute CDN cache, so never use it for a live value. Its terms limit content to private personal use and bar storing it elsewhere without consent, so the cloud poller leaves it off by default.
 - MLB in-game win probability: Polymarket US public market data first (MLB's own model ignores team strength), with the MLB feed as the fallback.
