@@ -135,16 +135,6 @@ def test_golden_image_per_state_and_profile(state_name: str, profile: PanelProfi
     _assert_matches_golden(canvas.image(), f"live_football_{state_name}_{profile.to_json_value()}.png")
 
 
-@pytest.mark.parametrize("profile", ALL_PROFILES)
-def test_golden_without_tiles_falls_back_to_color_bars(profile: PanelProfile) -> None:
-    state, play, win = STATES["drive"]
-    width, height = geometry_for(profile).size
-    canvas = PillowCanvas(width, height)
-    card = live_football_card(state, last_play=play, win_probability=win)
-    LiveFootballRenderer().render(card, RenderContext(profile=profile, now=T), canvas)
-    _assert_matches_golden(canvas.image(), f"live_football_bars_{profile.to_json_value()}.png")
-
-
 # --- behavior ------------------------------------------------------------------------------------
 
 
@@ -252,3 +242,21 @@ def test_a_card_whose_contest_isnt_a_team_game_is_refused() -> None:
         LiveFootballRenderer().render(
             card, RenderContext(profile=PanelProfile.QUAD_128X64, now=T), RecordingCanvas(128, 64)
         )
+
+
+@pytest.mark.parametrize("profile", [PanelProfile.QUAD_128X64, PanelProfile.STACK_64X64])
+def test_a_club_whose_tile_is_missing_falls_back_to_a_color_bar_and_its_abbreviation(profile: PanelProfile) -> None:
+    state, play, win = STATES["drive"]
+    width, height = geometry_for(profile).size
+    with_tiles, without = RecordingCanvas(width, height), RecordingCanvas(width, height)
+    card = live_football_card(state, last_play=play, win_probability=win)
+    LiveFootballRenderer().render(card, RenderContext(profile=profile, now=T, logos=LOGOS), with_tiles)
+    LiveFootballRenderer().render(card, RenderContext(profile=profile, now=T), without)
+    assert len(with_tiles.images()) == 2 and not without.images()
+
+    def row_labels(canvas: RecordingCanvas) -> set[str | None]:
+        # The team rows: left of the pips and above the play strip. The spot ("CIN 38") also names a club.
+        return {op.text for op in canvas.texts() if op.x is not None and op.y is not None and op.x < 20 and op.y < 40}
+
+    assert row_labels(without) == {"PIT", "CIN"}
+    assert not row_labels(with_tiles)  # the logo names the club

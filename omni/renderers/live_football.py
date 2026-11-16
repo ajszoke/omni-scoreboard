@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from enum import Enum
 from typing import assert_never
 
 from omni.cards.base import ScoreboardCard
@@ -125,6 +126,7 @@ _SINGLE_INTERVAL_Y = (7, 16)
 
 _AMP_GAP = 1  # air either side of the down's ampersand
 _STACK_RUN_GAP = 4  # between the stack's down and its spot
+_STACK_SPOT_GAP = 2  # between the stack's team and yard line: a full space would crowd out the down
 _SINGLE_SPOT_GAP = 1  # between the single board's team and yard line
 
 _SCORE_FONT = "6x10"
@@ -166,18 +168,32 @@ def _period_pieces(period: int, font: str) -> list[_Piece]:
     return pieces
 
 
-def _down_pieces(state: FootballGameState, font: str, *, compact: bool) -> list[_Piece] | None:
-    """The down and distance, ``3rd & 7`` or ``3&7`` compact; None with no live down.
+class _Suffix(Enum):
+    """How a down's ordinal suffix is written."""
 
-    The ampersand keeps a pixel of air either side, so ``2&3`` can't run together into ``283``.
+    NONE = "none"  # 3&7
+    RAISED = "raised"  # 3rd&7, the suffix small and raised, the way a broadcast bug writes it
+    INLINE = "inline"  # 3rd&7, the suffix in the number's own face
+
+
+_STACK_SUFFIX = _Suffix.INLINE  # at the stack's size a raised suffix is barely smaller than the number
+
+
+def _down_pieces(state: FootballGameState, font: str, *, suffix: _Suffix, goal: str = "Goal") -> list[_Piece] | None:
+    """The down and distance, ``3rd & 7``, with ``goal`` standing in for the distance at goal to go.
+
+    None with no live down. The ampersand keeps a pixel of air either side, so ``2&3`` can't run
+    together into ``283``.
     """
     if state.down is None or state.distance is None:
         return None
-    number, suffix = period_parts(state.down)
+    number, ordinal = period_parts(state.down)
     pieces = [_Piece(number, font)]
-    if not compact:
-        pieces.append(_Piece(suffix, _TINY_FONT, drop=_SUFFIX_DROP[font]))
-    rest = ("G" if compact else "Goal") if state.goal_to_go else str(state.distance)
+    if suffix is _Suffix.RAISED:
+        pieces.append(_Piece(ordinal, _TINY_FONT, drop=_SUFFIX_DROP[font]))
+    elif suffix is _Suffix.INLINE:
+        pieces.append(_Piece(ordinal, font))
+    rest = goal if state.goal_to_go else str(state.distance)
     return [*pieces, _Piece("&", font, gap=_AMP_GAP), _Piece(rest, font, gap=_AMP_GAP)]
 
 
@@ -194,6 +210,11 @@ def _spot_pieces(game: TeamGame, state: FootballGameState, font: str, *, gap: in
 
 def _pieces_width(pieces: list[_Piece]) -> int:
     return sum(piece.gap + text_width(piece.text, piece.font) for piece in pieces)
+
+
+def _runs_width(runs: list[tuple[list[_Piece], RGBColor]]) -> int:
+    """Runs drawn side by side on the stack's down line, with the gap between them."""
+    return sum(_pieces_width(pieces) for pieces, _ in runs) + _STACK_RUN_GAP * (len(runs) - 1)
 
 
 def _draw_pieces(canvas: Canvas, x: int, y: int, pieces: list[_Piece], color: RGBColor) -> int:
@@ -288,7 +309,7 @@ class LiveFootballRenderer:
         period_right = _draw_pieces(canvas, left, _QUAD_PERIOD_Y, _period_pieces(state.period, _STATE_FONT), _YELLOW)
         clock_font = _STATE_FONT if period_right + 3 + text_width(clock, _STATE_FONT) <= right else _SCORE_FONT
         draw_right_aligned(canvas, right, _QUAD_PERIOD_Y, clock, _YELLOW, clock_font)
-        down = _down_pieces(state, _STATE_FONT, compact=False)
+        down = _down_pieces(state, _STATE_FONT, suffix=_Suffix.RAISED)
         if down is not None:
             _draw_pieces_centered(canvas, left, right, _QUAD_DOWN_Y, down, _YELLOW)
         spot = _spot_pieces(game, state, _SCORE_FONT, gap=text_width(" ", _SCORE_FONT))
@@ -346,19 +367,24 @@ class LiveFootballRenderer:
         _draw_pieces_centered(
             canvas, 0, 64, _STACK_PERIOD_Y, [*_period_pieces(state.period, _SCORE_FONT), clock], _YELLOW
         )
-        down = _down_pieces(state, _SMALL_FONT, compact=True)
-        spot = _spot_pieces(game, state, _SMALL_FONT, gap=text_width(" ", _SMALL_FONT))
-        runs = [
-            (pieces, color)
-            for pieces, color in ((down, _YELLOW), (spot, _RED if state.in_red_zone else _YELLOW))
-            if pieces
-        ]
-        if not runs:
+        spot = _spot_pieces(game, state, _SMALL_FONT, gap=_STACK_SPOT_GAP)
+        if spot is None and state.down is None:
             return
-        width = sum(_pieces_width(pieces) for pieces, _ in runs) + _STACK_RUN_GAP * (len(runs) - 1)
-        x = (64 - width) // 2
+        spot_color = _RED if state.in_red_zone else _YELLOW
+        # The full down, "3rd & 7"; at goal to go "& Goal" can crowd the spot off the board, so it shortens to "& G".
+        runs = self._stack_runs(state, spot, spot_color, goal="Goal")
+        if _runs_width(runs) > 64:
+            runs = self._stack_runs(state, spot, spot_color, goal="G")
+        x = (64 - _runs_width(runs)) // 2
         for pieces, color in runs:
             x = _draw_pieces(canvas, x, _STACK_DOWN_Y, pieces, color) + _STACK_RUN_GAP
+
+    @staticmethod
+    def _stack_runs(
+        state: FootballGameState, spot: list[_Piece] | None, spot_color: RGBColor, *, goal: str
+    ) -> list[tuple[list[_Piece], RGBColor]]:
+        down = _down_pieces(state, _SMALL_FONT, suffix=_STACK_SUFFIX, goal=goal)
+        return [(pieces, color) for pieces, color in ((down, _YELLOW), (spot, spot_color)) if pieces]
 
     # --- single -------------------------------------------------------------------------------------
 
@@ -402,7 +428,7 @@ class LiveFootballRenderer:
         period_y, clock_y, down_y, spot_y = _SINGLE_LINES_Y
         _draw_pieces_centered(canvas, left, right, period_y, _period_pieces(state.period, _SMALL_FONT), _YELLOW)
         draw_centered(canvas, left, right, clock_y, clock_text(state.clock_seconds), _YELLOW, _TINY_FONT)
-        down = _down_pieces(state, _TINY_FONT, compact=True)
+        down = _down_pieces(state, _TINY_FONT, suffix=_Suffix.NONE, goal="G")
         if down is not None:
             _draw_pieces_centered(canvas, left, right, down_y, down, _YELLOW)
         spot = _spot_pieces(game, state, _TINY_FONT, gap=_SINGLE_SPOT_GAP)  # a pixel apart: PIT 8, not PIT8
