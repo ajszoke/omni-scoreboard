@@ -13,9 +13,10 @@ Primary repositories and references:
 - GitHub CLI fork docs: https://cli.github.com/manual/gh_repo_fork
 - GitHub CLI rename docs: https://cli.github.com/manual/gh_repo_rename
 - GitHub double-fork caveat: https://github.com/cli/cli/issues/6329
-- ESPN NFL scoreboard JSON endpoint: https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard
-- ESPN NBA scoreboard JSON endpoint: https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard
-- ESPN PGA scoreboard JSON endpoint: https://site.api.espn.com/apis/site/v2/sports/golf/pga/scoreboard
+- ESPN scoreboard JSON endpoints (reference only since 2026-11-15: ESPN's terms bar automated access):
+  - NFL: https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard
+  - NBA: https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard
+  - PGA: https://site.api.espn.com/apis/site/v2/sports/golf/pga/scoreboard
 - DataGolf API: https://datagolf.com/api-access
 - SportsDataIO Golf API: https://sportsdata.io/pga-golf-api
 - Tidbyt product reference: https://tidbyt.com/
@@ -73,3 +74,54 @@ Local execution note:
   - Pricing is per league: Free (5 a minute), ALL-STAR $9.99 a month, GOAT $39.99 a month, with a 7-day free trial. ALL-ACCESS is $299.99 a month for all leagues.
   - NFL `/games` (scores, quarter scores, status; no clock or situation) is on every tier. `/nfl/v1/plays` (`start_`/`end_` down, distance and yard line, `end_possession_text`, `clock_display`, `scoring_play`), ordered by wall-clock time, needs GOAT.
   - Its terms allow storing, archiving and serving your own boards.
+
+NBA providers (review round 4's research thread):
+- Sources: the head's report of 2026-11-15, kept at `~/omni-review/research/nba-providers-research.md`. BALLDONTLIE's docs and terms were re-checked 2026-11-16; the other providers are as the head reported them.
+- What no feed at a family budget gives:
+  - a running-clock flag or a shot clock. Only Sportradar Push (under contract), TheRundown at $399 a month and SportsAPI.app at $199 have one. Clocks are sampled, so the NBA game clock's colon doesn't blink either.
+  - possession, or the coach's challenge count. Under the NBA rule, a successful first challenge earns a second.
+- BALLDONTLIE NBA (re-checked 2026-11-16):
+  - Tiers are per league:
+    - Free: teams, players and games, at 5 requests a minute.
+    - ALL-STAR, $9.99 a month: adds game player stats, active players and injuries, at 60 a minute.
+    - GOAT, $39.99 a month: adds box scores (`GET /v1/box_scores/live` among them), plays, lineups and odds, at 600 a minute. A 7-day GOAT trial runs at 5 a minute.
+  - The game object (the games endpoint is on every tier):
+    - `status_state`: `scheduled`, `in_progress`, `final`, `postponed`, `canceled`, `delayed`, `suspended`, `abandoned` or `unknown`.
+    - `status`: "1st Qtr" through "Halftime" to "Final", or a start time before tip-off.
+    - `period`: 0 before tip-off and 5+ in overtime. Some old overtime finals read 4.
+    - `time`: a clock string, such as "3:44".
+    - Scores by quarter and overtime.
+    - `home_`/`visitor_timeouts_remaining` and `home_`/`visitor_in_bonus`. Quarter, bonus and timeout data start with the 2023 season.
+    - No possession, team fouls or running flag.
+  - "Game data is realtime for in-progress games"; no refresh interval is published. One `/games?dates[]=` request covers a slate, so the Free tier's 5 a minute allows a full-slate read every 12 seconds.
+  - Terms, last updated 2026-10-20:
+    - §6 allows any lawful personal or commercial use, including "backend APIs that support those products, provided those APIs are not offered to third parties".
+    - Copying, caching, storing and archiving are allowed, with no retention deadline.
+    - Data may be kept after access ends (§17).
+    - No attribution is required.
+    - Barred: a substitute sports-data API or feed (§6), sharing API keys (§5, §7(b)), and automation outside the official interfaces (§7(d)).
+    - There are no separate Free-tier terms.
+    - So one key in a central poller can serve every Omni board; a key on each friend's board would be sharing it.
+- Realtime Sports API Starter, $29 a month, with a 7-day no-card trial:
+  - Live NBA and NHL play-by-play and sampled clocks, plus NFL, MLB and NCAA.
+  - Its FAQ allows display to your own users, backend caching, and keeping data after cancelling; it claims no league license.
+  - Its 10,000 units a month are pooled across every league and delivery type, and one full NBA night polled every 10 seconds nearly uses them up. It needs push, with ingest focused on favorite games.
+- PropLine Hobby, $9 a month (Pro $19):
+  - NBA and NHL score, period, sampled clock, last play and player stats, with game state refreshed about every 5 seconds.
+  - Individual values in an end-user product are allowed; archive and post-cancellation rights are unverified.
+  - Full NBA plays need Streaming Lite, at $39.
+- Too slow or too thin: Highlightly All Sports Pro ($12.49) refreshes the NBA scoreboard every 60 seconds and details every 120. API-Sports has no NBA play-by-play, and its terms grant no publication license.
+- Technically best: Sportradar NBA v8, with Push Game Clock (running state, tenths and shot clock) and edits and deletes. It needs a negotiated license, and its standard terms require destroying data after termination.
+- Excluded:
+  - NBA.com's CDN and `nba_api`: NBA.com's terms (2026-07-13) restrict live and archived play-by-play products, and the wrapper saw 403s in 2026.
+  - ESPN: its terms bar automated access.
+- Cost, by the head's model: a 10–15-game night needs about 900 slate requests at a 10-second poll, and plays polled every 10 seconds add 900 per game (9,900–14,400 calls a night).
+- Trials the head suggests:
+  - BALLDONTLIE NBA ALL-STAR on a night with NBA and NHL games;
+  - Realtime's 7-day trial on one NBA and one NHL game;
+  - PropLine Hobby against the full slate.
+  Measure each against one broadcast:
+  - receipt age, p50 and p95;
+  - lead changes missed between samples;
+  - clock nulls and placeholders;
+  - when the last play arrives relative to the final.
