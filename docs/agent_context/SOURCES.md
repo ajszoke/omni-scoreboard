@@ -94,6 +94,14 @@ NBA providers (review round 4's research thread):
     - `home_`/`visitor_timeouts_remaining` and `home_`/`visitor_in_bonus`. Quarter, bonus and timeout data start with the 2023 season.
     - No possession, team fouls or running flag.
   - "Game data is realtime for in-progress games"; no refresh interval is published. One `/games?dates[]=` request covers a slate, so the Free tier's 5 a minute allows a full-slate read every 12 seconds.
+  - Probed with the user's Free key, 2026-11-16 (`tools/balldontlie_record.py --probe`):
+    - The key goes bare in an `Authorization` header. A slate answered in 0.12–0.18 s, uncached (`cf-cache-status: DYNAMIC`, with a weak `ETag`).
+    - Rate-limit headers: `x-ratelimit-limit` (5), `x-ratelimit-remaining`, and `x-ratelimit-reset`, the epoch second the minute's window ends. The window opened with the first request.
+    - Endpoints above the tier (`/v1/stats`, `/v1/box_scores/live`) answer 401 "Unauthorized", as a refused key would, with no rate-limit headers.
+    - Before tip-off: `status` is the tip time (UTC), `status_state` is `scheduled`, `period` is 0 and the scores are 0. `time`, quarter scores, timeouts and bonus are null.
+    - At the final, `status` and `time` both read "Final". An overtime final has `period` 5 and `*_ot1` scores. Timeouts and bonus keep their last values.
+    - Every game also has `date` (the US Eastern date the API files it under), `datetime` (tip-off, UTC), `season` (its starting year), `postseason`, `postponed` and `ist_stage` (the NBA Cup stage; null on these games).
+    - A team has an id, conference, division, city, name, full name and abbreviation (`BKN`, `GSW`, `NOP`, `PHX`, `SAS`, `UTA`, `WAS`).
   - Terms, last updated 2026-10-20:
     - §6 allows any lawful personal or commercial use, including "backend APIs that support those products, provided those APIs are not offered to third parties".
     - Copying, caching, storing and archiving are allowed, with no retention deadline.
