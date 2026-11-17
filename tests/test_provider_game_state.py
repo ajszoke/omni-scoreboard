@@ -5,11 +5,11 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import pytest
 
-from omni.core.enum import GameStatus, League
+from omni.core.enum import GameStatus, HomeAway, League
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.domain.baseball import (
     BatterGameLine,
@@ -42,6 +42,7 @@ from omni.providers.mlb_statsapi import (
     _parse_game_state,
     _phase_from_inning_state,
     _reached_base,
+    _ReachLedger,
 )
 from omni.providers.mlb_teams import MlbTeamRegistry
 
@@ -168,46 +169,242 @@ def test_batting_walks_hbp_unknown_when_either_count_is_missing() -> None:
     assert _batting_walks_hbp(_boxscore({"away": {"hitByPitch": 0}}), "away") is None
 
 
+_CLEAN_LOG = _ReachLedger(reached=frozenset(), complete=frozenset(HomeAway))  # every play on record, no one reached
+_NO_LOG = _ReachLedger(reached=frozenset(), complete=frozenset())  # no play log to go by
+
+
 def test_reached_base_true_on_a_hit_or_a_defensive_error() -> None:
-    assert _reached_base({}, side="away", hits=1, fielding_errors=0) is True
-    assert _reached_base({}, side="away", hits=0, fielding_errors=1) is True  # reached on the defense's error
+    # A count that shows a baserunner settles it, with or without a play log.
+    assert _reached_base({}, side=HomeAway.AWAY, hits=1, fielding_errors=0, ledger=_NO_LOG) is True
+    assert _reached_base({}, side=HomeAway.AWAY, hits=0, fielding_errors=1, ledger=_NO_LOG) is True  # on an error
 
 
 def test_reached_base_unknown_without_the_boxscore() -> None:
     # Hitless and errorless, but no walk/HBP data — unknown, so a perfect game is never claimed.
-    assert _reached_base({"liveData": {}}, side="away", hits=0, fielding_errors=0) is None
+    assert _reached_base({"liveData": {}}, side=HomeAway.AWAY, hits=0, fielding_errors=0, ledger=_CLEAN_LOG) is None
 
 
 def test_reached_base_clean_sheet_versus_a_walk() -> None:
     clean = _boxscore({"home": {"baseOnBalls": 0, "hitByPitch": 0}})
-    assert _reached_base(clean, side="home", hits=0, fielding_errors=0) is False
+    assert _reached_base(clean, side=HomeAway.HOME, hits=0, fielding_errors=0, ledger=_CLEAN_LOG) is False
     walked = _boxscore({"home": {"baseOnBalls": 1, "hitByPitch": 0}})
-    assert _reached_base(walked, side="home", hits=0, fielding_errors=0) is True
+    assert _reached_base(walked, side=HomeAway.HOME, hits=0, fielding_errors=0, ledger=_CLEAN_LOG) is True
 
 
 def test_a_clean_sheet_needs_the_defense_s_errors_on_the_linescore() -> None:
     clean = _boxscore({"home": {"baseOnBalls": 0, "hitByPitch": 0}})
-    assert _reached_base(clean, side="home", hits=0, fielding_errors=None) is None  # unknown: no perfect game
+    unknown = _reached_base(clean, side=HomeAway.HOME, hits=0, fielding_errors=None, ledger=_CLEAN_LOG)
+    assert unknown is None  # no perfect game
     walked = _boxscore({"home": {"baseOnBalls": 1, "hitByPitch": 0}})
-    assert _reached_base(walked, side="home", hits=0, fielding_errors=None) is True  # a walk put a man on anyway
+    on_anyway = _reached_base(walked, side=HomeAway.HOME, hits=0, fielding_errors=None, ledger=_CLEAN_LOG)
+    assert on_anyway is True  # a walk put a man on anyway
 
 
-def test_parse_game_state_reads_a_clean_sheet_for_a_no_hit_side() -> None:
+def test_zero_counts_are_no_clean_sheet_without_a_complete_play_log() -> None:
+    clean = _boxscore({"home": {"baseOnBalls": 0, "hitByPitch": 0}})
+    assert _reached_base(clean, side=HomeAway.HOME, hits=0, fielding_errors=0, ledger=_NO_LOG) is None
+
+
+# --- the play log: who reached base, plate appearance by plate appearance ---------------------------
+
+
+def _batter(end: str | None, event: str) -> dict[str, Any]:
+    """The batter's entry in a play's runners, as StatsAPI gives it: no origin base, and safe at ``end``, or put out
+    at first when ``end`` is None."""
+    movement = {"originBase": None, "start": None, "end": end, "outBase": None if end else "1B", "isOut": end is None}
+    return {"movement": movement, "details": {"eventType": event}}
+
+
+def _runner(origin: str, *, out_at: str, event: str) -> dict[str, Any]:
+    """A runner already on ``origin`` put out at ``out_at``: a caught stealing, say."""
+    movement = {"originBase": origin, "start": origin, "end": None, "outBase": out_at, "isOut": True}
+    return {"movement": movement, "details": {"eventType": event}}
+
+
+def _play(index: int, inning: int, half: str, *runners: dict[str, Any], complete: bool = True) -> dict[str, Any]:
+    """One `allPlays` entry: its at-bat index, its inning and half, whether it is over, and its runners."""
+    about = {"atBatIndex": index, "halfInning": half, "inning": inning, "isComplete": complete}
+    return {"atBatIndex": index, "about": about, "runners": list(runners)}
+
+
+TOP_OF_THE_3RD = 12  # the top of the 3rd's leadoff at-bat, after two innings of three up and three down
+BOTTOM_OF_THE_3RD = 15
+
+
+def _clean_log() -> list[dict[str, Any]]:
+    """The play log up to the top of the 7th with two out, every batter put out: six innings of three up and three
+    down, two outs in the 7th, and the at-bat in progress, which has no runners yet."""
+    halves = [(inning, half) for inning in range(1, 7) for half in ("top", "bottom") for _ in range(3)]
+    halves += [(7, "top"), (7, "top")]
+    log = [_play(index, inning, half, _batter(None, "strikeout")) for index, (inning, half) in enumerate(halves)]
+    log.append(_play(len(log), 7, "top", complete=False))
+    return log
+
+
+def _reached_at(at_bat: int) -> list[dict[str, Any]]:
+    """The clean log, but the batter at ``at_bat`` struck out and reached first on the wild pitch."""
+    log = _clean_log()
+    log[at_bat]["runners"] = [_batter("1B", "strikeout")]
+    return log
+
+
+def _dropped_third_strike_log() -> list[dict[str, Any]]:
+    """The top of the 3rd's leadoff man reached first on a strikeout's wild pitch, then was caught stealing in the
+    next at-bat. No hit, walk, HBP or error is charged, and the half still sends up only three men."""
+    log = _reached_at(TOP_OF_THE_3RD)
+    caught = _runner("1B", out_at="2B", event="caught_stealing_2b")
+    log[TOP_OF_THE_3RD + 1]["runners"] = [caught, _batter(None, "field_out")]
+    return log
+
+
+def _no_hit_feed(plays: Any, *, away_walks: int = 0) -> dict[str, Any]:
+    """The fixture's top of the 7th, two out and the bases empty, with neither side yet to get a hit, a walk, an HBP
+    or an error, over the play log ``plays``."""
     feed = _feed()
     line = feed["liveData"]["linescore"]
-    line["teams"]["away"]["hits"] = 0  # away hitless...
-    line["teams"]["home"]["errors"] = 0  # ...and no away batter reached on a home error
-    feed["liveData"]["boxscore"] = {"teams": {"away": {"teamStats": {"batting": {"baseOnBalls": 0, "hitByPitch": 0}}}}}
+    line["teams"] = {"away": {"runs": 0, "hits": 0, "errors": 0}, "home": {"runs": 0, "hits": 0, "errors": 0}}
+    line["offense"] = {}
+    batting = {"away": {"baseOnBalls": away_walks, "hitByPitch": 0}, "home": {"baseOnBalls": 0, "hitByPitch": 0}}
+    feed["liveData"]["boxscore"] = _boxscore(batting)["liveData"]["boxscore"]
+    feed["liveData"]["plays"]["allPlays"] = plays
+    return feed
+
+
+def test_a_batter_who_reached_on_a_dropped_third_strike_spoils_the_perfect_game_but_not_the_no_hitter() -> None:
+    state = _parse_game_state(_no_hit_feed(_dropped_third_strike_log()))
+    assert (state.away_hits, state.home_errors) == (0, 0)  # every count is still zero...
+    assert state.away_reached_base is True  # ...but the play log shows a man reached first
+    feat = pitching_feat_progress(state, min_completed_innings=6)
+    assert feat is not None and feat.kind is PitchingFeatKind.NO_HITTER and not feat.perfect
+
+
+def test_a_complete_clean_play_log_with_every_count_zero_is_a_perfect_game() -> None:
+    # The at-bat in progress has no runners yet; every finished one has its batter put out.
+    state = _parse_game_state(_no_hit_feed(_clean_log()))
+    assert state.away_reached_base is False
+    feat = pitching_feat_progress(state, min_completed_innings=6)
+    assert feat is not None and feat.kind is PitchingFeatKind.PERFECT_GAME and feat.completed_innings == 6
+
+
+def test_a_walk_in_the_counts_is_a_baserunner_whatever_the_play_log_says() -> None:
+    state = _parse_game_state(_no_hit_feed(_clean_log(), away_walks=1))
+    assert state.away_reached_base is True
+
+
+@pytest.mark.parametrize(
+    ("at_bat", "away", "home"),
+    [(TOP_OF_THE_3RD, True, False), (BOTTOM_OF_THE_3RD, False, True)],
+)
+def test_a_reach_counts_against_the_batting_side_only(at_bat: int, away: bool, home: bool) -> None:
+    state = _parse_game_state(_no_hit_feed(_reached_at(at_bat)))
+    assert (state.away_reached_base, state.home_reached_base) == (away, home)
+    # Both sides are hitless, so the bid shown is the home staff's, on the away side's batters.
+    feat = pitching_feat_progress(state, min_completed_innings=6)
+    assert feat is not None and feat.side is HomeAway.HOME and feat.perfect is not away
+
+
+@pytest.mark.parametrize(
+    "movement",
+    [
+        {"originBase": None, "end": "2B", "isOut": False},  # a double
+        {"originBase": None, "end": "score", "isOut": False},  # a home run
+        {"originBase": None, "end": "1B"},  # safe at first, and not said to be out
+    ],
+)
+def test_a_batter_who_ends_a_play_on_a_base_or_home_and_not_out_has_reached(movement: dict[str, Any]) -> None:
+    log = _clean_log()
+    log[TOP_OF_THE_3RD]["runners"] = [{"movement": movement}]
+    assert _parse_game_state(_no_hit_feed(log)).away_reached_base is True
+
+
+def test_a_reach_in_the_at_bat_still_in_progress_counts() -> None:
+    log = _clean_log()
+    log[-1]["runners"] = [_batter("1B", "strikeout")]  # the play is not yet marked complete
+    assert _parse_game_state(_no_hit_feed(log)).away_reached_base is True
+
+
+def _log(feed: dict[str, Any]) -> Any:
+    return feed["liveData"]["plays"]["allPlays"]
+
+
+def _drop(*path: Any) -> Callable[[dict[str, Any]], None]:
+    """A change to a feed that deletes the node at ``path`` in its play log."""
+
+    def change(feed: dict[str, Any]) -> None:
+        node = _log(feed)
+        for key in path[:-1]:
+            node = node[key]
+        del node[path[-1]]
+
+    return change
+
+
+def _put(*path: Any, value: Any) -> Callable[[dict[str, Any]], None]:
+    """A change to a feed that sets the node at ``path`` in its play log to ``value``."""
+
+    def change(feed: dict[str, Any]) -> None:
+        node = _log(feed)
+        for key in path[:-1]:
+            node = node[key]
+        node[path[-1]] = value
+
+    return change
+
+
+def _swap(feed: dict[str, Any]) -> None:
+    log = _log(feed)
+    log[20], log[21] = log[21], log[20]
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        pytest.param(lambda feed: feed["liveData"]["plays"].pop("allPlays"), id="no allPlays"),
+        pytest.param(lambda feed: feed["liveData"]["plays"].update(allPlays={}), id="allPlays not a list"),
+        pytest.param(lambda feed: feed["liveData"].update(plays=[]), id="a malformed plays node"),
+        pytest.param(lambda feed: feed["liveData"]["plays"].update(allPlays=[]), id="an empty log in the 7th"),
+        pytest.param(_drop(20), id="an at-bat missing from the middle"),
+        pytest.param(_drop(0), id="the first at-bat missing"),
+        pytest.param(_swap, id="two at-bats out of order"),
+        pytest.param(_drop(TOP_OF_THE_3RD, "runners"), id="a finished play with no runners"),
+        pytest.param(_put(TOP_OF_THE_3RD, "runners", value=[]), id="a finished play with an empty runners list"),
+        pytest.param(_put(TOP_OF_THE_3RD, "runners", 0, value={"details": {}}), id="a runner with no movement"),
+        pytest.param(_drop(TOP_OF_THE_3RD, "about", "halfInning"), id="a play that names no half"),
+        pytest.param(_put(TOP_OF_THE_3RD, value="not a play"), id="a play that is not an object"),
+        pytest.param(
+            _put(TOP_OF_THE_3RD, value=_play(TOP_OF_THE_3RD, 3, "top", complete=False)),
+            id="an at-bat before the last still in progress",
+        ),
+    ],
+)
+def test_a_play_log_that_cant_rule_out_a_reach_leaves_a_plain_no_hitter(
+    change: Callable[[dict[str, Any]], None],
+) -> None:
+    feed = _no_hit_feed(_clean_log())
+    change(feed)
     state = _parse_game_state(feed)
-    assert state.away_hits == 0 and state.away_reached_base is False  # a clean sheet -> perfect-game eligible
+    assert state.away_reached_base is None
+    feat = pitching_feat_progress(state, min_completed_innings=6)
+    assert feat is not None and feat.kind is PitchingFeatKind.NO_HITTER
+
+
+def test_every_answer_reads_the_whole_play_log_afresh_so_a_rewritten_play_shows_at_once() -> None:
+    # The top of the 3rd's leadoff man is logged out on strikes, then rewritten as safe at first on the wild pitch,
+    # then back to out: each answer is read as it stands, with nothing kept from the one before.
+    answers = [_no_hit_feed(_clean_log()), _no_hit_feed(_reached_at(TOP_OF_THE_3RD)), _no_hit_feed(_clean_log())]
+    provider = MlbStatsApiProvider(MlbTeamRegistry({}), fetch_game=lambda _pk: answers.pop(0))
+    reads = [provider.fetch_live_feed(_game(), now=NOW).state.away_reached_base for _ in range(3)]
+    assert reads == [False, True, False]
+
+
+def test_the_fields_whitelist_keeps_what_the_play_log_reads() -> None:
+    read = {"allPlays", "about", "halfInning", "atBatIndex", "isComplete", "runners", "movement", "originBase", "end"}
+    assert read | {"isOut"} <= set(_GAME_FIELDS.split(","))
 
 
 def test_a_no_hit_side_is_no_perfect_game_without_every_count_that_could_have_put_a_man_on() -> None:
-    feed = _feed()
-    line = feed["liveData"]["linescore"]
-    line["teams"]["away"]["hits"] = 0
-    del line["teams"]["home"]["errors"]  # the defense's errors are left out
-    feed["liveData"]["boxscore"] = {"teams": {"away": {"teamStats": {"batting": {"baseOnBalls": 0, "hitByPitch": 0}}}}}
+    feed = _no_hit_feed(_clean_log())  # a clean, complete play log
+    del feed["liveData"]["linescore"]["teams"]["home"]["errors"]  # but the defense's errors are left out
     state = _parse_game_state(feed)
     assert state.home_errors == 0 and state.away_reached_base is None  # shown as 0, but no clean sheet claimed
     feat = pitching_feat_progress(state, min_completed_innings=6)

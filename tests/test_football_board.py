@@ -868,18 +868,18 @@ def test_a_touchdown_whose_second_frame_a_stalled_display_never_shows_is_gone_by
     assert _strip_lines(lines) == ["  = TOUCHDOWN PIT", "  x TOUCHDOWN PIT (cleared: past its hard end)"]
 
 
-def _tv_timeout_then_the_snap_at_171() -> _Script:
-    """A TV timeout at 0 s; the field stays put until the next snap moves it at 171 s, with no play yet."""
-    tv = _event("tv", "TV TIMEOUT", tone=PlayTone.ALERT, kind=FootballEventKind.TV_TIMEOUT)
+def _official_timeout_then_the_snap_at_171() -> _Script:
+    """An official timeout at 0 s; the field stays put until the next snap moves it at 171 s, with no play yet."""
+    stoppage = _event("official", "OFFICIAL TIMEOUT", tone=PlayTone.ALERT, kind=FootballEventKind.OFFICIAL_TIMEOUT)
     snapped = _state(possession=HomeAway.AWAY, down=2, distance=6, yards_to_goal=26)
     quiet = (_answer(second, _LIVE) for second in range(10, 171, 10))
-    return _Script(_answer(0, _LIVE, tv), *quiet, *(_answer(second, snapped) for second in range(171, 200, 10)))
+    return _Script(_answer(0, _LIVE, stoppage), *quiet, *(_answer(second, snapped) for second in range(171, 200, 10)))
 
 
-def test_a_tv_timeout_on_the_panel_stays_past_its_hard_end_until_the_field_moves() -> None:
+def test_an_official_timeout_on_the_panel_stays_past_its_hard_end_until_the_field_moves() -> None:
     lines: list[str] = []
     board = FootballBoard(
-        _tv_timeout_then_the_snap_at_171(), RecordingDisplaySink(PanelProfile.QUAD_128X64), log=lines.append
+        _official_timeout_then_the_snap_at_171(), RecordingDisplaySink(PanelProfile.QUAD_128X64), log=lines.append
     )
     cleared = None
     for second in range(0, 200):
@@ -889,21 +889,44 @@ def test_a_tv_timeout_on_the_panel_stays_past_its_hard_end_until_the_field_moves
         if second == 120:  # past its 90 s hard end, still current: only the field moving ends it
             assert board._strip.next_deadline(_at(T0 + second * S)) is None
     assert cleared == 171
-    assert _strip_lines(lines) == ["  = TV TIMEOUT", "  x TV TIMEOUT (cleared: the field moved on without its play)"]
+    assert _strip_lines(lines) == [
+        "  = OFFICIAL TIMEOUT",
+        "  x OFFICIAL TIMEOUT (cleared: the field moved on without its play)",
+    ]
 
 
-def test_a_tv_timeout_a_stalled_display_never_shows_goes_unseen_at_its_latest_start() -> None:
+def test_an_official_timeout_a_stalled_display_never_shows_goes_unseen_at_its_latest_start() -> None:
     stream = _Stream()
     stream.start()  # a display that acknowledges, and shows nothing
     lines: list[str] = []
-    board = FootballBoard(_tv_timeout_then_the_snap_at_171(), stream.sink, log=lines.append, renderer=_Ticking())
+    board = FootballBoard(_official_timeout_then_the_snap_at_171(), stream.sink, log=lines.append, renderer=_Ticking())
     dropped = None
     for second in range(0, 200):
         board.step(_at(T0 + second * S))
         if dropped is None and lines[-1].startswith("  -"):
             dropped = second
     assert dropped == 61
-    assert _strip_lines(lines) == ["  - TV TIMEOUT (unseen: too late to start)"]
+    assert _strip_lines(lines) == ["  - OFFICIAL TIMEOUT (unseen: too late to start)"]
+
+
+def test_an_official_timeout_in_the_feed_airs_as_one_and_stays_up_until_the_field_moves() -> None:
+    feed = FakeFeed()
+    snapped = _synced(
+        "p2", "awaiting_play", situation={"possession_abbr": "CIN", "down": 3, "distance": 2, "yardline_100": 71}
+    )
+    feed.scores = [*(_scores(_synced("p1")) for _ in range(18)), _scores(snapped)]  # the snap comes at 180 s
+    feed.plays = [_page(_change("p1", 1, "Official Timeout at 13:09.", play_type="official_timeout"))]
+    board, _, lines = _board(feed)
+    cleared = None
+    for second in range(0, 200):
+        board.step(_at(T0 + second * S))
+        if cleared is None and lines[-1].startswith("  x"):
+            cleared = second
+    assert cleared == 180  # well past its 90 s hard end: a stoppage holds until play resumes
+    assert _strip_lines(lines) == [
+        "  = OFFICIAL TIMEOUT",  # the feed doesn't say why the officials stopped play, so no TV break is claimed
+        "  x OFFICIAL TIMEOUT (cleared: the field moved on without its play)",
+    ]
 
 
 # Closing a period out: bounded, whatever the strip or the display is doing.

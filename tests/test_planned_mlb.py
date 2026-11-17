@@ -6,7 +6,7 @@ import copy
 import dataclasses
 import threading
 from datetime import date, datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -43,6 +43,7 @@ from omni.renderers.registry import RendererRegistry, default_registry
 from omni.tower.board import FrameKind, SourceHealth
 from tests.test_app_loop import SOURCE, _game, _state
 from tests.test_poller import _SOON, _until
+from tests.test_provider_game_state import _clean_log, _dropped_third_strike_log
 
 AFTER_MIDNIGHT = datetime(2026, 6, 18, 6, 30, tzinfo=timezone.utc)  # 00:30 in Denver, on the 18th
 TODAY, YESTERDAY = date(2026, 6, 18), date(2026, 6, 17)
@@ -692,6 +693,24 @@ def test_a_live_answer_missing_its_hits_in_the_7th_raises_no_no_hitter() -> None
     assert [refresh.pipeline.no_hitters for _, refresh in board.refreshes if refresh.pipeline.no_hitters] == []
     assert board.shown(":nohitter") == []
     assert board.shown(":live")  # the live card airs, from the 6th's answer
+
+
+@pytest.mark.parametrize(("log", "perfect"), [(_clean_log, True), (_dropped_third_strike_log, False)])
+def test_a_bid_in_the_7th_airs_as_a_perfect_game_only_when_its_play_log_shows_no_one_reached(
+    log: Callable[[], list[dict[str, Any]]], perfect: bool
+) -> None:
+    # Every count is zero both ways in the top of the 7th. With every batter in the play log put out, the board
+    # calls it a perfect game; with one who reached first on a strikeout's wild pitch, a no-hitter.
+    payload = _statsapi(
+        "In Progress", 7, "Top", {"runs": 0, "hits": 0, "errors": 0}, {"runs": 0, "hits": 0, "errors": 0}
+    )
+    batting = {"teamStats": {"batting": {"baseOnBalls": 0, "hitByPitch": 0}}}
+    payload["liveData"]["boxscore"] = {"teams": {"away": batting, "home": batting}}
+    payload["liveData"]["plays"] = {"allPlays": log()}
+    board = _StatsApiBoard(payload, lag=0)
+    board.run_until(60)
+    shown = board.shown(":nohitter")
+    assert shown and {(bid.perfect, bid.through_inning) for _, bid in shown} == {(perfect, 6)}
 
 
 def test_an_answer_from_the_top_of_the_1st_with_nothing_yet_for_the_home_side_shows_its_true_zero() -> None:

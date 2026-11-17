@@ -67,6 +67,8 @@ TRACE_VERSION = 1
 REPLAY_SOURCE = SourceRef("replay", "fixture://football-trace")
 _STATUS = {NflPhase.PRE: GameStatus.PREGAME, NflPhase.IN: GameStatus.LIVE, NflPhase.POST: GameStatus.FINAL}
 _NUDGE = timedelta(milliseconds=1)  # a step on its deadline is due; the next is always a little later
+# Kinds an older trace names the way the provider then did: an officials' timeout was written "tv_timeout".
+_FORMER_KINDS = {"tv_timeout": FootballEventKind.OFFICIAL_TIMEOUT}
 
 
 @dataclass(frozen=True, slots=True)
@@ -394,7 +396,7 @@ def _event_record(event: FootballEvent, start: datetime) -> dict[str, Any]:
 def _event(record: dict[str, Any], start: datetime) -> FootballEvent:
     return FootballEvent(
         key=record["key"],
-        kind=FootballEventKind(record["kind"]),
+        kind=_FORMER_KINDS.get(record["kind"]) or FootballEventKind(record["kind"]),
         summary=PlaySummary(tone=PlayTone(record["tone"]), headline=record["headline"], detail=record.get("detail")),
         players_line=record.get("players"),
         written_at=start + timedelta(seconds=record["written"]) if "written" in record else None,

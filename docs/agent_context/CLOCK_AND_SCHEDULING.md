@@ -353,7 +353,7 @@ by a probe at its production entry point. They were built as D1–D4 in one PR:
     monotonic clock.
 - **D4, the strip's bounds:**
   - Each caption has a hard end, 90 s after release for routine and 150 s for major (the latest start plus
-    the 30 s maximum).
+    a 30 s finishing allowance; it must still start by its latest start).
   - A caption cued but never shown is dropped at its latest start or when the field moves on. A stoppage
     caption that is on air and still current stays until play resumes.
   - The lane pins a strip entry's bounds to the monotonic clock when it's offered.
