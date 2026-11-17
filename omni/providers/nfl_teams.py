@@ -2,7 +2,8 @@
 
 The club table is owned by `omni` so the typed island stays self-contained; its provenance is nflverse's
 team table (CC BY 4.0). Feeds don't agree on a few abbreviations, so each spelling a source uses
-resolves to one canonical abbreviation, the one NFLMeta uses.
+resolves to one canonical abbreviation, the one NFLMeta uses. That includes the league's play-by-play
+codes ("BLT" for Baltimore), whose table belongs to the play text (`omni.events.football_clubs`).
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ from omni.core.enum import League
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.domain.base import LogoAsset
 from omni.domain.teams import FootballTeam
+from omni.events.football_clubs import PLAY_BY_PLAY_CODES
 from omni.providers.nfl_palette import FREED_BASE_METER_COLOR, LOGO_ALT_COLOR, LOGO_BASE_COLOR
 
 __all__ = ["NFL_TEAMS", "NflTeamRegistry", "canonical_abbreviation"]
@@ -56,7 +58,7 @@ NFL_TEAMS: dict[str, tuple[str, str, str, str]] = {
 }
 
 # Other spellings feeds use -> the canonical abbreviation.
-_ALIASES = {"LA": "LAR", "WSH": "WAS", "JAC": "JAX", "LVR": "LV"}
+_ALIASES = {"WSH": "WAS", "JAC": "JAX", "LVR": "LV", **PLAY_BY_PLAY_CODES}
 
 
 def canonical_abbreviation(raw: str) -> str:

@@ -3,7 +3,9 @@
 A `FootballPlay` is one row of a game's play-by-play, typed. Its words are the league's own play text,
 whose grammar is regular enough to read who did what ("J.Burrow pass short right to J.Chase to PIT 26 for
 4 yards (J.Dean)"); `PlayText` reads it. A review rewrites a play's text in place, appending the ruling
-and then the play as it now stands, so everything here reads the text after the last ruling.
+and then the play as it now stands, so everything here reads the text after the last ruling. The text
+names a few clubs by play-by-play codes ("BLT" for Baltimore): `PlayText` reads and shows them as the
+board's abbreviations.
 
 A `FootballEvent` is what a board's play strip shows: a play, a timeout, a review's result, a conversion
 or an injury, already put into a headline, a description, and the involved players' lines for the game.
@@ -20,6 +22,7 @@ from typing import Any
 
 from omni.core.enum import StrEnumMixin
 from omni.domain.football import PlaySummary, PlayTone
+from omni.events.football_clubs import canonical_play_text, club_code
 
 __all__ = [
     "ConversionResult",
@@ -219,11 +222,11 @@ class PlayText:
     """A play's description: as published, and as the play stands after any ruling.
 
     A reversed play's text goes on to describe the play as it now stands; an upheld one stands as first
-    described, before the ruling.
+    described, before the ruling. Clubs read as the board's abbreviations, wherever the text names them.
     """
 
     def __init__(self, raw: str) -> None:
-        self.raw = raw.strip()
+        self.raw = canonical_play_text(raw.strip())
         self._ruling: re.Match[str] | None = None
         for self._ruling in _REVIEW.finditer(self.raw):
             pass
@@ -245,7 +248,8 @@ class PlayText:
             return None
         verdict = ReviewVerdict.REVERSED if found["verdict"].upper() == "REVERSED" else ReviewVerdict.STANDS
         charged = int(found["charged"]) if found["charged"] else None
-        return Review(found["challenger"], found["ruling"], verdict, charged)
+        challenger = club_code(found["challenger"]) if found["challenger"] else None
+        return Review(challenger, found["ruling"], verdict, charged)
 
     @property
     def timeout(self) -> TimeoutCall | None:
@@ -256,13 +260,13 @@ class PlayText:
         if clock is not None:
             minutes, seconds = clock.split(":")
             clock = f"{int(minutes)}:{seconds}"
-        return TimeoutCall(found["team"], int(found["number"]), clock)
+        return TimeoutCall(club_code(found["team"]), int(found["number"]), clock)
 
     @property
     def penalty(self) -> tuple[str, str] | None:
         """The penalized club and the foul, if a flag was thrown."""
         found = _PENALTY.search(self.standing)
-        return (found["team"], found["foul"]) if found else None
+        return (club_code(found["team"]), found["foul"]) if found else None
 
     @property
     def conversion(self) -> str | None:

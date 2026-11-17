@@ -23,6 +23,7 @@ from omni.events.football import (
     review_headline,
     summarize_play,
 )
+from omni.events.football_clubs import PLAY_BY_PLAY_CODES, canonical_play_text, club_code
 from omni.events.football_ledger import PlayerLine, PlayLedger
 from omni.providers.nfl_teams import NflTeamRegistry
 
@@ -351,6 +352,50 @@ def test_a_play_first_seen_with_a_ruling_is_major_when_it_scored_or_turned_the_b
     ]
     assert [event.major for event in events] == [True, False, False]  # only the touchdown stands as a score
     assert not play(4, "END QUARTER 1", "end_period").scored_or_turned_over
+
+
+def test_each_play_by_play_code_reads_as_the_boards_abbreviation_and_any_other_code_as_written() -> None:
+    assert PLAY_BY_PLAY_CODES == {"BLT": "BAL", "CLV": "CLE", "ARZ": "ARI", "HST": "HOU", "LA": "LAR"}
+    assert [club_code(code) for code in ("BLT", "CLV", "ARZ", "HST", "LA")] == ["BAL", "CLE", "ARI", "HOU", "LAR"]
+    assert [club_code(code) for code in ("CIN", "XYZ")] == ["CIN", "XYZ"]
+    text = "A.B pass to C.D to BLT 12 for 3 yards. PENALTY on CLV-E.F, Holding, enforced at ARZ 40 (HST), LA 20."
+    assert canonical_play_text(text) == (
+        "A.B pass to C.D to BAL 12 for 3 yards. PENALTY on CLE-E.F, Holding, enforced at ARI 40 (HOU), LAR 20."
+    )
+    untouched = "blt BLTS ABLT HSTN la LAC 20, LAS 5, WSH 30"  # not a whole word in capitals, or not one of the five
+    assert canonical_play_text(untouched) == untouched
+
+
+def test_play_text_names_clubs_by_the_boards_abbreviations_in_headlines_details_and_counts() -> None:
+    timeout = summarize_play(play(1, "Timeout #3 by BLT at 01:47.", "timeout"))
+    assert timeout is not None and (timeout[1].headline, timeout[1].detail) == ("TIMEOUT BAL", "BAL #3 at 1:47")
+    flag = summarize_play(play(2, "A.B pass incomplete.PENALTY on CLV-A.C, Offside, 5 yards - No Play.", "penalty"))
+    assert flag is not None and flag[1].headline == "FLAG CLE: OFFSIDE"
+    assert flag[1].detail == "A.B pass incomplete.PENALTY on CLE-A.C, Offside, 5 yards - No Play."
+    run = summarize_play(play(3, "A.Back up the middle to HST 12 for 3 yards (C.D).", yards_gained=3))
+    assert run is not None and run[1].detail == "A.Back up the middle to HOU 12 for 3 yards (C.D)."
+    challenged = PlayText(CHALLENGE_UPHELD.replace("Cincinnati", "ARZ")).review
+    assert challenged is not None and challenged.challenger == "ARI"
+
+    ledger = PlayLedger(_TEAMS.resolve("BAL"), _TEAMS.resolve("CLE"))
+    ledger.absorb(
+        [
+            play(n, f"Timeout #{n} by BLT at 0{n}:00.", "timeout", quarter=2)
+            for n in range(1, 4)  # Baltimore spends all three
+        ]
+        + [play(4, "Timeout #1 by CLV at 00:40.", "timeout", quarter=2)]
+    )
+    assert ledger.timeouts(2) == TeamTimeouts(away=0, home=2)
+    rekick = play(
+        5,
+        "X.K kicks 65 yards from BLT 35 to CLV 0. PENALTY on BLT-X.Y, Illegal Formation, 5 yards, enforced at"
+        " BLT 35 - No Play.",
+        "kickoff",
+        offense="CLE",
+        quarter=2,
+    )
+    ledger.absorb([rekick])
+    assert ledger.next_kickoff(2) == (HomeAway.AWAY, 30)  # Baltimore kicks again, five yards back
 
 
 def test_a_failed_try_arriving_late_is_announced_plainly() -> None:

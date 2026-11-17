@@ -327,6 +327,31 @@ def test_each_play_entry_carries_when_the_feed_wrote_it_and_a_correction_when_th
     ]
 
 
+def test_a_clubs_play_by_play_code_counts_as_its_abbreviation_and_reads_as_one() -> None:
+    feed = FakeFeed()
+    baltimore = {"abbr": "BAL", "score": 0}
+    feed.scores = [_scores(_row(away_team=baltimore)), _scores(_synced("p4", away_team=baltimore))]
+    feed.plays = [
+        _page(),
+        _page(
+            _change("p1", 1, "Timeout #1 by BLT at 12:10.", play_type="timeout"),
+            _change("p2", 2, "Timeout #2 by BLT at 06:02.", play_type="timeout"),
+            _change("p3", 3, "Timeout #3 by BLT at 01:47.", play_type="timeout"),
+            _change("p4", 4, "A.Back up the middle to BLT 12 for 3 yards (C.D).", yards_gained=3),
+        ),
+    ]
+    provider = _provider(feed)
+    provider.poll(GAME, T0)
+    snapshot = provider.poll(GAME, T0 + timedelta(seconds=10))
+    assert snapshot.state is not None and snapshot.state.timeouts == TeamTimeouts(away=0, home=3)
+    assert [(event.summary.headline, event.summary.detail) for event in snapshot.events] == [
+        ("TIMEOUT BAL", "BAL #1 at 12:10"),
+        ("TIMEOUT BAL", "BAL #2 at 6:02"),
+        ("TIMEOUT BAL", "BAL #3 at 1:47"),
+        ("3 YARD RUN", "A.Back up the middle to BAL 12 for 3 yards (C.D)."),
+    ]
+
+
 def test_a_watch_that_finds_nothing_ends_on_its_own() -> None:
     feed = FakeFeed()
     feed.scores = [_scores(_synced("p1")), _scores(_synced("p1", clock="8:29"))]

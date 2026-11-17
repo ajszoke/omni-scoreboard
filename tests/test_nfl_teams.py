@@ -26,7 +26,18 @@ def test_there_are_thirty_two_clubs_split_evenly() -> None:
 
 
 @pytest.mark.parametrize(
-    "raw, canonical", [("WSH", "WAS"), ("la", "LAR"), ("JAC", "JAX"), ("LVR", "LV"), (" kc ", "KC")]
+    "raw, canonical",
+    [
+        ("WSH", "WAS"),
+        ("la", "LAR"),
+        ("JAC", "JAX"),
+        ("LVR", "LV"),
+        (" kc ", "KC"),
+        ("BLT", "BAL"),  # the league's play-by-play codes, as play text writes them
+        ("CLV", "CLE"),
+        ("ARZ", "ARI"),
+        ("HST", "HOU"),
+    ],
 )
 def test_every_spelling_a_feed_uses_names_one_club(raw: str, canonical: str) -> None:
     assert canonical_abbreviation(raw) == canonical
