@@ -46,7 +46,10 @@ seconds in turn (a walk-off field goal, then FINAL). The close is bounded: the b
 `CLOSING_WAIT` after its reading is released, whether or not the plays have landed or the display is
 showing frames. Room is kept for the period's last play (the decisive one), which keeps its 10 seconds
 once it's up, even past the bound; older captions that don't fit before it are dropped as having
-missed their air window. Through the break itself the strip stays empty.
+missed their air window. Through the break itself the strip stays empty, except after the final: the
+feed is still read for a while for the game's last plays and fixes (the provider's drain), and what
+that brings once FINAL is up airs over it, on the quad's strip. A score that changes with it revises
+the final, released under the delay like any reading.
 
 A feed that stops answering is shown as stale: once no answer has come for `FEED_STALE_AFTER` past when
 the next was due, the card dims, the strip clears (a stoppage held on it too) and the meter goes, until
@@ -85,7 +88,7 @@ from omni.cards.football import LiveFootballCardPayload
 from omni.core.enum import DisplayPriority, PanelProfile
 from omni.core.time import DurationSeconds
 from omni.domain.baseball import WinProbability
-from omni.domain.football import FootballGameState, PlaySummary
+from omni.domain.football import FootballGameState, FootballInterval, PlaySummary
 from omni.events.football import FootballEvent, FootballEventKind
 from omni.providers.nflmeta import NflLiveSnapshot
 from omni.renderers.base import Renderer
@@ -139,6 +142,8 @@ WALL_JUMP = timedelta(seconds=30)  # the wall clock moving this much more than t
 _PLAYS = frozenset(
     {FootballEventKind.PLAY, FootballEventKind.SCORE, FootballEventKind.CONVERSION, FootballEventKind.REVIEW}
 )
+# What the card draws the strip over: the field in play, and the final while its drain brings late plays.
+_CAPTIONED = frozenset({None, FootballInterval.FINAL})
 # What comes down early, and how the log words it.
 _EARLY = frozenset({EndReason.INVALIDATED, EndReason.SOURCE_STALE, EndReason.UNDRAWN})
 _CLEARED_WORDS = {EndReason.INVALIDATED: "the field moved on without its play"}
@@ -258,6 +263,7 @@ class FootballBoard:
         self._credit(at)
         for result in self._feed.collect(at):
             self._absorb(result, at)
+        self._end_close(at)  # a close whose bound has passed is over before anything newer is taken
         while self._pending and self._pending[0].release_at <= at.monotonic:
             reading = self._pending.popleft()
             self._heard = reading
@@ -265,19 +271,14 @@ class FootballBoard:
                 self._take(reading, at)
         stale = self._check_stale(at)
         cue = self._strip.cue(at)
-        closing, by = self._closing, self._closing_by
-        if closing is not None and by is not None:
-            landed = closing.snapshot.caught_up and self._strip.idle
-            if landed or (at.monotonic >= by and not self._strip.keeping(at)):
-                self._showing, self._closing = closing, None
-                self._dropped(self._strip.clear(at), EndReason.MISSED_WINDOW.value)
-                cue = None
+        if self._end_close(at):
+            cue = None
         showing = self._showing
         if showing is not None and showing.snapshot.state is not None:
             if self._closing is not None and self._closing.snapshot.state is not None:
                 view = _closing_view(showing.snapshot.state, self._closing.snapshot.state)
                 self._draw(self._closing, view, cue, at, stale=stale)
-            elif showing.snapshot.state.interval is None:
+            elif showing.snapshot.state.interval in _CAPTIONED:
                 self._draw(showing, showing.snapshot.state, cue, at, stale=stale)
             else:
                 self._draw(showing, showing.snapshot.state, None, at, stale=stale)
@@ -296,6 +297,20 @@ class FootballBoard:
         if not self._stale:
             deadlines.append(self._stale_at())
         return earliest(deadlines)
+
+    def _end_close(self, at: ClockReading) -> bool:
+        """Show the break whose plays are being closed out, once they're all in and shown, or once its bound
+        has passed and the decisive play has had its minimum; whether it did. What the strip still holds
+        goes unseen, as having missed its air window."""
+        closing, by = self._closing, self._closing_by
+        if closing is None or by is None:
+            return False
+        landed = closing.snapshot.caught_up and self._strip.idle
+        if not landed and (at.monotonic < by or self._strip.keeping(at)):
+            return False
+        self._showing, self._closing = closing, None
+        self._dropped(self._strip.clear(at), EndReason.MISSED_WINDOW.value)
+        return True
 
     def _watch_clock(self, at: ClockReading) -> None:
         """Log a jump of the wall clock against the monotonic one since the last step. After a jump ahead (a
@@ -338,7 +353,8 @@ class FootballBoard:
         return stale
 
     def _take(self, reading: _Reading, at: ClockReading) -> None:
-        """A reading the broadcast has caught up to: show it, or close out the period it ends."""
+        """A reading the broadcast has caught up to: show it, close out the period it ends, or (once the final
+        is up) put what the final's drain brought over it."""
         state = reading.snapshot.state
         shown = self._showing.snapshot.state if self._showing is not None else None
         if state is not None and state.interval is not None:
@@ -350,6 +366,12 @@ class FootballBoard:
                 self._closing, self._closing_by = reading, reading.release_at + CLOSING_WAIT  # its plays first
                 self._offer(reading, at)
                 self._strip.close_out(by=self._closing_by, last=self._last_play)
+            elif state.interval is FootballInterval.FINAL and shown is not None and shown.interval is state.interval:
+                self._strip.resume()  # the final's drain: its late plays and fixes air over FINAL
+                if _field(state) != _field(shown):
+                    self._strip.invalidate()
+                self._offer(reading, at)
+                self._showing = reading
             else:
                 self._showing = reading  # already in a break, or starting in one: the strip stays empty
                 unseen = self._strip.clear(at) + self._segments(reading, reading.snapshot.events, at)

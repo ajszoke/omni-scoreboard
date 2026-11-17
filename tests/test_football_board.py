@@ -8,10 +8,11 @@ from typing import Any
 
 import re
 
+import pytest
 from omni.core.clock import ClockReading, FakeClock, MonotonicTime
 from omni.app.display import RecordingDisplaySink
 from omni.app.football import _parse_args
-from omni.app.football_feed import FeedResult, GameFeed
+from omni.app.football_feed import AFTER_FINAL, FeedResult, GameFeed
 from omni.app.football_board import (
     CLOSING_WAIT,
     FEED_STALE_AFTER,
@@ -55,7 +56,7 @@ from omni.renderers.canvas import Canvas, RecordingCanvas
 from omni.renderers.live_football import LiveFootballRenderer
 from omni.tower import ChangeKind, EndReason, LaneChange, Provenance, Segment, SegmentKey, Surface
 from tests.football_fixtures import nfl_game
-from tests.test_nflmeta import GAME, FakeFeed, _change, _page, _row, _scores, _synced
+from tests.test_nflmeta import GAME, FakeFeed, _change, _final_row, _page, _row, _scores, _synced
 
 T0 = datetime(2026, 11, 16, 2, 0, tzinfo=timezone.utc)
 S = timedelta(seconds=1)
@@ -373,6 +374,121 @@ def test_stops_polling_once_the_final_and_its_last_play_are_in() -> None:
     assert "final: no more polling" in lines
     board.step(_at(T0 + timedelta(hours=1)))
     assert len(feed.requests) == asked
+
+
+# The final's drain: asked at the live pace, read on its boundary, and what it brings aired over FINAL.
+
+
+def _scores_asked(feed: FakeFeed) -> int:
+    return sum(path == "/api/v1/live-scores" for path, _ in feed.requests)
+
+
+def _last_snap(away: int = 10) -> dict[str, Any]:
+    """The scoreboard three seconds from the end, PIT with ``away`` points to CIN's 10."""
+    return _synced("p1", period=4, clock="0:03", status_detail="0:03 - 4th", away_team={"abbr": "PIT", "score": away})
+
+
+def _incomplete() -> dict[str, Any]:
+    return _page(_change("p1", 100, "M.Rudolph pass incomplete.", quarter=4), cursor="c1")
+
+
+@pytest.mark.parametrize("pace", [900, 7])
+def test_a_final_is_drained_at_the_live_pace_and_read_on_its_boundary_however_slowly_the_feed_says_to_poll(
+    pace: int,
+) -> None:
+    feed = FakeFeed()
+    feed.scores = [_scores(_last_snap()), _scores(_final_row(), poll=pace)]  # final from 10 s
+    feed.plays = [_incomplete(), _page(cursor="c1")]
+    board, _, lines = _board(feed)
+    asked: list[int] = []
+    for second in range(0, 1000):
+        before = _scores_asked(feed)
+        board.step(_at(T0 + second * S))
+        if _scores_asked(feed) > before:
+            asked.append(second)
+    boundary = 10 + int(FINAL_DRAIN.total_seconds())
+    drained = range(10, boundary, min(pace, 10))  # never slower than the live pace
+    assert asked == [0, *drained, boundary]  # the last read on the boundary, and then no more
+    assert lines.count("final: no more polling") == 1
+
+
+def test_a_walk_off_row_that_lands_after_final_is_up_airs_over_it_and_the_final_takes_its_score() -> None:
+    feed = FakeFeed()
+    final = _scores(_final_row(away_team={"abbr": "PIT", "score": 10}))  # FINAL before the kick's points posted
+    feed.scores = [_scores(_last_snap()), *[final] * 12, _scores(_final_row(away_team={"abbr": "PIT", "score": 13}))]
+    feed.plays = [_incomplete(), _page(cursor="c1")]
+    walk_off = _change(
+        "p2",
+        200,
+        "C.Boswell 45 yard field goal is GOOD.",
+        play_type="field_goal_good",
+        field_goal_result="made",
+        posteam_abbr="PIT",
+        quarter=4,
+    )
+    end = _change("p3", 300, "END GAME", play_type="end_of_game", quarter=4)
+    board, _, lines = _board(feed, delay=30 * S)
+    cards = _Cards()
+    board._renderer = cards  # type: ignore[assignment]
+    for second in range(0, 200):
+        if second == 129:  # its row lands a second before the drain's last read
+            feed.plays = [_page(walk_off, end, cursor="c2")]
+        board.step(_at(T0 + second * S))
+        drawn = cards.cards[-1].payload if cards.cards else None
+        if second == 70:  # the close's bound: FINAL, 10-10
+            assert drawn is not None and drawn.state.interval is FootballInterval.FINAL
+            assert drawn.state.away_score == 10
+        if second == 159:  # the last read's answer is still inside the delay
+            assert drawn is not None and (drawn.state.away_score, drawn.last_play) == (10, None)
+        if second == 160:  # released: the kick over FINAL, and FINAL with its points
+            assert drawn is not None and drawn.state.interval is FootballInterval.FINAL
+            assert drawn.state.away_score == 13
+            assert drawn.last_play is not None and drawn.last_play.headline == "FIELD GOAL GOOD"
+    assert "  = FIELD GOAL GOOD | C.Boswell 45 yard field goal is GOOD." in lines
+    assert not any("unseen" in line or line.startswith("  !") for line in lines)  # caught up: nothing missing
+    assert _scores_asked(feed) == 14  # 0 s, then the drain from 10 s to its last read at 130 s
+    assert (
+        board._strip.idle
+        and board.next_deadline(_at(T0 + 199 * S)) == MonotonicTime(160) + AFTER_FINAL + FEED_STALE_AFTER
+    )
+
+
+def test_a_walk_off_row_that_never_lands_airs_as_a_score_update_over_the_final_with_the_gap_noted() -> None:
+    feed = FakeFeed()
+    feed.scores = [_scores(_last_snap()), _scores(_final_row(away_team={"abbr": "PIT", "score": 13}))]
+    feed.plays = [_incomplete(), _page(cursor="c1")]  # the drain's pages, complete and empty
+    board, _, lines = _board(feed)
+    cards = _Cards()
+    board._renderer = cards  # type: ignore[assignment]
+    for second in range(0, 160):
+        board.step(_at(T0 + second * S))
+        if second == 130:  # the drain's last read
+            drawn = cards.cards[-1].payload
+            assert drawn.state.interval is FootballInterval.FINAL and drawn.last_play is not None
+    assert [line for line in lines if line.startswith(("  !", "  =", "  -", "final"))] == [
+        "  = RUN | M.Rudolph pass incomplete.",  # the feed's latest on the first look
+        "  ! final plays incomplete: no end of game in the feed",
+        "final: no more polling",
+        "  = PIT +3 | Score update; play not reported",
+    ]
+
+
+def test_a_wall_clock_set_back_mid_game_neither_stops_nor_stretches_the_asks() -> None:
+    feed = _punt()
+    clock = FakeClock(T0)
+    board, _, lines = _board(feed)
+    asked: list[float] = []
+    for second in range(0, 120):
+        if second == 30:
+            clock.jump(-timedelta(minutes=10))
+        before = _scores_asked(feed)
+        board.step(clock.read())
+        if _scores_asked(feed) > before:
+            asked.append(clock.elapsed.seconds)
+        clock.advance(S)
+    assert asked == [10.0 * n for n in range(12)]  # at the scoreboard's pace throughout
+    assert lines[-1] == "clock: the wall clock jumped -10m against the monotonic clock"  # logged, and no more
+    assert not any(line.startswith("feed stale") for line in lines)
 
 
 class _Cards:

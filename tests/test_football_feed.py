@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
-from omni.core.clock import ClockReading, MonotonicTime, SystemClock
+from omni.core.clock import ClockReading, FakeClock, MonotonicTime, SystemClock
 from omni.app.football_feed import RETRY_AFTER_FAILURE, BackgroundFeed, FeedResult, GameFeed
 from omni.providers.nfl_teams import NflTeamRegistry
 from omni.providers.nflmeta import NFLMETA_SOURCE, NflMetaLiveProvider
@@ -80,7 +80,9 @@ def test_an_ask_that_breaks_outright_is_reported_and_waits_before_asking_again()
     answer = results[0]
     assert answer.snapshot is None and answer.next_ask == answer.asked_at + RETRY_AFTER_FAILURE
     assert answer.received_monotonic is not None
-    assert not broken.due(answer.asked_at + RETRY_AFTER_FAILURE - timedelta(seconds=1))
+    retry = answer.received_monotonic + RETRY_AFTER_FAILURE  # asked and failed in the same reading
+    assert not broken.due(ClockReading(answer.asked_at, retry + timedelta(seconds=-1)))
+    assert broken.due(ClockReading(answer.asked_at, retry))
 
 
 def test_inline_answers_are_dated_when_asked() -> None:
@@ -99,3 +101,17 @@ def test_inline_answers_are_dated_when_asked() -> None:
         T0 + timedelta(seconds=12),
         MonotonicTime(19.0),
     )
+
+
+def test_asks_fall_due_on_the_monotonic_clock_so_a_wall_clock_set_back_doesnt_stop_them() -> None:
+    nflmeta = FakeFeed()
+    nflmeta.scores = [_scores(_synced("p1"))]
+    clock = FakeClock(T0)
+    feed = BackgroundFeed(GameFeed(_provider(nflmeta), GAME), clock)
+    for second in range(0, 40):
+        if second == 5:
+            clock.jump(-timedelta(minutes=10))
+        feed._check()  # the worker's beat, run by hand
+        clock.advance(timedelta(seconds=1))
+    asked = [answer.received_monotonic for answer in feed.collect(clock.read())]
+    assert asked == [MonotonicTime(float(second)) for second in (0, 10, 20, 30)]  # every 10 s all the same
