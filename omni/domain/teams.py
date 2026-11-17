@@ -9,7 +9,7 @@ from omni.core.enum import League
 from omni.core.ids import LeagueScopedId
 from omni.domain.base import LogoAsset
 
-__all__ = ["Team", "BaseballTeam", "FootballTeam"]
+__all__ = ["Team", "BaseballTeam", "BasketballTeam", "FootballTeam"]
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -54,3 +54,11 @@ class FootballTeam(Team):
 
     conference: str | None = None  # AFC/NFC
     division: str | None = None  # e.g. "AFC North"
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class BasketballTeam(Team):
+    """NBA specialization; conference and division stay loose until modeled."""
+
+    conference: str | None = None  # East/West
+    division: str | None = None  # e.g. "Atlantic"

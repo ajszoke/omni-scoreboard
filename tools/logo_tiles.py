@@ -1,8 +1,9 @@
 """Shared steps for turning cached logo art into the board's 20x20 tiles, for any league.
 
 Each league's render tool picks a source and a background per tile (its treatment table); these
-steps do the rest: rasterize the source, make a baked-in background transparent, drop the tiny
-trademark glyph in the corner, recolor marked elements, crop to the mark, and center it on the tile.
+steps do the rest: rasterize the source, make a baked-in background transparent, drop stray specks,
+cut an emblem out of a fuller logo, drop the tiny trademark glyph in the corner, recolor marked
+elements, crop to the mark, and center it on the tile.
 
 A tool-time module; needs ``cairosvg``, ``scipy``, ``Pillow`` and ``numpy`` (see
 ``tools/requirements-logos.txt``). The runtime never renders SVG.
@@ -25,8 +26,10 @@ __all__ = [
     "PAD",
     "SIZE",
     "Treatment",
+    "clip",
     "compose",
     "compose_on_background",
+    "despeck",
     "detrademark",
     "knockout",
     "rasterize",
@@ -51,6 +54,9 @@ class Treatment:
     pad: int = PAD  # margin inside the tile (smaller -> larger mark)
     on_background: bool = False  # lay the mark on its tile color at full size, then shrink bicubically
     outline: RGBColor | None = None  # a one-pixel stroke around the mark, to set it off its own background color
+    crop: tuple[float, float, float, float] | None = None  # keep this box of the mark, e.g. without its wordmark
+    crop_round: bool = False  # keep the ellipse inscribed in the crop box instead, e.g. a roundel's inner disc
+    despeck: bool = False  # drop stray specks anywhere in the source, e.g. a cut-out's leftover pixels
 
 
 def rasterize(folder: str, stem: str, *, px: int = RENDER_PX) -> np.ndarray:
@@ -68,6 +74,43 @@ def knockout(rgba: np.ndarray, color: RGBColor, tol: int = 45) -> np.ndarray:
     near = np.sqrt(((rgb - [color.r, color.g, color.b]) ** 2).sum(2)) <= tol
     out = rgba.copy()
     out[near, 3] = 0
+    return out
+
+
+def clip(rgba: np.ndarray, box: tuple[float, float, float, float], *, round_: bool = False) -> np.ndarray:
+    """Keep only part of the mark: ``box`` is (left, top, right, bottom) as fractions of the mark's extent.
+
+    A wordmark or a ring of lettering turns to noise at tile size, so a club's emblem can be cut out of
+    its full logo. With ``round_``, only the ellipse inscribed in the box is kept, for the disc inside a
+    roundel. Returns just the kept region, so later steps see it as the whole source.
+    """
+    ys, xs = np.where(rgba[:, :, 3] > 30)
+    top, height = ys.min(), ys.max() + 1 - ys.min()
+    left, width = xs.min(), xs.max() + 1 - xs.min()
+    x0, x1 = left + round(box[0] * width), left + round(box[2] * width)
+    y0, y1 = top + round(box[1] * height), top + round(box[3] * height)
+    out = rgba[y0:y1, x0:x1].copy()
+    if round_:
+        yy, xx = np.mgrid[0 : y1 - y0, 0 : x1 - x0]
+        cy, cx = (y1 - y0 - 1) / 2, (x1 - x0 - 1) / 2
+        outside = ((yy - cy) / ((y1 - y0) / 2)) ** 2 + ((xx - cx) / ((x1 - x0) / 2)) ** 2 > 1
+        out[outside, 3] = 0
+    return out
+
+
+def despeck(rgba: np.ndarray, min_frac: float = 0.001) -> np.ndarray:
+    """Drop every isolated speck, wherever it sits, smaller than ``min_frac`` of the mark's largest part.
+
+    A raster cut out of its background can keep a few stray pixels along an edge; left in, they would
+    widen the crop to the mark or land on the tile.
+    """
+    solid = rgba[:, :, 3] > 30
+    labels, count = ndimage.label(solid)
+    if count <= 1:
+        return rgba
+    areas = ndimage.sum(solid, labels, range(1, count + 1))
+    out = rgba.copy()
+    out[np.isin(labels, np.flatnonzero(areas < min_frac * areas.max()) + 1), 3] = 0
     return out
 
 
@@ -164,6 +207,10 @@ def tile(rgba: np.ndarray, treatment: Treatment) -> Image.Image:
     """
     if treatment.knockout is not None:
         rgba = knockout(rgba, treatment.knockout)
+    if treatment.despeck:
+        rgba = despeck(rgba)
+    if treatment.crop is not None:
+        rgba = clip(rgba, treatment.crop, round_=treatment.crop_round)
     rgba = recolor(detrademark(rgba), treatment.recolors)
     if treatment.on_background or treatment.outline is not None:
         return compose_on_background(rgba, treatment)
