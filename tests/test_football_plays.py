@@ -172,9 +172,9 @@ def test_unknown_feed_words_read_as_other() -> None:
         (play(1, "Timeout #1 by PIT at 01:27.", "timeout"), "timeout", PlayTone.ALERT, "TIMEOUT PIT", "PIT #1 at 1:27"),
         (
             play(1, "Official Timeout at 08:26.", "official_timeout"),
-            "tv_timeout",
+            "official_timeout",
             PlayTone.STANDARD,
-            "TV TIMEOUT",
+            "OFFICIAL TIMEOUT",
             None,
         ),
         (

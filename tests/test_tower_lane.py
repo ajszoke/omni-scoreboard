@@ -103,7 +103,7 @@ def test_a_lone_segment_shows_its_description_then_its_players_then_nothing() ->
 
 
 def test_a_segment_of_one_frame_goes_blank_after_it() -> None:
-    lane = _lane(_segment("1", "TV TIMEOUT", players=None))
+    lane = _lane(_segment("1", "OFFICIAL TIMEOUT", players=None))
     _air(lane, T0)
     assert _air(lane, T0 + MAX) is None
 
@@ -132,11 +132,11 @@ def test_an_invalidated_segment_goes_once_it_has_had_its_minimum() -> None:
 
 
 def test_closing_out_gives_each_segment_its_minimum_and_no_later_frames() -> None:
-    lane = _lane(_segment("1", "KNEEL"), _segment("2", "TV TIMEOUT"))
+    lane = _lane(_segment("1", "KNEEL"), _segment("2", "OFFICIAL TIMEOUT"))
     _air(lane, T0)
     lane.close_out()
     assert _air(lane, T0 + MIN - S) == ("KNEEL", "KNEEL detail")
-    assert _air(lane, T0 + MIN) == ("TV TIMEOUT", "TV TIMEOUT detail")
+    assert _air(lane, T0 + MIN) == ("OFFICIAL TIMEOUT", "OFFICIAL TIMEOUT detail")
     assert not lane.idle
     assert _air(lane, T0 + 2 * MIN) is None and lane.idle
     lane.resume()
@@ -148,9 +148,9 @@ def test_closing_out_gives_each_segment_its_minimum_and_no_later_frames() -> Non
 
 
 def test_a_held_segment_stays_up_until_play_resumes() -> None:
-    lane = _lane(_stoppage("t", "TV TIMEOUT"))
+    lane = _lane(_stoppage("t", "OFFICIAL TIMEOUT"))
     _air(lane, T0)
-    assert _air(lane, T0 + timedelta(minutes=3)) == ("TV TIMEOUT", None)  # however long the break runs
+    assert _air(lane, T0 + timedelta(minutes=3)) == ("OFFICIAL TIMEOUT", None)  # however long the break runs
     lane.invalidate()  # the next snap
     assert _air(lane, T0 + timedelta(minutes=3)) is None
     lane.offer([_stoppage("i", "INJURY CIN"), _segment("2")])
@@ -428,7 +428,7 @@ def test_a_segment_the_display_cant_draw_comes_off_the_lane() -> None:
 
 
 def test_clearing_for_a_reason_takes_down_what_aired_for_it() -> None:
-    lane = _lane(_stoppage("t", "TV TIMEOUT"), _segment("2"))
+    lane = _lane(_stoppage("t", "OFFICIAL TIMEOUT"), _segment("2"))
     _air(lane, T0)
     gone = lane.clear(_at(T0 + timedelta(minutes=2)), EndReason.SOURCE_STALE)  # a held stoppage too
     assert [segment.key.subject for segment in gone] == ["2"]
@@ -473,7 +473,7 @@ def test_the_next_deadline_is_when_the_lane_would_change_by_itself() -> None:
     lane.invalidate()
     assert lane.next_deadline(_at(T0 + 6 * S)) == MonotonicTime(16.0)  # pending: its minimum
 
-    held = _lane(_stoppage("t", "TV TIMEOUT"))
+    held = _lane(_stoppage("t", "OFFICIAL TIMEOUT"))
     _air(held, T0)
     assert held.next_deadline(_at(T0)) is None  # held: only something new ends it
     held.offer([_segment("4", available=T0 + 4 * S)])
@@ -538,11 +538,11 @@ def test_a_shown_segment_keeps_its_air_past_its_latest_start_and_a_blanked_one_w
 
 
 def test_a_held_segment_on_the_panel_outlasts_its_expiry_while_nothing_is_pending() -> None:
-    stoppage = replace(_stoppage("t", "TV TIMEOUT"), expires_at=T0 + 90 * S)
+    stoppage = replace(_stoppage("t", "OFFICIAL TIMEOUT"), expires_at=T0 + 90 * S)
     lane = _lane(stoppage)
     _air(lane, T0)
     assert lane.next_deadline(_at(T0 + 100 * S)) is None  # held and current: only something new ends it
-    assert _air(lane, T0 + 100 * S) == ("TV TIMEOUT", None)  # past its expiry, still on the panel
+    assert _air(lane, T0 + 100 * S) == ("OFFICIAL TIMEOUT", None)  # past its expiry, still on the panel
     lane.offer([_segment("2", available=T0 + 105 * S)])
     assert lane.next_deadline(_at(T0 + 100 * S)) == MonotonicTime(105.0)  # when the next is available
     assert _air(lane, T0 + 105 * S) == ("RUN +4", "RUN +4 detail")

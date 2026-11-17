@@ -11,7 +11,8 @@ enough to send.
 The play strip is a lane on the tower's shared primitives (`omni.tower`): each event becomes a segment
 of the strip, in frames: its description, then the named players' lines for the game. Each frame gets
 10 seconds, and 20 while nothing else is waiting; then the strip goes blank until the next event. A
-stoppage (a timeout, a TV timeout, an injury, a review's ruling) is held instead, until play resumes.
+stoppage (a club's timeout, an official timeout, an injury, a review's ruling) is held instead, until
+play resumes.
 
 A strip frame's time counts from when the display first showed it, by the display's own word: each frame
 drawn is handed over with an id, and the board credits the strip frame (and the marquee's start) only

@@ -128,7 +128,9 @@ class FootballEventKind(StrEnumMixin, str, Enum):
 
     PLAY = "play"
     TIMEOUT = "timeout"  # a club's timeout
-    TV_TIMEOUT = "tv_timeout"
+    # The officials stopped play, and the feed doesn't say why: a commercial break, an injury, a
+    # measurement, equipment. So its caption names the officials' timeout and nothing more.
+    OFFICIAL_TIMEOUT = "official_timeout"
     REVIEW = "review"  # a challenge's or the booth's ruling, arriving after the play
     CONVERSION = "conversion"  # the try after a touchdown, arriving after the touchdown
     INJURY = "injury"
@@ -144,7 +146,7 @@ class FootballEventKind(StrEnumMixin, str, Enum):
 _SPANNING = frozenset(
     {
         FootballEventKind.TIMEOUT,
-        FootballEventKind.TV_TIMEOUT,
+        FootballEventKind.OFFICIAL_TIMEOUT,
         FootballEventKind.REVIEW,
         FootballEventKind.INJURY,
         FootballEventKind.TWO_MINUTE_WARNING,
@@ -365,7 +367,7 @@ _READINGS: dict[FootballPlayType, _Reading] = {
     FootballPlayType.BLOCKED_FIELD_GOAL: _Reading(_TURNOVER, "FG BLOCKED"),
     FootballPlayType.PENALTY: _Reading(_ALERT, "PENALTY"),
     FootballPlayType.TIMEOUT: _Reading(_ALERT, "TIMEOUT {team}", FootballEventKind.TIMEOUT),
-    FootballPlayType.OFFICIAL_TIMEOUT: _Reading(_STANDARD, "TV TIMEOUT", FootballEventKind.TV_TIMEOUT),
+    FootballPlayType.OFFICIAL_TIMEOUT: _Reading(_STANDARD, "OFFICIAL TIMEOUT", FootballEventKind.OFFICIAL_TIMEOUT),
     FootballPlayType.TWO_MINUTE_WARNING: _Reading(_ALERT, "TWO-MINUTE WARNING", FootballEventKind.TWO_MINUTE_WARNING),
     FootballPlayType.OTHER: _Reading(_STANDARD, "PLAY"),
 }

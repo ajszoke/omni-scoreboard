@@ -239,7 +239,7 @@ def test_catches_up_on_the_game_then_reads_each_matched_play_once() -> None:
     ]
     provider = _provider(feed)
     caught_up = provider.poll(GAME, _at(T0))
-    assert [event.kind for event in caught_up.events] == [FootballEventKind.TV_TIMEOUT]  # the latest only
+    assert [event.kind for event in caught_up.events] == [FootballEventKind.OFFICIAL_TIMEOUT]  # the latest only
     assert provider.poll(GAME, _at(T0)).events == ()  # awaiting: the row isn't there yet
     events = provider.poll(GAME, _at(T0)).events
     assert [event.summary.headline for event in events] == ["2 YARD RUN", "INCOMPLETE"]  # every play, in order
@@ -620,7 +620,7 @@ def test_a_score_the_feed_skips_is_shown_from_the_scoreboard_once_the_feed_moves
     later = provider.poll(GAME, _at(T0 + timedelta(seconds=20)))
     assert _headlines(later) == ["CIN +7"]
     assert later.events[0].summary.detail == "Score update; play not reported"
-    assert [event.kind for event in later.events][-1] is FootballEventKind.TV_TIMEOUT  # the score comes first
+    assert [event.kind for event in later.events][-1] is FootballEventKind.OFFICIAL_TIMEOUT  # the score comes first
 
 
 def test_a_score_whose_play_arrives_is_not_shown_from_the_scoreboard() -> None:

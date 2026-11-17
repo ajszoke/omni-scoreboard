@@ -135,7 +135,9 @@ def test_a_trace_reads_back_every_answer_as_written() -> None:
     kickoff = _state(period=3, away_score=7, home_score=3, possession=HomeAway.AWAY, set_piece=SetPiece.KICKOFF)
     half = _state(period=2, clock_seconds=0, away_score=7, home_score=3, interval=FootballInterval.HALFTIME)
     stoppage = FootballEvent(
-        key="t", kind=FootballEventKind.TV_TIMEOUT, summary=PlaySummary(tone=PlayTone.ALERT, headline="TV TIMEOUT")
+        key="t",
+        kind=FootballEventKind.OFFICIAL_TIMEOUT,
+        summary=PlaySummary(tone=PlayTone.ALERT, headline="OFFICIAL TIMEOUT"),
     )
     late = START + 70 * S
     dated = dataclasses.replace(_play("1"), written_at=START + 7.5 * S, scored_or_turned_over=True)
@@ -187,6 +189,20 @@ def test_only_a_football_trace_with_offsets_on_its_instants_loads() -> None:
     header = header_record(GAME, name="test", start=START) | {"start": "2026-11-16T01:00:00"}
     with pytest.raises(ValueError, match="carry their offset"):
         load_trace([json.dumps(header)])
+
+
+def test_a_trace_naming_an_official_timeout_by_its_former_name_reads_it_as_one() -> None:
+    stoppage = FootballEvent(
+        key="t",
+        kind=FootballEventKind.OFFICIAL_TIMEOUT,
+        summary=PlaySummary(tone=PlayTone.STANDARD, headline="OFFICIAL TIMEOUT"),
+    )
+    header, line = _trace(_answer(10 * S, _state(), stoppage))
+    older = json.loads(line)
+    assert older["snapshot"]["events"][0]["kind"] == "official_timeout"  # written under its own name
+    older["snapshot"]["events"][0]["kind"] = "tv_timeout"  # as an older trace names it
+    (read,) = load_trace([header, json.dumps(older)]).answers
+    assert read.snapshot is not None and read.snapshot.events == (stoppage,)
 
 
 def _reading(at: timedelta) -> ClockReading:
