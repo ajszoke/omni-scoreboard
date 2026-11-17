@@ -7,10 +7,11 @@ The board refreshes and paints on separate cadences:
      each one it asked last answered, or why it failed;
   2. take each answer into its scope and reconcile the board's contests across scopes (`ContestStore`), so a
      scope that fails keeps what it had and another league's scopes carry on regardless;
-  3. run the live-card pipeline (`LiveBaseballPipeline`, delay-safe, no spoilers), which stages the
-     card queue's changes, and drop what can no longer air. The pipeline gets the whole clock reading:
-     its holds are pinned, and released, on the monotonic clock, so a wall-clock jump can't release one
-     early;
+  3. run the live-card pipeline (`LiveBaseballPipeline`, delay-safe, no spoilers) over the baseball games, which
+     stages the card queue's changes, and drop what can no longer air. Another league's games stay members, and
+     count toward its health, but have no cards until a pipeline of their own joins the board. The pipeline gets
+     the whole clock reading: its holds are pinned, and released, on the monotonic clock, so a wall-clock jump
+     can't release one early;
   4. publish the staged cards to the board together with how far their source can be trusted, and how
      many games have nothing to show because they wait out the TV delay or their feed has stopped
      answering: one numbered input, so a paint on the frame thread sees all of a refresh or none of it.
@@ -57,7 +58,7 @@ from omni.app.pipeline import (
 )
 from omni.cards.base import CardId, ScoreboardCard
 from omni.core.clock import Clock, ClockReading, MonotonicTime
-from omni.core.enum import League
+from omni.core.enum import League, Sport
 from omni.domain.contest import TeamGame
 from omni.providers.base import ScopeSource
 from omni.queue.scheduler import InterleavedCardQueue, Missed, SelectionReason
@@ -205,9 +206,13 @@ class AppLoop:
             self._store.take(schedule.observe(at, held))
         reconciliation = self._store.reconcile(at.monotonic)
 
-        team_games = [contest for contest in self._store.contests if isinstance(contest, TeamGame)]
+        baseball = [
+            contest
+            for contest in self._store.contests
+            if isinstance(contest, TeamGame) and contest.sport is Sport.BASEBALL
+        ]
         pipeline_result = self._pipeline.refresh(
-            team_games,
+            baseball,
             at=at,
             fetch_feed=self._fetch_feed,
             fetch_win_probability=self._fetch_win_probability,
