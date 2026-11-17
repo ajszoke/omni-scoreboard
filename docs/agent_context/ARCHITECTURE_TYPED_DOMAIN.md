@@ -554,6 +554,36 @@ Provider modules own raw API shape. The rest of the system never sees raw JSON. 
 - **Schedule facts** on `Contest`: `stage` (`SeasonStage`), `game_number`, `start_tbd`, `provider_date`,
   `neutral_site`, `national_broadcast` and `resumed_from`, each unknown by default.
 
+- **Only baseball reaches the card pipeline.** Another league's games are members and count toward its
+  health, but have no cards until a pipeline of their own joins the board (`AppLoop.refresh`).
+- **Quota, per provider account** (`omni/app/quota.py`, `quota_store.py`):
+  - **Accounts and limits:** each account the board spends (`ProviderAccount`: StatsAPI, NFLMeta,
+    BALLDONTLIE, Polymarket US, Bovada, Omni's market service) has declared limits: a minute, a month's
+    requests, a month's rows, asks at once. NFLMeta's follow `--nflmeta-plan` (Free unless the user says
+    otherwise).
+  - **Charging:** `QuotaLedger` counts every HTTP response where it's made (`Meter`, `MeteredHttp`), from
+    the rows header when there is one. The provider's own "remaining" can raise the count, never lower it.
+  - **Admission:** `PollPlan` asks the ledger before each ask goes out. A key's account comes from an
+    explicit `AccountMap`, so an NFL slate in MLB's plan charges NFLMeta.
+  - **Shedding:** as an account runs down, it sheds by class (`SHEDDING`). Backfill goes above 50% left.
+    Background goes above 25%, then at double cadence to 10%. Normal goes above 5%, and focus until the
+    month is out. The last 20% of each minute is held for normal and focus.
+  - **What a refusal says:** a refused ask stays due, and its reason reaches the league's health.
+  - **Persistence:** monthly usage persists under `--state-dir`, written atomically at most once a minute
+    and at shutdown.
+- **Versions** (`omni/app/versions.py`): every run names its policy (`omni-board-policy/1` for the shared
+  board's bands, `omni-nfl-solo/1` for the NFL runner), its config schema and the digest of the settings
+  that change decisions, its rules (`omni/domain/rules.py`: MLB extra innings and NFL overtime by stage and
+  season), its models (none yet) and its code's commit. Traces open with them, and replay decisions with
+  all but the commit. Config migrations are typed and keep the original entry
+  (`ConfigMigration.BARE_FAVORITE_IS_MLB`).
+- **Rights** (`omni/providers/rights.py`): a typed manifest of each source's terms. It covers display,
+  cache, archive (none, a diagnosis with a retention period, or kept), training, redistribution,
+  attribution, termination and key sharing; an unstated term counts as refused. Every recording folder
+  gets a `RETENTION.json` with its delete-by date. `tools/recordings_due.py` lists overdue ones and deletes
+  nothing. Our decision telemetry (ids, kinds, reasons, timings) is ours to keep; a provider's wording
+  follows its source's archive rule.
+
 Plays travel with each game's feed, not in `ProviderUpdate`.
 
 ## Queue responsibilities
