@@ -12,7 +12,7 @@ with when it arrived. It says how much of the scope it covers:
 - **failed:** nothing usable came back.
 
 A `ScopeSource` is a league's schedule seen this way. Each pass it names the scopes its window covers
-(`Coverage`) and hands over what each scope it asked last said (`ScopeReport`).
+(`ScopeSpan`) and hands over what each scope it asked last said (`ScopeReport`).
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ from omni.core.ids import SourceRef
 from omni.domain.contest import Contest
 
 __all__ = [
-    "Coverage",
+    "ScopeSpan",
     "CoverageWindow",
     "CurrentSlate",
     "LocalDate",
@@ -153,7 +153,7 @@ class ScopeObservation:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class Coverage:
+class ScopeSpan:
     """The scopes one source covers for one league now: its current one (the league's health is that scope's)
     and the earlier ones still in its window, newest first, such as yesterday's slate while a late game runs
     past midnight. ``max_age`` is how long an answer of any of them counts as fresh."""
@@ -165,11 +165,11 @@ class Coverage:
     def __post_init__(self) -> None:
         for scope in self.earlier:
             if (scope.source, scope.league) != (self.current.source, self.current.league):
-                raise ValueError("a coverage's scopes share one source and one league")
+                raise ValueError("a span's scopes share one source and one league")
         if self.current in self.earlier or len(set(self.earlier)) != len(self.earlier):
-            raise ValueError("a coverage names each scope once")
+            raise ValueError("a span names each scope once")
         if self.max_age <= timedelta(0):
-            raise ValueError("a coverage's max age must be positive")
+            raise ValueError("a span's max age must be positive")
 
     @property
     def scopes(self) -> tuple[PollScope, ...]:
@@ -180,7 +180,7 @@ class Coverage:
 class ScopeReport:
     """One pass over a source's scopes: what it covers now, and what each scope it asked last said."""
 
-    coverage: Coverage
+    span: ScopeSpan
     observations: tuple[ScopeObservation, ...] = ()
 
 

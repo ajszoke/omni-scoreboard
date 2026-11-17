@@ -11,7 +11,7 @@ from omni.core.enum import GameStatus, League
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.domain.contest import Contest
 from omni.providers.base import (
-    Coverage,
+    ScopeSpan,
     CurrentSlate,
     LocalDate,
     PollScope,
@@ -100,15 +100,15 @@ def test_an_observation_s_outcome_error_and_contests_must_agree() -> None:
 
 def test_a_coverage_names_one_source_and_league_s_scopes_once_each() -> None:
     yesterday = PollScope(SOURCE, League.MLB, LocalDate(date(2026, 6, 16)))
-    coverage = Coverage(current=TODAY, earlier=(yesterday,), max_age=timedelta(minutes=2))
-    assert coverage.scopes == (TODAY, yesterday)
+    span = ScopeSpan(current=TODAY, earlier=(yesterday,), max_age=timedelta(minutes=2))
+    assert span.scopes == (TODAY, yesterday)
     with pytest.raises(ValueError, match="one source and one league"):
-        Coverage(current=TODAY, earlier=(PollScope(SOURCE, League.NBA, LocalDate(date(2026, 6, 16))),), max_age=60 * S)
+        ScopeSpan(current=TODAY, earlier=(PollScope(SOURCE, League.NBA, LocalDate(date(2026, 6, 16))),), max_age=60 * S)
     with pytest.raises(ValueError, match="one source and one league"):
-        Coverage(current=TODAY, earlier=(PollScope(SourceRef("x"), League.MLB, CurrentSlate()),), max_age=60 * S)
+        ScopeSpan(current=TODAY, earlier=(PollScope(SourceRef("x"), League.MLB, CurrentSlate()),), max_age=60 * S)
     with pytest.raises(ValueError, match="each scope once"):
-        Coverage(current=TODAY, earlier=(TODAY,), max_age=60 * S)
+        ScopeSpan(current=TODAY, earlier=(TODAY,), max_age=60 * S)
     with pytest.raises(ValueError, match="each scope once"):
-        Coverage(current=TODAY, earlier=(yesterday, yesterday), max_age=60 * S)
+        ScopeSpan(current=TODAY, earlier=(yesterday, yesterday), max_age=60 * S)
     with pytest.raises(ValueError, match="must be positive"):
-        Coverage(current=TODAY, max_age=timedelta(0))
+        ScopeSpan(current=TODAY, max_age=timedelta(0))

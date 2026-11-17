@@ -30,7 +30,7 @@ from omni.core.ids import LeagueScopedId, SourceRef
 from omni.core.time import DurationSeconds, local_date
 from omni.domain.contest import Contest
 from omni.providers.base import (
-    Coverage,
+    ScopeSpan,
     CurrentSlate,
     LocalDate,
     PollScope,
@@ -134,7 +134,7 @@ class _OtherLeague:
         failure = self.plan.failure(key)
         if failure is not None:
             observed.append(ScopeObservation.failure(scope, failure.error, failure.at))
-        return ScopeReport(coverage=Coverage(current=scope, max_age=2 * MINUTE), observations=tuple(observed))
+        return ScopeReport(span=ScopeSpan(current=scope, max_age=2 * MINUTE), observations=tuple(observed))
 
     def _fetch(self, asked: datetime) -> ProviderUpdate:
         if self.failing:
@@ -219,7 +219,7 @@ class _Scripted:
 
     def observe(self, at: ClockReading, held: Collection[PollScope]) -> ScopeReport:
         handed, self.queued = tuple(self.queued), []
-        return ScopeReport(coverage=Coverage(current=self.scope, max_age=2 * MINUTE), observations=handed)
+        return ScopeReport(span=ScopeSpan(current=self.scope, max_age=2 * MINUTE), observations=handed)
 
 
 def test_an_older_partial_landing_after_a_newer_complete_answer_is_ignored_and_a_newer_one_keeps_what_it_omits() -> (

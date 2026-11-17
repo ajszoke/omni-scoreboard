@@ -51,7 +51,7 @@ from omni.domain.contest import TeamGame
 from omni.events.baseball import LiveBaseballFeed
 from omni.preferences.favorites import Favorites
 from omni.providers.base import (
-    Coverage,
+    ScopeSpan,
     LocalDate,
     PollScope,
     ProviderError,
@@ -177,8 +177,8 @@ class PlannedMlb:
         observations = self._observe(today, PollPriority.NORMAL, at)
         for day in (yesterday, *older):
             observations.extend(self._observe(day, PollPriority.BACKGROUND, at))
-        coverage = Coverage(current=self._scope(today), earlier=(self._scope(yesterday),), max_age=SLATE_MAX_AGE)
-        return ScopeReport(coverage=coverage, observations=tuple(observations))
+        span = ScopeSpan(current=self._scope(today), earlier=(self._scope(yesterday),), max_age=SLATE_MAX_AGE)
+        return ScopeReport(span=span, observations=tuple(observations))
 
     def fetch_feed(self, game: TeamGame, now: datetime) -> LiveBaseballFeed:
         """A game's newest standing feed answer, with when it arrived, how long it counts as current, and why

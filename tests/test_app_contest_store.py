@@ -12,7 +12,7 @@ from omni.core.enum import GameStatus, League
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.domain.contest import Contest
 from omni.providers.base import (
-    Coverage,
+    ScopeSpan,
     LocalDate,
     PollScope,
     ProviderUpdate,
@@ -56,11 +56,11 @@ def _failure(scope: PollScope, *, at: float, error: str = "ProviderError: down")
 def _cover(store: ContestStore, day: date = DAY, *, league: League = League.MLB, window: int = 1) -> None:
     """``day`` as the current scope of ``league``, with the ``window - 1`` days before it."""
     earlier = tuple(_scope(day - timedelta(days=back), league) for back in range(1, window))
-    store.cover(Coverage(current=_scope(day, league), earlier=earlier, max_age=MAX_AGE))
+    store.cover(ScopeSpan(current=_scope(day, league), earlier=earlier, max_age=MAX_AGE))
 
 
-def _coverage() -> Coverage:
-    return Coverage(current=_scope(), max_age=MAX_AGE)
+def _span() -> ScopeSpan:
+    return ScopeSpan(current=_scope(), max_age=MAX_AGE)
 
 
 def _raws(store: ContestStore) -> list[str]:
@@ -137,7 +137,7 @@ def test_an_older_partial_applied_after_a_newer_complete_is_ignored_and_a_newer_
     _cover(store)
     store.apply(_answer(_scope(), _contest("g1"), _contest("g2"), at=10))
     late = _answer(_scope(), _contest("g1", GameStatus.LIVE), _contest("g3"), at=5, skipped=("a row",))
-    assert store.take(ScopeReport(coverage=_coverage(), observations=(late,))) == (late,)  # ignored
+    assert store.take(ScopeReport(span=_span(), observations=(late,))) == (late,)  # ignored
     store.reconcile(MonotonicTime(10))
     assert _raws(store) == ["g1", "g2"] and _status(store, "g1") is GameStatus.SCHEDULED
     store.apply(_answer(_scope(), _contest("g2", GameStatus.LIVE), at=20, skipped=("g1's row",)))

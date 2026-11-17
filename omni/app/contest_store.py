@@ -45,7 +45,7 @@ from omni.core.enum import GameStatus, League, StrEnumMixin
 from omni.core.ids import LeagueScopedId
 from omni.domain.contest import Contest
 from omni.providers.base import (
-    Coverage,
+    ScopeSpan,
     CoverageWindow,
     LocalDate,
     PollScope,
@@ -215,21 +215,21 @@ class ContestStore:
         self._contests: dict[LeagueScopedId, Contest] = {}  # the union handed out by the last reconcile
         self._final_since: dict[LeagueScopedId, MonotonicTime] = {}  # when each was first handed out final
 
-    def cover(self, coverage: Coverage) -> None:
+    def cover(self, span: ScopeSpan) -> None:
         """A source covers these scopes now: its current one, and the earlier ones still in its window. Its other
         scopes have rolled off, and are retired."""
-        current = coverage.current
+        current = span.current
         previous = self._current.get(current.league)
         if previous != current:
             self._carried[current.league] = self._fresh_from(previous) if previous is not None else None
             self._current[current.league] = current
-        roles = {current: ScopeRole.CURRENT, **{scope: ScopeRole.EARLIER for scope in coverage.earlier}}
+        roles = {current: ScopeRole.CURRENT, **{scope: ScopeRole.EARLIER for scope in span.earlier}}
         for scope, role in roles.items():
             state = self._scopes.get(scope)
             if state is None:
-                self._scopes[scope] = _Scope(role=role, max_age=coverage.max_age)
+                self._scopes[scope] = _Scope(role=role, max_age=span.max_age)
             else:
-                state.role, state.max_age = role, coverage.max_age
+                state.role, state.max_age = role, span.max_age
         for scope in self._scopes:
             if scope not in roles and (scope.source, scope.league) == (current.source, current.league):
                 self.retire(scope)
@@ -255,7 +255,7 @@ class ContestStore:
     def take(self, report: ScopeReport) -> tuple[ScopeObservation, ...]:
         """One pass of a source: cover its window, then apply what each scope said. Returns the observations
         ignored."""
-        self.cover(report.coverage)
+        self.cover(report.span)
         return tuple(observation for observation in report.observations if not self.apply(observation))
 
     def reconcile(self, now: MonotonicTime) -> Reconciliation:

@@ -168,7 +168,7 @@ def test_the_slate_spans_yesterday_and_today_and_keeps_a_game_through_its_final(
     late, done, tonight = _game("late"), _game("done", GameStatus.FINAL), _game("tonight", GameStatus.SCHEDULED)
     provider.slates = {YESTERDAY: (late, done), TODAY: (tonight,)}
     first = _pass(planned, store, clock)
-    assert first.observations == () and first.coverage.scopes == (_scope(TODAY), _scope(YESTERDAY))  # asked
+    assert first.observations == () and first.span.scopes == (_scope(TODAY), _scope(YESTERDAY))  # asked
     poller.run_due()
     report = _pass(planned, store, clock)
     assert _ids(store) == ["tonight", "late"]  # yesterday's finished game stays away on a fresh start

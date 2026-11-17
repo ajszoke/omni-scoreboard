@@ -18,7 +18,7 @@ from dataclasses import dataclass
 
 from omni.core.clock import ClockReading, MonotonicTime
 from omni.core.time import DurationSeconds
-from omni.providers.base import Coverage, CurrentSlate, PollScope, Provider, ScopeObservation, ScopeReport
+from omni.providers.base import ScopeSpan, CurrentSlate, PollScope, Provider, ScopeObservation, ScopeReport
 
 __all__ = ["BackoffPolicy", "ProviderSupervisor"]
 
@@ -49,7 +49,7 @@ class ProviderSupervisor:
         backoff: BackoffPolicy | None = None,
     ) -> None:
         self._provider = provider
-        self._coverage = Coverage(
+        self._span = ScopeSpan(
             current=PollScope(provider.source, provider.league, CurrentSlate()), max_age=max_age.as_timedelta()
         )
         self._backoff = backoff if backoff is not None else BackoffPolicy()
@@ -59,7 +59,7 @@ class ProviderSupervisor:
     @property
     def scope(self) -> PollScope:
         """The provider's current slate, the one scope it answers for."""
-        return self._coverage.current
+        return self._span.current
 
     def ready_to_poll(self, at: MonotonicTime) -> bool:
         """Whether the backoff has run out, so the provider should be asked."""
@@ -68,14 +68,14 @@ class ProviderSupervisor:
     def observe(self, at: ClockReading, held: Collection[PollScope] = ()) -> ScopeReport:
         """Ask the provider as of ``at``, unless backing off, and report its answer or failure."""
         if not self.ready_to_poll(at.monotonic):
-            return ScopeReport(coverage=self._coverage)
+            return ScopeReport(span=self._span)
         try:
             answer = ScopeObservation.answer(self.scope, self._provider.refresh(at.utc), at)
         except Exception as exc:  # resilience boundary: survive ANY provider failure, a malformed answer included
             self._failures += 1
             self._next_retry_at = at.monotonic + self._backoff.delay_after(self._failures).as_timedelta()
             failure = ScopeObservation.failure(self.scope, f"{type(exc).__name__}: {exc}", at)
-            return ScopeReport(coverage=self._coverage, observations=(failure,))
+            return ScopeReport(span=self._span, observations=(failure,))
         self._failures = 0
         self._next_retry_at = None
-        return ScopeReport(coverage=self._coverage, observations=(answer,))
+        return ScopeReport(span=self._span, observations=(answer,))

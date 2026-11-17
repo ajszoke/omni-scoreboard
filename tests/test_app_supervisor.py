@@ -45,8 +45,8 @@ def test_an_answer_is_its_one_scope_s_observation_received_at_the_pass() -> None
     provider = _FakeProvider()
     supervisor = ProviderSupervisor(provider, max_age=MAX_AGE)
     report = supervisor.observe(_at(0))
-    assert supervisor.scope == SCOPE and report.coverage.current == SCOPE and report.coverage.earlier == ()
-    assert report.coverage.max_age == timedelta(seconds=120)
+    assert supervisor.scope == SCOPE and report.span.current == SCOPE and report.span.earlier == ()
+    assert report.span.max_age == timedelta(seconds=120)
     [answer] = report.observations
     assert (answer.scope, answer.outcome, answer.received) == (SCOPE, ScopeOutcome.COMPLETE, _at(0))
     assert provider.calls == [T]
@@ -91,7 +91,7 @@ def test_after_a_failure_it_backs_off_on_the_monotonic_clock() -> None:
     supervisor.observe(_at(0))  # the first failure: back off 5 s
     assert not supervisor.ready_to_poll(MonotonicTime(3))
     held_back = supervisor.observe(_at(3, wall=600))  # the wall clock jumped ten minutes ahead: still waiting
-    assert held_back.observations == () and held_back.coverage.current == SCOPE and len(provider.calls) == 1
+    assert held_back.observations == () and held_back.span.current == SCOPE and len(provider.calls) == 1
     assert supervisor.ready_to_poll(MonotonicTime(5))
     supervisor.observe(_at(5, wall=-600))  # and back: the wait is over when 5 s have passed
     assert len(provider.calls) == 2
