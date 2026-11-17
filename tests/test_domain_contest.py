@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 
 import pytest
 
 from omni.core.colors import RGBColor
-from omni.core.enum import GameStatus, League, Sport
+from omni.core.enum import GameStatus, League, SeasonStage, Sport
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.domain.athletes import Golfer
 from omni.domain.base import Competitor, LogoAsset
@@ -129,3 +130,26 @@ def test_golf_tournament_holds_individual_competitors() -> None:
     assert tourney.tournament_name == "U.S. Open"
     assert tourney.cut_line == 2
     assert all(isinstance(c, Competitor) for c in tourney.competitors)
+
+
+def test_a_game_whose_schedule_says_nothing_more_has_every_fact_unknown() -> None:
+    game = make_team_game()
+    assert game.stage is SeasonStage.UNKNOWN
+    assert (game.game_number, game.provider_date, game.neutral_site, game.national_broadcast) == (
+        None,
+        None,
+        None,
+        None,
+    )
+    assert game.resumed_from is None and game.start_tbd is False
+
+
+@pytest.mark.parametrize("number", [1, 2])
+def test_a_doubleheaders_games_are_numbered_1_and_2(number: int) -> None:
+    assert replace(make_team_game(), game_number=number).game_number == number
+
+
+@pytest.mark.parametrize("number", [0, 3])
+def test_no_other_game_number_is_a_doubleheaders(number: int) -> None:
+    with pytest.raises(ValueError, match="numbered 1 and 2"):
+        replace(make_team_game(), game_number=number)
