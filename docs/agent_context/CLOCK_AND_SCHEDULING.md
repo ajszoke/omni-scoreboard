@@ -323,10 +323,11 @@ entry point:
   every draw; a matched play missing from a complete page is re-read for 30 s; and the halftime hold is
   13 minutes by default (the user accepted the recommendation, 2026-11-16).
 
-Picked during the closeout, for the user or round 6 to ratify: a feed answer is current for two
-cadences; the final's confirmation bound (30 s); the release guard's plausibility bounds (a source time
-up to 5 s ahead of receipt or 2 minutes behind it) and its 2-minute settle after a jump; the NFL dead-feed
-bound (40 s past due) and mismatch re-reads (30 s).
+Bounds picked during the closeout:
+- **Ratified by the user (2026-11-16):** a feed answer is current for two cadences; the final's
+  confirmation bound (30 s); the NFL dead-feed bound (40 s past due) and mismatch re-reads (30 s).
+- **For round 6 to check:** the release guard's plausibility bounds (a source time up to 5 s ahead of
+  receipt or 2 minutes behind it) and its 2-minute settle after a jump.
 
 An audit of A1a against the round-4 rulings found four defects, fixed before round 5:
 - **A card the display can't draw** held the board: it was cued again every frame and nothing else
