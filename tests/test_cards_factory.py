@@ -9,6 +9,7 @@ from typing import Any
 
 from omni.cards.base import CardKind, CardPriority, ScoreboardCard
 from omni.cards.factory import CardFactory
+from omni.core.clock import ClockReading, MonotonicTime
 from omni.core.enum import DisplayPriority, GameStatus, HomeAway, League, PanelProfile
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.core.time import DurationSeconds
@@ -165,5 +166,5 @@ def test_an_mlb_and_an_nfl_game_with_the_same_raw_id_never_share_a_card_or_a_key
         assert [card.dedupe_key.raw for card in built] == expected
         assert CardFactory.big_play_key(game, play).raw == f"{scope}:bigplay:700001:ab:1"
     queue = InterleavedCardQueue()
-    queue.ingest_all([*cards(mlb), *cards(nfl)])
+    queue.ingest_all([*cards(mlb), *cards(nfl)], ClockReading(NOW, MonotonicTime(0.0)))
     assert len(queue) == 12  # no card of one game replaced the other's

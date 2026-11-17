@@ -8,6 +8,13 @@ is committed, not when it is chosen, so a card that never reached the panel spen
 its rotation or its reminder; and only if the latest view still holds the card as it was drawn, so a
 card that changed or left while it was drawn books nothing.
 
+A card's window runs on the monotonic clock. Its timing says, in UTC, when it may first air and when it
+expires; the queue pins both to the monotonic clock when it takes the card in (`CardWindow`), as that clock
+reading places them, and judges the window against the monotonic clock from then on. So a step of the wall
+clock neither takes a card off the board until the wall clock catches up nor cuts its window short. A card
+staged again with the same timing keeps its pins; new timing is pinned anew. The card keeps its UTC instants,
+for the trace and the display.
+
 Selection filters first, then chooses:
 1. **Eligible:** available, not expired, and supported on the profile.
 2. **A usable window:** a card about to expire, with less time left than its minimum, is passed over.
@@ -48,12 +55,12 @@ from types import MappingProxyType
 from typing import Any, Iterable
 
 from omni.cards.attention import AttentionMode
-from omni.cards.base import CardKind, ScoreboardCard
+from omni.cards.base import CardKind, DisplayTiming, ScoreboardCard
 from omni.core.clock import ClockReading, MonotonicTime
 from omni.core.enum import DisplayPriority, PanelProfile, StrEnumMixin
 from omni.core.ids import LeagueScopedId
 
-__all__ = ["CardView", "InterleavedCardQueue", "MissReason", "Missed", "Pick", "SelectionReason"]
+__all__ = ["CardView", "CardWindow", "InterleavedCardQueue", "MissReason", "Missed", "Pick", "SelectionReason"]
 
 # How much more airtime each band earns (multiplies time-since-last-shown).
 _BAND_WEIGHT: dict[DisplayPriority, int] = {
@@ -106,12 +113,48 @@ class Pick:
     reason: SelectionReason
 
 
+@dataclass(frozen=True, slots=True)
+class CardWindow:
+    """When a card may air, on the monotonic clock: pinned from its UTC timing as the clock read when the queue
+    took the card in, so a later step of the wall clock moves none of it."""
+
+    timing: DisplayTiming  # the timing it was pinned from
+    available: MonotonicTime  # the earliest it may air
+    expires: MonotonicTime | None = None  # gone by then, on air or not; None if it never expires
+
+    @classmethod
+    def pin(cls, timing: DisplayTiming, at: ClockReading) -> CardWindow:
+        """``timing``'s instants placed on the monotonic clock as ``at`` reads both."""
+
+        def place(instant: datetime) -> MonotonicTime:
+            return at.monotonic + (instant - at.utc)
+
+        expires = place(timing.expires_at) if timing.expires_at is not None else None
+        return cls(timing, place(timing.available_at), expires)
+
+    @property
+    def latest_start(self) -> MonotonicTime | None:
+        """The last moment it can start and still have its minimum before it expires; None if it never expires."""
+        if self.expires is None:
+            return None
+        return self.expires + (-self.timing.min_display.as_timedelta())
+
+    def is_open(self, now: MonotonicTime) -> bool:
+        """Whether it may show at ``now``: available, and not yet expired."""
+        return now >= self.available and (self.expires is None or now < self.expires)
+
+    def is_usable(self, now: MonotonicTime) -> bool:
+        """Whether it has time left at ``now`` for at least its minimum before it expires."""
+        return self.expires is None or self.expires.since(now) >= self.timing.min_display.as_timedelta()
+
+
 @dataclass(frozen=True, slots=True, eq=False)
 class CardView:
     """The cards one refresh published, numbered: what the board selects from until the next one."""
 
     generation: int
     cards: Mapping[str, ScoreboardCard[Any]]  # DedupeKey.raw -> card; read-only
+    windows: Mapping[str, CardWindow]  # DedupeKey.raw -> its card's window; read-only
 
     def card(self, dedupe_key: str) -> ScoreboardCard[Any] | None:
         """The card under ``dedupe_key`` in this view, or None if it isn't in it."""
@@ -126,7 +169,7 @@ class CardView:
         return next(replacing, None)
 
 
-_EMPTY = CardView(0, MappingProxyType({}))
+_EMPTY = CardView(0, MappingProxyType({}), MappingProxyType({}))
 
 
 class InterleavedCardQueue:
@@ -139,6 +182,7 @@ class InterleavedCardQueue:
     def __init__(self) -> None:
         self._lock = threading.RLock()
         self._cards: dict[str, ScoreboardCard[Any]] = {}  # staged: DedupeKey.raw -> card, until published
+        self._windows: dict[str, CardWindow] = {}  # DedupeKey.raw -> a staged card's window
         self._published = _EMPTY
         self._tick = 0
         self._group_last_shown: dict[LeagueScopedId, int] = {}  # contest id -> tick
@@ -149,54 +193,65 @@ class InterleavedCardQueue:
 
     # --- the decision thread: staging, then publishing -----------------------------------
 
-    def ingest(self, card: ScoreboardCard[Any]) -> None:
-        """Stage a card, or replace the one sharing its `DedupeKey` (a fresh update)."""
-        with self._lock:
-            self._cards[card.dedupe_key.raw] = card
-            self._undrawn.discard(card.dedupe_key.raw)  # a new version gets a fresh chance to draw
+    def ingest(self, card: ScoreboardCard[Any], at: ClockReading) -> None:
+        """Stage a card as of ``at``, or replace the one sharing its `DedupeKey` (a fresh update).
 
-    def ingest_all(self, cards: Iterable[ScoreboardCard[Any]]) -> None:
+        Its window is pinned to the monotonic clock as ``at`` places it; one staged again with the same timing
+        keeps the window it had.
+        """
+        key = card.dedupe_key.raw
+        with self._lock:
+            window = self._windows.get(key)
+            if window is None or window.timing != card.timing:
+                self._windows[key] = CardWindow.pin(card.timing, at)
+            self._cards[key] = card
+            self._undrawn.discard(key)  # a new version gets a fresh chance to draw
+
+    def ingest_all(self, cards: Iterable[ScoreboardCard[Any]], at: ClockReading) -> None:
         for card in cards:
-            self.ingest(card)
+            self.ingest(card, at)
 
     def remove(self, dedupe_key: str) -> None:
         with self._lock:
             self._cards.pop(dedupe_key, None)
+            self._windows.pop(dedupe_key, None)
 
-    def prune(self, now: datetime) -> list[Missed]:
-        """Unstage what can no longer air: cards past their expiry, and cards that never aired with less time
-        left than their minimum. Returns those that never aired, with why each missed."""
+    def prune(self, at: ClockReading) -> list[Missed]:
+        """Unstage what can no longer air at ``at``: cards past their expiry, and cards that never aired with
+        less time left than their minimum. Returns those that never aired, with why each missed."""
+        now = at.monotonic
         with self._lock:
             missed: list[Missed] = []
             for key, card in list(self._cards.items()):
-                expires = card.timing.expires_at
-                if expires is None:
+                window = self._windows[key]
+                if window.expires is None:
                     continue
                 aired = key in self._card_last_shown
-                expired = now >= expires
-                if not expired and (aired or expires - now >= card.timing.min_display.as_timedelta()):
+                expired = now >= window.expires
+                if not expired and (aired or window.is_usable(now)):
                     continue  # it can still start, or it has aired and stays until its expiry
-                del self._cards[key]
+                del self._cards[key], self._windows[key]
                 if not aired:
                     why = MissReason.EXPIRED if expired else MissReason.TOO_LATE
                     missed.append(Missed(card, MissReason.UNDRAWN if key in self._undrawn else why))
             return missed
 
-    def next_miss(self, now: datetime) -> datetime | None:
-        """When a staged card that hasn't aired next runs out of time to air, after ``now``; None if none will."""
+    def next_miss(self, at: ClockReading) -> MonotonicTime | None:
+        """When a staged card that hasn't aired next runs out of time to air, after ``at``, on the monotonic
+        clock; None if none will."""
         with self._lock:
             instants = [
-                card.timing.expires_at - card.timing.min_display.as_timedelta()
-                for key, card in self._cards.items()
-                if card.timing.expires_at is not None and key not in self._card_last_shown
+                window.latest_start for key, window in self._windows.items() if key not in self._card_last_shown
             ]
-        return min((instant for instant in instants if instant > now), default=None)
+        return min((instant for instant in instants if instant is not None and instant > at.monotonic), default=None)
 
     def publish(self) -> CardView:
         """Make the staged cards the board's, as one new numbered view. What's remembered of cards no longer
         in it is forgotten."""
         with self._lock:
-            self._published = CardView(self._published.generation + 1, MappingProxyType(dict(self._cards)))
+            generation = self._published.generation + 1
+            cards, windows = MappingProxyType(dict(self._cards)), MappingProxyType(dict(self._windows))
+            self._published = CardView(generation, cards, windows)
             self._forget_orphans()
             return self._published
 
@@ -214,10 +269,12 @@ class InterleavedCardQueue:
         with self._lock:
             return frozenset(card.contest.id for card in self._cards.values())
 
-    def eligible(self, now: datetime, profile: PanelProfile) -> list[ScoreboardCard[Any]]:
-        """Staged cards that may show right now on `profile` (available, in-window, supported)."""
+    def eligible(self, at: ClockReading, profile: PanelProfile) -> list[ScoreboardCard[Any]]:
+        """Staged cards that may show at ``at`` on `profile` (available, in-window, supported)."""
         with self._lock:
-            return [card for card in self._cards.values() if self._showable(card, now, profile)]
+            return [
+                card for key, card in self._cards.items() if _showable(card, self._windows[key], at.monotonic, profile)
+            ]
 
     # --- the frame thread: selecting against a view, and booking ------------------------
 
@@ -251,11 +308,14 @@ class InterleavedCardQueue:
         can't draw) are passed over, and hold up nothing ordered behind them.
         """
         with self._lock:
-            cards = (view if view is not None else self._published).cards.values()
-            eligible = [
-                card for card in cards if self._showable(card, at.utc, profile) and card.dedupe_key.raw not in skip
+            view = view if view is not None else self._published
+            now, windows = at.monotonic, view.windows
+            usable = [
+                card
+                for key, card in view.cards.items()
+                if key not in skip and _showable(card, windows[key], now, profile) and windows[key].is_usable(now)
             ]
-            pool = self._in_order(self._usable(eligible, at.utc))
+            pool = self._in_order(usable)
             if recovery:
                 pool = [card for card in pool if _is_base(card)] or pool
             bursting = [card for card in pool if self._is_bursting(card)]
@@ -306,7 +366,7 @@ class InterleavedCardQueue:
         """Prune and publish what's staged, then choose and book the next card at once (as if it aired at
         ``at``)."""
         with self._lock:
-            self.prune(at.utc)
+            self.prune(at)
             self.publish()
             pick = self.peek(at, profile)
             if pick is not None:
@@ -326,23 +386,19 @@ class InterleavedCardQueue:
         if no card will change on its own."""
         deadlines: list[MonotonicTime] = []
         with self._lock:
-            for key, card in (view if view is not None else self._published).cards.items():
+            view = view if view is not None else self._published
+            for key, card in view.cards.items():
                 if not card.layout_support.supports(profile):
                     continue
-                timing = card.timing
-                instants = [timing.available_at]
-                if timing.expires_at is not None:
-                    instants += [timing.expires_at, timing.expires_at - timing.min_display.as_timedelta()]
-                deadlines.extend(at.monotonic + (instant - at.utc) for instant in instants if instant > at.utc)
+                window = view.windows[key]
+                instants = (window.available, window.expires, window.latest_start)
+                deadlines.extend(instant for instant in instants if instant is not None and instant > at.monotonic)
                 reminded = self._reminded_at.get(key)
                 if reminded is not None:
                     due = reminded + card.attention.cooldown.as_timedelta()
                     if due > at.monotonic:
                         deadlines.append(due)
         return min(deadlines, default=None)
-
-    def _showable(self, card: ScoreboardCard[Any], now: datetime, profile: PanelProfile) -> bool:
-        return card.timing.is_available(now) and card.layout_support.supports(profile)
 
     def _in_order(self, pool: list[ScoreboardCard[Any]]) -> list[ScoreboardCard[Any]]:
         """The cards whose turn it is: none waiting on a card in the pool that hasn't aired, and of the finals
@@ -358,15 +414,6 @@ class InterleavedCardQueue:
             for card in pool
             if not any(before in waiting for before in card.after)
             and not (card.kind is CardKind.FINAL and card.dedupe_key in waiting and card.dedupe_key != next_final)
-        ]
-
-    @staticmethod
-    def _usable(pool: list[ScoreboardCard[Any]], now: datetime) -> list[ScoreboardCard[Any]]:
-        """The cards with time left for at least their minimum before they expire."""
-        return [
-            card
-            for card in pool
-            if card.timing.expires_at is None or card.timing.expires_at - now >= card.timing.min_display.as_timedelta()
         ]
 
     def _is_bursting(self, card: ScoreboardCard[Any]) -> bool:
@@ -407,6 +454,11 @@ class InterleavedCardQueue:
         self._reminded_at = {key: at for key, at in self._reminded_at.items() if key in cards}
         self._recurring_count = {key: c for key, c in self._recurring_count.items() if key in cards}
         self._undrawn &= set(cards) | set(self._cards)
+
+
+def _showable(card: ScoreboardCard[Any], window: CardWindow, now: MonotonicTime, profile: PanelProfile) -> bool:
+    """Whether ``card`` may show at ``now`` on ``profile``: inside its window, and supported."""
+    return window.is_open(now) and card.layout_support.supports(profile)
 
 
 def _is_base(card: ScoreboardCard[Any]) -> bool:

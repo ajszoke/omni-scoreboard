@@ -7,16 +7,17 @@ The board refreshes and paints on separate cadences:
      each one it asked last answered, or why it failed;
   2. take each answer into its scope and reconcile the board's contests across scopes (`ContestStore`), so a
      scope that fails keeps what it had and another league's scopes carry on regardless;
-  3. run the live-card pipeline (`LiveBaseballPipeline`, delay-safe, no spoilers), which stages the
-     card queue's changes, and drop what can no longer air. The pipeline gets the whole clock reading:
-     its holds are pinned, and released, on the monotonic clock, so a wall-clock jump can't release one
-     early;
+  3. run the live-card pipeline (`LiveBaseballPipeline`, delay-safe, no spoilers) over the baseball games, which
+     stages the card queue's changes, and drop what can no longer air. Another league's games stay members, and
+     count toward its health, but have no cards until a pipeline of their own joins the board. The pipeline gets
+     the whole clock reading: its holds are pinned, and released, on the monotonic clock, so a wall-clock jump
+     can't release one early;
   4. publish the staged cards to the board together with how far their source can be trusted, and how
      many games have nothing to show because they wait out the TV delay or their feed has stopped
      answering: one numbered input, so a paint on the frame thread sees all of a refresh or none of it.
      Each league's health is its current scope's, judged on the monotonic clock. The board's is its
      healthiest league's, so one league going offline doesn't take another's cards down; with one league
-     it is that league's.
+     it is that league's. While a quota holds a league's current scope back, its reason says so.
 - **`paint(at)`** asks the board (`BoardSession`) what should be up: a card, chosen by the queue and
   held by its dwell, or an explicit frame (idle, held, offline). It draws that through the
   `RendererRegistry`, a stale card dimmed, and commits it to the `DisplaySink`. The commit starts a
@@ -40,7 +41,7 @@ Each card that reaches the panel is traced at its first committed frame, with ho
 
 from __future__ import annotations
 
-from collections.abc import Hashable, Sequence
+from collections.abc import Callable, Hashable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, tzinfo
 from typing import Any
@@ -57,9 +58,9 @@ from omni.app.pipeline import (
 )
 from omni.cards.base import CardId, ScoreboardCard
 from omni.core.clock import Clock, ClockReading, MonotonicTime
-from omni.core.enum import League
+from omni.core.enum import League, Sport
 from omni.domain.contest import TeamGame
-from omni.providers.base import ScopeSource
+from omni.providers.base import PollScope, ScopeSource
 from omni.queue.scheduler import InterleavedCardQueue, Missed, SelectionReason
 from omni.renderers.board_frame import BoardFrameRenderer
 from omni.renderers.canvas import DimmedCanvas
@@ -81,10 +82,22 @@ from omni.tower.board import (
 from omni.tower.lane import ChangeKind, LaneChange, earliest
 from omni.tower.segment import Surface
 
-__all__ = ["OFFLINE_AFTER", "AppLoop", "LeagueHealth", "Painted", "Presentation", "Refresh", "TickResult"]
+__all__ = [
+    "OFFLINE_AFTER",
+    "AppLoop",
+    "LeagueHealth",
+    "Painted",
+    "Presentation",
+    "QuotaNote",
+    "Refresh",
+    "TickResult",
+]
 
 # How long the schedule may go unanswered before the board takes its cards down and says it's offline.
 OFFLINE_AFTER = timedelta(minutes=10)
+
+# Why a quota is holding a scope's asks back, while it is: e.g. "quota: NFLMeta rows 8% left, background slowed".
+QuotaNote = Callable[[PollScope], str | None]
 
 # The board's health is its healthiest league's.
 _HEALTHIEST_FIRST = {SourceHealth.FRESH: 0, SourceHealth.STALE: 1, SourceHealth.OFFLINE: 2}
@@ -97,7 +110,7 @@ class LeagueHealth:
     league: League
     source: SourceHealth
     scope: ScopeHealth  # the league's current scope, as the store has it
-    reason: str = ""  # why it's stale or offline
+    reason: str = ""  # why it's stale or offline, or that a quota is holding its schedule back
     changes_at: MonotonicTime | None = None  # when this next changes by itself
 
 
@@ -174,6 +187,7 @@ class AppLoop:
         marquee: MarqueeStyle = DEFAULT_MARQUEE,
         policy: BoardPolicy = BoardPolicy(),
         offline_after: timedelta = OFFLINE_AFTER,
+        quota: QuotaNote | None = None,
     ) -> None:
         if not schedules:
             raise ValueError("a board needs at least one schedule source")
@@ -193,6 +207,7 @@ class AppLoop:
         self._lanes = LaneClock()  # when each line went up, by the card's time on the board
         self._display_timezone = display_timezone  # the zone board clocks read in; None -> the render clock's
         self._offline_after = offline_after
+        self._quota = quota  # why a quota holds a scope back; None: no quota is consulted
         self._board = BoardSession(queue, sink.profile, policy=policy)
         self._frames = BoardFrameRenderer()
         self._health_changes_at: MonotonicTime | None = None  # when a league's health next changes by itself
@@ -205,9 +220,13 @@ class AppLoop:
             self._store.take(schedule.observe(at, held))
         reconciliation = self._store.reconcile(at.monotonic)
 
-        team_games = [contest for contest in self._store.contests if isinstance(contest, TeamGame)]
+        baseball = [
+            contest
+            for contest in self._store.contests
+            if isinstance(contest, TeamGame) and contest.sport is Sport.BASEBALL
+        ]
         pipeline_result = self._pipeline.refresh(
-            team_games,
+            baseball,
             at=at,
             fetch_feed=self._fetch_feed,
             fetch_win_probability=self._fetch_win_probability,
@@ -215,7 +234,7 @@ class AppLoop:
             fetch_pregame_details=self._fetch_pregame_details,
             fetch_game_lines=self._fetch_game_lines,
         )
-        unseen = tuple(self._queue.prune(now))
+        unseen = tuple(self._queue.prune(at))
         leagues = tuple(self._judge(league) for league in self._store.league_healths(at.monotonic))
         health, status = self._health(leagues, pipeline_result)
         self._board.publish(health)
@@ -317,8 +336,7 @@ class AppLoop:
         clearing the delay, a live card going stale or a stale game's cards coming down, the source going stale
         or offline, or a card that hasn't aired running out of time to (it's dropped then, and traced as
         missed)."""
-        miss = self._queue.next_miss(at.utc)
-        missed = at.monotonic + (miss - at.utc) if miss is not None else None
+        missed = self._queue.next_miss(at)
         return earliest((self._pipeline.next_deadline(at), self._health_changes_at, missed))
 
     def next_deadline(self, at: ClockReading) -> MonotonicTime | None:
@@ -341,9 +359,11 @@ class AppLoop:
         return health, healthiest.scope.status
 
     def _judge(self, scope: ScopeHealth) -> LeagueHealth:
-        """How far the board can trust a league's schedule, from its current scope's health."""
+        """How far the board can trust a league's schedule, from its current scope's health. A quota holding
+        the scope back is the reason, fresh or not: it's why no newer answer came."""
         league = scope.scope.league
-        error = scope.error or "no answer"
+        held = self._quota(scope.scope) if self._quota is not None else None
+        error = held or scope.error or "no answer"
         if scope.fresh_from is None or scope.age is None:
             return LeagueHealth(
                 league=league, source=SourceHealth.OFFLINE, scope=scope, reason=f"no schedule yet: {error}"
@@ -361,7 +381,11 @@ class AppLoop:
                 league=league, source=SourceHealth.STALE, scope=scope, reason=reason, changes_at=changes_at
             )
         return LeagueHealth(
-            league=league, source=SourceHealth.FRESH, scope=scope, changes_at=since + scope.max_age + second
+            league=league,
+            source=SourceHealth.FRESH,
+            scope=scope,
+            reason=held or "",
+            changes_at=since + scope.max_age + second,
         )
 
 

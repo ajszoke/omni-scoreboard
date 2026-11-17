@@ -1,3 +1,4 @@
+versions: policy omni-nfl-solo/1 | config omni-config/1 76a93823d4d8 | rules omni-rules/2026.1 | models none
    915.75  field  Q1 0-0 kickoff -
    915.75  strip  -
    982.75  field  Q1 0-0 -

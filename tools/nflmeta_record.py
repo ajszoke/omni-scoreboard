@@ -11,7 +11,9 @@ the request cap.
 
 Everything lands in ``build/recordings/nflmeta/<date>-<away>-<home>/``: the raw responses as JSON
 lines, stamped with when they arrived, and ``summary.log``, a readable line per change to compare
-against the broadcast (``tail -f`` it during the game).
+against the broadcast (``tail -f`` it during the game). NFLMeta's terms allow no standing copy, so the
+folder is made with a ``RETENTION.json`` stamp saying when it must be deleted by (7 days on); see
+``tools/recordings_due.py``.
 """
 
 from __future__ import annotations
@@ -31,6 +33,7 @@ _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT))  # so `omni` resolves when this script is run directly
 
 from omni.core.env import read_env_file
+from omni.providers.rights import DataSource, stamp_recording
 
 _BASE = "https://nflmeta.org"
 _KEY_VAR = "NFLMETA_API_KEY"
@@ -254,10 +257,11 @@ def main() -> int:
         / "nflmeta"
         / f"{kickoff.astimezone():%Y-%m-%d}-{_abbr(game, 'away')}-{_abbr(game, 'home')}"
     )
-    out.mkdir(parents=True, exist_ok=True)
+    stamp = stamp_recording(out, DataSource.NFLMETA, datetime.now(timezone.utc))
     recorder = Recorder(client, game_id, out)
     recorder._log(
         f"{_local(datetime.now(timezone.utc))}  game {game_id}, kickoff {_local(kickoff)}; recording to {out}"
+        f" (delete by {stamp.delete_by:%Y-%m-%d})"
     )
     wait = (kickoff - timedelta(minutes=args.lead_minutes) - datetime.now(timezone.utc)).total_seconds()
     if wait > 0:

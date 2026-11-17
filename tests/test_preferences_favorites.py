@@ -10,7 +10,7 @@ from omni.core.enum import GameStatus, League
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.domain.contest import TeamGame
 from omni.domain.teams import Team
-from omni.preferences.favorites import Favorites, parse_favorites
+from omni.preferences.favorites import AppliedMigration, ConfigMigration, Favorites, parse_favorites
 from omni.providers.mlb_teams import MlbTeamRegistry
 from omni.providers.nba_teams import NbaTeamRegistry
 from omni.providers.nfl_teams import NflTeamRegistry
@@ -38,7 +38,7 @@ def _game(away: Team, home: Team) -> TeamGame:
     )
 
 
-def _silent(line: str) -> None:
+def _silent(line: AppliedMigration) -> None:
     raise AssertionError(f"unexpected note: {line}")
 
 
@@ -103,11 +103,12 @@ def test_command_line_order_is_rank_and_the_league_is_read_in_any_case() -> None
     assert favorites == USER
 
 
-def test_a_bare_team_is_read_as_mlb_and_said_so_once() -> None:
-    notes: list[str] = []
+def test_a_bare_team_is_read_as_mlb_and_said_so_once_as_a_named_migration_keeping_the_entry_as_given() -> None:
+    notes: list[AppliedMigration] = []
     favorites = parse_favorites(["atl", "mlb:COL"], note=notes.append)
     assert favorites == Favorites({League.MLB: ("ATL", "COL")})
-    assert notes == ["--favorite atl read as mlb:ATL (a team without a league is MLB's)"]
+    assert notes == [AppliedMigration(ConfigMigration.BARE_FAVORITE_IS_MLB, original="atl", migrated="mlb:ATL")]
+    assert [str(note) for note in notes] == ["--favorite atl read as mlb:ATL (a team without a league is MLB's)"]
 
 
 @pytest.mark.parametrize(

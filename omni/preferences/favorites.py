@@ -6,20 +6,23 @@ abbreviation is checked against its league's club table as the favorites are bui
 configuration error instead of a team that silently never matches.
 
 On the command line each ``--favorite`` is ``LEAGUE:ABBR``, and their order is the rank. A bare ``ABBR``
-is the flag's older form, which only ever meant MLB, so it's read as ``mlb:ABBR``.
+is the flag's older form, which only ever meant MLB, so it's read as ``mlb:ABBR``. That reading is a named
+migration (`ConfigMigration`): each one applied is reported with the entry as given beside what it became
+(`AppliedMigration`), so a run can say which it applied and the original can be shown or written back.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass
+from enum import Enum
 
-from omni.core.enum import League
+from omni.core.enum import League, StrEnumMixin
 from omni.domain.contest import TeamGame
 from omni.domain.teams import Team
 from omni.providers import mlb_teams, nba_teams, nfl_teams
 
-__all__ = ["Favorites", "parse_favorites"]
+__all__ = ["AppliedMigration", "ConfigMigration", "Favorites", "parse_favorites"]
 
 # Each league with a club table: how a spelling resolves to its canonical abbreviation, and every club.
 _CLUBS: dict[League, tuple[Callable[[str], str], Collection[str]]] = {
@@ -27,6 +30,30 @@ _CLUBS: dict[League, tuple[Callable[[str], str], Collection[str]]] = {
     League.NFL: (nfl_teams.canonical_abbreviation, nfl_teams.NFL_TEAMS),
     League.NBA: (nba_teams.canonical_abbreviation, nba_teams.NBA_TEAMS),
 }
+
+
+class ConfigMigration(StrEnumMixin, str, Enum):
+    """A rewrite that reads a setting's older form as today's."""
+
+    BARE_FAVORITE_IS_MLB = "bare_favorite_is_mlb"  # ``--favorite ATL`` is ``mlb:ATL``
+
+
+# What each migration says when it reads an entry, filled with the entry as given and what it became.
+_SAYS = {
+    ConfigMigration.BARE_FAVORITE_IS_MLB: "--favorite {original} read as {migrated} (a team without a league is MLB's)"
+}
+
+
+@dataclass(frozen=True, slots=True)
+class AppliedMigration:
+    """One entry a migration rewrote: the entry exactly as given, kept beside what it became."""
+
+    migration: ConfigMigration
+    original: str
+    migrated: str
+
+    def __str__(self) -> str:
+        return _SAYS[self.migration].format(original=self.original, migrated=self.migrated)
 
 
 @dataclass(frozen=True, slots=True, init=False)
@@ -83,11 +110,11 @@ class Favorites:
         )
 
 
-def parse_favorites(entries: Iterable[str], *, note: Callable[[str], None]) -> Favorites:
+def parse_favorites(entries: Iterable[str], *, note: Callable[[AppliedMigration], None]) -> Favorites:
     """Favorites from ``--favorite`` entries in rank order, each ``LEAGUE:ABBR`` or a bare ``ABBR`` for MLB.
 
-    A bare entry is read as ``mlb:ABBR``, and ``note`` is told so, once for each. Raises `ValueError`
-    naming the entry for an unknown league or team.
+    A bare entry is read as ``mlb:ABBR``, and ``note`` is handed that migration, once for each. Raises
+    `ValueError` naming the entry for an unknown league or team.
     """
     ranked: dict[League, list[str]] = {}
     for entry in entries:
@@ -105,7 +132,7 @@ def parse_favorites(entries: Iterable[str], *, note: Callable[[str], None]) -> F
         except ValueError as exc:
             raise ValueError(f"--favorite {entry}: {exc}") from None
         if not colon:
-            note(f"--favorite {entry} read as mlb:{team} (a team without a league is MLB's)")
+            note(AppliedMigration(ConfigMigration.BARE_FAVORITE_IS_MLB, original=entry, migrated=f"mlb:{team}"))
         ranked.setdefault(league, []).append(team)
     return Favorites(ranked)
 

@@ -89,6 +89,7 @@ Free/low-cost by default:
 - MLB in-game win probability: Polymarket US public market data first (MLB's own model ignores team strength), with the MLB feed as the fallback.
 - Do not use Kalshi's API (its Developer Agreement limits use to a member's own trading) or polymarket.com's APIs from the US (its terms limit US residents to content features). Details: `docs/agent_context/SOURCES.md`.
 - Commercial fallback only after free sources fail product needs.
+- Each source's terms are typed in `omni/providers/rights.py`. A recording carries a `RETENTION.json` with its delete-by date, and `tools/recordings_due.py` lists overdue ones; deleting stays a person's step. Every account's requests and rows are counted against its limits (`omni/app/quota.py`).
 
 ## Device policy
 

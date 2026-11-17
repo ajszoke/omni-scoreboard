@@ -1094,14 +1094,14 @@ def test_a_game_whose_feed_stops_answering_goes_stale_then_comes_down() -> None:
     fetch = _Fetch()
     fetch.set("g1", _state(away_hits=0, inning=8, phase=InningPhase.BOTTOM))  # a no-hit bid: two cards
     pipe.refresh([_game("g1")], at=_at(T), fetch_feed=fetch)
-    assert {card.dedupe_key.raw for card in queue.eligible(T, QUAD)} == {
+    assert {card.dedupe_key.raw for card in queue.eligible(_at(T), QUAD)} == {
         "mlb:mlb_statsapi:g1:live",
         "mlb:mlb_statsapi:g1:nohitter",
     }
     fetch.fail.add("g1")
     res = pipe.refresh([_game("g1")], at=_at(T + timedelta(seconds=10)), fetch_feed=fetch)
     assert res.stale == (_id("g1"),)
-    marked = {card.dedupe_key.raw: card.stale_since for card in queue.eligible(T, QUAD)}
+    marked = {card.dedupe_key.raw: card.stale_since for card in queue.eligible(_at(T), QUAD)}
     assert marked == {
         "mlb:mlb_statsapi:g1:live": T + timedelta(seconds=10),
         "mlb:mlb_statsapi:g1:nohitter": T + timedelta(seconds=10),
@@ -1180,7 +1180,7 @@ def test_a_game_whose_feed_says_final_before_its_schedule_does_gets_its_result_f
     res = pipe.refresh([_game("g1")], at=_seconds(70), fetch_feed=fetch)
     assert [card.raw for card in res.finals] == ["mlb:mlb_statsapi:g1:final"] and res.removed == (_id("g1"),)
     assert _final_score(queue) == (2, 3)
-    queue.prune(T + timedelta(seconds=130))  # its post-game window ends
+    queue.prune(_seconds(130))  # its post-game window ends
     fetch.set("g1", _state(away=2, home=4))
     gone = pipe.refresh([_game("g1")], at=_seconds(131), fetch_feed=fetch)
     assert gone.corrections == () and gone.ingested == () and queue.card("mlb:mlb_statsapi:g1:final") is None
@@ -1238,7 +1238,7 @@ def test_a_correction_to_a_final_whose_window_is_over_doesnt_bring_it_back() -> 
     fetch = _Fetch()
     fetch.set("g1", _state(away=2, home=5))
     pipe.refresh([_game("g1", GameStatus.FINAL)], at=_seconds(0), fetch_feed=fetch)
-    queue.prune(T + timedelta(seconds=60))  # its post-game window ends
+    queue.prune(_seconds(60))  # its post-game window ends
     fetch.set("g1", _state(away=2, home=6))
     asked: list[datetime] = []
 

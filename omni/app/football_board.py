@@ -63,8 +63,9 @@ the final, released under the delay like any reading.
 
 A feed that stops answering is shown as stale: once no answer has come for `FEED_STALE_AFTER` past when
 the next was due, the card dims, the strip clears (a stoppage held on it too) and the meter goes, until
-the next answer is released. A halftime hold is quiet on purpose and never stale, nor is a final the
-feed has parked on.
+the next answer is released. A feed the quota holds back goes stale the same way, and says so: its log
+names the quota once, and again only when the reason changes. A halftime hold is quiet on purpose and
+never stale, nor is a final the feed has parked on.
 
 The market moves on a play as it happens, while the feed reports it 20 to 30 seconds later, so a fresh
 price beside the feed's score would give the play away early. Each reading takes the market's price
@@ -268,6 +269,7 @@ class FootballBoard:
         self._prices: deque[_Price] = deque()  # the market's readings, oldest first
         self._last_step: ClockReading | None = None  # the previous step's reading, to notice a clock jump
         self._majors: set[SegmentKey] = set()  # the strip entries offered as major, which no backlog drops
+        self._refused: str | None = None  # why the quota is holding the feed's asks back, while it is
 
     @property
     def showing(self) -> NflLiveSnapshot | None:
@@ -368,7 +370,8 @@ class FootballBoard:
         stale_at = self._stale_at()
         stale = stale_at is not None and at.monotonic >= stale_at
         if stale and not self._stale:
-            self._log("feed stale: no answer; dimming the card until it answers")
+            why = f" ({self._refused})" if self._refused is not None else ""
+            self._log(f"feed stale: no answer{why}; dimming the card until it answers")
             self._dropped(self._strip.clear(at, EndReason.SOURCE_STALE), EndReason.SOURCE_STALE.value)
         elif self._stale and not stale:
             self._log("feed answering again")
@@ -499,8 +502,11 @@ class FootballBoard:
             self._log("halftime hold over: polling again")
         snapshot = result.snapshot
         if snapshot is None:
-            self._log(f"feed: {result.error}")
+            if result.refused is None or result.error != self._refused:
+                self._log(f"feed: {result.error}")
+            self._refused = result.error if result.refused is not None else None
             return
+        self._refused = None
         for note in snapshot.notes:
             self._log(f"  ! {note.kind.value}: {note.detail}")
         received = result.received_monotonic if result.received_monotonic is not None else at.monotonic

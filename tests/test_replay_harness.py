@@ -27,7 +27,7 @@ from omni.queue.scheduler import InterleavedCardQueue
 from omni.queue.scheduler import SelectionReason
 from omni.tower.board import FrameKind
 from omni.providers.mlb_teams import MlbTeamRegistry
-from omni.replay.harness import ReplayProvider, Seek, TraceEntry, replay, replay_decisions
+from omni.replay.harness import ReplayProvider, Seek, TraceEntry, replay, replay_decisions, replay_versions
 from omni.replay.timeline import GameFrame, Outage, Timeline
 from tests.test_app_pipeline import _event
 
@@ -170,9 +170,10 @@ def test_replay_provider_serves_the_schedule_as_of_now() -> None:
 
 def test_decisions_list_each_change_on_the_board_with_its_reason() -> None:
     timeline = Timeline(frames=(_live(T0, "g1"), _live(T0, "g2")))
-    lines = replay_decisions(
+    header, *lines = replay_decisions(
         timeline, profile=QUAD, until=T0 + timedelta(seconds=60), broadcast_lag=DurationSeconds(30)
     )
+    assert header == replay_versions(QUAD, broadcast_lag=DurationSeconds(30)).header()
     assert lines[:6] == [
         "     0.0  source  fresh",
         "     0.0  frame   held  (2 games in the TV delay)",
@@ -191,7 +192,7 @@ def test_an_outage_dims_the_cards_then_takes_them_down_and_the_board_recovers() 
     provider = ReplayProvider(timeline)
     with pytest.raises(ProviderError, match="outage"):
         provider.refresh(T0 + timedelta(seconds=10))
-    lines = replay_decisions(timeline, profile=QUAD, until=T0 + timedelta(seconds=720))
+    _, *lines = replay_decisions(timeline, profile=QUAD, until=T0 + timedelta(seconds=720))
     assert lines == [
         "     0.0  source  fresh",
         "     0.0  up      mlb:mlb_statsapi:g1:live  (rotation)",
@@ -214,8 +215,10 @@ def test_a_seek_moves_the_replay_s_wall_clock_and_what_was_held_still_clears_on_
     timeline = Timeline(frames=frames)
     lag = DurationSeconds(45)
     seek = Seek(at=T0 + timedelta(seconds=40), to=T0 + timedelta(seconds=640))
-    sought = replay_decisions(timeline, profile=QUAD, until=T0 + timedelta(seconds=700), broadcast_lag=lag, seek=seek)
-    plain = replay_decisions(timeline, profile=QUAD, until=T0 + timedelta(seconds=100), broadcast_lag=lag)
+    _, *sought = replay_decisions(
+        timeline, profile=QUAD, until=T0 + timedelta(seconds=700), broadcast_lag=lag, seek=seek
+    )
+    _, *plain = replay_decisions(timeline, profile=QUAD, until=T0 + timedelta(seconds=100), broadcast_lag=lag)
     assert sought[:3] == [
         "     0.0  source  fresh",
         "     0.0  frame   held  (a game in the TV delay)",
@@ -235,11 +238,29 @@ def test_a_final_whose_feed_cant_be_read_shows_no_result_and_says_its_feed_is_mi
 
 @pytest.mark.parametrize("profile", list(PanelProfile))
 def test_the_slate_replays_to_its_recorded_decisions(profile: PanelProfile) -> None:
-    """The board decides alike on every profile; only the drawing differs."""
+    """The board decides alike on every profile; only the drawing differs. The profile is one of the
+    settings, so each profile's header carries its own digest."""
     from tests.mlb_slate import END, FAVORITES, LAG, slate
 
-    lines = replay_decisions(slate(), profile=profile, until=END, broadcast_lag=LAG, favorites=FAVORITES)
-    assert lines == SLATE_DECISIONS.read_text().splitlines()
+    header, *decided = replay_decisions(slate(), profile=profile, until=END, broadcast_lag=LAG, favorites=FAVORITES)
+    assert decided == SLATE_DECISIONS.read_text().splitlines()[1:]
+    assert header == replay_versions(profile, broadcast_lag=LAG, favorites=FAVORITES).header()
+
+
+def test_the_slate_s_recorded_decisions_open_with_what_made_them() -> None:
+    """The fixture was recorded on the quad board: today's policy, the slate's settings and the rule table."""
+    from tests.mlb_slate import FAVORITES, LAG
+
+    recorded = SLATE_DECISIONS.read_text().splitlines()[0]
+    assert recorded == replay_versions(QUAD, broadcast_lag=LAG, favorites=FAVORITES).header()
+    assert recorded == (
+        "versions: policy omni-board-policy/1 | config omni-config/1 c9cc6a61704f | rules omni-rules/2026.1"
+        " | models none"
+    )
+    assert replay_versions(QUAD, broadcast_lag=LAG, favorites=FAVORITES).config.canonical() == (
+        "delay=45s;favorites=mlb:ATL,mlb:COL;meter=off;odds=off;profile=quad_128x64;scroll_speed=slow;"
+        "takeover_cap=30s;turn=12s"
+    )
 
 
 def test_replay_samples_what_the_panel_showed_and_why() -> None:
@@ -256,10 +277,10 @@ def test_a_card_that_never_drew_is_listed_as_dropped() -> None:
     from omni.tower.lane import ChangeKind, EndReason
 
     queue = InterleavedCardQueue()
-    queue.ingest(CardFactory().pregame(_game("g1", GameStatus.PREGAME), now=T0))
+    reading = ClockReading(T0, MonotonicTime(0.0))
+    queue.ingest(CardFactory().pregame(_game("g1", GameStatus.PREGAME), now=T0), reading)
     board = BoardSession(queue, QUAD, policy=BoardPolicy())
     board.publish(BoardHealth())
-    reading = ClockReading(T0, MonotonicTime(0.0))
     board.cue(reading)
     queue.remove("mlb:mlb_statsapi:g1:pregame")
     board.publish(BoardHealth())

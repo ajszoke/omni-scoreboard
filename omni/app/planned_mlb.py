@@ -25,8 +25,13 @@ so no read here ever waits on the network.
   arrived no later than it, on the monotonic clock. The pipeline asks as of the arrival of the feed
   answer whose state is on the card, so the meter never knows more than the score beside it, and each
   reading carries its own arrival, which ages it.
-- **Pregame details and odds** are asked slowly, on their own workers; a game without an answer yet
-  simply shows less.
+- **Pregame details and odds** are asked slowly, on their own workers, as backfill: the first asks a
+  running-down month sheds. A game without an answer yet simply shows less.
+- **Accounts.** In a plan with a quota ledger, each ask spends the account `mlb_accounts` names: StatsAPI
+  for the slate, the feeds, the model and pregame details, the market's for its price, and the
+  sportsbook's for its odds. Given a StatsAPI `Meter`, each StatsAPI request is charged to it. A plan that
+  doesn't name an account for one of these asks fails here, when the board is built. While the ledger holds
+  a date's slate back, `held_back` says why, for the league's health.
 
 A feed with no standing answer raises `ProviderError`, with the last failure if there was one, which the
 pipeline reports just as it reported a failed fetch.
@@ -42,7 +47,8 @@ from zoneinfo import ZoneInfo
 
 from omni.core.clock import Clock, ClockReading
 from omni.app.pipeline import MeterReading
-from omni.app.poll_plan import PollKey, PollPlan, PollPolicy, PollPriority, PollSource
+from omni.app.poll_plan import AccountMap, PollKey, PollPlan, PollPolicy, PollPriority, PollSource
+from omni.app.quota import Meter, ProviderAccount
 from omni.core.enum import GameStatus, League
 from omni.core.ids import SourceRef
 from omni.core.time import local_date
@@ -68,6 +74,7 @@ __all__ = [
     "MlbSources",
     "OddsReader",
     "PlannedMlb",
+    "mlb_accounts",
 ]
 
 T = TypeVar("T")
@@ -108,6 +115,21 @@ MLB_POLICIES = {
     PollSource.GAME_LINES: PollPolicy(every=timedelta(minutes=5), keep_for=timedelta(minutes=30), per_minute=12),
 }
 
+
+def mlb_accounts(
+    source: SourceRef,
+    *,
+    market: ProviderAccount = ProviderAccount.POLYMARKET_US,
+    odds: ProviderAccount = ProviderAccount.BOVADA,
+) -> AccountMap:
+    """The accounts the MLB board's asks spend: the slate, feeds, model and pregame details ``source``'s (MLB
+    StatsAPI's), a market price ``market``'s, and pregame odds ``odds``'s."""
+    return AccountMap(
+        sources={source: ProviderAccount.MLB_STATSAPI},
+        kinds={PollSource.MARKET_WIN_PROBABILITY: market, PollSource.GAME_LINES: odds},
+    )
+
+
 # How the plan asks a market for one game's probability as of a UTC instant.
 MarketReader = Callable[[TeamGame, datetime], WinProbability | None]
 
@@ -147,10 +169,15 @@ class PlannedMlb:
         market: MarketReader | None = None,
         odds: OddsReader | None = None,
         favorites: Favorites = Favorites(),
+        meter: Meter | None = None,
     ) -> None:
+        accounts = plan.accounts
+        if accounts is not None:
+            for kind in PollSource:  # every ask this board makes spends a named account, or the board isn't built
+                accounts.account(kind, provider.source)
         self._plan = plan
         self._clock = clock
-        self._provider = provider
+        self._provider = _Counted(provider, meter) if meter is not None else provider
         self._market = market
         self._odds = odds
         self._favorites = favorites
@@ -179,6 +206,11 @@ class PlannedMlb:
             observations.extend(self._observe(day, PollPriority.BACKGROUND, at))
         span = ScopeSpan(current=self._scope(today), earlier=(self._scope(yesterday),), max_age=SLATE_MAX_AGE)
         return ScopeReport(span=span, observations=tuple(observations))
+
+    def held_back(self, scope: PollScope) -> str | None:
+        """Why the quota ledger is holding ``scope``'s slate back, while it is."""
+        admission = self._plan.held_back(PollKey(PollSource.SLATE, scope))
+        return admission.reason if admission is not None else None
 
     def fetch_feed(self, game: TeamGame, now: datetime) -> LiveBaseballFeed:
         """A game's newest standing feed answer, with when it arrived, how long it counts as current, and why
@@ -265,7 +297,7 @@ class PlannedMlb:
         """An optional read: the standing answer's value, or None. A failure only leaves the card showing less,
         and the plan retries it on its own schedule."""
         at = self._clock.read()
-        self._plan.want(key, fetch, priority=PollPriority.BACKGROUND, at=at)
+        self._plan.want(key, fetch, priority=PollPriority.BACKFILL, at=at)
         answer = self._plan.latest(key, at)
         return answer.value if answer is not None else None
 
@@ -275,3 +307,31 @@ class PlannedMlb:
         if game.status is not GameStatus.LIVE and not as_live:
             return PollPriority.BACKGROUND
         return PollPriority.FOCUS if self._favorites.of(game) is not None else PollPriority.NORMAL
+
+
+class _Counted:
+    """The MLB provider, each of its fetches charged to a meter as the one StatsAPI request it makes."""
+
+    def __init__(self, provider: MlbSources, meter: Meter) -> None:
+        self._provider = provider
+        self._meter = meter
+
+    @property
+    def source(self) -> SourceRef:
+        return self._provider.source
+
+    @property
+    def schedule_timezone(self) -> ZoneInfo:
+        return self._provider.schedule_timezone
+
+    def fetch_schedule(self, day: date, *, now: datetime) -> ProviderUpdate:
+        return self._meter.counted(self._provider.fetch_schedule)(day, now=now)
+
+    def fetch_live_feed(self, game: TeamGame, *, now: datetime) -> LiveBaseballFeed:
+        return self._meter.counted(self._provider.fetch_live_feed)(game, now=now)
+
+    def fetch_win_probability(self, game: TeamGame) -> WinProbability | None:
+        return self._meter.counted(self._provider.fetch_win_probability)(game)
+
+    def fetch_pregame_details(self, game: TeamGame) -> PregameDetails:
+        return self._meter.counted(self._provider.fetch_pregame_details)(game)
