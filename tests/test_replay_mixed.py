@@ -71,6 +71,7 @@ from omni.replay.mixed import (
     run_mixed,
 )
 from omni.replay.timeline import GameFrame
+from omni.replay.harness import replay_versions
 from omni.tower.board import SourceHealth
 
 ZONE = ZoneInfo("America/Denver")
@@ -401,9 +402,13 @@ def _runs(values: list[SourceHealth]) -> list[SourceHealth]:
 
 @pytest.mark.parametrize("profile", list(PanelProfile))
 def test_the_mixed_day_replays_to_its_recorded_decisions_on_every_profile(profile: PanelProfile) -> None:
-    """The board decides alike on every profile; only the drawing differs."""
-    lines = mixed_decisions(mixed_slate(), profile=profile, favorites=FAVORITES, broadcast_lag=LAG)
-    assert lines == DECISIONS.read_text().splitlines()
+    """The board decides alike on every profile; only the drawing differs. The profile is one of the settings, so
+    each profile's header carries its own digest, and the fixture's is the quad board's."""
+    header, *decided = mixed_decisions(mixed_slate(), profile=profile, favorites=FAVORITES, broadcast_lag=LAG)
+    recorded, *expected = DECISIONS.read_text().splitlines()
+    assert decided == expected
+    assert header == replay_versions(profile, broadcast_lag=LAG, favorites=FAVORITES).header()
+    assert recorded == replay_versions(QUAD, broadcast_lag=LAG, favorites=FAVORITES).header()
 
 
 def test_two_runs_of_the_mixed_day_decide_ask_and_measure_alike(day: _Day) -> None:
@@ -590,7 +595,7 @@ def test_an_nfl_game_on_the_board_s_slate_is_a_member_with_no_card_and_no_feed()
 def test_while_mlb_s_source_is_out_its_live_card_dims_then_comes_down() -> None:
     outage = SourceOutage(league=League.MLB, start=SHORT + timedelta(minutes=1), end=SHORT + timedelta(minutes=9))
     lines = mixed_decisions(_short(_playing(), faults=(outage,)), profile=QUAD, nfl=False)
-    assert lines[5:] == [
+    assert lines[6:] == [  # after the versions header and the first answers
         "    60.0  scope   mlb 2026-11-21  failed",
         "    60.0  scope   mlb 2026-11-22  failed",
         "    75.0  stale   mlb:mlb_statsapi:1:live",  # its last answer, at 45, was current for two cadences

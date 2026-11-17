@@ -88,7 +88,7 @@ from omni.queue.scheduler import InterleavedCardQueue
 from omni.renderers.canvas import Canvas
 from omni.renderers.context import RenderContext
 from omni.renderers.registry import RendererRegistry, default_registry
-from omni.replay.harness import _describe, _Discarding
+from omni.replay.harness import _describe, _Discarding, replay_versions
 from omni.replay.timeline import GameFrame, Timeline
 
 __all__ = [
@@ -333,9 +333,11 @@ def mixed_decisions(
     broadcast_lag: DurationSeconds = DurationSeconds(45),
     nfl: bool = True,
 ) -> list[str]:
-    """Every change across ``timeline``, one line each, timed in seconds since its start."""
+    """Every change across ``timeline``, one line each, timed in seconds since its start, under a header naming
+    what the replay decided with (`replay_versions`)."""
     run = run_mixed(timeline, profile=profile, favorites=favorites, broadcast_lag=broadcast_lag, nfl=nfl)
-    return list(run.decisions)
+    header = replay_versions(profile, broadcast_lag=broadcast_lag, favorites=favorites).header()
+    return [header, *run.decisions]
 
 
 def run_mixed(
