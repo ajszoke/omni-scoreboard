@@ -210,6 +210,33 @@ def test_fetch_live_feed_surfaces_the_pitching_decisions() -> None:
     assert (decisions.winner, decisions.loser, decisions.save) == ("Clayton Kershaw", "German Marquez", "Tanner Scott")
 
 
+def test_a_live_feed_carries_its_own_status_and_timestamp() -> None:
+    # Only the feed's own word that a game is final lets its state stand as the result.
+    feed = _feed()
+    feed["gameData"]["status"] = {"detailedState": "Final"}
+    feed["metaData"] = {"timeStamp": "20260617_233012"}
+    provider = MlbStatsApiProvider(MlbTeamRegistry({}), fetch_game=lambda _pk: feed)
+    live = provider.fetch_live_feed(_game(), now=NOW)
+    assert live.status is GameStatus.FINAL and live.as_of == datetime(2026, 6, 17, 23, 30, 12, tzinfo=timezone.utc)
+    assert {"gameData", "status", "detailedState", "metaData", "timeStamp"} <= set(_GAME_FIELDS.split(","))
+
+
+@pytest.mark.parametrize(
+    ("game_data", "meta_data"),
+    [({}, {}), ({"status": {"detailedState": ""}}, {"timeStamp": "not a time"}), ({"status": None}, {"timeStamp": 7})],
+)
+def test_a_feed_that_doesnt_say_its_status_or_time_says_neither(game_data: Any, meta_data: Any) -> None:
+    feed = _feed()
+    feed["gameData"], feed["metaData"] = game_data, meta_data
+    live = MlbStatsApiProvider(MlbTeamRegistry({}), fetch_game=lambda _pk: feed).fetch_live_feed(_game(), now=NOW)
+    assert live.status is None and live.as_of is None
+
+
+def test_the_fixture_feed_is_in_progress() -> None:
+    provider = MlbStatsApiProvider(MlbTeamRegistry({}), fetch_game=lambda _pk: _feed())
+    assert provider.fetch_live_feed(_game(), now=NOW).status is GameStatus.LIVE
+
+
 def test_parse_decisions_handles_the_block_shapes() -> None:
     person = lambda name: {"fullName": name}  # noqa: E731 - terse fixture helper
     full = {"liveData": {"decisions": {"winner": person("W"), "loser": person("L"), "save": person("S")}}}

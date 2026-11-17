@@ -113,7 +113,7 @@ def test_build_loop_threads_the_win_probability_fetcher() -> None:
     sink = RecordingDisplaySink(PanelProfile.QUAD_128X64)
     calls: list[str] = []
 
-    def fetch_wp(game: TeamGame, as_of: datetime) -> MeterReading | None:
+    def fetch_wp(game: TeamGame, as_of: ClockReading) -> MeterReading | None:
         calls.append(game.id.raw)
         return MeterReading(WinProbability(home=70.0, away=30.0), as_of)
 
@@ -176,7 +176,7 @@ def test_a_slow_swap_moves_the_dwell_the_booking_and_the_marquee_to_when_the_fra
         return book(pick, at)
 
     monkeypatch.setattr(loop._queue, "book", spy)
-    loop.refresh(clock.now())
+    loop.refresh(clock.read())
     first = paint_frame(loop, clock)
     shown = T + timedelta(seconds=5)
     assert first.presented is not None and first.presented.at == shown and first.at == shown
@@ -199,7 +199,7 @@ def test_a_slow_swap_moves_the_dwell_the_booking_and_the_marquee_to_when_the_fra
 def test_a_paint_without_a_clock_credits_the_frame_when_it_was_drawn() -> None:
     clock = FakeClock(T)
     loop = build_loop(_TwoGames(), _fetch_feed, _SlowSink(clock, 5.0), broadcast_lag=DurationSeconds(0))
-    loop.refresh(T)
+    loop.refresh(_at(T))
     painted = loop.paint(clock.read())
     assert painted.presented is not None and painted.presented.at == T  # a replay: no time passes in a paint
 

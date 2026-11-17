@@ -85,8 +85,8 @@ def _state(away: int = 1, home: int = 2) -> BaseballGameState:
 
 
 class _Slate:
-    """The schedule and each game's feed, as a test sets them: games listed in order, and a source that can
-    fail."""
+    """The schedule and each game's feed, as a test sets them: games listed in order, each feed agreeing with
+    the schedule on its game's status, and a source that can fail."""
 
     source = SOURCE
     league = League.MLB
@@ -103,7 +103,7 @@ class _Slate:
         return ProviderUpdate(source=SOURCE, observed_at=now, contests=contests)
 
     def feed(self, game: TeamGame, now: datetime) -> LiveBaseballFeed:
-        return LiveBaseballFeed(state=_state(*self.scores[game.id.raw]))
+        return LiveBaseballFeed(state=_state(*self.scores[game.id.raw]), status=self.status[game.id.raw])
 
 
 class _PausingQueue(InterleavedCardQueue):
@@ -179,7 +179,7 @@ def _loop(
 
 def _step(loop: AppLoop, seconds: float) -> Painted:
     """A refresh, then a paint, at ``seconds``."""
-    loop.refresh(T + timedelta(seconds=seconds))
+    loop.refresh(_at(seconds))
     return loop.paint(_at(seconds))
 
 
@@ -206,9 +206,9 @@ def test_a_paint_between_two_final_inserts_sees_the_refresh_before_and_the_earli
     _step(loop, 0)
     assert _step(loop, 30).shown is not None  # both live cards clear the delay; one goes up
     slate.status["atl-nym"] = GameStatus.FINAL
-    loop.refresh(T + timedelta(seconds=40))  # first seen final at 40: its result shows at 70
+    loop.refresh(_at(40))  # first seen final at 40: its result shows at 70
     slate.status["bos-nyy"] = GameStatus.FINAL
-    loop.refresh(T + timedelta(seconds=50))  # first seen final at 50: its result shows at 80
+    loop.refresh(_at(50))  # first seen final at 50: its result shows at 80
     seen: list[Painted] = []
     generations: list[int] = []
 
@@ -218,7 +218,7 @@ def test_a_paint_between_two_final_inserts_sees_the_refresh_before_and_the_earli
 
     queue.after, queue.pause = "bos-nyy:final", frame_thread
     before = queue.published.generation
-    refresh = loop.refresh(T + timedelta(seconds=80))  # both results show: bos-nyy's is staged first
+    refresh = loop.refresh(_at(80))  # both results show: bos-nyy's is staged first
     [mid] = seen
     assert generations == [before] and queue.published.generation == before + 1  # one refresh, one view
     assert mid.shown is not None and mid.shown.raw.endswith(":live")  # the last whole refresh: no final yet
@@ -234,7 +234,7 @@ def test_a_paint_between_the_new_cards_and_their_health_sees_the_old_cards_with_
     slate.fail, slate.scores["col-lad"] = True, (3, 2)  # the schedule stops answering; the feed moves on
     seen: list[Painted] = []
     queue.before_publishing = lambda: seen.append(loop.paint(_at(121)))
-    refresh = loop.refresh(T + timedelta(seconds=121))  # the new score, and the source past its age
+    refresh = loop.refresh(_at(121))  # the new score, and the source past its age
     queue.before_publishing = None
     [mid] = seen
     old = drawn.drawn[-1].payload
@@ -251,11 +251,11 @@ def test_a_paint_between_the_new_cards_and_their_health_sees_the_old_cards_with_
 def test_a_card_removed_while_its_first_frame_is_drawn_books_nothing_and_comes_down_unaired() -> None:
     slate = _Slate("atl-nym", "bos-nyy")
     loop, queue, drawn = _loop(slate)
-    loop.refresh(T)
+    loop.refresh(_at(0))
 
     def game_ends(card: ScoreboardCard[Any]) -> None:
         del slate.status[card.contest.id.raw]  # its game leaves the schedule while the frame is drawn
-        loop.refresh(T + timedelta(seconds=0.05))
+        loop.refresh(_at(0.05))
 
     drawn.while_drawing = game_ends
     painted = loop.paint(_at(0))
@@ -270,11 +270,11 @@ def test_a_card_removed_while_its_first_frame_is_drawn_books_nothing_and_comes_d
 def test_a_card_replaced_while_its_first_frame_is_drawn_counts_from_the_new_version_s_first_frame() -> None:
     slate = _Slate("col-lad")
     loop, queue, drawn = _loop(slate)
-    loop.refresh(T)
+    loop.refresh(_at(0))
 
     def scored(card: ScoreboardCard[Any]) -> None:
         slate.scores["col-lad"] = (3, 2)
-        loop.refresh(T + timedelta(seconds=0.05))
+        loop.refresh(_at(0.05))
 
     drawn.while_drawing = scored
     painted = loop.paint(_at(0))
@@ -401,7 +401,7 @@ def test_a_live_card_hands_off_to_the_final_that_ended_first_while_its_own_waits
     slate.status["atl-nym"] = GameStatus.FINAL
     _step(loop, 32)
     assert [_up(_step(loop, seconds)) for seconds in (42, 54)] == ["bos-nyy:live", "atl-nym:live"]
-    revealed = loop.refresh(T + timedelta(seconds=61))
+    revealed = loop.refresh(_at(61))
     assert revealed.pipeline.ends == (
         (CardId("bos-nyy:final"), GameEnd(T + timedelta(seconds=31), EndBasis.FIRST_SEEN)),
     )
@@ -417,7 +417,7 @@ def test_a_predecessor_too_late_to_start_is_traced_and_holds_its_final_up_no_lon
     walk_off = _card("col-lad", "walkoff", expires=5)  # 5 s left against an 8 s minimum
     final = CardFactory().final(_game("col-lad", GameStatus.FINAL), _state(), now=T, after=(walk_off.dedupe_key,))
     queue.ingest_all((walk_off, final))
-    refresh = loop.refresh(T)
+    refresh = loop.refresh(_at(0))
     assert refresh.unseen == (Missed(walk_off, MissReason.TOO_LATE),)
     assert _up(loop.paint(_at(0))) == "col-lad:final"
 
@@ -432,5 +432,5 @@ def test_a_predecessor_that_failed_to_draw_holds_nothing_up_and_is_traced_with_w
     assert failed.render_error is not None and _down(failed)[1] is EndReason.UNDRAWN
     assert _up(loop.paint(_at(0))) == "col-lad:final"
     assert loop.refresh_deadline(_at(0)) == MonotonicTime(22.0)  # when it can no longer start
-    refresh = loop.refresh(T + timedelta(seconds=22.5))
+    refresh = loop.refresh(_at(22.5))
     assert refresh.unseen == (Missed(walk_off, MissReason.UNDRAWN),)

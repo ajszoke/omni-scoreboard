@@ -14,19 +14,19 @@ from omni.queue.scheduler import Missed, MissReason, SelectionReason
 from omni.tower.board import BoardFrame, BoardHealth, BoardNote, BoardPayload, FrameKind, SourceHealth
 from omni.tower.lane import ChangeKind, EndReason, LaneChange
 from omni.tower.segment import Dwell, Provenance, Segment, SegmentKey, Surface
-from tests.test_app_loop import T, _at, _build
+from tests.test_app_loop import T, _at, _build, _game
 
 LATER = T + timedelta(seconds=12)
 
 
 def _refresh() -> Refresh:
     loop, _, _ = _build(lag=0)
-    return loop.refresh(T)
+    return loop.refresh(_at(T))
 
 
 def _first_paint() -> Painted:
     loop, _, _ = _build(lag=0)
-    loop.refresh(T)
+    loop.refresh(_at(T))
     return loop.paint(_at(T))
 
 
@@ -67,7 +67,7 @@ def test_a_card_that_left_before_it_aired_is_written_with_why() -> None:
     lines: list[str] = []
     tracer = DecisionTracer(lines.append, timezone=timezone.utc)
     loop, _, _ = _build(lag=0)
-    refresh = loop.refresh(T)
+    refresh = loop.refresh(_at(T))
     card = loop._queue.card("g1:live")
     assert card is not None
     tracer.refreshed(refresh, took=timedelta(0), next_at=LATER)
@@ -96,6 +96,24 @@ def test_a_final_revealed_is_written_with_when_its_game_ended_and_on_what_basis(
         lines[0],
         "  final: g1:final ended 22:59:20 (its decisive play)",
         "  final: g2:final ended 23:00:00 (first seen final)",
+    ]
+
+
+def test_a_corrected_final_and_a_final_its_feed_hasnt_confirmed_are_written() -> None:
+    lines: list[str] = []
+    tracer = DecisionTracer(lines.append, timezone=timezone.utc)
+    refresh = _refresh()
+    tracer.refreshed(refresh, took=timedelta(0), next_at=LATER)
+    waiting = dataclasses.replace(refresh.pipeline, unconfirmed=(_game("g2").id,))
+    tracer.refreshed(dataclasses.replace(refresh, pipeline=waiting), took=timedelta(0), next_at=LATER)
+    tracer.refreshed(dataclasses.replace(refresh, pipeline=waiting), took=timedelta(0), next_at=LATER)  # no change
+    corrected = dataclasses.replace(refresh.pipeline, corrections=(CardId("g1:final"),))
+    tracer.refreshed(dataclasses.replace(refresh, pipeline=corrected), took=timedelta(0), next_at=LATER)
+    assert lines[1:] == [
+        lines[0],
+        "  unconfirmed: g2 (final on the schedule; its feed hasn't said so)",
+        lines[0],
+        "  corrected: g1:final",
     ]
 
 

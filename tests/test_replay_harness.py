@@ -27,8 +27,9 @@ from omni.queue.scheduler import InterleavedCardQueue
 from omni.queue.scheduler import SelectionReason
 from omni.tower.board import FrameKind
 from omni.providers.mlb_teams import MlbTeamRegistry
-from omni.replay.harness import ReplayProvider, TraceEntry, replay, replay_decisions
+from omni.replay.harness import ReplayProvider, Seek, TraceEntry, replay, replay_decisions
 from omni.replay.timeline import GameFrame, Outage, Timeline
+from tests.test_app_pipeline import _event
 
 T0 = datetime(2026, 6, 17, 23, 0, tzinfo=timezone.utc)
 SOURCE = SourceRef("mlb_statsapi", "https://statsapi.mlb.com")
@@ -203,10 +204,31 @@ def test_an_outage_dims_the_cards_then_takes_them_down_and_the_board_recovers() 
     ]
 
 
-def test_a_game_without_a_state_has_no_feed() -> None:
+def test_a_seek_moves_the_replay_s_wall_clock_and_what_was_held_still_clears_on_its_own_monotonic_time() -> None:
+    # A home run at 30 s is held behind a 45 s delay, with the state before it. At 40 s the replay seeks ten
+    # minutes ahead: on the wall clock, everything held is long overdue. Nothing is released at the seek; the
+    # board makes the same decisions it makes without one, each ten minutes later on the wall clock.
+    home_run = _event("g1:ab:1", source_time=T0 + timedelta(seconds=30))
+    frames = (_live(T0, "g1"), dataclasses.replace(_live(T0 + timedelta(seconds=30), "g1", away=1), events=(home_run,)))
+    timeline = Timeline(frames=frames)
+    lag = DurationSeconds(45)
+    seek = Seek(at=T0 + timedelta(seconds=40), to=T0 + timedelta(seconds=640))
+    sought = replay_decisions(timeline, profile=QUAD, until=T0 + timedelta(seconds=700), broadcast_lag=lag, seek=seek)
+    plain = replay_decisions(timeline, profile=QUAD, until=T0 + timedelta(seconds=100), broadcast_lag=lag)
+    assert sought[:3] == [
+        "     0.0  source  fresh",
+        "     0.0  frame   held  (a game in the TV delay)",
+        "   645.0  up      g1:live  (rotation)",  # its first state, received at 0, clears 45 s on
+    ]
+    assert sought[4] == "   675.0  up      g1:bigplay:g1:ab:1  (takeover)"  # 45 s after the play, not at the seek
+    later = [line.replace(f"{float(line[:8]):8.1f}", f"{float(line[:8]) - 600:8.1f}", 1) for line in sought[2:]]
+    assert later == plain[2 : 2 + len(later)]
+
+
+def test_a_final_whose_feed_cant_be_read_shows_no_result_and_says_its_feed_is_missing() -> None:
     final_without_state = GameFrame(at=T0, game=_game("g1", GameStatus.FINAL))
     trace = replay(Timeline(frames=(final_without_state,)), profile=QUAD, tick=DurationSeconds(10))
-    assert [(entry.shown, entry.frame) for entry in trace] == [(None, FrameKind.IDLE)]  # the final can't be read
+    assert [(entry.shown, entry.frame) for entry in trace] == [(None, FrameKind.OFFLINE)]  # no feed for 1 game
 
 
 @pytest.mark.parametrize("profile", list(PanelProfile))

@@ -179,6 +179,10 @@ class PollPlan:
         """How many asks of each source may run at the same time."""
         return {source: policy.at_once for source, policy in self._policies.items()}
 
+    def policy(self, source: PollSource) -> PollPolicy:
+        """How ``source`` is asked."""
+        return self._policies[source]
+
     def want(
         self, key: PollKey[T], fetch: Callable[[datetime], T], *, priority: PollPriority, at: ClockReading
     ) -> None:
@@ -203,14 +207,15 @@ class PollPlan:
             answer: Answer[T] = entry.answers[-1]
             return answer if self._standing(key, answer, at) else None
 
-    def latest_by(self, key: PollKey[T], received_by: datetime, at: ClockReading) -> Answer[T] | None:
-        """The newest answer that arrived no later than ``received_by``, if it still stands."""
+    def latest_by(self, key: PollKey[T], received_by: MonotonicTime, at: ClockReading) -> Answer[T] | None:
+        """The newest answer that arrived no later than ``received_by`` (on the monotonic clock), if it still
+        stands."""
         with self._lock:
             entry = self._entries.get(key)
             if entry is None:
                 return None
             for answer in reversed(entry.answers):
-                if answer.received.utc <= received_by:
+                if answer.received.monotonic <= received_by:
                     return answer if self._standing(key, answer, at) else None
             return None
 

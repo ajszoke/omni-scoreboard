@@ -11,8 +11,8 @@ Each clock gives two readings, for two different jobs:
 - **Monotonic** (`monotonic`) measures spans: dwell, time since receipt, backoff, animation phase,
   pacing. It never jumps, so a wall-clock change can't stretch or cut a span.
 
-`FakeClock.advance` moves both readings together; `FakeClock.set` moves the wall clock alone, the way
-an NTP correction or a DST mistake would, so tests can check that spans don't follow it.
+`FakeClock.advance` moves both readings together; `FakeClock.set` and `FakeClock.jump` move the wall clock
+alone, the way an NTP correction or a DST mistake would, so tests can check that spans don't follow it.
 """
 
 from __future__ import annotations
@@ -52,6 +52,10 @@ class ClockReading:
     def __post_init__(self) -> None:
         if self.utc.tzinfo is None:
             raise ValueError("a clock reading's UTC time must be timezone-aware")
+
+    def project(self, instant: MonotonicTime) -> datetime:
+        """The UTC this reading puts on ``instant``: its own UTC, moved by the monotonic span to ``instant``."""
+        return self.utc + instant.since(self.monotonic)
 
 
 @runtime_checkable
@@ -117,6 +121,11 @@ class FakeClock:
         if to.tzinfo is None:
             raise ValueError("FakeClock time must be timezone-aware")
         self.current = to
+
+    def jump(self, by: timedelta) -> None:
+        """Jump the wall clock by ``by``, forward or back, the way a clock correction does; monotonic time
+        doesn't move."""
+        self.current = self.current + by
 
 
 class Pacer:

@@ -6,7 +6,7 @@ from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
-from omni.core.clock import FakeClock
+from omni.core.clock import FakeClock, MonotonicTime
 from omni.app.poll_plan import PollKey, PollPlan, PollPolicy, PollPriority, PollSource
 
 T0 = datetime(2026, 6, 17, 23, 0, tzinfo=timezone.utc)
@@ -131,10 +131,10 @@ def test_an_answer_can_be_read_as_of_an_earlier_receipt() -> None:
         plan.take_due(clock.read())
         plan.answered(key, value, clock.read())
         clock.advance(15 * S)
-    before_second = T0 + 20 * S
+    before_second = MonotonicTime(20)  # 20 s after the first, on the monotonic clock
     answer = plan.latest_by(key, before_second, clock.read())
     assert answer is not None and answer.value == "second"
-    assert plan.latest_by(key, T0 - S, clock.read()) is None  # nothing that old
+    assert plan.latest_by(key, MonotonicTime(-1), clock.read()) is None  # nothing that old
     clock.advance(80 * S)
     assert plan.latest_by(key, before_second, clock.read()) is None  # it has expired since
 
@@ -153,7 +153,7 @@ def test_a_key_nobody_wants_is_forgotten_even_in_flight() -> None:
     plan.answered(dropped, "late", clock.read())  # its answer lands after it was forgotten
     plan.failed(dropped, "late failure", clock.read())
     assert plan.latest(dropped, clock.read()) is None and plan.last_error(dropped) is None
-    assert plan.latest_by(dropped, T0 + 60 * S, clock.read()) is None
+    assert plan.latest_by(dropped, MonotonicTime(60), clock.read()) is None
 
 
 def test_the_next_deadline_is_the_earliest_idle_due_time() -> None:
@@ -276,8 +276,8 @@ def test_answers_are_kept_while_they_stand_however_many_arrive() -> None:
         plan.answered(key, f"answer {value}", clock.read())
         clock.advance(10 * S)
         _want(plan, clock, key)
-    oldest = plan.latest_by(key, T0, clock.read())
+    oldest = plan.latest_by(key, MonotonicTime(0), clock.read())
     assert oldest is not None and oldest.value == "answer 0"
     clock.advance(11 * S)  # the first is 101 s old: it no longer stands
     plan.answered(key, "newest", clock.read())
-    assert plan.latest_by(key, T0, clock.read()) is None
+    assert plan.latest_by(key, MonotonicTime(0), clock.read()) is None

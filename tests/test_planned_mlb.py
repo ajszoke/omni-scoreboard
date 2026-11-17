@@ -11,14 +11,14 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from omni.app.display import RecordingDisplaySink
-from omni.app.loop import AppLoop, Refresh
+from omni.app.loop import AppLoop, Painted, Refresh
 from omni.app.pipeline import MeterReading
 from omni.app.planned_mlb import FINAL_HOLD, MLB_POLICIES, NO_BACKOFF, PlannedMlb
 from omni.app.poll_plan import PollKey, PollPlan, PollSource
 from omni.app.poller import Poller
 from omni.app.runner import build_loop, build_planned_loop, warm_up
 from omni.cards.base import ScoreboardCard
-from omni.core.clock import FakeClock
+from omni.core.clock import ClockReading, FakeClock, MonotonicTime
 from omni.core.enum import GameStatus, PanelProfile
 from omni.core.ids import SourceRef
 from omni.core.time import DurationSeconds
@@ -62,6 +62,8 @@ class _FakeMlb:
         self.failing: set[date] = set()
         self.asked: list[tuple[date, datetime]] = []  # each schedule request: its date, and when
         self.states: dict[str, BaseballGameState] = {}
+        self.feed_status: dict[str, GameStatus] = {}  # a feed's own word on its game's status, if not the schedule's
+        self.feed_failing: set[str] = set()  # games whose feed requests fail
         self.probability: WinProbability | None = EVEN
         self.details: PregameDetails | None = DETAILS
         self.hang: threading.Event | None = None  # when set, a details request waits for it
@@ -73,7 +75,10 @@ class _FakeMlb:
         return ProviderUpdate(source=SOURCE, observed_at=now, contests=self.slates.get(day, ()), warnings=(f"{day}",))
 
     def fetch_live_feed(self, game: TeamGame, *, now: datetime) -> LiveBaseballFeed:
-        return LiveBaseballFeed(state=self.states.get(game.id.raw, _state()))
+        raw = game.id.raw
+        if raw in self.feed_failing:
+            raise ProviderError("game feed down")
+        return LiveBaseballFeed(state=self.states.get(raw, _state()), status=self.feed_status.get(raw, game.status))
 
     def fetch_win_probability(self, game: TeamGame) -> WinProbability | None:
         return self.probability
@@ -193,7 +198,7 @@ def test_a_live_game_from_yesterday_outlasts_its_dates_failing_slate_and_ends_wh
     for _ in range(14):  # seven minutes: yesterday's last good answer, from the start, stands only five
         clock.advance(30 * S)
         poller.run_due()
-        refreshes.append(loop.refresh(clock.now()))
+        refreshes.append(loop.refresh(clock.read()))
     removed = {game.raw for refresh in refreshes if refresh.reconciliation for game in refresh.reconciliation.removed}
     assert removed == set() and all(refresh.health.source is SourceHealth.FRESH for refresh in refreshes)
     assert _ids(planned.refresh(clock.now())) == ["tonight", "late"]  # still on the slate, its card still up
@@ -203,8 +208,26 @@ def test_a_live_game_from_yesterday_outlasts_its_dates_failing_slate_and_ends_wh
     for _ in range(3):  # the healthy answer lands, then the final is revealed
         clock.advance(30 * S)
         poller.run_due()
-        finals.extend(card.raw for card in loop.refresh(clock.now()).pipeline.finals)
+        finals.extend(card.raw for card in loop.refresh(clock.read()).pipeline.finals)
     assert finals == ["late:final"]
+
+
+def test_a_live_game_from_a_date_whose_slate_keeps_failing_gets_its_final_from_its_own_feed() -> None:
+    planned, _, clock, provider, poller = _setup(market=False)
+    late = _game("late")
+    provider.slates = {YESTERDAY: (late,), TODAY: (_game("tonight", GameStatus.SCHEDULED),)}
+    loop = build_planned_loop(planned, RecordingDisplaySink(QUAD), broadcast_lag=DurationSeconds(0))
+    warm_up(loop, poller, clock)
+    provider.failing = {YESTERDAY}  # yesterday's slate keeps saying the game is live, as last heard
+    provider.states["late"] = _state(away=3, home=4)
+    provider.feed_status["late"] = GameStatus.FINAL  # but its feed says it's over
+    finals: list[str] = []
+    for _ in range(4):
+        clock.advance(15 * S)
+        poller.run_due()
+        finals.extend(card.raw for card in loop.refresh(clock.read()).pipeline.finals)
+    assert finals == ["late:final"]
+    assert [contest.status for contest in planned.refresh(clock.now()).contests][1] is GameStatus.LIVE
 
 
 def test_a_date_that_leaves_the_window_retires_its_games_but_one_still_being_played() -> None:
@@ -250,19 +273,39 @@ def test_a_feed_is_dated_by_its_arrival_and_a_favorite_is_asked_sooner() -> None
         planned.fetch_feed(game, clock.now())
     poller.run_due()
     feed = planned.fetch_feed(game, clock.now())
-    assert feed.received_at == AFTER_MIDNIGHT
+    assert feed.received == ClockReading(AFTER_MIDNIGHT, MonotonicTime(0))
+    assert feed.current_for == 16 * S and feed.failing is None  # current for two of its cadences
     due = plan.next_due()
     assert due is not None and due.seconds == 8.0  # a favorite's live game: the focus cadence
 
 
-@pytest.mark.parametrize(("status", "cadence"), [(GameStatus.LIVE, 15.0), (GameStatus.FINAL, 30.0)])
-def test_other_games_are_asked_on_their_cadence(status: GameStatus, cadence: float) -> None:
+def test_another_live_game_is_asked_on_its_cadence() -> None:
     planned, plan, clock, _, poller = _setup()
     with pytest.raises(ProviderError):
-        planned.fetch_feed(_game("g1", status), clock.now())
+        planned.fetch_feed(_game("g1"), clock.now())
     poller.run_due()
     due = plan.next_due()
-    assert due is not None and due.seconds == cadence
+    assert due is not None and due.seconds == 15.0
+
+
+def test_a_final_is_asked_as_if_live_until_its_feed_says_final_then_in_the_background() -> None:
+    planned, plan, clock, provider, poller = _setup(favorites=frozenset({"COL"}))
+    game = _game("g1", GameStatus.FINAL)
+    provider.feed_status["g1"] = GameStatus.LIVE  # the feed hasn't caught up with the schedule
+    with pytest.raises(ProviderError):
+        planned.fetch_feed(game, clock.now())
+    poller.run_due()
+    assert planned.fetch_feed(game, clock.now()).current_for == 16 * S  # still a favorite's live game to ask
+    due = plan.next_due()
+    assert due is not None and due.seconds == 8.0
+    provider.feed_status.clear()  # it says final now
+    clock.advance(8 * S)
+    poller.run_due()
+    assert planned.fetch_feed(game, clock.now()).current_for == 60 * S  # a final: two background cadences
+    clock.advance(8 * S)
+    poller.run_due()
+    due = plan.next_due()
+    assert due is not None and due.seconds == 46.0  # asked again only in the background, for corrections
 
 
 def test_warming_up_takes_the_board_from_nothing_to_a_live_card() -> None:
@@ -270,7 +313,7 @@ def test_warming_up_takes_the_board_from_nothing_to_a_live_card() -> None:
     provider.slates = {TODAY: (_game("g1"),)}
     sink = RecordingDisplaySink(QUAD)
     loop = build_loop(planned, planned.fetch_feed, sink, broadcast_lag=DurationSeconds(0), backoff=NO_BACKOFF)
-    assert loop.refresh(clock.now()).health.source is SourceHealth.OFFLINE  # no schedule answered yet
+    assert loop.refresh(clock.read()).health.source is SourceHealth.OFFLINE  # no schedule answered yet
     assert loop.paint(clock.read()).frame is FrameKind.OFFLINE
     warm_up(loop, poller, clock)
     assert loop.paint(clock.read()).shown is not None
@@ -318,14 +361,14 @@ def test_a_hung_pregame_read_never_delays_an_on_time_score_release() -> None:
     poller = Poller(plan, clock, check_every=timedelta(milliseconds=1))
     poller.start()
     try:
-        loop.refresh(clock.now())  # wants the slates
+        loop.refresh(clock.read())  # wants the slates
         assert _until(lambda: plan.latest(PollKey(PollSource.SLATE, TODAY), clock.read()) is not None)
-        loop.refresh(clock.now())  # wants g1's feed, and g2's details and odds
+        loop.refresh(clock.read())  # wants g1's feed, and g2's details and odds
         feed: PollKey[LiveBaseballFeed] = PollKey(PollSource.GAME_FEED, live.id)
         assert _until(lambda: odds_asked.is_set() and plan.latest(feed, clock.read()) is not None)
-        assert loop.refresh(clock.now()).pipeline.held == (live.id,)  # the score waits out the delay
+        assert loop.refresh(clock.read()).pipeline.held == (live.id,)  # the score waits out the delay
         clock.advance(45 * S)
-        released = loop.refresh(clock.now()).pipeline  # g2's details and odds are still hung
+        released = loop.refresh(clock.read()).pipeline  # g2's details and odds are still hung
         assert [card.raw for card in released.ingested] == ["g1:live"]  # the score goes up on time
         assert [card.raw for card in released.pregames] == ["g2:pregame"]  # g2's card, just without details
     finally:
@@ -339,28 +382,31 @@ def test_a_hung_pregame_read_never_delays_an_on_time_score_release() -> None:
 def test_the_market_is_read_as_of_an_instant_and_carries_its_own_arrival() -> None:
     planned, _, clock, _, poller = _setup()
     game = _game("g1")
-    assert planned.fetch_win_probability(game, clock.now()) is None  # nothing in yet
+    start = clock.read()
+    assert planned.fetch_win_probability(game, start) is None  # nothing in yet
     poller.run_due()  # the market answers 300 ms after it's asked
-    first = AFTER_MIDNIGHT + timedelta(milliseconds=300)
-    assert planned.fetch_win_probability(game, AFTER_MIDNIGHT) is None  # nothing had arrived by then
+    first = clock.read()
+    assert first.utc == AFTER_MIDNIGHT + timedelta(milliseconds=300)
+    assert planned.fetch_win_probability(game, start) is None  # nothing had arrived by then
     assert planned.fetch_win_probability(game, first) == MeterReading(WinProbability(home=60.0, away=40.0), first)
     clock.advance(15 * S)
     poller.run_due()
-    assert planned.fetch_win_probability(game, first + S) == MeterReading(WinProbability(home=60.0, away=40.0), first)
-    reading = planned.fetch_win_probability(game, clock.now())
+    just_after = ClockReading(first.utc + S, first.monotonic + S)
+    assert planned.fetch_win_probability(game, just_after) == MeterReading(WinProbability(home=60.0, away=40.0), first)
+    reading = planned.fetch_win_probability(game, clock.read())
     assert reading is not None and reading.value == WinProbability(home=61.0, away=39.0)
 
 
 def test_the_model_is_read_the_same_way_and_a_market_with_nothing_to_say_reads_none() -> None:
     planned, _, clock, provider, poller = _setup()
     game = _game("g1")
-    planned.fetch_fallback_win_probability(game, clock.now())
+    planned.fetch_fallback_win_probability(game, clock.read())
     poller.run_due()
-    assert planned.fetch_fallback_win_probability(game, clock.now()) == MeterReading(EVEN, AFTER_MIDNIGHT)
+    assert planned.fetch_fallback_win_probability(game, clock.read()) == MeterReading(EVEN, clock.read())
     provider.probability = None
     clock.advance(20 * S)
     poller.run_due()
-    assert planned.fetch_fallback_win_probability(game, clock.now()) is None
+    assert planned.fetch_fallback_win_probability(game, clock.read()) is None
     assert planned.source == SOURCE
 
 
@@ -372,12 +418,12 @@ def test_a_failing_market_is_reported_and_no_market_means_no_meter() -> None:
         raise ProviderError("market down")
 
     failing = PlannedMlb(plan, clock, _FakeMlb(clock), market=broken)
-    failing.fetch_win_probability(game, clock.now())
+    failing.fetch_win_probability(game, clock.read())
     poller.run_due()
     with pytest.raises(ProviderError, match="market down"):
-        failing.fetch_win_probability(game, clock.now())
+        failing.fetch_win_probability(game, clock.read())
     unpriced, _, _, _, _ = _setup(market=False)
-    assert unpriced.fetch_win_probability(game, clock.now()) is None
+    assert unpriced.fetch_win_probability(game, clock.read()) is None
 
 
 def _metered_board(*, meter: bool) -> tuple[AppLoop, PollPlan, FakeClock, _FakeMlb, Poller, _Drawn]:
@@ -395,7 +441,7 @@ def test_the_running_board_shows_no_live_meter_unless_asked_for() -> None:
         for _ in range(8):  # two minutes: the first states clear the delay, and the readings beside them
             clock.advance(15 * S)
             poller.run_due()
-            loop.refresh(clock.now())
+            loop.refresh(clock.read())
         loop.paint(clock.read())
         assert drawn.card is not None and drawn.card.id.raw == "g1:live"
         assert (drawn.card.payload.win_probability is not None) is meter
@@ -415,9 +461,9 @@ def test_a_quote_that_arrives_after_the_score_on_the_card_never_airs_beside_it()
     for _ in range(6):  # 90 s of old-score answers, and quotes beside them
         clock.advance(15 * S)
         poller.run_due()
-        loop.refresh(clock.now())
+        loop.refresh(clock.read())
     clock.advance(30 * S)  # an answer from 15 s before the last refresh clears the delay...
-    started = clock.now()  # ...as the refresh starts, and another old-score answer arrives
+    started = clock.read()  # ...as the refresh starts, and another old-score answer arrives
     plan.answered(PollKey(PollSource.GAME_FEED, game.id), LiveBaseballFeed(state=old), clock.read())
     clock.advance(S)
     leading = WinProbability(home=99.0, away=1.0)
@@ -427,11 +473,117 @@ def test_a_quote_that_arrives_after_the_score_on_the_card_never_airs_beside_it()
     clock.advance(3 * S)
     loop.refresh(started)  # it reads only now
     clock.advance(timedelta(seconds=40))  # the second old-score answer clears the delay
-    loop.refresh(clock.now())
+    loop.refresh(clock.read())
     loop.paint(clock.read())
     assert drawn.card is not None and drawn.card.payload.home_line.runs == 2
     assert drawn.card.payload.win_probability not in (None, leading)
     clock.advance(2 * S)  # the new score clears it
-    loop.refresh(clock.now())
+    loop.refresh(clock.read())
     loop.paint(clock.read())
     assert drawn.card.payload.home_line.runs == 3 and drawn.card.payload.win_probability == leading
+
+
+# --- finals the feed confirms, and staleness from the last good answer ---------------------------------
+
+
+class _Board:
+    """The running board's wiring over the fake StatsAPI, stepped a second at a time: the poller asks what is
+    due, then a refresh and a paint."""
+
+    def __init__(self, *, lag: int, favorites: frozenset[str] = frozenset()) -> None:
+        self.planned, self.plan, self.clock, self.provider, self.poller = _setup(market=False, favorites=favorites)
+        self.drawn = _Drawn()
+        self.loop = build_planned_loop(
+            self.planned, RecordingDisplaySink(QUAD), broadcast_lag=DurationSeconds(lag), registry=self.drawn
+        )
+        self.start = self.clock.monotonic()
+        self.refreshes: list[tuple[float, Refresh]] = []
+        self.paints: list[tuple[float, Painted]] = []
+
+    @property
+    def elapsed(self) -> float:
+        return self.clock.monotonic().since(self.start).total_seconds()
+
+    def run_until(self, seconds: float) -> None:
+        while self.elapsed < seconds:
+            self.clock.advance(S)
+            self.poller.run_due()
+            self.refreshes.append((self.elapsed, self.loop.refresh(self.clock.read())))
+            self.paints.append((self.elapsed, self.loop.paint(self.clock.read())))
+
+    def finals(self) -> list[tuple[float, str]]:
+        return [(at, card.raw) for at, refresh in self.refreshes for card in refresh.pipeline.finals]
+
+    def shown(self, at: float) -> tuple[str | None, bool]:
+        """What the paint at ``at`` showed, and whether it was dimmed."""
+        [painted] = [painted for when, painted in self.paints if when == at]
+        return (painted.shown.raw if painted.shown is not None else None), painted.stale
+
+
+def test_a_schedule_final_never_puts_the_last_live_score_on_a_final_and_the_feed_s_own_final_does() -> None:
+    # The schedule calls a tied game final at +15 s, and its feed fails from then on: the last good answer is
+    # the live 2-2, still standing for 90 s. It never airs as a final. Once the feed answers again, with a
+    # final 2-3, that result shows when it clears the 45 s delay.
+    board = _Board(lag=45)
+    game = _game("g1")
+    board.provider.slates = {TODAY: (game,)}
+    board.provider.states["g1"] = _state(away=2, home=2)
+    warm_up(board.loop, board.poller, board.clock)  # the 2-2 answer arrives at 0
+    board.run_until(14)
+    board.provider.slates = {TODAY: (dataclasses.replace(game, status=GameStatus.FINAL),)}
+    board.provider.feed_failing = {"g1"}
+    board.run_until(89)
+    assert board.finals() == []  # no FINAL 2-2 at +60, when the schedule's word would have cleared the delay
+    unconfirmed = [refresh.pipeline.unconfirmed for at, refresh in board.refreshes if at >= 15]
+    assert set(unconfirmed) == {(game.id,)}  # traced: final by the schedule, not yet by its feed
+    assert board.shown(45) == ("g1:live", True)  # its last live frame airs as it clears the delay, dimmed
+
+    board.provider.feed_failing.clear()
+    board.provider.states["g1"] = _state(away=2, home=3)
+    board.run_until(160)
+    # The feed's ask failed at 15 s and its retries at 17, 22, 37, then every 15 s: the one at 97 s answers.
+    assert board.finals() == [(97 + 45, "g1:final")]
+    assert board.drawn.card is not None and board.drawn.card.id.raw == "g1:final"
+    assert (board.drawn.card.payload.away_score, board.drawn.card.payload.home_score) == (2, 3)
+
+
+def test_a_live_card_dims_two_cadences_after_its_last_good_answer_and_comes_down_two_minutes_later() -> None:
+    # The feed's last good answer arrives at 0. The next is due 15 s later and fails, and so do its retries: at
+    # 30 s, a whole cadence past when it was due, the card is drawn dimmed, however long the plan keeps that
+    # answer standing; at 150 s, two minutes on, it comes down.
+    board = _Board(lag=0)
+    board.provider.slates = {TODAY: (_game("g1"),)}
+    warm_up(board.loop, board.poller, board.clock)
+    board.provider.feed_failing = {"g1"}
+    board.run_until(160)
+    assert board.shown(29) == ("g1:live", False)
+    assert board.shown(30) == ("g1:live", True)
+    assert board.shown(149) == ("g1:live", True)
+    assert board.shown(150) == (None, False)  # down: the board says it has no feed for the game
+    stale = [(at, refresh.pipeline.warnings) for at, refresh in board.refreshes if refresh.pipeline.warnings]
+    assert stale[0] == (
+        30,
+        ("g1: stale: its feed's newest answer is out of date (its last ask: " "ProviderError: game feed down)",),
+    )
+
+
+def test_a_final_its_feed_keeps_calling_live_is_held_dimmed_then_taken_down() -> None:
+    # The schedule says final at +20 s, but the feed keeps answering, live: its live card carries on as the feed
+    # has it, and 30 s after the schedule's word it is marked stale; two minutes later it comes down. No result
+    # is shown, and the feed is still asked.
+    board = _Board(lag=0)
+    game = _game("g1")
+    board.provider.slates = {TODAY: (game,)}
+    board.provider.feed_status["g1"] = GameStatus.LIVE
+    warm_up(board.loop, board.poller, board.clock)
+    board.run_until(19)
+    board.provider.slates = {TODAY: (dataclasses.replace(game, status=GameStatus.FINAL),)}
+    board.run_until(200)
+    said_final = min(at for at, refresh in board.refreshes if refresh.pipeline.unconfirmed)
+    assert said_final == 30  # the slate is asked every 15 s
+    assert board.shown(59) == ("g1:live", False) and board.shown(60) == ("g1:live", True)
+    assert board.shown(179) == ("g1:live", True) and board.shown(180) == (None, False)
+    assert board.finals() == []
+    feed: PollKey[LiveBaseballFeed] = PollKey(PollSource.GAME_FEED, game.id)
+    asked = board.plan.latest(feed, board.clock.read())
+    assert asked is not None and asked.received.monotonic.since(board.start) > 185 * S  # still asked

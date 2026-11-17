@@ -4,27 +4,28 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+from omni.core.clock import ClockReading, MonotonicTime
 from omni.core.time import DurationSeconds
 from omni.queue.delay_buffer import DelayBuffer
 
 T0 = datetime(2026, 6, 17, 23, 0, 0, tzinfo=timezone.utc)
 
 
-def _at(seconds: int) -> datetime:
-    return T0 + timedelta(seconds=seconds)
+def _at(seconds: int, *, jumped: timedelta = timedelta(0)) -> ClockReading:
+    return ClockReading(T0 + timedelta(seconds=seconds) + jumped, MonotonicTime(seconds))
 
 
 def test_zero_delay_releases_on_next_call() -> None:
     buffer: DelayBuffer[str] = DelayBuffer(DurationSeconds(0))
-    buffer.push("now", observed_at=T0)
-    assert buffer.release(T0) == ["now"]
+    buffer.push("now", received=_at(0))
+    assert buffer.release(_at(0)) == ["now"]
     assert buffer.pending() == 0
 
 
 def test_item_is_held_until_the_delay_elapses() -> None:
     buffer: DelayBuffer[str] = DelayBuffer(DurationSeconds(10))
-    release_at = buffer.push("run scored", observed_at=T0)
-    assert release_at == _at(10)
+    release_at = buffer.push("run scored", received=_at(0))
+    assert release_at == MonotonicTime(10)
 
     assert buffer.release(_at(9)) == []  # still spoiler territory
     assert buffer.pending() == 1
@@ -34,16 +35,16 @@ def test_item_is_held_until_the_delay_elapses() -> None:
 
 def test_released_items_are_not_yielded_twice() -> None:
     buffer: DelayBuffer[str] = DelayBuffer(DurationSeconds(5))
-    buffer.push("x", observed_at=T0)
+    buffer.push("x", received=_at(0))
     assert buffer.release(_at(5)) == ["x"]
     assert buffer.release(_at(10)) == []
 
 
 def test_releases_in_push_order_as_delays_elapse() -> None:
     buffer: DelayBuffer[str] = DelayBuffer(DurationSeconds(10))
-    buffer.push("a", observed_at=_at(0))  # releases at 10
-    buffer.push("b", observed_at=_at(3))  # releases at 13
-    buffer.push("c", observed_at=_at(3))  # releases at 13
+    buffer.push("a", received=_at(0))  # releases at 10
+    buffer.push("b", received=_at(3))  # releases at 13
+    buffer.push("c", received=_at(3))  # releases at 13
 
     assert buffer.release(_at(10)) == ["a"]
     assert buffer.pending() == 2
@@ -53,11 +54,18 @@ def test_releases_in_push_order_as_delays_elapse() -> None:
 def test_next_release_at_reports_the_earliest_hold() -> None:
     buffer: DelayBuffer[int] = DelayBuffer(DurationSeconds(10))
     assert buffer.next_release_at() is None
-    buffer.push(1, observed_at=_at(5))  # releases at 15
-    buffer.push(2, observed_at=_at(0))  # releases at 10
-    assert buffer.next_release_at() == _at(10)
+    buffer.push(1, received=_at(5))  # releases at 15
+    buffer.push(2, received=_at(0))  # releases at 10
+    assert buffer.next_release_at() == MonotonicTime(10)
     buffer.release(_at(10))
-    assert buffer.next_release_at() == _at(15)
+    assert buffer.next_release_at() == MonotonicTime(15)
+
+
+def test_a_wall_jump_neither_releases_an_item_early_nor_holds_it_longer() -> None:
+    buffer: DelayBuffer[str] = DelayBuffer(DurationSeconds(10))
+    buffer.push("run scored", received=_at(0))
+    assert buffer.release(_at(5, jumped=timedelta(hours=1))) == []  # an hour ahead on the wall: still held
+    assert buffer.release(_at(10, jumped=timedelta(hours=-1))) == ["run scored"]  # an hour back: on time
 
 
 def test_delay_is_exposed() -> None:
@@ -92,6 +100,6 @@ def test_buffer_holds_a_real_card_until_release() -> None:
     card = CardFactory().live_baseball(game, state, now=T0)
 
     buffer: DelayBuffer[object] = DelayBuffer(DurationSeconds(8))
-    buffer.push(card, observed_at=T0)
+    buffer.push(card, received=_at(0))
     assert buffer.release(_at(7)) == []
     assert buffer.release(_at(8)) == [card]

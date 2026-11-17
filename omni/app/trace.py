@@ -7,10 +7,12 @@ One line per change, so a running board's log reads as a story rather than a hea
     down 19:05:24: mlb-745123:live (ran its time, 12.0s)
     frame 19:31:40: idle (nothing eligible)
 
-- A **refresh** line is written when the source's health or the number of games held in the TV delay
-  changes, and whenever a refresh drops a game or a play, misses a card or reveals a final. Each one
-  names the next refresh due by itself. Under it, a card that left without airing is named with why
-  (`unseen`), and a final with when its game ended and what that rests on, which orders the finals.
+- A **refresh** line is written when the source's health, the number of games held in the TV delay, or
+  the games the schedule calls final that their feed doesn't yet change, and whenever a refresh drops a
+  game or a play, misses a card, reveals a final or corrects one. Each one names the next refresh due by
+  itself. Under it, a card that left without airing is named with why (`unseen`), a final with when its
+  game ended and what that rests on, which orders the finals, a final whose result a later answer changed
+  (`corrected`), and each game whose result waits for its feed to say final (`unconfirmed`).
 - An **up** line is written at a card's first committed frame, with why the queue chose it and how its
   teams were drawn: logo variant, tile or color bar, meter color, and the contrast policy that chose
   them. A **frame** line is written when an explicit frame goes up, with why.
@@ -46,9 +48,11 @@ class DecisionTracer:
 
     def refreshed(self, refresh: Refresh, *, took: timedelta, next_at: datetime | None) -> None:
         health = refresh.health
-        key = (health.source, health.reason, health.held, health.unfed)
-        dropped = refresh.pipeline.skipped + refresh.pipeline.warnings
-        if key == self._last_refresh and not dropped and not refresh.unseen and not refresh.pipeline.ends:
+        pipeline = refresh.pipeline
+        key = (health.source, health.reason, health.held, health.unfed, pipeline.unconfirmed)
+        dropped = pipeline.skipped + pipeline.warnings
+        news = dropped or refresh.unseen or pipeline.ends or pipeline.corrections
+        if key == self._last_refresh and not news:
             return
         self._last_refresh = key
         line = f"refresh {self._clock(refresh.at)} in {took.total_seconds():.1f}s: source {health.source.value}"
@@ -63,8 +67,12 @@ class DecisionTracer:
             self._log(f"  dropped: {note}")
         for missed in refresh.unseen:
             self._log(f"  unseen: {missed.card.id.raw} ({missed.reason.value})")
-        for card, ended in refresh.pipeline.ends:
+        for card, ended in pipeline.ends:
             self._log(f"  final: {card.raw} ended {self._clock(ended.at)} ({ended.basis.value})")
+        for card in pipeline.corrections:
+            self._log(f"  corrected: {card.raw}")
+        for game in pipeline.unconfirmed:
+            self._log(f"  unconfirmed: {game.raw} (final on the schedule; its feed hasn't said so)")
 
     def painted(self, painted: Painted) -> None:
         for change in painted.changes:

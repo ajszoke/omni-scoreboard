@@ -150,7 +150,7 @@ def build_planned_loop(
 def warm_up(loop: AppLoop, poller: Poller, clock: Clock) -> None:
     """Fill the plan before the board starts: refresh, then ask what that refresh wanted, a few times."""
     for _ in range(_WARM_UP_PASSES):
-        loop.refresh(clock.now())
+        loop.refresh(clock.read())
         poller.run_due()
 
 
@@ -173,7 +173,7 @@ def run_forever(
 
     def refresh() -> MonotonicTime | None:
         started = clock.read()
-        result = loop.refresh(started.utc)
+        result = loop.refresh(started)
         deadline = loop.refresh_deadline(clock.read())
         next_at = started.utc + deadline.since(started.monotonic) if deadline is not None else None
         tracer.refreshed(result, took=clock.monotonic().since(started.monotonic), next_at=next_at)

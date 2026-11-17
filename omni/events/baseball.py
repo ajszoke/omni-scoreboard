@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum
 
-from omni.core.enum import StrEnumMixin
+from omni.core.clock import ClockReading
+from omni.core.enum import GameStatus, StrEnumMixin
 from omni.domain.baseball import (
     BaseballCount,
     BaseballGameState,
@@ -111,10 +112,20 @@ class LiveBaseballFeed:
     while it is in progress, a tie, or absent from the feed) — what the final card needs
     beyond the score. `warnings` lists any plays the parse had to drop (a malformed entry,
     isolated per-play) so a degraded feed is observable, not silently thinned.
+
+    `status` is the game's status as the feed itself gives it: only a feed that says FINAL
+    attests its state is the final result. `as_of` is when the feed says its answer stood.
+    The rest describe the answer as the board got it: when it arrived here (`received`), how
+    long it counts as current from then (`current_for`), and why the source's latest ask for
+    it since failed, while it is failing (`failing`).
     """
 
     state: BaseballGameState
     events: tuple[BaseballGameEvent, ...] = ()
     decisions: PitchingDecisions | None = None
     warnings: tuple[str, ...] = ()
-    received_at: datetime | None = None  # when this answer arrived; None means as of the pass that read it
+    status: GameStatus | None = None  # None when the feed doesn't say
+    as_of: datetime | None = None  # by the source's clock
+    received: ClockReading | None = None  # None means as of the pass that read it
+    current_for: timedelta | None = None  # None: current until a read fails
+    failing: str | None = None

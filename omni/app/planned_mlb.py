@@ -18,11 +18,18 @@ so no read here ever waits on the network.
   game this session has handed out that is still being played, or whose final hasn't had its time on
   the board yet (`FINAL_HOLD` since it was first handed out final). Those stay, and their date is
   still asked, until each is final and shown.
-- **A game's feed** carries the time its answer arrived, which dates the state for the TV delay.
-- **Win probability**, from the market or the model, is read as of an instant: the newest answer that
-  arrived no later than it. The pipeline asks as of the arrival of the feed answer whose state is on
-  the card, so the meter never knows more than the score beside it, and each reading carries its own
-  arrival, which ages it.
+- **A game's feed** carries when its answer arrived, read both ways, which dates the state for the TV
+  delay. It also says how long that answer counts as current (`CURRENT_FOR_CADENCES` of its cadence:
+  the next answer is due one cadence after it, and has one more to arrive), and why the latest ask
+  since failed, if it did. Past that the pipeline marks the game's card stale, however long the plan
+  still keeps the answer as its last good one.
+- **A game the schedule calls final** is asked as if it were still live (a favorite's sooner) until
+  its feed says final too, since only the feed's word reveals a result; then in the background, so a
+  late correction still arrives.
+- **Win probability**, from the market or the model, is read as of a moment: the newest answer that
+  arrived no later than it, on the monotonic clock. The pipeline asks as of the arrival of the feed
+  answer whose state is on the card, so the meter never knows more than the score beside it, and each
+  reading carries its own arrival, which ages it.
 - **Pregame details and odds** are asked slowly, on their own workers; a game without an answer yet
   simply shows less.
 
@@ -51,7 +58,16 @@ from omni.domain.contest import Contest, TeamGame
 from omni.events.baseball import LiveBaseballFeed
 from omni.providers.base import ProviderError, ProviderUpdate
 
-__all__ = ["FINAL_HOLD", "MLB_POLICIES", "NO_BACKOFF", "MarketReader", "MlbSources", "OddsReader", "PlannedMlb"]
+__all__ = [
+    "CURRENT_FOR_CADENCES",
+    "FINAL_HOLD",
+    "MLB_POLICIES",
+    "NO_BACKOFF",
+    "MarketReader",
+    "MlbSources",
+    "OddsReader",
+    "PlannedMlb",
+]
 
 T = TypeVar("T")
 
@@ -65,6 +81,10 @@ FINAL_HOLD = timedelta(hours=1)
 
 # A game still being played: kept past its date's window until it ends.
 _IN_PLAY = frozenset({GameStatus.LIVE, GameStatus.DELAYED})
+
+# How many of its cadences a feed answer counts as current: the next answer is due one cadence after it,
+# and has a whole further cadence to arrive.
+CURRENT_FOR_CADENCES = 2
 
 MLB_POLICIES = {
     PollSource.SLATE: PollPolicy(
@@ -202,17 +222,27 @@ class PlannedMlb:
         )
 
     def fetch_feed(self, game: TeamGame, now: datetime) -> LiveBaseballFeed:
+        """A game's newest standing feed answer, with when it arrived, how long it counts as current, and why
+        the latest ask since failed, if it did."""
         at = self._clock.read()
         key: PollKey[LiveBaseballFeed] = PollKey(PollSource.GAME_FEED, game.id)
-        self._plan.want(
-            key, lambda asked: self._provider.fetch_live_feed(game, now=asked), priority=self._priority(game), at=at
-        )
         answer = self._plan.latest(key, at)
+        unconfirmed = game.status is GameStatus.FINAL and (
+            answer is None or answer.value.status is not GameStatus.FINAL
+        )
+        priority = self._priority(game, as_live=unconfirmed)
+        self._plan.want(key, lambda asked: self._provider.fetch_live_feed(game, now=asked), priority=priority, at=at)
         if answer is None:
             raise ProviderError(self._plan.last_error(key) or "no answer yet")
-        return dataclasses.replace(answer.value, received_at=answer.received.utc)
+        cadence = self._plan.policy(PollSource.GAME_FEED).cadence(priority)
+        return dataclasses.replace(
+            answer.value,
+            received=answer.received,
+            current_for=cadence * CURRENT_FOR_CADENCES,
+            failing=self._plan.last_error(key),
+        )
 
-    def fetch_win_probability(self, game: TeamGame, as_of: datetime) -> MeterReading | None:
+    def fetch_win_probability(self, game: TeamGame, as_of: ClockReading) -> MeterReading | None:
         """The market's probability as it stood at ``as_of``: the newest reading that arrived by then."""
         market = self._market
         if market is None:
@@ -220,7 +250,7 @@ class PlannedMlb:
         key: PollKey[WinProbability | None] = PollKey(PollSource.MARKET_WIN_PROBABILITY, game.id)
         return self._reading(key, game, lambda asked: market(game, asked), as_of)
 
-    def fetch_fallback_win_probability(self, game: TeamGame, as_of: datetime) -> MeterReading | None:
+    def fetch_fallback_win_probability(self, game: TeamGame, as_of: ClockReading) -> MeterReading | None:
         """The model's probability as it stood at ``as_of``: the newest reading that arrived by then."""
         key: PollKey[WinProbability | None] = PollKey(PollSource.MODEL_WIN_PROBABILITY, game.id)
         return self._reading(key, game, lambda asked: self._provider.fetch_win_probability(game), as_of)
@@ -268,13 +298,13 @@ class PlannedMlb:
         key: PollKey[WinProbability | None],
         game: TeamGame,
         fetch: Callable[[datetime], WinProbability | None],
-        as_of: datetime,
+        as_of: ClockReading,
     ) -> MeterReading | None:
         at = self._clock.read()
         self._plan.want(key, fetch, priority=self._priority(game), at=at)
-        answer = self._plan.latest_by(key, as_of, at)
+        answer = self._plan.latest_by(key, as_of.monotonic, at)
         if answer is not None:
-            return MeterReading(answer.value, answer.received.utc) if answer.value is not None else None
+            return MeterReading(answer.value, answer.received) if answer.value is not None else None
         error = self._plan.last_error(key)
         if error is not None:
             raise ProviderError(error)
@@ -288,8 +318,10 @@ class PlannedMlb:
         answer = self._plan.latest(key, at)
         return answer.value if answer is not None else None
 
-    def _priority(self, game: TeamGame) -> PollPriority:
-        if game.status is not GameStatus.LIVE:
+    def _priority(self, game: TeamGame, *, as_live: bool = False) -> PollPriority:
+        """A favorite's live game is focus, another live game normal, the rest background; ``as_live`` asks a game
+        as if it were live (a final its feed hasn't confirmed)."""
+        if game.status is not GameStatus.LIVE and not as_live:
             return PollPriority.BACKGROUND
         favorite = game.away.abbreviation in self._favorites or game.home.abbreviation in self._favorites
         return PollPriority.FOCUS if favorite else PollPriority.NORMAL

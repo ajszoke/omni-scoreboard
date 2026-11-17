@@ -2,11 +2,13 @@
 
 The board refreshes and paints on separate cadences:
 
-- **`refresh(now)`**, the decision pass, wires the spine end to end:
+- **`refresh(at)`**, the decision pass, wires the spine end to end:
   1. poll the provider (`ProviderSupervisor`, last-known-good on failure);
   2. reconcile the contest set (`ContestStore`);
   3. run the live-card pipeline (`LiveBaseballPipeline`, delay-safe, no spoilers), which stages the
-     card queue's changes, and drop what can no longer air;
+     card queue's changes, and drop what can no longer air. The pipeline gets the whole clock reading:
+     its holds are pinned, and released, on the monotonic clock, so a wall-clock jump can't release one
+     early;
   4. publish the staged cards to the board together with how far their source can be trusted, and how
      many games have nothing to show because they wait out the TV delay or their feed has stopped
      answering: one numbered input, so a paint on the frame thread sees all of a refresh or none of it.
@@ -172,15 +174,16 @@ class AppLoop:
         self._frames = BoardFrameRenderer()
         self._health_changes_at: datetime | None = None  # when the source's health next changes by itself
 
-    def refresh(self, now: datetime) -> Refresh:
-        """One refresh as of ``now``: bring the cards up to date, and tell the board how its source stands."""
+    def refresh(self, at: ClockReading) -> Refresh:
+        """One refresh as of ``at``: bring the cards up to date, and tell the board how its source stands."""
+        now = at.utc
         snapshot = self._supervisor.poll(now)
         reconciliation = self._store.apply(snapshot.update) if snapshot.update is not None else None
 
         team_games = [contest for contest in self._store.contests if isinstance(contest, TeamGame)]
         pipeline_result = self._pipeline.refresh(
             team_games,
-            now=now,
+            at=at,
             fetch_feed=self._fetch_feed,
             fetch_win_probability=self._fetch_win_probability,
             fetch_fallback_win_probability=self._fetch_fallback_win_probability,
@@ -271,7 +274,7 @@ class AppLoop:
 
     def run_once(self, at: ClockReading) -> TickResult:
         """One refresh, then one paint, at ``at``."""
-        refresh = self.refresh(at.utc)
+        refresh = self.refresh(at)
         painted = self.paint(at)
         return TickResult(
             provider_status=refresh.provider_status,
@@ -283,11 +286,13 @@ class AppLoop:
         )
 
     def refresh_deadline(self, at: ClockReading) -> MonotonicTime | None:
-        """When a refresh would next find something changed by itself, as of ``at``: a state or play clearing
-        the delay, a final's reveal, a stale game's cards coming down, the source going stale or offline, or
-        a card that hasn't aired running out of time to (it's dropped then, and traced as missed)."""
-        instants = [self._pipeline.next_deadline(at.utc), self._health_changes_at, self._queue.next_miss(at.utc)]
-        return earliest(at.monotonic + (instant - at.utc) for instant in instants if instant is not None)
+        """When a refresh would next find something changed by itself, as of ``at``: a state, play or result
+        clearing the delay, a live card going stale or a stale game's cards coming down, the source going stale
+        or offline, or a card that hasn't aired running out of time to (it's dropped then, and traced as
+        missed)."""
+        instants = [self._health_changes_at, self._queue.next_miss(at.utc)]
+        projected = (at.monotonic + (instant - at.utc) for instant in instants if instant is not None)
+        return earliest((self._pipeline.next_deadline(at), *projected))
 
     def next_deadline(self, at: ClockReading) -> MonotonicTime | None:
         """When either pass next has something to do by itself, as of ``at``."""

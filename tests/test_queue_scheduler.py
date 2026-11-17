@@ -250,13 +250,13 @@ def test_scored_and_delayed_cards_compose_through_the_queue() -> None:
     from omni.queue.delay_buffer import DelayBuffer
 
     buffer: DelayBuffer[ScoreboardCard[LiveBaseballCardPayload]] = DelayBuffer(DurationSeconds(10))
-    buffer.push(_card("g1"), observed_at=NOW)
-    buffer.push(_card("g2", band=DisplayPriority.FAVORITE, score=30.0), observed_at=NOW)
+    buffer.push(_card("g1"), received=_at(NOW))
+    buffer.push(_card("g2", band=DisplayPriority.FAVORITE, score=30.0), received=_at(NOW))
 
     queue = InterleavedCardQueue()
-    assert buffer.release(NOW) == []  # still delayed
+    assert buffer.release(_at(NOW)) == []  # still delayed
     later = NOW + timedelta(seconds=10)
-    queue.ingest_all(buffer.release(later))
+    queue.ingest_all(buffer.release(_at(later)))
     assert len(queue) == 2
     # The favorite shows first (higher band breaks the equal-staleness tie).
     assert _shown(queue.next_card(_at(later), QUAD)) == "g2"
