@@ -38,6 +38,8 @@ Odds and win probability (measured 2026-11-01):
   - A play's row lands a median of 10s after the scoreboard shows the play; `play_sync.status` turns `matched` when it has.
   - Every live row is `provisional`, and 46 of 51 plays were corrected, up to five times. The last correction came a median of 4.4 minutes later, mostly filling in `drive_result` or the description, sometimes the yards. A review can move the scoreboard backward.
   - Live rows have 27 columns, with no timeouts, win probability or wall-clock time. Play types are ESPN's (`pass_reception`, `rush`, `sack`, `official_timeout`, `end_period`).
+  - Play text names clubs by the league's play-by-play codes. Five differ from the board's abbreviations: BLT (BAL), CLV (CLE), ARZ (ARI), HST (HOU) and LA (LAR). The board reads them through `omni/events/football_clubs.py` (seen as "TIMEOUT BLT" on LAC @ BAL, 2026-11-16).
+  - Once no game is live, `recommended_poll_seconds` runs long: after LAC @ BAL's final (2026-11-16) the next recommended poll came about 15 minutes later.
   - Cost: about 490 requests an hour at the recommended pace, so roughly 1,500 for a game.
   - Kickoff rows list the receiving team in `posteam_abbr`, and punt rows the punting team.
   - Club timeouts appear only in play text ("Timeout #2 by CIN at 01:52."). So does one charged for a lost challenge ("...was Upheld. ... (Timeout #1.)").
@@ -90,7 +92,7 @@ NBA providers (review round 4's research thread):
     - `status_state`: `scheduled`, `in_progress`, `final`, `postponed`, `canceled`, `delayed`, `suspended`, `abandoned` or `unknown`.
     - `status`: "1st Qtr" through "Halftime" to "Final", or a start time before tip-off.
     - `period`: 0 before tip-off and 5+ in overtime. Some old overtime finals read 4.
-    - `time`: a clock string, such as "3:44".
+    - `time`: the game clock with its period, "Q2 1:17", with tenths under a minute ("Q1 :50.9"); "END Q1", "Half", "END Q3" and "END Q4" at breaks (seen live, 2026-11-16).
     - Scores by quarter and overtime.
     - `home_`/`visitor_timeouts_remaining` and `home_`/`visitor_in_bonus`. Quarter, bonus and timeout data start with the 2023 season.
     - No possession, team fouls or running flag.
@@ -103,6 +105,13 @@ NBA providers (review round 4's research thread):
     - At the final, `status` and `time` both read "Final". An overtime final has `period` 5 and `*_ot1` scores. Timeouts and bonus keep their last values.
     - Every game also has `date` (the US Eastern date the API files it under), `datetime` (tip-off, UTC), `season` (its starting year), `postseason`, `postponed` and `ist_stage` (the NBA Cup stage; null on these games).
     - A team has an id, conference, division, city, name, full name and abbreviation (`BKN`, `GSW`, `NOP`, `PHX`, `SAS`, `UTA`, `WAS`).
+  - Recorded live, 2026-11-16 (8 games, a slate read every ~13 s from 16:50 to 21:26 Mountain; analysis in `~/omni-review/sources/evidence/live-2026-11-16.md`):
+    - 1,084 answers, all 200: p50 0.17 s, p95 0.61 s, max 6.3 s. The 5-a-minute limit was fully used (`x-ratelimit-remaining` spread evenly over 0-4) with no 429, so 13 s is the edge; a board-side poller should back off on 429.
+    - The `time` clock is sampled live: while play runs it advances about one game second per wall second (p50), so the feed is current to within a poll. It has no possession or running flag.
+    - About 60% of reads change nothing (stoppages). A game's clock moves 13-26 s apart and its score about 39 s apart (medians).
+    - A timeout shows as a decrement of `*_timeouts_remaining` (85 over 8 games; the NBA charges its mandatory timeouts to a team).
+    - `status_state` turns `final` 13-26 s after the clock reads Q4 :00.0, sometimes through "END Q4"; no score changed after a final.
+    - The clock can step back: official corrections (Q2 2:12 to 2:13) and period-boundary transients ("Q4 :00.0" under period 4 before "Q4 11:45"; "Q2 12:00" under period 2 just before "Half"). Treat a boundary reading as provisional.
   - Terms, last updated 2026-10-20:
     - §6 allows any lawful personal or commercial use, including "backend APIs that support those products, provided those APIs are not offered to third parties".
     - Copying, caching, storing and archiving are allowed, with no retention deadline.
