@@ -505,3 +505,95 @@ def test_a_segment_and_its_dwell_are_checked_when_made() -> None:
     with pytest.raises(ValueError, match="expire after"):
         replace(good, expires_at=T0)
     assert Cue(good, 1).payload.detail == "C.Brown 4 YDS 1 CAR"
+
+
+# Bounds while a segment waits on the display, and pinned to the monotonic clock.
+
+
+def test_a_cued_segment_never_shown_goes_at_its_latest_start_or_at_once_once_invalidated() -> None:
+    lane = _lane(_segment("1", latest_start=T0 + 5 * S), _segment("2", "PASS +9"))
+    assert lane.cue(_at(T0)) is not None  # cued, and the display never shows it
+    assert lane.next_deadline(_at(T0)) == MonotonicTime(5.0)  # its latest start
+    assert lane.cue(_at(T0 + 5 * S)) is not None  # not late yet
+    late = lane.cue(_at(T0 + 6 * S))
+    assert late is not None and late.payload.headline == "PASS +9"
+    lane.invalidate()  # the field moves on before the display shows the pass
+    assert lane.next_deadline(_at(T0 + 7 * S)) == MonotonicTime(7.0)  # at once
+    assert lane.cue(_at(T0 + 7 * S)) is None and lane.idle
+    assert [(c.kind, c.segment.key.subject, c.reason) for c in lane.changes()] == [
+        (ChangeKind.DROPPED, "1", EndReason.TOO_LATE),
+        (ChangeKind.DROPPED, "2", EndReason.INVALIDATED),
+    ]
+
+
+def test_a_shown_segment_keeps_its_air_past_its_latest_start_and_a_blanked_one_waits_for_its_expiry() -> None:
+    lane = _lane(_segment("1", latest_start=T0 + 5 * S, expires_at=T0 + 30 * S))
+    _air(lane, T0)
+    assert _air(lane, T0 + 15 * S) == ("RUN +4", "RUN +4 detail")  # started in time: its latest start is spent
+    lane.blanked(_at(T0 + 16 * S))  # the display goes away
+    assert lane.cue(_at(T0 + 29 * S)) is not None  # blank, waiting for a new display, until its expiry
+    assert lane.next_deadline(_at(T0 + 29 * S)) == MonotonicTime(30.0)
+    assert lane.cue(_at(T0 + 30 * S)) is None
+    assert [(c.kind, c.reason) for c in lane.changes()][-1] == (ChangeKind.DOWN, EndReason.EXPIRED)
+
+
+def test_a_held_segment_on_the_panel_outlasts_its_expiry_while_nothing_is_pending() -> None:
+    stoppage = replace(_stoppage("t", "TV TIMEOUT"), expires_at=T0 + 90 * S)
+    lane = _lane(stoppage)
+    _air(lane, T0)
+    assert lane.next_deadline(_at(T0 + 100 * S)) is None  # held and current: only something new ends it
+    assert _air(lane, T0 + 100 * S) == ("TV TIMEOUT", None)  # past its expiry, still on the panel
+    lane.offer([_segment("2", available=T0 + 105 * S)])
+    assert lane.next_deadline(_at(T0 + 100 * S)) == MonotonicTime(105.0)  # when the next is available
+    assert _air(lane, T0 + 105 * S) == ("RUN +4", "RUN +4 detail")
+    blank = _lane(stoppage)
+    _air(blank, T0)
+    blank.blanked(_at(T0 + 5 * S))  # off the panel: its expiry stands
+    assert blank.next_deadline(_at(T0 + 5 * S)) == MonotonicTime(90.0)
+    assert blank.cue(_at(T0 + 90 * S)) is None
+    assert [(c.kind, c.segment.key.subject, c.reason) for c in (*lane.changes(), *blank.changes())][1:] == [
+        (ChangeKind.DOWN, "t", EndReason.NEXT_WAITING),
+        (ChangeKind.UP, "2", None),
+        (ChangeKind.UP, "t", None),
+        (ChangeKind.BLANKED, "t", None),
+        (ChangeKind.DOWN, "t", EndReason.EXPIRED),
+    ]
+
+
+def test_bounds_offered_with_a_clock_reading_stay_put_when_the_wall_clock_jumps() -> None:
+    lane: Lane[PlaySummary] = Lane(Surface.PLAY_STRIP)
+    offered = _at(T0)
+    run = _segment("1", players=None, expires_at=T0 + 90 * S)
+    lane.offer([run, _segment("2", "PASS +9", players=None, available=T0 + 30 * S)], at=offered)
+
+    def at(seconds: int, jump: timedelta) -> ClockReading:  # the wall clock off by ``jump``
+        return ClockReading(T0 + seconds * S + jump, MonotonicTime(float(seconds)))
+
+    back, ahead = -timedelta(minutes=10), timedelta(hours=1)
+    assert _shown(lane, at(0, ahead)) == "RUN +4"  # not expired, though the wall clock is an hour past it
+    assert lane.next_deadline(at(10, back)) == MonotonicTime(20.0)  # its maximum; the pass isn't available yet
+    assert _shown(lane, at(25, back)) is None  # it ran its time
+    assert lane.next_deadline(at(25, back)) == MonotonicTime(30.0)  # the pass at 30 s, not ten minutes later
+    assert _shown(lane, at(30, back)) == "PASS +9"
+    lane.offer([_segment("3", "SACK -7", players=None, latest_start=T0 + 40 * S)], at=offered)
+    assert _cued(lane, at(40, back)) == "SACK -7"  # its turn, on its latest start; the display never shows it
+    assert _cued(lane, at(41, back)) is None  # late by the monotonic clock, though the wall says ten minutes early
+    assert [(c.kind, c.segment.key.subject, c.reason) for c in lane.changes()][-1] == (
+        ChangeKind.DROPPED,
+        "3",
+        EndReason.TOO_LATE,
+    )
+
+
+def _cued(lane: Lane[PlaySummary], at: ClockReading) -> str | None:
+    cue = lane.cue(at)
+    return cue.payload.headline if cue is not None else None
+
+
+def _shown(lane: Lane[PlaySummary], at: ClockReading) -> str | None:
+    """What a display that draws every cue at once shows as of ``at``."""
+    cue = lane.cue(at)
+    if cue is None:
+        return None
+    lane.committed(cue, at)
+    return cue.payload.headline

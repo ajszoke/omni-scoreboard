@@ -1,10 +1,13 @@
 """The network side of a football board: when to ask NFLMeta and the market about one game, and asking.
 
 `GameFeed` keeps the asking cadence. It asks the provider when its last answer says to, retries 30
-seconds after a failure, and stops once the final has settled. It also reads the market with each
-answer, when there is a market. Each answer comes back as a `FeedResult`, stamped with when it was
-asked and when it actually arrived, on both clocks. The board dates what it shows from the arrival, and
-holds it back from the arrival on the monotonic clock, which a wall-clock jump doesn't move.
+seconds after a failure, and stops once the final has settled. While the final drains it asks at the
+live pace whatever the answer says, and once more on the drain's boundary, so the drain gets its reads.
+Its due times run on the monotonic clock, so a wall-clock step neither stops the asks nor hurries them.
+It also reads the market with each answer, when there is a market. Each answer comes back as a
+`FeedResult`, stamped with when it was asked and when it actually arrived, on both clocks. The board
+dates what it shows from the arrival, and holds it back from the arrival on the monotonic clock, which
+a wall-clock jump doesn't move.
 
 The board collects answers once per frame through a `FeedSource`:
 - `GameFeed` itself asks inline, when due. That is deterministic, and what tests and replay use.
@@ -25,7 +28,7 @@ from omni.core.clock import Clock, ClockReading, MonotonicTime
 from omni.domain.baseball import WinProbability
 from omni.domain.contest import TeamGame
 from omni.providers.base import ProviderError
-from omni.providers.nflmeta import NflLiveSnapshot, NflMetaLiveProvider
+from omni.providers.nflmeta import DEFAULT_POLL, NflLiveSnapshot, NflMetaLiveProvider
 
 __all__ = [
     "AFTER_FINAL",
@@ -59,7 +62,7 @@ class FeedResult:
 
     asked_at: datetime
     received_at: datetime
-    next_ask: datetime  # when the feed is next due
+    next_ask: datetime  # when the feed is next due, dated as of the ask
     snapshot: NflLiveSnapshot | None  # None when the ask failed
     error: str | None = None
     held: bool = False  # the provider repeated its last answer during a hold, without asking
@@ -89,24 +92,25 @@ class GameFeed:
         self._provider = provider
         self._game_id = game_id
         self._win_probability = win_probability
-        self._next_ask: datetime | None = None
+        self._next_ask: MonotonicTime | None = None
 
-    def due(self, now: datetime) -> bool:
-        return self._next_ask is None or now >= self._next_ask
+    def due(self, at: ClockReading) -> bool:
+        """Whether an ask is due as of ``at``, on the monotonic clock."""
+        return self._next_ask is None or at.monotonic >= self._next_ask
 
-    def back_off(self, now: datetime) -> datetime:
-        """Wait the failure retry before asking again; returns when the next ask is due."""
-        self._next_ask = now + RETRY_AFTER_FAILURE
-        return self._next_ask
+    def back_off(self, at: ClockReading) -> datetime:
+        """Wait the failure retry before asking again; returns when the next ask is due, dated as of ``at``."""
+        self._next_ask = at.monotonic + RETRY_AFTER_FAILURE
+        return at.utc + RETRY_AFTER_FAILURE
 
     def ask(self, at: ClockReading, *, arrived: Callable[[], ClockReading] | None = None) -> FeedResult:
         """Ask the provider (and the market) as of ``at``; ``arrived`` reads the clock when the answer came."""
         now = at.utc
-        held = self._provider.holding(self._game_id, now)  # a held poll repeats the last answer, unasked
+        held = self._provider.holding(self._game_id, at)  # a held poll repeats the last answer, unasked
         try:
-            snapshot = self._provider.poll(self._game_id, now)
+            snapshot = self._provider.poll(self._game_id, at)
         except ProviderError as exc:
-            retry = self.back_off(now)
+            retry = self.back_off(at)
             received = arrived() if arrived is not None else at
             return FeedResult(
                 asked_at=now,
@@ -116,7 +120,8 @@ class GameFeed:
                 snapshot=None,
                 error=str(exc),
             )
-        self._next_ask = now + (AFTER_FINAL if snapshot.settled else snapshot.poll_every.as_timedelta())
+        wait = _wait(snapshot)
+        self._next_ask = at.monotonic + wait
         quote = None
         if not held and self._win_probability is not None:
             try:
@@ -128,15 +133,15 @@ class GameFeed:
             asked_at=now,
             received_at=received.utc,
             received_monotonic=received.monotonic,
-            next_ask=self._next_ask,
+            next_ask=now + wait,
             snapshot=snapshot,
             held=held,
-            holding=self._provider.holding(self._game_id, now),
+            holding=self._provider.holding(self._game_id, at),
             quote=quote,
         )
 
     def collect(self, at: ClockReading, *, arrived: Callable[[], ClockReading] | None = None) -> list[FeedResult]:
-        return [self.ask(at, arrived=arrived)] if self.due(at.utc) else []
+        return [self.ask(at, arrived=arrived)] if self.due(at) else []
 
 
 class BackgroundFeed:
@@ -169,7 +174,7 @@ class BackgroundFeed:
     def _failed(self, exc: Exception) -> None:
         """An ask that broke outright: report it, and wait the retry rather than ask again at once."""
         now = self._clock.read()
-        retry = self._feed.back_off(now.utc)
+        retry = self._feed.back_off(now)
         self._answers.put(
             FeedResult(
                 asked_at=now.utc,
@@ -180,3 +185,14 @@ class BackgroundFeed:
                 error=f"{type(exc).__name__}: {exc}",
             )
         )
+
+
+def _wait(snapshot: NflLiveSnapshot) -> timedelta:
+    """How long after an answer the feed is next asked: as the answer says, until the final has settled.
+    While the final drains, no longer than the live pace, nor past the drain's last read."""
+    if snapshot.settled:
+        return AFTER_FINAL
+    wait = snapshot.poll_every.as_timedelta()
+    if snapshot.drain_left is not None:
+        wait = min(wait, DEFAULT_POLL.as_timedelta(), snapshot.drain_left)
+    return wait

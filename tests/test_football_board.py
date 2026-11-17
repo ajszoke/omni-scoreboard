@@ -8,16 +8,19 @@ from typing import Any
 
 import re
 
+import pytest
 from omni.core.clock import ClockReading, FakeClock, MonotonicTime
 from omni.app.display import RecordingDisplaySink
 from omni.app.football import _parse_args
-from omni.app.football_feed import FeedResult, GameFeed
+from omni.app.football_feed import AFTER_FINAL, FeedResult, GameFeed
 from omni.app.football_board import (
     CLOSING_WAIT,
     FEED_STALE_AFTER,
     LATE_AFTER,
+    MAJOR_HARD_END,
     MAJOR_START_WITHIN,
     MAX_ROUTINE_WAITING,
+    ROUTINE_HARD_END,
     ROUTINE_START_WITHIN,
     STRIP_DWELL,
     WALL_JUMP,
@@ -55,7 +58,7 @@ from omni.renderers.canvas import Canvas, RecordingCanvas
 from omni.renderers.live_football import LiveFootballRenderer
 from omni.tower import ChangeKind, EndReason, LaneChange, Provenance, Segment, SegmentKey, Surface
 from tests.football_fixtures import nfl_game
-from tests.test_nflmeta import GAME, FakeFeed, _change, _page, _row, _scores, _synced
+from tests.test_nflmeta import GAME, FakeFeed, _change, _final_row, _page, _row, _scores, _synced
 
 T0 = datetime(2026, 11, 16, 2, 0, tzinfo=timezone.utc)
 S = timedelta(seconds=1)
@@ -375,6 +378,121 @@ def test_stops_polling_once_the_final_and_its_last_play_are_in() -> None:
     assert len(feed.requests) == asked
 
 
+# The final's drain: asked at the live pace, read on its boundary, and what it brings aired over FINAL.
+
+
+def _scores_asked(feed: FakeFeed) -> int:
+    return sum(path == "/api/v1/live-scores" for path, _ in feed.requests)
+
+
+def _last_snap(away: int = 10) -> dict[str, Any]:
+    """The scoreboard three seconds from the end, PIT with ``away`` points to CIN's 10."""
+    return _synced("p1", period=4, clock="0:03", status_detail="0:03 - 4th", away_team={"abbr": "PIT", "score": away})
+
+
+def _incomplete() -> dict[str, Any]:
+    return _page(_change("p1", 100, "M.Rudolph pass incomplete.", quarter=4), cursor="c1")
+
+
+@pytest.mark.parametrize("pace", [900, 7])
+def test_a_final_is_drained_at_the_live_pace_and_read_on_its_boundary_however_slowly_the_feed_says_to_poll(
+    pace: int,
+) -> None:
+    feed = FakeFeed()
+    feed.scores = [_scores(_last_snap()), _scores(_final_row(), poll=pace)]  # final from 10 s
+    feed.plays = [_incomplete(), _page(cursor="c1")]
+    board, _, lines = _board(feed)
+    asked: list[int] = []
+    for second in range(0, 1000):
+        before = _scores_asked(feed)
+        board.step(_at(T0 + second * S))
+        if _scores_asked(feed) > before:
+            asked.append(second)
+    boundary = 10 + int(FINAL_DRAIN.total_seconds())
+    drained = range(10, boundary, min(pace, 10))  # never slower than the live pace
+    assert asked == [0, *drained, boundary]  # the last read on the boundary, and then no more
+    assert lines.count("final: no more polling") == 1
+
+
+def test_a_walk_off_row_that_lands_after_final_is_up_airs_over_it_and_the_final_takes_its_score() -> None:
+    feed = FakeFeed()
+    final = _scores(_final_row(away_team={"abbr": "PIT", "score": 10}))  # FINAL before the kick's points posted
+    feed.scores = [_scores(_last_snap()), *[final] * 12, _scores(_final_row(away_team={"abbr": "PIT", "score": 13}))]
+    feed.plays = [_incomplete(), _page(cursor="c1")]
+    walk_off = _change(
+        "p2",
+        200,
+        "C.Boswell 45 yard field goal is GOOD.",
+        play_type="field_goal_good",
+        field_goal_result="made",
+        posteam_abbr="PIT",
+        quarter=4,
+    )
+    end = _change("p3", 300, "END GAME", play_type="end_of_game", quarter=4)
+    board, _, lines = _board(feed, delay=30 * S)
+    cards = _Cards()
+    board._renderer = cards  # type: ignore[assignment]
+    for second in range(0, 200):
+        if second == 129:  # its row lands a second before the drain's last read
+            feed.plays = [_page(walk_off, end, cursor="c2")]
+        board.step(_at(T0 + second * S))
+        drawn = cards.cards[-1].payload if cards.cards else None
+        if second == 70:  # the close's bound: FINAL, 10-10
+            assert drawn is not None and drawn.state.interval is FootballInterval.FINAL
+            assert drawn.state.away_score == 10
+        if second == 159:  # the last read's answer is still inside the delay
+            assert drawn is not None and (drawn.state.away_score, drawn.last_play) == (10, None)
+        if second == 160:  # released: the kick over FINAL, and FINAL with its points
+            assert drawn is not None and drawn.state.interval is FootballInterval.FINAL
+            assert drawn.state.away_score == 13
+            assert drawn.last_play is not None and drawn.last_play.headline == "FIELD GOAL GOOD"
+    assert "  = FIELD GOAL GOOD | C.Boswell 45 yard field goal is GOOD." in lines
+    assert not any("unseen" in line or line.startswith("  !") for line in lines)  # caught up: nothing missing
+    assert _scores_asked(feed) == 14  # 0 s, then the drain from 10 s to its last read at 130 s
+    assert (
+        board._strip.idle
+        and board.next_deadline(_at(T0 + 199 * S)) == MonotonicTime(160) + AFTER_FINAL + FEED_STALE_AFTER
+    )
+
+
+def test_a_walk_off_row_that_never_lands_airs_as_a_score_update_over_the_final_with_the_gap_noted() -> None:
+    feed = FakeFeed()
+    feed.scores = [_scores(_last_snap()), _scores(_final_row(away_team={"abbr": "PIT", "score": 13}))]
+    feed.plays = [_incomplete(), _page(cursor="c1")]  # the drain's pages, complete and empty
+    board, _, lines = _board(feed)
+    cards = _Cards()
+    board._renderer = cards  # type: ignore[assignment]
+    for second in range(0, 160):
+        board.step(_at(T0 + second * S))
+        if second == 130:  # the drain's last read
+            drawn = cards.cards[-1].payload
+            assert drawn.state.interval is FootballInterval.FINAL and drawn.last_play is not None
+    assert [line for line in lines if line.startswith(("  !", "  =", "  -", "final"))] == [
+        "  = RUN | M.Rudolph pass incomplete.",  # the feed's latest on the first look
+        "  ! final plays incomplete: no end of game in the feed",
+        "final: no more polling",
+        "  = PIT +3 | Score update; play not reported",
+    ]
+
+
+def test_a_wall_clock_set_back_mid_game_neither_stops_nor_stretches_the_asks() -> None:
+    feed = _punt()
+    clock = FakeClock(T0)
+    board, _, lines = _board(feed)
+    asked: list[float] = []
+    for second in range(0, 120):
+        if second == 30:
+            clock.jump(-timedelta(minutes=10))
+        before = _scores_asked(feed)
+        board.step(clock.read())
+        if _scores_asked(feed) > before:
+            asked.append(clock.elapsed.seconds)
+        clock.advance(S)
+    assert asked == [10.0 * n for n in range(12)]  # at the scoreboard's pace throughout
+    assert lines[-1] == "clock: the wall clock jumped -10m against the monotonic clock"  # logged, and no more
+    assert not any(line.startswith("feed stale") for line in lines)
+
+
 class _Cards:
     """Stands in for the renderer, keeping each card it's asked to draw."""
 
@@ -467,7 +585,7 @@ def test_the_log_names_an_entry_the_strip_dropped_unseen() -> None:
             LaneChange(ChangeKind.DROPPED, punt, _at(T0)),
         ]
     )
-    assert lines[-2:] == ["  - PUNT (unseen: expired)", "  - PUNT (unseen: dropped)"]
+    assert lines[-2:] == ["  - PUNT (unseen: past its hard end)", "  - PUNT (unseen: dropped)"]
 
 
 # Drawing through the frame stream: the strip counts a frame as shown only on the display's word.
@@ -489,8 +607,11 @@ class _Stream:
         self.frames: list[StreamFrame] = []
         self.sink = StreamDisplaySink(PanelProfile.QUAD_128X64, self._write, self.link)
         self.generation = 0
+        self.refusing = False  # the writer says frames aren't going out (a stalled pipe, say)
 
     def _write(self, frame: StreamFrame) -> bool:
+        if self.refusing:
+            return False
         self.frames.append(frame)
         self.link.written(self.generation, frame.id)
         return True
@@ -548,7 +669,9 @@ def test_a_strip_frame_counts_its_time_from_when_the_display_shows_it_not_from_w
     stream.start()
     board, _, lines = _streamed(_punt(), stream)
     board.step(_at(T0))  # drawn and handed over
-    assert board._strip.next_deadline(_at(T0)) is None  # the strip waits for the display's word
+    assert board._strip.next_deadline(_at(T0)) == MonotonicTime(
+        60
+    )  # it waits for the display's word, till its latest start
     first = stream.frames[0].id
     for second in range(1, 5):
         board.step(_at(T0 + second * S))
@@ -595,7 +718,7 @@ def test_a_short_stall_keeps_the_caption_on_the_panel_on_its_time_and_credits_no
         if second == 10:  # the pass has arrived: the punt goes once it has had 10 s from when it went up
             assert board.next_deadline(_at(T0 + 10 * S)) == MonotonicTime(11)
     assert [line for line in lines if line.startswith("  =")] == [f"  = {PUNT}"]  # the pass isn't up yet
-    assert board._strip.next_deadline(_at(T0 + 15 * S)) is None  # it waits for the display
+    assert board._strip.next_deadline(_at(T0 + 15 * S)) == MonotonicTime(70)  # it waits for the display, till 60 s
     stream.show_newest()
     board.step(_at(T0 + 16 * S))
     assert lines[-1] == "  = PASS | J.Burrow pass short right to J.Chase for 9 yards."
@@ -615,13 +738,15 @@ def test_a_lost_display_takes_the_captions_time_back_and_a_new_one_gives_it_all_
     stream.go_away()  # ... when it went away
     board.step(_at(T0 + 6 * S))
     assert lines[-1] == f"  ~ {PUNT} (blanked: the display went away)"
-    assert board._strip.next_deadline(_at(T0 + 6 * S)) is None  # no time runs on a blank panel
+    assert board._strip.next_deadline(_at(T0 + 6 * S)) == MonotonicTime(
+        90
+    )  # no time runs on a blank panel but its hard end
     stream.link.shown(1, in_flight)  # the old display's word, late: dropped
     stream.start()  # a new display process, its panel blank
     stream.link.shown(2, in_flight)  # it shows the old frame after all, but that frame was drawn for the old one
     board.step(_at(T0 + 8 * S))
     assert lines[-1] == f"  ~ {PUNT} (blanked: the display went away)"
-    assert board._strip.next_deadline(_at(T0 + 8 * S)) is None
+    assert board._strip.next_deadline(_at(T0 + 8 * S)) == MonotonicTime(90)
     stream.show_newest()  # a frame drawn since: current and complete
     board.step(_at(T0 + 9 * S))
     assert lines[-1] == f"  = {PUNT} (again, on the new display)"
@@ -657,6 +782,128 @@ def test_frames_the_display_never_shows_are_forgotten_after_a_while() -> None:
     stream.show_newest()
     board.step(_at(T0 + UNSHOWN_AFTER + 2 * S))
     assert lines[-1] == f"  = {PUNT}"
+
+
+# A caption the display doesn't show: held to its latest start while cued, and gone by its hard end.
+
+
+def _field_moves_at_60() -> FakeFeed:
+    """A punt at 0 s; at 60 s the field moves on to 3rd & 2, with its play. The feed keeps answering."""
+    feed = _punt()
+    moved = {"possession_abbr": "CIN", "down": 3, "distance": 2, "text": "3rd & 2", "yardline_100": 71}
+    feed.scores = [_scores(_synced("p1"))] * 6 + [_scores(_synced("p2", situation=moved))]
+    run = _change("p2", 2, "C.Brown up the middle for 4 yards.", yards_gained=4)
+    feed.plays = [_page(feed.plays[0]["data"][0], cursor="c1"), _page(run, cursor="c2"), _page(cursor="c2")]
+    return feed
+
+
+def test_the_strips_hard_ends_are_its_latest_starts_plus_half_a_minute() -> None:
+    assert (ROUTINE_HARD_END, MAJOR_HARD_END) == (timedelta(seconds=90), timedelta(seconds=150))
+
+
+def test_a_caption_a_silent_display_never_shows_goes_unseen_and_nothing_old_airs_when_it_wakes() -> None:
+    stream = _Stream()
+    stream.start()
+    board, _, lines = _streamed(_field_moves_at_60(), stream)
+    for second in range(0, 200):
+        if second >= 180:  # the display shows frames again
+            stream.show_newest()
+        board.step(_at(T0 + second * S))
+        if second == 121:
+            assert board._strip.idle
+    assert _strip_lines(lines) == [
+        f"  - {PUNT} (unseen: the field moved on)",  # cued, never shown, and no longer the field's
+        "  - 4 YARD RUN | C.Brown up the middle for 4 yards. (unseen: too late to start)",  # not shown in its minute
+    ]
+
+
+def test_a_caption_a_writer_wont_send_goes_unseen_at_its_latest_start() -> None:
+    stream = _Stream()
+    stream.start()
+    stream.refusing = True
+    board, _, lines = _streamed(_punt(), stream)
+    for second in range(0, 200):
+        stream.refusing = second < 180
+        board.step(_at(T0 + second * S))
+        if second > 180:
+            stream.show_newest()
+    assert [line for line in lines if line.startswith(("paint", "  -", "  ="))] == [
+        "paint failed: DisplayUnavailable: the display isn't taking frames",
+        f"  - {PUNT} (unseen: too late to start)",  # at 61 s
+        "paint recovered",  # at 180 s, with nothing from before on the strip
+    ]
+
+
+def test_a_caption_on_a_display_that_went_away_is_gone_by_its_hard_end_before_a_new_one_starts() -> None:
+    stream = _Stream()
+    stream.start()
+    board, _, lines = _streamed(_punt(), stream)
+    for second in range(0, 200):
+        if second == 5:
+            stream.go_away()
+        if second == 180:
+            stream.start()
+        board.step(_at(T0 + second * S))
+        if second in (0, 181):
+            stream.show_newest()
+        if second == 90:
+            assert lines[-1] == f"  x {PUNT} (cleared: past its hard end)"
+    assert _strip_lines(lines) == [f"  = {PUNT}", f"  x {PUNT} (cleared: past its hard end)"]  # not again at 181 s
+
+
+def test_a_touchdown_whose_second_frame_a_stalled_display_never_shows_is_gone_by_its_hard_end() -> None:
+    stream = _Stream()
+    stream.start()
+    touchdown = _event("td", "TOUCHDOWN PIT", tone=PlayTone.SCORE, players="players line")
+    lines: list[str] = []
+    script = _Script(_answer(0, _LIVE, touchdown), *(_answer(second, _LIVE) for second in range(10, 200, 10)))
+    board = FootballBoard(script, stream.sink, log=lines.append, renderer=_Ticking())
+    for second in range(0, 200):
+        board.step(_at(T0 + second * S))
+        if second in (0, 181):  # the display shows its first frame, then nothing until 181 s
+            stream.show_newest()
+        if second == 149:
+            cue = board._strip.cue(_at(T0 + second * S))
+            assert cue is not None and cue.frame == 1 and not board._strip.dwelling  # the players' frame, unshown
+    assert _strip_lines(lines) == ["  = TOUCHDOWN PIT", "  x TOUCHDOWN PIT (cleared: past its hard end)"]
+
+
+def _tv_timeout_then_the_snap_at_171() -> _Script:
+    """A TV timeout at 0 s; the field stays put until the next snap moves it at 171 s, with no play yet."""
+    tv = _event("tv", "TV TIMEOUT", tone=PlayTone.ALERT, kind=FootballEventKind.TV_TIMEOUT)
+    snapped = _state(possession=HomeAway.AWAY, down=2, distance=6, yards_to_goal=26)
+    quiet = (_answer(second, _LIVE) for second in range(10, 171, 10))
+    return _Script(_answer(0, _LIVE, tv), *quiet, *(_answer(second, snapped) for second in range(171, 200, 10)))
+
+
+def test_a_tv_timeout_on_the_panel_stays_past_its_hard_end_until_the_field_moves() -> None:
+    lines: list[str] = []
+    board = FootballBoard(
+        _tv_timeout_then_the_snap_at_171(), RecordingDisplaySink(PanelProfile.QUAD_128X64), log=lines.append
+    )
+    cleared = None
+    for second in range(0, 200):
+        board.step(_at(T0 + second * S))
+        if cleared is None and lines[-1].startswith("  x"):
+            cleared = second
+        if second == 120:  # past its 90 s hard end, still current: only the field moving ends it
+            assert board._strip.next_deadline(_at(T0 + second * S)) is None
+    assert cleared == 171
+    assert _strip_lines(lines) == ["  = TV TIMEOUT", "  x TV TIMEOUT (cleared: the field moved on without its play)"]
+
+
+def test_a_tv_timeout_a_stalled_display_never_shows_goes_unseen_at_its_latest_start() -> None:
+    stream = _Stream()
+    stream.start()  # a display that acknowledges, and shows nothing
+    lines: list[str] = []
+    board = FootballBoard(_tv_timeout_then_the_snap_at_171(), stream.sink, log=lines.append, renderer=_Ticking())
+    dropped = None
+    for second in range(0, 200):
+        board.step(_at(T0 + second * S))
+        if dropped is None and lines[-1].startswith("  -"):
+            dropped = second
+    assert dropped == 61
+    assert _strip_lines(lines) == ["  - TV TIMEOUT (unseen: too late to start)"]
 
 
 # Closing a period out: bounded, whatever the strip or the display is doing.
@@ -1057,7 +1304,7 @@ def test_past_three_routine_entries_waiting_the_oldest_go_and_a_major_is_never_o
     ]
 
 
-def test_a_routine_entry_whose_play_was_written_over_two_minutes_before_it_arrived_is_dropped_at_once() -> None:
+def test_an_entry_whose_play_was_written_over_two_minutes_before_it_arrived_is_dropped_at_once_a_major_too() -> None:
     injury, alert = FootballEventKind.INJURY, PlayTone.ALERT
     answers = (
         _answer(
@@ -1078,12 +1325,21 @@ def test_a_routine_entry_whose_play_was_written_over_two_minutes_before_it_arriv
     )
     assert _strip_lines(_run(60, *answers)) == [
         "  - RUN 1 (unseen: arrived late)",
+        "  - INTERCEPTION (unseen: arrived late)",  # history beside the field the card shows, if a major
         "  - INJURY 1 (unseen: arrived late)",
-        "  = INTERCEPTION",  # a late major still airs, on its own bound
         "  = RUN 2",
         "  = RUN 3",
         "  = INJURY 2",
         "  = RUN 4",
+    ]
+
+
+def test_a_touchdown_written_half_an_hour_before_it_arrived_is_dropped_as_late_and_never_airs() -> None:
+    old = T0 - timedelta(minutes=30)
+    touchdown = _event("td", "TOUCHDOWN PIT", tone=PlayTone.SCORE, written_at=old)
+    assert _strip_lines(_run(60, _answer(0, _LIVE, _event("run", "RUN", written_at=old), touchdown))) == [
+        "  - RUN (unseen: arrived late)",
+        "  - TOUCHDOWN PIT (unseen: arrived late)",
     ]
 
 
@@ -1122,7 +1378,9 @@ def _burst(arrives: datetime) -> list[dict[str, Any]]:
     return rows
 
 
-def test_a_burst_of_plays_written_over_50_minutes_airs_its_majors_in_order_and_only_the_newest_routine_ones() -> None:
+def test_a_burst_of_plays_written_over_50_minutes_airs_only_its_newest_routine_ones_and_none_of_its_old_majors() -> (
+    None
+):
     feed = FakeFeed()
     feed.scores = [_scores(_row()), _scores(_synced("p46"))]
     feed.plays = [_page(), _page(*_burst(T0 + 10 * S))]  # caught up at the first look; the burst at 10 s
@@ -1132,13 +1390,11 @@ def test_a_burst_of_plays_written_over_50_minutes_airs_its_majors_in_order_and_o
         if second == 10 + int(MAJOR_START_WITHIN.total_seconds()):
             assert board._strip.idle  # caught up within two minutes of the burst
     assert sum(line.startswith("  > ") for line in lines) == 46
-    assert [_numbered(line) for line in lines if line.startswith("  = ")] == [5, 12, 20, 28, 35, 41, 44]
+    assert [_numbered(line) for line in lines if line.startswith("  = ")] == [44, 45, 46]
     reasons = {_numbered(line): line.rsplit("(unseen: ", 1)[1].rstrip(")") for line in lines if line.startswith("  - ")}
-    assert reasons == {number: "arrived late" for number in range(1, 42) if number not in _MAJORS} | {
+    assert reasons == {number: "arrived late" for number in range(1, 42)} | {  # the six majors among them
         42: "backlog",  # five routine plays in time: the three newest wait
         43: "backlog",
-        45: "too late to start",  # behind six majors, their minute ran out at 70 s
-        46: "too late to start",
     }
 
 
@@ -1157,7 +1413,7 @@ def test_a_reviewed_touchdown_in_a_burst_airs_though_it_reads_as_a_ruling() -> N
     feed.plays = [
         _page(),
         _page(
-            _dated(_change("p1", 1, challenged, play_type="rushing_touchdown", touchdown=True), burst - 10 * 60 * S),
+            _dated(_change("p1", 1, challenged, play_type="rushing_touchdown", touchdown=True), burst - 100 * S),
             _dated(_change("p2", 2, booth, play_type="passing_touchdown", touchdown=True), burst - 50 * S),
             *(  # three routine plays after it, in time: with it as routine, four would wait
                 _dated(_change(f"p{n}", n, f"Into the line, play {n}.", yards_gained=1), burst - (50 - 10 * n) * S)
@@ -1169,7 +1425,7 @@ def test_a_reviewed_touchdown_in_a_burst_airs_though_it_reads_as_a_ruling() -> N
     for second in range(0, 80):
         board.step(_at(T0 + second * S))
     assert [line.split(" | ")[0] for line in _strip_lines(lines)] == [
-        "  = PIT CHALLENGE: STANDS",  # written ten minutes before it arrived: late, but a score
+        "  = PIT CHALLENGE: STANDS",  # a score's ruling: major
         "  = REVIEW: STANDS",  # not the oldest of four routine entries: not routine at all
         "  = 1 YARD RUN",
         "  = 1 YARD RUN",
@@ -1211,6 +1467,8 @@ def test_plays_arriving_one_at_a_time_soon_after_they_were_written_air_as_undate
 
 
 WOKE_NOTE = "clock: the wall clock jumped +49m against the monotonic clock (the host slept?)"
+WOKE_DIMMED = "woke: dimming the card until an answer from after the sleep is up"
+WOKE_BRIGHT = "woke: an answer from after the sleep is up"
 
 
 def test_a_host_that_slept_clears_what_the_strip_held_and_prunes_what_the_feed_brings_on_waking() -> None:
@@ -1252,9 +1510,10 @@ def test_a_host_that_slept_clears_what_the_strip_held_and_prunes_what_the_feed_b
     ]
     pruned = _strip_lines(woken[2:])
     assert [line for line in pruned if line.startswith("  -")] == [
-        f"  - 1 YARD RUN | Into the line, play {n}. (unseen: arrived late)" for n in range(3, 10)
+        *(f"  - 1 YARD RUN | Into the line, play {n}. (unseen: arrived late)" for n in range(3, 10)),
+        "  - FIELD GOAL GOOD | Field goal, play 10. (unseen: arrived late)",  # a score, but ten minutes old
     ]
-    assert [_numbered(line) for line in pruned if line.startswith("  =")] == [10, 11, 12]
+    assert [_numbered(line) for line in pruned if line.startswith("  =")] == [11, 12]
 
 
 def test_a_wall_clock_set_back_is_only_logged() -> None:
@@ -1282,8 +1541,46 @@ def test_plays_held_back_by_the_broadcast_delay_across_a_sleep_go_unseen_as_stal
     slept = T0 + timedelta(minutes=49)
     board.step(ClockReading(slept + 5 * S, MonotonicTime(5)))
     board.step(ClockReading(slept + 30 * S, MonotonicTime(30)))  # released after the sleep
-    assert lines[-2:] == [
+    assert lines[-3:] == [
         "clock: the wall clock jumped +49m against the monotonic clock (the host slept?)",
+        WOKE_DIMMED,
         f"  - {PUNT} (unseen: its source went stale)",
     ]
     assert board._strip.idle
+
+
+@pytest.mark.parametrize(("delay", "failing", "bright_from"), [(0, 90, 110), (30, 0, 50)])
+def test_a_host_that_slept_dims_the_old_field_until_an_answer_from_after_the_sleep_is_up(
+    delay: int, failing: int, bright_from: int
+) -> None:
+    """Asleep from 15 s for 49 minutes. Without a delay the feed fails for 90 s after waking, so the next
+    good answer is at 110 s; with a 30 s delay it answers at 20 s, released at 50 s, and the answers from
+    before the sleep are released (at 30 s and 40 s) after it."""
+    feed = FakeFeed()
+    feed.scores = [_scores(_synced("p1", clock="13:09"))]
+    clock = FakeClock(T0)
+    board, sink, lines = _board(
+        feed, delay=delay * S, win_probability=lambda game, now: WinProbability(home=60.0, away=40.0), meter_lag=0 * S
+    )
+    renderer = _Kept()
+    board._renderer = renderer
+    fresh = _scores(_synced("p1", clock="1:58", period=4, away_team={"abbr": "PIT", "score": 24}))
+    for second in range(0, 130):
+        if second == 15:
+            clock.jump(timedelta(minutes=49))
+            feed.scores = [RuntimeError("network unreachable") if failing else fresh]
+        if failing and second == 15 + failing:
+            feed.scores = [fresh]
+        drawn = len(renderer.cards)
+        board.step(clock.read())
+        clock.advance(S)
+        if len(renderer.cards) == drawn:
+            continue  # nothing released yet
+        card, bright = renderer.cards[-1].payload, _brightest(sink.frames[-1]) == 255
+        if second < 15:
+            assert bright and card.win_probability is not None
+        elif second < bright_from:  # the old field, dimmed and without its meter, from the waking step
+            assert card.state.clock_seconds == 789 and not bright and card.win_probability is None
+        else:
+            assert card.state.clock_seconds == 118 and bright and card.win_probability is not None
+    assert lines.index(WOKE_NOTE) + 1 == lines.index(WOKE_DIMMED) < lines.index(WOKE_BRIGHT)

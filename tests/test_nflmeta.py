@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from omni.core.clock import ClockReading, FakeClock, MonotonicTime
 from omni.core.enum import GameStatus, HomeAway
 from omni.core.time import DurationSeconds
 from omni.domain.football import FootballInterval, SetPiece, TeamChallenges, TeamTimeouts
@@ -32,6 +33,11 @@ from omni.providers.nflmeta import (
 
 T0 = datetime(2026, 11, 16, 2, 0, tzinfo=timezone.utc)
 GAME = 22920
+
+
+def _at(moment: datetime) -> ClockReading:
+    """The clock's two readings at ``moment``; the monotonic one counts from T0."""
+    return ClockReading(utc=moment, monotonic=MonotonicTime((moment - T0).total_seconds()))
 
 
 def _row(**changes: Any) -> dict[str, Any]:
@@ -107,7 +113,7 @@ def test_finds_a_game_by_either_spelling_of_its_clubs() -> None:
 def test_reads_a_live_game_into_the_football_state() -> None:
     feed = FakeFeed()
     feed.scores = [_scores(_row(), poll=7)]
-    snapshot = _provider(feed).poll(GAME, T0)
+    snapshot = _provider(feed).poll(GAME, _at(T0))
     assert snapshot.phase is NflPhase.IN
     assert snapshot.game.status is GameStatus.LIVE
     assert snapshot.game.away.abbreviation == "PIT"
@@ -139,7 +145,7 @@ def test_reads_a_live_game_into_the_football_state() -> None:
 def test_keeps_only_a_situation_it_can_place(situation: Any, expected: tuple[Any, ...]) -> None:
     feed = FakeFeed()
     feed.scores = [_scores(_row(situation=situation))]
-    state = _provider(feed).poll(GAME, T0).state
+    state = _provider(feed).poll(GAME, _at(T0)).state
     assert state is not None
     assert (state.possession, state.down, state.distance, state.yards_to_goal) == expected
 
@@ -156,7 +162,7 @@ def test_keeps_only_a_situation_it_can_place(situation: Any, expected: tuple[Any
 def test_reads_the_breaks_between_periods(detail: str | None, interval: FootballInterval | None) -> None:
     feed = FakeFeed()
     feed.scores = [_scores(_row(status_detail=detail, clock=None))]
-    state = _provider(feed).poll(GAME, T0).state
+    state = _provider(feed).poll(GAME, _at(T0)).state
     assert state is not None
     assert state.interval is interval
     assert state.clock_seconds == 0
@@ -170,10 +176,10 @@ def test_a_game_before_kickoff_has_no_state_and_after_has_a_final_one() -> None:
     feed = FakeFeed()
     feed.scores = [_scores(_row(phase="pre", period=0)), _scores(_row(phase="post", status_detail="Final"), poll=0)]
     provider = _provider(feed)
-    before = provider.poll(GAME, T0)
+    before = provider.poll(GAME, _at(T0))
     assert before.state is None
     assert before.game.status is GameStatus.PREGAME
-    after = provider.poll(GAME, T0)
+    after = provider.poll(GAME, _at(T0))
     assert after.game.status is GameStatus.FINAL
     assert after.state is not None and after.state.possession is None
     assert after.state.interval is FootballInterval.FINAL
@@ -187,23 +193,23 @@ def test_halftime_holds_off_the_feed_for_the_hold_then_polls_again() -> None:
     feed.scores = [_scores(_row()), halftime, halftime, _scores(_row(period=3, status_detail="15:00 - 3rd"))]
     feed.plays = [_page(_change("p0", 100, "A.Rodgers kneels to PIT 21 for -1 yards."))]
     provider = _provider(feed)
-    provider.poll(GAME, T0)
-    assert not provider.holding(GAME, T0)
-    first = provider.poll(GAME, T0 + timedelta(minutes=1))
+    provider.poll(GAME, _at(T0))
+    assert not provider.holding(GAME, _at(T0))
+    first = provider.poll(GAME, _at(T0 + timedelta(minutes=1)))
     assert first.state is not None and first.state.interval is FootballInterval.HALFTIME
     assert first.break_ends_at == T0 + timedelta(minutes=1) + HALFTIME_HOLD
     asked = len(feed.requests)
     for minute in (2, 9, 13):
         at = T0 + timedelta(minutes=minute)
-        assert provider.holding(GAME, at)
-        held = provider.poll(GAME, at)
+        assert provider.holding(GAME, _at(at))
+        held = provider.poll(GAME, _at(at))
         assert held.state == first.state and held.events == ()
     assert len(feed.requests) == asked  # not one request over the hold
     end = T0 + timedelta(minutes=1) + HALFTIME_HOLD
-    assert not provider.holding(GAME, end)
-    provider.poll(GAME, end)  # still halftime: polled, and the hold isn't restarted
-    assert not provider.holding(GAME, end + timedelta(seconds=10))
-    third = provider.poll(GAME, end + timedelta(seconds=10))
+    assert not provider.holding(GAME, _at(end))
+    provider.poll(GAME, _at(end))  # still halftime: polled, and the hold isn't restarted
+    assert not provider.holding(GAME, _at(end + timedelta(seconds=10)))
+    third = provider.poll(GAME, _at(end + timedelta(seconds=10)))
     assert third.state is not None and third.state.period == 3
 
 
@@ -232,15 +238,15 @@ def test_catches_up_on_the_game_then_reads_each_matched_play_once() -> None:
         _page(cursor="c3"),  # p3 is matched, but its row never comes
     ]
     provider = _provider(feed)
-    caught_up = provider.poll(GAME, T0)
+    caught_up = provider.poll(GAME, _at(T0))
     assert [event.kind for event in caught_up.events] == [FootballEventKind.TV_TIMEOUT]  # the latest only
-    assert provider.poll(GAME, T0).events == ()  # awaiting: the row isn't there yet
-    events = provider.poll(GAME, T0).events
+    assert provider.poll(GAME, _at(T0)).events == ()  # awaiting: the row isn't there yet
+    events = provider.poll(GAME, _at(T0)).events
     assert [event.summary.headline for event in events] == ["2 YARD RUN", "INCOMPLETE"]  # every play, in order
-    assert provider.poll(GAME, T0).events == ()  # already read for p2
-    provider.poll(GAME, T0)
-    provider.poll(GAME, T0 + MISMATCH_RETRY)  # p3 isn't in a complete read: read again, until the retry ends
-    provider.poll(GAME, T0 + MISMATCH_RETRY)
+    assert provider.poll(GAME, _at(T0)).events == ()  # already read for p2
+    provider.poll(GAME, _at(T0))
+    provider.poll(GAME, _at(T0 + MISMATCH_RETRY))  # p3 isn't in a complete read: read again, until the retry ends
+    provider.poll(GAME, _at(T0 + MISMATCH_RETRY))
     reads = [query for path, query in feed.requests if "/play-changes" in path]
     assert reads == [
         {"limit": 100},
@@ -271,14 +277,14 @@ def test_watches_the_feed_for_a_correction_when_the_scoreboard_moves_on_its_own(
         _page(),
     ]
     provider = _provider(feed)
-    provider.poll(GAME, T0)
-    assert provider.poll(GAME, T0 + timedelta(seconds=10)).events == ()  # watching; nothing yet
-    review = provider.poll(GAME, T0 + timedelta(seconds=20)).events
+    provider.poll(GAME, _at(T0))
+    assert provider.poll(GAME, _at(T0 + timedelta(seconds=10))).events == ()  # watching; nothing yet
+    review = provider.poll(GAME, _at(T0 + timedelta(seconds=20))).events
     assert [(event.kind, event.summary.headline) for event in review] == [
         (FootballEventKind.REVIEW, "REVIEW: REVERSED")
     ]
     reads = feed.play_reads()
-    provider.poll(GAME, T0 + timedelta(seconds=30))  # the correction came: the watch is over
+    provider.poll(GAME, _at(T0 + timedelta(seconds=30)))  # the correction came: the watch is over
     assert feed.play_reads() == reads
 
 
@@ -311,8 +317,8 @@ def test_each_play_entry_carries_when_the_feed_wrote_it_and_a_correction_when_th
         ),
     ]
     provider = _provider(feed)
-    provider.poll(GAME, T0 - timedelta(seconds=300))  # caught up, with nothing yet
-    plays = provider.poll(GAME, T0 + timedelta(seconds=10)).events
+    provider.poll(GAME, _at(T0 - timedelta(seconds=300)))  # caught up, with nothing yet
+    plays = provider.poll(GAME, _at(T0 + timedelta(seconds=10))).events
     dates = [(event.play, event.written_at) for event in plays]
     assert dates == [
         (1, T0 - timedelta(seconds=200)),  # the earliest change to the play in the read
@@ -320,7 +326,7 @@ def test_each_play_entry_carries_when_the_feed_wrote_it_and_a_correction_when_th
         (3, None),  # the feed didn't say
         (None, None),  # an injury: no play row is behind it
     ]
-    later = provider.poll(GAME, T0 + timedelta(seconds=20)).events
+    later = provider.poll(GAME, _at(T0 + timedelta(seconds=20))).events
     assert [(event.kind, event.play, event.written_at) for event in later] == [
         (FootballEventKind.CONVERSION, 1, T0 + timedelta(seconds=14)),  # the try, dated by its own change
         (FootballEventKind.PLAY, 4, T0 + timedelta(seconds=15)),
@@ -341,8 +347,8 @@ def test_a_clubs_play_by_play_code_counts_as_its_abbreviation_and_reads_as_one()
         ),
     ]
     provider = _provider(feed)
-    provider.poll(GAME, T0)
-    snapshot = provider.poll(GAME, T0 + timedelta(seconds=10))
+    provider.poll(GAME, _at(T0))
+    snapshot = provider.poll(GAME, _at(T0 + timedelta(seconds=10)))
     assert snapshot.state is not None and snapshot.state.timeouts == TeamTimeouts(away=0, home=3)
     assert [(event.summary.headline, event.summary.detail) for event in snapshot.events] == [
         ("TIMEOUT BAL", "BAL #1 at 12:10"),
@@ -357,10 +363,10 @@ def test_a_watch_that_finds_nothing_ends_on_its_own() -> None:
     feed.scores = [_scores(_synced("p1")), _scores(_synced("p1", clock="8:29"))]
     feed.plays = [_page(_change("p1", 100, "C.Brown up the middle for 4 yards.")), _page()]
     provider = _provider(feed)
-    provider.poll(GAME, T0)
-    provider.poll(GAME, T0 + timedelta(seconds=10))
+    provider.poll(GAME, _at(T0))
+    provider.poll(GAME, _at(T0 + timedelta(seconds=10)))
     reads = feed.play_reads()
-    provider.poll(GAME, T0 + timedelta(seconds=10) + CORRECTION_WATCH)
+    provider.poll(GAME, _at(T0 + timedelta(seconds=10) + CORRECTION_WATCH))
     assert feed.play_reads() == reads
 
 
@@ -368,7 +374,7 @@ def test_stops_paging_a_play_feed_that_never_ends() -> None:
     feed = FakeFeed()
     feed.scores = [_scores(_synced("p9"))]
     feed.plays = [_page(more=True, cursor=None)]
-    _provider(feed).poll(GAME, T0)
+    _provider(feed).poll(GAME, _at(T0))
     assert feed.play_reads() == 30  # a first look reads the whole game so far, but not forever
 
 
@@ -393,7 +399,7 @@ def test_reads_a_play_row_into_the_typed_play() -> None:
             {"source_play_id": "p2", "play": None},
         )
     ]
-    events = _provider(feed).poll(GAME, T0).events
+    events = _provider(feed).poll(GAME, _at(T0)).events
     assert [event.summary.headline for event in events] == ["FG NO GOOD"]
 
 
@@ -415,12 +421,12 @@ def test_an_injury_is_news_once_and_again_when_it_changes() -> None:
         _scores(_row(injuries=[old, {**fresh, "state": "out"}, newcomer])),
     ]
     provider = _provider(feed)
-    first = provider.poll(GAME, T0)
+    first = provider.poll(GAME, _at(T0))
     assert [(event.kind, event.summary.headline, event.summary.detail) for event in first.events] == [
         (FootballEventKind.INJURY, "INJURY CIN", "Dalton Risner (Knee), questionable to return")
     ]  # recent enough to be news on a first look; the older one isn't
-    assert provider.poll(GAME, T0).events == ()
-    changed = provider.poll(GAME, T0).events
+    assert provider.poll(GAME, _at(T0)).events == ()
+    changed = provider.poll(GAME, _at(T0)).events
     assert [event.summary.detail for event in changed] == ["Dalton Risner (Knee), out", "New Guy, being evaluated"]
     assert changed[1].summary.headline == "INJURY WAS"
 
@@ -447,7 +453,7 @@ def test_a_failed_or_unreadable_answer_is_a_provider_error(answer: Any) -> None:
     feed = FakeFeed()
     feed.scores = [answer]
     with pytest.raises(ProviderError):
-        _provider(feed).poll(GAME, T0)
+        _provider(feed).poll(GAME, _at(T0))
 
 
 def test_the_halftime_hold_waits_for_the_halfs_last_play() -> None:
@@ -458,11 +464,11 @@ def test_the_halftime_hold_waits_for_the_halfs_last_play() -> None:
         _scores(_synced("p2", "awaiting_play", status_detail="Halftime", clock="0:00")),
     ]
     provider = _provider(feed)
-    provider.poll(GAME, T0)
-    first = provider.poll(GAME, T0 + timedelta(seconds=10))
-    assert not first.caught_up and not provider.holding(GAME, T0 + timedelta(seconds=10))
-    provider.poll(GAME, T0 + timedelta(seconds=10) + HALFTIME_GRACE)  # the play never came: hold anyway
-    assert provider.holding(GAME, T0 + timedelta(seconds=11) + HALFTIME_GRACE)
+    provider.poll(GAME, _at(T0))
+    first = provider.poll(GAME, _at(T0 + timedelta(seconds=10)))
+    assert not first.caught_up and not provider.holding(GAME, _at(T0 + timedelta(seconds=10)))
+    provider.poll(GAME, _at(T0 + timedelta(seconds=10) + HALFTIME_GRACE))  # the play never came: hold anyway
+    assert provider.holding(GAME, _at(T0 + timedelta(seconds=11) + HALFTIME_GRACE))
 
 
 def test_halftime_gives_the_ball_to_the_second_halfs_receiver() -> None:
@@ -470,7 +476,7 @@ def test_halftime_gives_the_ball_to_the_second_halfs_receiver() -> None:
     feed.scores = [_scores(_synced("p1", status_detail="Halftime", clock="0:00"))]
     opening = "C.Boswell kicks 60 yards from PIT 35 to CIN 5. D.Meyers to CIN 24 for 19 yards (L.Nichols)."
     feed.plays = [_page(_change("p1", 1, opening, play_type="kickoff", quarter=1, posteam_abbr="CIN"))]
-    snapshot = _provider(feed).poll(GAME, T0)
+    snapshot = _provider(feed).poll(GAME, _at(T0))
     assert snapshot.caught_up
     assert snapshot.state is not None
     assert (snapshot.state.possession, snapshot.state.timeouts) == (HomeAway.AWAY, None)
@@ -480,7 +486,7 @@ def test_halftime_gives_the_ball_to_the_second_halfs_receiver() -> None:
 def test_regulations_end_leaves_the_ball_to_overtimes_toss() -> None:
     feed = FakeFeed()
     feed.scores = [_scores(_row(status_detail="End of 4th Quarter", period=4, clock="0:00"))]
-    state = _provider(feed).poll(GAME, T0).state
+    state = _provider(feed).poll(GAME, _at(T0)).state
     assert state is not None
     assert (state.interval, state.possession, state.down, state.timeouts) == (
         FootballInterval.END_OF_QUARTER,
@@ -507,7 +513,7 @@ def test_a_kickoff_after_a_score_says_so_with_the_kicker_and_the_spot() -> None:
             )
         )
     ]
-    state = _provider(feed).poll(GAME, T0).state
+    state = _provider(feed).poll(GAME, _at(T0)).state
     assert state is not None
     assert (state.set_piece, state.possession, state.yards_to_goal) == (SetPiece.KICKOFF, HomeAway.HOME, 65)
     assert state.ball_on is not None and (state.ball_on.side, state.ball_on.yard_line) == (HomeAway.HOME, 35)
@@ -523,7 +529,7 @@ def test_only_a_matched_play_that_has_landed_counts_as_caught_up() -> None:
     ]
     feed.plays = [_page(_change("p1", 100, "C.Brown up the middle for 4 yards."))]
     provider = _provider(feed)
-    assert [provider.poll(GAME, T0).caught_up for _ in range(4)] == [False, False, False, True]
+    assert [provider.poll(GAME, _at(T0)).caught_up for _ in range(4)] == [False, False, False, True]
     assert PlaySyncStatus("stale") is PlaySyncStatus.STALE
 
 
@@ -538,23 +544,23 @@ def _half_ended(written: datetime) -> FakeFeed:
 def test_a_board_starting_mid_break_counts_it_from_when_the_half_ended() -> None:
     written = T0 - timedelta(minutes=4)
     provider = _provider(_half_ended(written))
-    snapshot = provider.poll(GAME, T0)
+    snapshot = provider.poll(GAME, _at(T0))
     assert snapshot.break_ends_at == written + HALFTIME_HOLD  # not a whole new hold from the restart
-    assert provider.holding(GAME, T0 + timedelta(minutes=8))
-    assert not provider.holding(GAME, written + HALFTIME_HOLD)
+    assert provider.holding(GAME, _at(T0 + timedelta(minutes=8)))
+    assert not provider.holding(GAME, _at(written + HALFTIME_HOLD))
     long_over = _provider(_half_ended(T0 - HALFTIME_HOLD - timedelta(minutes=1)))
-    long_over.poll(GAME, T0)
-    assert not long_over.holding(GAME, T0 + timedelta(seconds=1))  # the break is as good as over: poll on
+    long_over.poll(GAME, _at(T0))
+    assert not long_over.holding(GAME, _at(T0 + timedelta(seconds=1)))  # the break is as good as over: poll on
 
 
 def test_a_board_starting_mid_break_with_no_record_of_its_start_shows_no_countdown() -> None:
     feed = FakeFeed()
     feed.scores = [_scores(_synced("p0", status="unknown", status_detail="Halftime", clock="0:00"))]
     provider = _provider(feed)
-    assert provider.poll(GAME, T0).break_ends_at is None
-    assert provider.holding(GAME, T0 + timedelta(minutes=1))
+    assert provider.poll(GAME, _at(T0)).break_ends_at is None
+    assert provider.holding(GAME, _at(T0 + timedelta(minutes=1)))
     feed.scores = [_scores(_row())]
-    assert _provider(feed).poll(GAME, T0).break_ends_at is None
+    assert _provider(feed).poll(GAME, _at(T0)).break_ends_at is None
 
 
 def test_a_down_line_left_behind_by_a_score_is_dropped_until_the_feed_writes_a_new_one() -> None:
@@ -572,12 +578,12 @@ def test_a_down_line_left_behind_by_a_score_is_dropped_until_the_feed_writes_a_n
         ),
     ]
     provider = _provider(feed)
-    first = provider.poll(GAME, T0).state
+    first = provider.poll(GAME, _at(T0)).state
     assert first is not None and first.down == 1
     for _ in range(2):
-        stale = provider.poll(GAME, T0).state
+        stale = provider.poll(GAME, _at(T0)).state
         assert stale is not None and (stale.possession, stale.down, stale.yards_to_goal) == (None, None, None)
-    fresh = provider.poll(GAME, T0).state
+    fresh = provider.poll(GAME, _at(T0)).state
     assert fresh is not None and (fresh.down, fresh.distance) == (1, 10)
 
 
@@ -609,9 +615,9 @@ def test_a_score_the_feed_skips_is_shown_from_the_scoreboard_once_the_feed_moves
         _page(_change("p2", 300, "Official Timeout at 04:12.", play_type="official_timeout")),
     ]
     provider = _provider(feed)
-    assert _headlines(provider.poll(GAME, T0)) == []
-    assert _headlines(provider.poll(GAME, T0 + timedelta(seconds=10))) == []  # the play may yet come
-    later = provider.poll(GAME, T0 + timedelta(seconds=20))
+    assert _headlines(provider.poll(GAME, _at(T0))) == []
+    assert _headlines(provider.poll(GAME, _at(T0 + timedelta(seconds=10)))) == []  # the play may yet come
+    later = provider.poll(GAME, _at(T0 + timedelta(seconds=20)))
     assert _headlines(later) == ["CIN +7"]
     assert later.events[0].summary.detail == "Score update; play not reported"
     assert [event.kind for event in later.events][-1] is FootballEventKind.TV_TIMEOUT  # the score comes first
@@ -622,9 +628,9 @@ def test_a_score_whose_play_arrives_is_not_shown_from_the_scoreboard() -> None:
     feed.scores = [_scores(_home(10, "p1")), _scores(_home(16, "p2", "awaiting_play")), _scores(_home(16, "p2"))]
     feed.plays = [_page(_change("p1", 100, "C.Brown up the middle for 4 yards.")), _page(_scoring("p2", 200))]
     provider = _provider(feed)
-    provider.poll(GAME, T0)
-    provider.poll(GAME, T0 + timedelta(seconds=10))
-    arrived = provider.poll(GAME, T0 + timedelta(seconds=20))
+    provider.poll(GAME, _at(T0))
+    provider.poll(GAME, _at(T0 + timedelta(seconds=10)))
+    arrived = provider.poll(GAME, _at(T0 + timedelta(seconds=20)))
     assert _headlines(arrived) == [] and [event.summary.headline for event in arrived.events] == ["TOUCHDOWN CIN"]
 
 
@@ -632,10 +638,10 @@ def _score_after_backstop(points: int) -> list[str]:
     feed = FakeFeed()
     feed.scores = [_scores(_home(10, "p1")), _scores(_home(10 + points, "p1"))]
     provider = _provider(feed)
-    provider.poll(GAME, T0)
-    assert _headlines(provider.poll(GAME, T0 + timedelta(seconds=10))) == []  # the gap opens
-    shown = _headlines(provider.poll(GAME, T0 + timedelta(seconds=10) + SCORE_BACKSTOP))
-    assert _headlines(provider.poll(GAME, T0 + timedelta(minutes=30))) == []  # and is shown once
+    provider.poll(GAME, _at(T0))
+    assert _headlines(provider.poll(GAME, _at(T0 + timedelta(seconds=10)))) == []  # the gap opens
+    shown = _headlines(provider.poll(GAME, _at(T0 + timedelta(seconds=10) + SCORE_BACKSTOP)))
+    assert _headlines(provider.poll(GAME, _at(T0 + timedelta(minutes=30)))) == []  # and is shown once
     return shown
 
 
@@ -649,9 +655,9 @@ def test_a_try_owed_after_a_touchdown_is_left_to_its_own_row() -> None:
     feed.scores = [_scores(_home(16, "p1")), _scores(_home(17, "p1"))]
     feed.plays = [_page(_change("p0", 50, "D", yards_gained=4), _scoring("p1", 100))]
     provider = _provider(feed)
-    provider.poll(GAME, T0)
-    provider.poll(GAME, T0 + timedelta(seconds=10))
-    assert _headlines(provider.poll(GAME, T0 + timedelta(minutes=30))) == []
+    provider.poll(GAME, _at(T0))
+    provider.poll(GAME, _at(T0 + timedelta(seconds=10)))
+    assert _headlines(provider.poll(GAME, _at(T0 + timedelta(minutes=30)))) == []
 
 
 def test_plays_that_turn_up_after_their_score_was_shown_dont_open_a_new_gap() -> None:
@@ -669,12 +675,12 @@ def test_plays_that_turn_up_after_their_score_was_shown_dont_open_a_new_gap() ->
         _page(_scoring("p2", 200, extra_point_result="good")),  # the skipped touchdown turns up, try and all
     ]
     provider = _provider(feed)
-    provider.poll(GAME, T0)
-    provider.poll(GAME, T0 + timedelta(seconds=10))
-    assert _headlines(provider.poll(GAME, T0 + timedelta(seconds=10) + SCORE_BACKSTOP)) == ["CIN +7"]
-    late = provider.poll(GAME, T0 + timedelta(minutes=5))
+    provider.poll(GAME, _at(T0))
+    provider.poll(GAME, _at(T0 + timedelta(seconds=10)))
+    assert _headlines(provider.poll(GAME, _at(T0 + timedelta(seconds=10) + SCORE_BACKSTOP))) == ["CIN +7"]
+    late = provider.poll(GAME, _at(T0 + timedelta(minutes=5)))
     assert [event.summary.headline for event in late.events] == ["TOUCHDOWN CIN"]  # the real one, with its words
-    assert _headlines(provider.poll(GAME, T0 + timedelta(minutes=10))) == []
+    assert _headlines(provider.poll(GAME, _at(T0 + timedelta(minutes=10)))) == []
 
 
 def test_no_score_is_shown_until_the_plays_so_far_are_all_in() -> None:
@@ -682,8 +688,8 @@ def test_no_score_is_shown_until_the_plays_so_far_are_all_in() -> None:
     feed.scores = [_scores(_home(10, "p1")), _scores(_home(16, "p1"))]
     feed.plays = [_page(more=True, cursor="c")]
     provider = _provider(feed)
-    provider.poll(GAME, T0)
-    assert _headlines(provider.poll(GAME, T0 + timedelta(hours=1))) == []
+    provider.poll(GAME, _at(T0))
+    assert _headlines(provider.poll(GAME, _at(T0 + timedelta(hours=1)))) == []
 
 
 S10, S20, S30 = (timedelta(seconds=n) for n in (10, 20, 30))
@@ -703,13 +709,13 @@ def test_a_failed_play_read_is_retried_for_the_same_play() -> None:
         _page(cursor="c3"),
     ]
     provider = _provider(feed)
-    provider.poll(GAME, T0)
-    failed = provider.poll(GAME, T0 + S10)
+    provider.poll(GAME, _at(T0))
+    failed = provider.poll(GAME, _at(T0 + S10))
     assert failed.state is not None and failed.events == () and not failed.caught_up  # the scoreboard still came
     assert [note.kind for note in failed.notes] == [FeedNoteKind.PLAY_READ_FAILED]
-    retried = provider.poll(GAME, T0 + S20)
+    retried = provider.poll(GAME, _at(T0 + S20))
     assert [event.summary.headline for event in retried.events] == ["2 YARD RUN"] and retried.caught_up
-    provider.poll(GAME, T0 + S30)  # read through for p1 now: not again
+    provider.poll(GAME, _at(T0 + S30))  # read through for p1 now: not again
     assert _reads(feed) == [{"limit": 100}, {"limit": 100, "cursor": "c1"}, {"limit": 100, "cursor": "c1"}]
 
 
@@ -723,11 +729,11 @@ def test_a_read_that_fails_partway_keeps_its_pages_and_reads_on_from_there() -> 
         _page(_change("p2", 300, "A.Rodgers pass incomplete short right.", play_type="pass_incompletion")),
     ]
     provider = _provider(feed)
-    provider.poll(GAME, T0)
-    partway = provider.poll(GAME, T0 + S10)
+    provider.poll(GAME, _at(T0))
+    partway = provider.poll(GAME, _at(T0 + S10))
     assert [event.summary.headline for event in partway.events] == ["2 YARD RUN"]  # the page that came is kept
     assert not partway.caught_up  # but the rest of the feed isn't in
-    rest = provider.poll(GAME, T0 + S20)
+    rest = provider.poll(GAME, _at(T0 + S20))
     assert [event.summary.headline for event in rest.events] == ["INCOMPLETE"] and rest.caught_up
     assert _reads(feed)[1:] == [
         {"limit": 100, "cursor": "c1"},
@@ -748,9 +754,9 @@ def test_a_first_look_that_fails_partway_announces_nothing_until_the_game_is_all
         ),
     ]
     provider = _provider(feed)
-    first = provider.poll(GAME, T0)
+    first = provider.poll(GAME, _at(T0))
     assert first.events == () and not first.caught_up
-    second = provider.poll(GAME, T0 + S10)
+    second = provider.poll(GAME, _at(T0 + S10))
     assert [event.summary.headline for event in second.events] == ["INCOMPLETE"]  # the latest, not a replay
 
 
@@ -763,9 +769,9 @@ def test_timeouts_and_challenges_stay_unknown_until_the_play_feed_is_all_in() ->
         _page(_change("p1", 200, "S.Perine right guard for 2 yards.", yards_gained=2)),
     ]
     provider = _provider(feed)
-    first = provider.poll(GAME, T0)
+    first = provider.poll(GAME, _at(T0))
     assert first.state is not None and first.state.timeouts is None and first.state.challenges is None
-    second = provider.poll(GAME, T0 + S10)
+    second = provider.poll(GAME, _at(T0 + S10))
     assert second.state is not None and second.state.timeouts is not None and second.state.challenges is not None
 
 
@@ -788,10 +794,10 @@ def test_a_cursor_the_feed_refuses_starts_the_reading_over_without_replaying_the
         ),
     ]
     provider = _provider(feed)
-    provider.poll(GAME, T0)
-    refused = provider.poll(GAME, T0 + S10)
+    provider.poll(GAME, _at(T0))
+    refused = provider.poll(GAME, _at(T0 + S10))
     assert refused.events == () and [note.kind for note in refused.notes] == [FeedNoteKind.CURSOR_RESET]
-    again = provider.poll(GAME, T0 + S20)
+    again = provider.poll(GAME, _at(T0 + S20))
     assert [event.summary.headline for event in again.events] == ["INCOMPLETE"]  # the latest only
     assert _reads(feed) == [{"limit": 100}, {"limit": 100, "cursor": "c1"}, {"limit": 100}]
 
@@ -817,15 +823,15 @@ def test_the_final_drains_the_feed_for_its_last_plays_then_settles() -> None:
         _page(),
     ]
     provider = _provider(feed)
-    provider.poll(GAME, T0)
-    final = provider.poll(GAME, T0 + S10)
+    provider.poll(GAME, _at(T0))
+    final = provider.poll(GAME, _at(T0 + S10))
     assert [event.summary.headline for event in final.events] == ["INCOMPLETE"]  # read though nothing named it
     assert not final.caught_up and not final.settled
-    ended = provider.poll(GAME, T0 + S20)
+    ended = provider.poll(GAME, _at(T0 + S20))
     assert ended.caught_up and not ended.settled  # the feed wrote the game's end; fixes may still come
-    assert provider.poll(GAME, T0 + S10 + FINAL_DRAIN).settled
+    assert provider.poll(GAME, _at(T0 + S10 + FINAL_DRAIN)).settled
     reads = feed.play_reads()
-    provider.poll(GAME, T0 + S20 + FINAL_DRAIN)
+    provider.poll(GAME, _at(T0 + S20 + FINAL_DRAIN))
     assert feed.play_reads() == reads  # the drain is over
 
 
@@ -838,12 +844,12 @@ def test_halftime_drains_the_feed_until_its_hold_begins() -> None:
         _page(),
     ]
     provider = _provider(feed)
-    provider.poll(GAME, T0)
-    half = provider.poll(GAME, T0 + S10)
+    provider.poll(GAME, _at(T0))
+    half = provider.poll(GAME, _at(T0 + S10))
     assert [event.summary.headline for event in half.events] == ["KNEEL"] and not half.caught_up
-    assert not provider.holding(GAME, T0 + S20)
-    held = provider.poll(GAME, T0 + S10 + HALFTIME_GRACE)
-    assert provider.holding(GAME, T0 + S20 + HALFTIME_GRACE)
+    assert not provider.holding(GAME, _at(T0 + S20))
+    held = provider.poll(GAME, _at(T0 + S10 + HALFTIME_GRACE))
+    assert provider.holding(GAME, _at(T0 + S20 + HALFTIME_GRACE))
     assert held.break_ends_at == T0 + S10 + HALFTIME_HOLD  # from when the break began, not when the drain ended
 
 
@@ -871,16 +877,16 @@ def test_a_play_first_seen_after_a_later_one_is_counted_but_not_shown() -> None:
         ),
     ]
     provider = _provider(feed)
-    provider.poll(GAME, T0)
-    kicked = provider.poll(GAME, T0 + S10)
+    provider.poll(GAME, _at(T0))
+    kicked = provider.poll(GAME, _at(T0 + S10))
     assert [event.summary.headline for event in kicked.events] == ["KICKOFF"]  # the score's play may yet come
-    late = provider.poll(GAME, T0 + S20)
+    late = provider.poll(GAME, _at(T0 + S20))
     # The touchdown turns up behind the kickoff: its points are the scoreboard's to show, not its words.
     assert [event.summary.headline for event in late.events] == ["CIN +7", "INCOMPLETE"]
     assert [(note.kind, note.detail.split(" | ")[0]) for note in late.notes] == [
         (FeedNoteKind.LATE_PLAY, "TOUCHDOWN CIN")
     ]
-    fixed = provider.poll(GAME, T0 + S30)
+    fixed = provider.poll(GAME, _at(T0 + S30))
     assert [event.summary.headline for event in fixed.events] == ["3 YARD RUN"]  # no score again, and no try:
     assert [note.kind for note in fixed.notes] == [FeedNoteKind.LATE_PLAY]  # its try stays as unseen as it
 
@@ -893,15 +899,15 @@ def test_reading_the_play_feed_every_poll_finds_a_play_nothing_points_at() -> No
         _page(_change("p1", 100, "C.Brown up the middle for 4 yards.", yards_gained=4), cursor="c2"),
     ]
     eager = _provider(feed, play_feed=PlayFeedPace.EVERY_POLL)
-    eager.poll(GAME, T0)
-    assert [event.summary.headline for event in eager.poll(GAME, T0 + S10).events] == ["4 YARD RUN"]
+    eager.poll(GAME, _at(T0))
+    assert [event.summary.headline for event in eager.poll(GAME, _at(T0 + S10)).events] == ["4 YARD RUN"]
     assert PlayFeedPace("every-poll") is PlayFeedPace.EVERY_POLL
 
 
 def _overtime(period: int, week: int, status_detail: str = "10:00 - OT", **changes: Any) -> Any:
     feed = FakeFeed()
     feed.scores = [_scores(_row(period=period, week=week, status_detail=status_detail, **changes))]
-    return _provider(feed).poll(GAME, T0).state
+    return _provider(feed).poll(GAME, _at(T0)).state
 
 
 def test_overtime_shows_no_challenges_and_postseason_overtime_no_timeouts_yet() -> None:
@@ -920,7 +926,7 @@ def test_only_regulations_end_waits_on_a_toss_and_a_later_overtime_period_carrie
     assert second is not None and second.interval is FootballInterval.END_OF_QUARTER  # no halftime in overtime
     feed = FakeFeed()
     feed.scores = [_scores(_synced("p1", period=6, week=20, situation=None, status_detail="15:00 - 2nd OT"))]
-    state = _provider(feed).poll(GAME, T0).state
+    state = _provider(feed).poll(GAME, _at(T0)).state
     assert state is not None and state.set_piece is None  # no kickoff opens it
 
 
@@ -929,9 +935,9 @@ def _final_drain(feed: FakeFeed) -> NflMetaLiveProvider:
     feed.scores = [_scores(_synced("p1", period=4, clock="0:03", status_detail="0:03 - 4th")), _scores(_final_row())]
     feed.plays = [_page(_change("p1", 100, "M.Rudolph pass incomplete.", quarter=4), cursor="c1"), _page(cursor="c1")]
     provider = _provider(feed)
-    provider.poll(GAME, T0)
+    provider.poll(GAME, _at(T0))
     for second in range(10, 130, 10):
-        assert not provider.poll(GAME, T0 + timedelta(seconds=second)).settled
+        assert not provider.poll(GAME, _at(T0 + timedelta(seconds=second))).settled
     return provider
 
 
@@ -947,12 +953,52 @@ def test_the_final_drain_ends_with_a_read_on_its_boundary_that_finds_a_late_deci
         posteam_abbr="PIT",
         quarter=4,
     )
-    feed.plays = [_page(walk_off, cursor="c2")]  # its row lands at +129 s, the drain's 119th second
-    last = provider.poll(GAME, T0 + timedelta(seconds=10) + FINAL_DRAIN)  # on the drain's boundary
+    end = _change("p3", 300, "END GAME", play_type="end_of_game", quarter=4)
+    feed.plays = [_page(walk_off, end, cursor="c2")]  # its row lands at +129 s, the drain's 119th second
+    last = provider.poll(GAME, _at(T0 + timedelta(seconds=10) + FINAL_DRAIN))  # on the drain's boundary
     assert [event.summary.headline for event in last.events] == ["FIELD GOAL GOOD"]
-    assert last.settled and last.notes == ()
+    assert last.settled and last.caught_up and last.notes == ()
     reads = feed.play_reads()
-    assert provider.poll(GAME, T0 + timedelta(seconds=140)).settled and feed.play_reads() == reads  # parked
+    assert provider.poll(GAME, _at(T0 + timedelta(seconds=140))).settled and feed.play_reads() == reads  # parked
+
+
+def test_a_final_draining_says_how_long_is_left_and_a_last_read_without_the_games_end_notes_the_gap() -> None:
+    feed = FakeFeed()
+    feed.scores = [_scores(_synced("p1", period=4, clock="0:03", status_detail="0:03 - 4th")), _scores(_final_row())]
+    feed.plays = [_page(_change("p1", 100, "M.Rudolph pass incomplete.", quarter=4), cursor="c1"), _page(cursor="c1")]
+    provider = _provider(feed)
+    assert provider.poll(GAME, _at(T0)).drain_left is None  # still live
+    assert provider.poll(GAME, _at(T0 + S10)).drain_left == FINAL_DRAIN  # final: the drain starts
+    assert provider.poll(GAME, _at(T0 + S30)).drain_left == FINAL_DRAIN - S20
+    last = provider.poll(GAME, _at(T0 + S10 + FINAL_DRAIN))  # its pages complete, and empty
+    assert last.settled and last.drain_left is None and not last.caught_up
+    assert [(note.kind, note.detail) for note in last.notes] == [
+        (FeedNoteKind.FINAL_INCOMPLETE, "no end of game in the feed")
+    ]
+
+
+def test_the_halftime_hold_and_the_final_drain_run_their_length_whatever_the_wall_clock_does() -> None:
+    feed = FakeFeed()
+    halftime = _scores(_synced("p0", status_detail="Halftime", clock="0:00"))
+    feed.scores = [_scores(_row()), halftime, _scores(_final_row())]
+    feed.plays = [_page(_change("p0", 100, "A.Rodgers kneels to PIT 21 for -1 yards."))]
+    provider = _provider(feed)
+    clock = FakeClock(T0)
+    provider.poll(GAME, clock.read())
+    clock.advance(S10)
+    assert provider.poll(GAME, clock.read()).break_ends_at == T0 + S10 + HALFTIME_HOLD  # dated on the wall clock
+    clock.jump(-timedelta(minutes=10))  # the wall clock is set back ten minutes
+    second = timedelta(seconds=1)
+    clock.advance(HALFTIME_HOLD - second)
+    assert provider.holding(GAME, clock.read())
+    clock.advance(second)
+    assert not provider.holding(GAME, clock.read())  # thirteen minutes after the break began, not 23
+    provider.poll(GAME, clock.read())  # the final
+    clock.jump(timedelta(hours=1))  # and now ahead an hour
+    clock.advance(FINAL_DRAIN - second)
+    assert not provider.poll(GAME, clock.read()).settled  # still draining
+    clock.advance(second)
+    assert provider.poll(GAME, clock.read()).settled  # two minutes after the final, by the monotonic clock
 
 
 @pytest.mark.parametrize("answer", [RuntimeError("timed out"), _page(more=True, cursor="c9")])
@@ -960,10 +1006,10 @@ def test_a_final_whose_last_read_doesnt_finish_notes_the_gap_then_settles(answer
     feed = FakeFeed()
     provider = _final_drain(feed)
     feed.plays = [answer]
-    last = provider.poll(GAME, T0 + timedelta(seconds=10) + FINAL_DRAIN)
+    last = provider.poll(GAME, _at(T0 + timedelta(seconds=10) + FINAL_DRAIN))
     assert last.settled and [note.kind for note in last.notes][-1] is FeedNoteKind.FINAL_INCOMPLETE
     reads = feed.play_reads()
-    provider.poll(GAME, T0 + timedelta(seconds=140))
+    provider.poll(GAME, _at(T0 + timedelta(seconds=140)))
     assert feed.play_reads() == reads  # parked all the same
 
 
@@ -973,22 +1019,22 @@ def test_a_matched_play_a_complete_read_lacks_is_read_for_again_for_a_while() ->
     run = _change("p1", 200, "S.Perine right guard for 2 yards.", yards_gained=2)
     feed.plays = [_page(_change("p0", 100, "C.Brown up the middle for 4 yards."), cursor="c1"), _page(), _page(run)]
     provider = _provider(feed)
-    first = provider.poll(GAME, T0)  # the scoreboard names p1; the feed, read to its end, doesn't have it
+    first = provider.poll(GAME, _at(T0))  # the scoreboard names p1; the feed, read to its end, doesn't have it
     assert [note.kind for note in first.notes] == [FeedNoteKind.PLAY_MISSING] and not first.caught_up
-    assert provider.poll(GAME, T0 + S10).notes == ()  # read again: still not there
-    found = provider.poll(GAME, T0 + S20)  # read again: there it is
+    assert provider.poll(GAME, _at(T0 + S10)).notes == ()  # read again: still not there
+    found = provider.poll(GAME, _at(T0 + S20))  # read again: there it is
     assert [event.summary.headline for event in found.events] == ["2 YARD RUN"] and found.caught_up
-    provider.poll(GAME, T0 + S30)
+    provider.poll(GAME, _at(T0 + S30))
     assert feed.play_reads() == 3  # read through for p1 now: not again
 
     feed = FakeFeed()
     feed.scores = [_scores(_synced("p9"))]
     provider = _provider(feed)
     for second in range(0, 30, 10):
-        provider.poll(GAME, T0 + timedelta(seconds=second))
-    gave_up = provider.poll(GAME, T0 + MISMATCH_RETRY)
+        provider.poll(GAME, _at(T0 + timedelta(seconds=second)))
+    gave_up = provider.poll(GAME, _at(T0 + MISMATCH_RETRY))
     assert [note.detail for note in gave_up.notes] == ["still not in the feed: waiting for the next play"]
-    provider.poll(GAME, T0 + MISMATCH_RETRY + S10)
+    provider.poll(GAME, _at(T0 + MISMATCH_RETRY + S10))
     assert feed.play_reads() == 4  # three polls more for it, and then no more
 
 
@@ -997,16 +1043,16 @@ def test_a_board_starting_mid_break_whose_first_read_fails_drains_before_its_hol
     feed = _half_ended(written)
     feed.plays = [RuntimeError("timed out"), *feed.plays]
     provider = _provider(feed)
-    first = provider.poll(GAME, T0)
-    assert not provider.holding(GAME, T0 + S10) and first.break_ends_at is None  # a short drain first
-    second = provider.poll(GAME, T0 + S10)  # read through now
-    assert provider.holding(GAME, T0 + S20)
+    first = provider.poll(GAME, _at(T0))
+    assert not provider.holding(GAME, _at(T0 + S10)) and first.break_ends_at is None  # a short drain first
+    second = provider.poll(GAME, _at(T0 + S10))  # read through now
+    assert provider.holding(GAME, _at(T0 + S20))
     assert second.break_ends_at == written + HALFTIME_HOLD  # the break began when the half ended
     stuck = _half_ended(written)
     stuck.plays = [RuntimeError("timed out")]
     failing = _provider(stuck)
-    failing.poll(GAME, T0)
-    failing.poll(GAME, T0 + S10)
-    assert not failing.holding(GAME, T0 + S20)
-    late = failing.poll(GAME, T0 + HALFTIME_GRACE)  # the grace is up: hold, with no countdown to show
-    assert failing.holding(GAME, T0 + HALFTIME_GRACE + S10) and late.break_ends_at is None
+    failing.poll(GAME, _at(T0))
+    failing.poll(GAME, _at(T0 + S10))
+    assert not failing.holding(GAME, _at(T0 + S20))
+    late = failing.poll(GAME, _at(T0 + HALFTIME_GRACE))  # the grace is up: hold, with no countdown to show
+    assert failing.holding(GAME, _at(T0 + HALFTIME_GRACE + S10)) and late.break_ends_at is None

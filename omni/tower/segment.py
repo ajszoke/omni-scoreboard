@@ -83,7 +83,7 @@ class Segment(Generic[PayloadT]):
     revision: int = 0
     parent: str | None = None
     latest_start: datetime | None = None  # if it hasn't started by then, it's dropped unseen
-    expires_at: datetime | None = None  # by then it's gone, on air or waiting
+    expires_at: datetime | None = None  # gone by then, on air or waiting (a hold on the panel, while current)
     hold: Hold | None = None
 
     def __post_init__(self) -> None:

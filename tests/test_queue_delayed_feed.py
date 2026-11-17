@@ -69,7 +69,7 @@ def test_keeps_future_values_for_a_later_pass() -> None:
 
 def test_a_credible_occurrence_makes_it_eligible_by_when_it_happened() -> None:
     feed = _feed()
-    feed.push("play", Arrival(received=_at(20), occurred=T), _at(20))  # 20 s fetch lag
+    feed.push("play", Arrival(received=_at(20), occurred=T, as_of=T + timedelta(seconds=20)), _at(20))  # 20 s late
     assert feed.latest_eligible(_at(29)) is None
     got = feed.latest_eligible(_at(30))
     assert got is not None and got.value == "play"

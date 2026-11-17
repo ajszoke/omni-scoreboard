@@ -18,8 +18,17 @@ Breaks drain the feed too:
 - **Halftime**, until the half's last play is in, for up to `HALFTIME_GRACE`. A board that starts
   mid-break drains too, when its first read of the game didn't finish. The hold runs from the break's
   onset (when the half ended, as near as the provider can tell), not from when the drain finished.
-- **The final**, for `FINAL_DRAIN`, ending with one last read at or after its end. If that last read
-  doesn't finish, the gap is noted (`FeedNoteKind.FINAL_INCOMPLETE`), and the game settles anyway.
+- **The final**, for `FINAL_DRAIN`, ending with one last read at or after its end. Each answer while
+  it drains says how long is left (`NflLiveSnapshot.drain_left`), so the asker can keep to the live pace
+  and ask on the boundary, however slowly NFLMeta says to poll a finished game. If that last read leaves
+  the plays short of the game's end (it didn't finish, or the feed never wrote the end), the gap is
+  noted (`FeedNoteKind.FINAL_INCOMPLETE`), and the game settles anyway. A score no play accounts for is
+  shown from the scoreboard on that read, since nothing is read after it.
+
+Each poll is given the clock's two readings. Instants are dated on the wall clock: the break's onset
+(for its countdown), when the feed wrote a play, an injury's report. Spans run on the monotonic clock:
+the halftime hold and its grace, the final's drain, the correction watch, the mismatch re-reads and the
+score backstop. So a wall-clock step neither stops nor stretches any of them.
 
 A read of the feed keeps what it got: each page that arrives is kept, the place in the feed moves only
 past what was kept, and a read that fails partway carries on from there at the next poll. Only plays
@@ -41,6 +50,7 @@ from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any
 
+from omni.core.clock import ClockReading, MonotonicTime
 from omni.core.enum import GameStatus, HomeAway, League, StrEnumMixin
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.core.time import DurationSeconds
@@ -60,6 +70,7 @@ from omni.providers.nfl_teams import NflTeamRegistry, canonical_abbreviation
 
 __all__ = [
     "CORRECTION_WATCH",
+    "DEFAULT_POLL",
     "FINAL_DRAIN",
     "HALFTIME_GRACE",
     "HALFTIME_HOLD",
@@ -140,7 +151,7 @@ class FeedNoteKind(StrEnumMixin, str, Enum):
     CURSOR_RESET = "cursor reset"  # the feed refused our place in it: re-read from its start, quietly
     LATE_PLAY = "late play"  # first seen after a later play: counted in the stats, not shown
     PLAY_MISSING = "matched play missing"  # the scoreboard names a play a complete read doesn't have
-    FINAL_INCOMPLETE = "final plays incomplete"  # the final's last read didn't finish: parked without the rest
+    FINAL_INCOMPLETE = "final plays incomplete"  # the final's last read left the plays short: parked without the rest
 
 
 @dataclass(frozen=True, slots=True)
@@ -193,6 +204,7 @@ class NflLiveSnapshot:
     ``state`` is None before kickoff. ``events`` usually trail ``state``: the scoreboard shows a play's
     result before the play itself arrives, and ``caught_up`` says whether it has. ``settled`` means the
     final is in and the feed has had its time for late plays and fixes: there's nothing left to ask.
+    Until then, ``drain_left`` says how long the final's drain has to its last read.
     """
 
     game: TeamGame
@@ -205,6 +217,7 @@ class NflLiveSnapshot:
     poll_every: DurationSeconds
     settled: bool = False
     notes: tuple[FeedNote, ...] = ()
+    drain_left: timedelta | None = None  # while the final drains: how long after this look its last read is due
 
 
 @dataclass(frozen=True, slots=True)
@@ -221,27 +234,27 @@ class _TrackedGame:
 
     ledger: PlayLedger | None = None
     latest: NflLiveSnapshot | None = None
-    halftime_seen: datetime | None = None  # when this game was first seen at halftime
+    halftime_seen: ClockReading | None = None  # when this game was first seen at halftime
     joined_at_half: bool = False  # the provider's first look at it was at halftime
-    halftime_at: datetime | None = None  # the break's onset, set once the half's plays are in: the hold runs from it
+    halftime_at: ClockReading | None = None  # the break's onset, once the half's plays are in: the hold runs from it
     break_timed: bool = True  # whether the onset is known well enough to count the break down
-    final_at: datetime | None = None  # when this game was first seen final
+    final_at: MonotonicTime | None = None  # when this game was first seen final
     settled: bool = False  # the final's drain has had its last read: nothing is left to ask
     cursor: str | None = None
     play_ids: set[str] = field(default_factory=set)  # every play the change feed has delivered and we kept
     written_at: dict[int, datetime] = field(default_factory=dict)  # when the feed first wrote each play
     read_for: str | None = None  # the matched play the feed was last read through for, so it's read once
-    missing: tuple[str, datetime] | None = None  # a matched play a complete read lacked, and since when
+    missing: tuple[str, MonotonicTime] | None = None  # a matched play a complete read lacked, and since when
     draining: bool = False  # the last read stopped short of the feed's end; the next poll reads on
     matched_board: tuple[Any, ...] | None = None  # the scoreboard as of the last matched play
-    watch_until: datetime | None = None  # reading the feed every poll until then, for a correction
+    watch_until: MonotonicTime | None = None  # reading the feed every poll until then, for a correction
     injuries: dict[tuple[str, str], _Injury] | None = None  # None until the first look
     caught_up_plays: bool = False  # the play feed has been read to its end since the last (re)start
     stale_situation: str | None = None  # a down line the feed left behind when the score moved
     last_situation: str | None = None
     last_scores: tuple[int, int] | None = None
     shown_points: dict[HomeAway, int] = field(default_factory=dict)  # scored from the scoreboard alone
-    gaps: dict[HomeAway, tuple[datetime, int]] = field(default_factory=dict)  # since, and the newest play then
+    gaps: dict[HomeAway, tuple[MonotonicTime, int]] = field(default_factory=dict)  # since, and the newest play then
     baselined: bool = False  # gaps already open on the first full look are old news, not events
 
 
@@ -283,23 +296,24 @@ class NflMetaLiveProvider:
                 return int(row["game_id"])
         return None
 
-    def holding(self, game_id: int, now: datetime) -> bool:
-        """Whether ``game_id`` is inside its halftime hold, when polling it makes no request."""
+    def holding(self, game_id: int, at: ClockReading) -> bool:
+        """Whether ``game_id`` is inside its halftime hold as of ``at``, when polling it makes no request."""
         tracked = self._games.get(game_id)
         return (
             tracked is not None
             and tracked.halftime_at is not None
             and tracked.latest is not None
-            and now - tracked.halftime_at < self._hold
+            and at.monotonic.since(tracked.halftime_at.monotonic) < self._hold
         )
 
-    def poll(self, game_id: int, now: datetime) -> NflLiveSnapshot:
-        """The game as it stands; inside the halftime hold, the last answer (with no new events), unasked.
+    def poll(self, game_id: int, at: ClockReading) -> NflLiveSnapshot:
+        """The game as it stands at ``at``; inside the halftime hold, the last answer (with no new events),
+        unasked.
 
         Raises `ProviderError` when the feed fails or no longer lists the game.
         """
         tracked = self._games.setdefault(game_id, _TrackedGame())
-        if self.holding(game_id, now) and tracked.latest is not None:
+        if self.holding(game_id, at) and tracked.latest is not None:
             return dataclasses.replace(tracked.latest, events=(), notes=())
         first_look = tracked.latest is None
         body = self._get("/api/v1/live-scores", {"game_id": game_id})
@@ -315,26 +329,31 @@ class NflMetaLiveProvider:
         if state is not None and _stale_situation(tracked, row, state):
             state = dataclasses.replace(state, possession=None, down=None, distance=None, yards_to_goal=None)
         if phase is NflPhase.POST and tracked.final_at is None:
-            tracked.final_at = now
+            tracked.final_at = at.monotonic
         at_half = state is not None and state.interval is FootballInterval.HALFTIME
         # A break drains the feed: halftime until its hold begins, the final until a read at its drain's end.
-        final_read = tracked.final_at is not None and not tracked.settled
-        draining = (at_half and tracked.halftime_at is None) or final_read
+        final_at = tracked.final_at if not tracked.settled else None  # the final drains from then
+        draining = (at_half and tracked.halftime_at is None) or final_at is not None
         ledger = tracked.ledger if tracked.ledger is not None else PlayLedger(game.away, game.home)
         notes: list[FeedNote] = []
-        plays = self._follow_plays(game_id, tracked, ledger, row, now, drain=draining, notes=notes)
+        plays = self._follow_plays(game_id, tracked, ledger, row, at, drain=draining, notes=notes)
         tracked.ledger = ledger
-        if final_read and tracked.final_at is not None and now - tracked.final_at >= FINAL_DRAIN:
-            tracked.settled = True  # that was the drain's last read
-            if tracked.draining:
-                notes.append(FeedNote(FeedNoteKind.FINAL_INCOMPLETE, "the last read after the final didn't finish"))
-        scored = _unexplained_points(game, tracked, ledger, state, now) if state is not None else []
-        events = scored + plays + _injury_events(tracked, row, now)
+        drain_left = FINAL_DRAIN - at.monotonic.since(final_at) if final_at is not None else None
+        last_read = drain_left is not None and drain_left <= timedelta(0)
+        if last_read:
+            tracked.settled, drain_left = True, None  # that was the drain's last read
+        scored: list[FootballEvent] = []
+        if state is not None:
+            scored = _unexplained_points(game, tracked, ledger, state, at.monotonic, last=last_read)
+        events = scored + plays + _injury_events(tracked, row, at.utc)
         if state is not None:
             state = _with_plays(state, ledger, postseason=_postseason(row), known=tracked.caught_up_plays)
         caught_up = _caught_up(row, phase, tracked, ledger)
+        if last_read and not caught_up:  # parked short of the game's end: say why
+            short = "the last read after the final didn't finish" if tracked.draining else "no end of game in the feed"
+            notes.append(FeedNote(FeedNoteKind.FINAL_INCOMPLETE, short))
         if at_half and tracked.halftime_at is None:
-            _drain_half(tracked, ledger, now, first_look=first_look, caught_up=caught_up)
+            _drain_half(tracked, ledger, at, first_look=first_look, caught_up=caught_up)
         timed = at_half and tracked.halftime_at is not None and tracked.break_timed
         tracked.latest = NflLiveSnapshot(
             game=game,
@@ -342,11 +361,12 @@ class NflMetaLiveProvider:
             state=state,
             events=tuple(events),
             caught_up=caught_up,
-            break_ends_at=tracked.halftime_at + self._hold if timed and tracked.halftime_at else None,
+            break_ends_at=tracked.halftime_at.utc + self._hold if timed and tracked.halftime_at else None,
             observed_at=_instant(row.get("observed_at")),
             poll_every=_poll_every(body),
             settled=tracked.settled,
             notes=tuple(notes),
+            drain_left=drain_left,
         )
         return tracked.latest
 
@@ -356,7 +376,7 @@ class NflMetaLiveProvider:
         tracked: _TrackedGame,
         ledger: PlayLedger,
         row: Mapping[str, Any],
-        now: datetime,
+        at: ClockReading,
         *,
         drain: bool,
         notes: list[FeedNote],
@@ -371,9 +391,9 @@ class NflMetaLiveProvider:
             if play_id is not None and play_id not in tracked.play_ids and play_id != tracked.read_for:
                 read = True
             elif tracked.matched_board is not None and board != tracked.matched_board:
-                tracked.watch_until = now + CORRECTION_WATCH  # the scoreboard moved with no new play
+                tracked.watch_until = at.monotonic + CORRECTION_WATCH  # the scoreboard moved with no new play
             tracked.matched_board = board
-        if tracked.watch_until is not None and now < tracked.watch_until:
+        if tracked.watch_until is not None and at.monotonic < tracked.watch_until:
             read = True
         if not read:
             return []
@@ -393,7 +413,7 @@ class NflMetaLiveProvider:
         if batch.complete:
             tracked.caught_up_plays = True
             if status is PlaySyncStatus.MATCHED:
-                _read_through(tracked, play_id, now, notes)
+                _read_through(tracked, play_id, at.monotonic, notes)
         if any(event.kind in _CORRECTIONS for event in events):
             tracked.watch_until = None
         notes += batch.notes
@@ -455,7 +475,7 @@ class NflMetaLiveProvider:
             raise ProviderError(f"NFLMeta fetch failed for {path}: {exc}") from exc
 
 
-def _read_through(tracked: _TrackedGame, play_id: str | None, now: datetime, notes: list[FeedNote]) -> None:
+def _read_through(tracked: _TrackedGame, play_id: str | None, now: MonotonicTime, notes: list[FeedNote]) -> None:
     """A complete read for a matched scoreboard. Its play is read for once it's in; while it isn't, the
     feed is read for it again each poll, until `MISMATCH_RETRY` has passed since the first read lacked it."""
     if play_id is None or play_id in tracked.play_ids:
@@ -463,7 +483,7 @@ def _read_through(tracked: _TrackedGame, play_id: str | None, now: datetime, not
     elif tracked.missing is None or tracked.missing[0] != play_id:
         tracked.missing = (play_id, now)
         notes.append(FeedNote(FeedNoteKind.PLAY_MISSING, "not in the feed yet: reading again next poll"))
-    elif now - tracked.missing[1] >= MISMATCH_RETRY:
+    elif now.since(tracked.missing[1]) >= MISMATCH_RETRY:
         tracked.read_for, tracked.missing = play_id, None
         notes.append(FeedNote(FeedNoteKind.PLAY_MISSING, "still not in the feed: waiting for the next play"))
 
@@ -475,21 +495,27 @@ def _dated(event: FootballEvent, written: Mapping[int, datetime]) -> FootballEve
     return dataclasses.replace(event, written_at=written[event.play])
 
 
-def _drain_half(tracked: _TrackedGame, ledger: PlayLedger, now: datetime, *, first_look: bool, caught_up: bool) -> None:
+def _drain_half(
+    tracked: _TrackedGame, ledger: PlayLedger, at: ClockReading, *, first_look: bool, caught_up: bool
+) -> None:
     """Halftime, before its hold: the hold begins once the half's plays are in, or after `HALFTIME_GRACE`.
 
     Seen live, the half's last play is in once the scoreboard's play has landed, and the break began
     when halftime was first seen. Joined mid-break, the game so far has to be read through first; the
-    break began when the feed wrote the half's last play, when that read finished and says so.
+    break began when the feed wrote the half's last play, when that read finished and says so. That
+    instant is placed on the monotonic clock as ``at`` reads it, for the hold to run from.
     """
     if tracked.halftime_seen is None:
-        tracked.halftime_seen, tracked.joined_at_half = now, first_look
+        tracked.halftime_seen, tracked.joined_at_half = at, first_look
     seen = tracked.halftime_seen
     read_all = tracked.caught_up_plays and not tracked.draining
-    if not (read_all if tracked.joined_at_half else caught_up) and now - seen < HALFTIME_GRACE:
+    if not (read_all if tracked.joined_at_half else caught_up) and at.monotonic.since(seen.monotonic) < HALFTIME_GRACE:
         return
     began = tracked.written_at.get(ledger.latest) if tracked.joined_at_half and read_all else None
-    tracked.halftime_at = min(began, seen) if began is not None else seen
+    if began is not None and began < seen.utc:  # the half ended before it was seen
+        tracked.halftime_at = ClockReading(began, at.monotonic + (began - at.utc))
+    else:
+        tracked.halftime_at = seen
     tracked.break_timed = began is not None or not tracked.joined_at_half
 
 
@@ -515,13 +541,20 @@ def _stale_situation(tracked: _TrackedGame, row: Mapping[str, Any], state: Footb
 
 
 def _unexplained_points(
-    game: TeamGame, tracked: _TrackedGame, ledger: PlayLedger, state: FootballGameState, now: datetime
+    game: TeamGame,
+    tracked: _TrackedGame,
+    ledger: PlayLedger,
+    state: FootballGameState,
+    now: MonotonicTime,
+    *,
+    last: bool = False,
 ) -> list[FootballEvent]:
     """Scores the scoreboard shows that no play accounts for, once the feed has plainly skipped them.
 
     The plays usually catch up within half a minute. A score is shown from the scoreboard when the
-    feed delivers a later play without it, or after `SCORE_BACKSTOP`. A try still owed after a
-    touchdown in the feed is left to its own row, however late: the scoreboard already shows it.
+    feed delivers a later play without it, after `SCORE_BACKSTOP`, or on the ``last`` read of the game.
+    A try still owed after a touchdown in the feed is left to its own row, however late: the
+    scoreboard already shows it.
     """
     if not tracked.caught_up_plays:
         return []  # the plays so far aren't all in yet
@@ -545,7 +578,7 @@ def _unexplained_points(
         if gap <= 2 and ledger.try_pending(side):
             continue
         since, newest = tracked.gaps.setdefault(side, (now, ledger.latest))
-        if ledger.latest > newest or now - since >= SCORE_BACKSTOP:
+        if last or ledger.latest > newest or now.since(since) >= SCORE_BACKSTOP:
             events += _score_events(team, gap, side, scored)
             tracked.shown_points[side] = shown + gap
             tracked.gaps.pop(side, None)

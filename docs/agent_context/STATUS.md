@@ -4,6 +4,20 @@ _Living status doc. Keep it short; update whenever project state changes (branch
 
 ## Now (2026-11-16)
 
+- **2026-11-16, external review round 6, and round 7 briefed.** Details: `~/omni-review/plans/omni-build-fidelity-REVIEWS.md` (round 6).
+  - **C1 and C2 close; C3 and C4 close after four narrow fixes, D1–D4 (this PR).** Every finding was reproduced by a probe at its production entry point before it was fixed. What changed is in `CLOCK_AND_SCHEDULING.md`, "After A1a".
+    - **D1, MLB:** a play's age is told on the source's clock, so a host clock running ahead can't release a big play early.
+    - **D2, MLB:** a missing run or hit count is a failed read, not a 0. A partial final had shown FINAL 0-0.
+    - **D3, NFL:** the final drain asks at the live pace, a play it brings after FINAL airs, and the feed's timing runs on the monotonic clock.
+    - **D4, the NFL strip:** a hard end (release +90 s, or +150 s for a major), historic majors dropped, and a dimmed card after a wake.
+  - **The board policy:** the head drafted a full multi-league policy: focus and break leases, a league split weighted by season length, interrupt classes, and card cadences. The user answered its open questions with tweaks:
+    - favorites ranked per league (1 ATL, 2 COL), as a proportional factor;
+    - outside interrupts once a minute, only above a stakes threshold, preferring micro-breaks with a hold of up to 24 s;
+    - a favorite in a blowout gets less of the board;
+    - about 2.5x airtime for a close, late game over a blowout;
+    - "excitement" is **leverage**.
+  - **Round 7** (briefed) designs leverage per league, policy v2, a micro-break catalog and the adjacent elements not yet named. Measured break lengths are in `SOURCES.md`.
+  - **Sequence (round 6):** D1–D4, then H5, then NFL onto the shared board with the policy (A1b alongside), then NBA v1 and A1c.
 - **2026-11-16, MNF LAC @ BAL live on the board, and the NBA slate recorded (PR #111 fixes what it found):** the first live test of the A1a closeout. Details: `~/omni-review/sources/evidence/live-2026-11-16.md`.
   - **Held:** every strip frame was credited on the Pi's acknowledgement (none unconfirmed), and the 13-minute halftime hold ended 1.5 minutes before the second-half kickoff showed.
   - **The host slept 49 minutes**, and on wake one play-feed read brought 49 plays, which the strip replayed for 8 minutes. PR #111 bounds it: a latest start (60 s routine, 120 s major), late routine plays dropped (written over 2 minutes before they arrived), at most 3 routine entries waiting, and the strip cleared after a wall-clock jump.
@@ -117,17 +131,18 @@ _Living status doc. Keep it short; update whenever project state changes (branch
 - Dev env: **uv + `.venv`** (Py 3.12); emulator runs headless (`http://localhost:8888/`). `pytest`/`pytest-cov` pinned in `requirements.dev.txt`; `starter_code/` excluded from `mypy`/`black`; `*/__main__.py` omitted from coverage. Coverage: `--cov=omni --cov-branch` (see `test` skill). See `docs/dev_setup.md`.
 - Physical **`quad_128x64` reference board** is live on the LAN running the pre-revival code; reachable from WSL (`ssh omni-board`). Details in `CLAUDE.local.md`. Deploying the revived repo to it is future work.
 
-## Next — round-5 sequence (2026-11-16): A1a closeout (C1–C4) → H5 → NFL onto the shared board, with A1b alongside → NBA → A1c
+## Next — round-6 sequence (2026-11-16): D1–D4 → H5 → NFL onto the shared board with the board policy, A1b alongside → NBA → A1c
 
-- **A1a closeout: built** (PR #109; the user stacked the four gates there rather than one PR each). In this order: C1, then C4 (NFL is live now), then C2, then C3. Each adds its counterexamples at the production entry points, keeps all three profiles in the replay run, and re-baselines only intended decision changes. The defaults stand: the 12 s turn, the 30 s takeover threshold, 40% stale dimming, 2-minute stale live removal and the 10-minute source offline limit. The MLB meter is off by default until the gate in C3.
-- **H5, the data boundary, behind replay:**
+- **A1a closeout: C1–C4 built** (PR #109). **D1–D4 built** (round 6's narrow fixes; one PR by the user's call). The defaults stand: the 12 s turn, the 30 s takeover threshold, 40% stale dimming, 2-minute stale live removal and the 10-minute source offline limit.
+- **The board policy:** round 7 designs leverage and policy v2; the user ratifies; it's built with NFL onto the shared board, on H5's types.
+- **H5, the data boundary, behind replay** (round 6 adds: MLB membership ordered by monotonic receipt, and an NFLMeta quota budget for a Sunday slate):
   - a typed poll scope per provider, league and coverage window, with complete, partial and failed observations and their own watermarks;
   - full identities in card, event, `after`, cache and booking keys;
   - favorites scoped by league;
   - an explicit contest↔market mapping that fails closed.
 - **NFL onto the shared board:** league producers over the common scheduler and release policy, with a per-board, per-league viewer delay. Round 5's R5-3, R5-4 and R5-8 land here, along with a mixed MLB/NFL replay that measures committed airtime and waits. The single-game runner stays as the rollback.
 - **A1b, alongside:** typed topology, a native smoke run on the Pi, and the frame-acknowledgement contract with the local driver. Then p50/p95/p99 costs, a canary with sink and feed interruptions, and bounded shutdown.
-- **NBA, once mixed MLB/NFL passes:** the Free `/games` capability first, keeping unknown apart from zero and provisional apart from final. First, the 2026-11-16 slate recording gets analyzed into `SOURCES.md` (round-5 question 4).
+- **NBA, once mixed MLB/NFL passes:** the Free `/games` capability first, keeping unknown apart from zero and provisional apart from final. The 2026-11-16 slate recording is analyzed in `SOURCES.md`. Poll about every 15 s, and parse the clock with a typed parser ("Q2 1:17", "Q1 :50.9"). There's no visible NBA probability in v1.
 - **A1c, deferred:** a guarded cutover of one board, and a soak.
 
 ## History — round-4 sequence (2026-11-15 → 11-16): NFL dogfood ship → A1a (done; round 5 signs it off conditionally)

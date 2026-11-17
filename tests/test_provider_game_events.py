@@ -216,15 +216,26 @@ def test_unknown_half_inning_defaults_to_top() -> None:
     assert event is not None and event.payload.phase is InningPhase.TOP
 
 
-def test_source_time_falls_back_to_start_then_observed() -> None:
-    # No endTime: fall back to startTime.
+def test_a_play_is_dated_by_its_end_and_never_by_its_at_bat_s_start() -> None:
+    as_of = datetime(2026, 6, 17, 23, 1, 30, tzinfo=timezone.utc)  # when the answer carrying the play stood
+    ended = _parse_one_play(_play(), contest=_game(), source=SOURCE, observed_at=NOW, as_of=as_of)
+    assert ended is not None and ended.source_time == datetime(2026, 6, 17, 23, 0, tzinfo=timezone.utc)
+    # No endTime: the answer that reports it dates it, however long ago its at-bat started.
     play = _play(endTime=None, startTime="2026-06-17T22:00:00.000Z")
-    started = _parse_one_play(play, contest=_game(), source=SOURCE, observed_at=NOW)
-    assert started is not None and started.source_time == datetime(2026, 6, 17, 22, 0, tzinfo=timezone.utc)
-    # No times at all: fall back to when we observed it.
-    play = _play(endTime=None, startTime=None)
+    reported = _parse_one_play(play, contest=_game(), source=SOURCE, observed_at=NOW, as_of=as_of)
+    assert reported is not None and reported.source_time == as_of
+    # No time from the source at all: when we observed it.
     observed = _parse_one_play(play, contest=_game(), source=SOURCE, observed_at=NOW)
     assert observed is not None and observed.source_time == NOW
+
+
+def test_the_feed_s_own_time_dates_a_play_that_has_no_end() -> None:
+    feed = {
+        "metaData": {"timeStamp": "20260617_230130"},
+        "liveData": {"plays": {"allPlays": [_play(endTime=None, startTime="2026-06-17T22:00:00.000Z")]}},
+    }
+    (event,), _warnings = _parse_game_events(feed, contest=_game(), source=SOURCE, observed_at=NOW)
+    assert event.source_time == datetime(2026, 6, 17, 23, 1, 30, tzinfo=timezone.utc)
 
 
 def test_malformed_count_drops_count_not_the_event() -> None:

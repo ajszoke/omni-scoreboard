@@ -24,17 +24,26 @@ older display process) is credited a few seconds in with each frame written to i
 A caption the renderer can't draw comes off the strip, and that frame is drawn without it, so a broken
 caption never holds up the strip or a break.
 
-The strip keeps up with the field. A routine entry (a play, a stoppage, a flag, an injury) that hasn't
-started within `ROUTINE_START_WITHIN` of its release goes unseen, as too late to start; a major one (a
-score, a turnover, a ruling) gets `MAJOR_START_WITHIN`. A routine entry that reached the board more than
-`LATE_AFTER` after the feed wrote its play goes at once, as having arrived late; a major one stays, on
-its own bound. And no more than `MAX_ROUTINE_WAITING` routine entries wait at once: the oldest go, as a
-backlog, since the newest are closest to the field the card shows. So when the feed delivers a long
-stretch of plays at once, the strip shows its majors in order and the newest few plays, then catches up.
+The strip keeps up with the field. A routine entry (a play, a stoppage, a flag, an injury) that the
+display hasn't shown within `ROUTINE_START_WITHIN` of its release goes unseen, as too late to start; a
+major one (a score, a turnover, a ruling) gets `MAJOR_START_WITHIN`. Cued isn't shown: an entry waiting
+on a stalled display is held to the same bound. Whatever has started, an entry is gone by its hard end
+(`ROUTINE_HARD_END`, `MAJOR_HARD_END` after its release), shown or not, so a stalled display or a dead
+display process never leaves an old caption up beside a newer field. A stoppage on the panel is the
+exception while it's still current: with the field where it was and nothing newer waiting, it stays
+until play resumes, however long the break. An entry that reached the board more than `LATE_AFTER`
+after the feed wrote its play goes at once, as having arrived late, a major one too: it's history
+beside the field the card shows. And no more than `MAX_ROUTINE_WAITING` routine entries wait at once:
+the oldest go, as a backlog, since the newest are closest to the field the card shows. So when the
+feed delivers a long stretch of plays at once, the strip shows its timely majors in order and the
+newest few plays, then catches up. Each entry's bounds are pinned to the monotonic clock as it's
+offered, so a wall-clock jump moves none.
 
 When the wall clock jumps ahead of the monotonic one (a host that slept and woke), the jump is logged,
 and whatever reached the board before it comes off the strip as stale, so a caption from before the
-sleep never airs after it. A jump back is only logged.
+sleep never airs after it. The card is shown as stale too (dimmed, no meter), and stays so until an
+answer that arrived after the jump is released: what arrived before it is released dimmed. A jump
+back is only logged.
 
 A field change shows at once. If its play comes with it, the play comes straight up; if not, what the
 strip still shows no longer describes the field, so it clears (once its frame has had 10 seconds) and
@@ -46,7 +55,10 @@ seconds in turn (a walk-off field goal, then FINAL). The close is bounded: the b
 `CLOSING_WAIT` after its reading is released, whether or not the plays have landed or the display is
 showing frames. Room is kept for the period's last play (the decisive one), which keeps its 10 seconds
 once it's up, even past the bound; older captions that don't fit before it are dropped as having
-missed their air window. Through the break itself the strip stays empty.
+missed their air window. Through the break itself the strip stays empty, except after the final: the
+feed is still read for a while for the game's last plays and fixes (the provider's drain), and what
+that brings once FINAL is up airs over it, on the quad's strip. A score that changes with it revises
+the final, released under the delay like any reading.
 
 A feed that stops answering is shown as stale: once no answer has come for `FEED_STALE_AFTER` past when
 the next was due, the card dims, the strip clears (a stoppage held on it too) and the meter goes, until
@@ -85,7 +97,7 @@ from omni.cards.football import LiveFootballCardPayload
 from omni.core.enum import DisplayPriority, PanelProfile
 from omni.core.time import DurationSeconds
 from omni.domain.baseball import WinProbability
-from omni.domain.football import FootballGameState, PlaySummary
+from omni.domain.football import FootballGameState, FootballInterval, PlaySummary
 from omni.events.football import FootballEvent, FootballEventKind
 from omni.providers.nflmeta import NflLiveSnapshot
 from omni.renderers.base import Renderer
@@ -101,12 +113,14 @@ __all__ = [
     "CLOSING_WAIT",
     "FEED_STALE_AFTER",
     "LATE_AFTER",
+    "MAJOR_HARD_END",
     "MAJOR_START_WITHIN",
     "MAX_ROUTINE_WAITING",
     "METER_LAG",
     "METER_MAX_AGE",
     "FRAME_MAX",
     "FRAME_MIN",
+    "ROUTINE_HARD_END",
     "ROUTINE_START_WITHIN",
     "STRIP_DWELL",
     "UNCONFIRMED_NOTE",
@@ -131,6 +145,9 @@ UNCONFIRMED_NOTE = (
 )
 ROUTINE_START_WITHIN = timedelta(seconds=60)  # a routine entry not started this long after its release goes
 MAJOR_START_WITHIN = timedelta(seconds=120)  # a score, a turnover or a ruling gets this long
+_LAST_AIRING = timedelta(seconds=30)  # an entry that starts at its latest start is up this long at most
+ROUTINE_HARD_END = ROUTINE_START_WITHIN + _LAST_AIRING  # a routine entry is gone this long after its release
+MAJOR_HARD_END = MAJOR_START_WITHIN + _LAST_AIRING  # and a major one this long
 LATE_AFTER = timedelta(minutes=2)  # an entry that reaches the board this long after its play was written is late
 WRITTEN_LEAD = timedelta(seconds=5)  # a play written this long after it reached the board says a clock is off
 MAX_ROUTINE_WAITING = 3  # past this many routine entries waiting, the oldest go
@@ -139,9 +156,12 @@ WALL_JUMP = timedelta(seconds=30)  # the wall clock moving this much more than t
 _PLAYS = frozenset(
     {FootballEventKind.PLAY, FootballEventKind.SCORE, FootballEventKind.CONVERSION, FootballEventKind.REVIEW}
 )
-# What comes down early, and how the log words it.
-_EARLY = frozenset({EndReason.INVALIDATED, EndReason.SOURCE_STALE, EndReason.UNDRAWN})
-_CLEARED_WORDS = {EndReason.INVALIDATED: "the field moved on without its play"}
+# What the card draws the strip over: the field in play, and the final while its drain brings late plays.
+_CAPTIONED = frozenset({None, FootballInterval.FINAL})
+# What comes down early, and how the log words why it did, or why a caption never went up.
+_EARLY = frozenset({EndReason.INVALIDATED, EndReason.SOURCE_STALE, EndReason.UNDRAWN, EndReason.EXPIRED})
+_CLEARED_WORDS = {EndReason.INVALIDATED: "the field moved on without its play", EndReason.EXPIRED: "past its hard end"}
+_UNSEEN_WORDS = {EndReason.INVALIDATED: "the field moved on", EndReason.EXPIRED: "past its hard end"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -242,6 +262,7 @@ class FootballBoard:
         self._heard: _Reading | None = None  # the newest answer released, held repeats included
         self._holding = False
         self._stale = False  # the feed has gone quiet: the card is dimmed
+        self._woke = False  # the host slept: the card is dimmed until an answer from after it is up
         self._last_line: str | None = None
         self._prices: deque[_Price] = deque()  # the market's readings, oldest first
         self._last_step: ClockReading | None = None  # the previous step's reading, to notice a clock jump
@@ -258,26 +279,25 @@ class FootballBoard:
         self._credit(at)
         for result in self._feed.collect(at):
             self._absorb(result, at)
+        self._end_close(at)  # a close whose bound has passed is over before anything newer is taken
         while self._pending and self._pending[0].release_at <= at.monotonic:
             reading = self._pending.popleft()
             self._heard = reading
             if not reading.held:
                 self._take(reading, at)
-        stale = self._check_stale(at)
+                if self._woke and not _jumped_since(reading, at):
+                    self._woke = False
+                    self._log("woke: an answer from after the sleep is up")
+        stale = self._check_stale(at) or self._woke
         cue = self._strip.cue(at)
-        closing, by = self._closing, self._closing_by
-        if closing is not None and by is not None:
-            landed = closing.snapshot.caught_up and self._strip.idle
-            if landed or (at.monotonic >= by and not self._strip.keeping(at)):
-                self._showing, self._closing = closing, None
-                self._dropped(self._strip.clear(at), EndReason.MISSED_WINDOW.value)
-                cue = None
+        if self._end_close(at):
+            cue = None
         showing = self._showing
         if showing is not None and showing.snapshot.state is not None:
             if self._closing is not None and self._closing.snapshot.state is not None:
                 view = _closing_view(showing.snapshot.state, self._closing.snapshot.state)
                 self._draw(self._closing, view, cue, at, stale=stale)
-            elif showing.snapshot.state.interval is None:
+            elif showing.snapshot.state.interval in _CAPTIONED:
                 self._draw(showing, showing.snapshot.state, cue, at, stale=stale)
             else:
                 self._draw(showing, showing.snapshot.state, None, at, stale=stale)
@@ -297,9 +317,24 @@ class FootballBoard:
             deadlines.append(self._stale_at())
         return earliest(deadlines)
 
+    def _end_close(self, at: ClockReading) -> bool:
+        """Show the break whose plays are being closed out, once they're all in and shown, or once its bound
+        has passed and the decisive play has had its minimum; whether it did. What the strip still holds
+        goes unseen, as having missed its air window."""
+        closing, by = self._closing, self._closing_by
+        if closing is None or by is None:
+            return False
+        landed = closing.snapshot.caught_up and self._strip.idle
+        if not landed and (at.monotonic < by or self._strip.keeping(at)):
+            return False
+        self._showing, self._closing = closing, None
+        self._dropped(self._strip.clear(at), EndReason.MISSED_WINDOW.value)
+        return True
+
     def _watch_clock(self, at: ClockReading) -> None:
         """Log a jump of the wall clock against the monotonic one since the last step. After a jump ahead (a
-        host that slept), what the strip holds is from before it: it comes off, as stale."""
+        host that slept), what the strip holds is from before it: it comes off, as stale, and the card is
+        stale until an answer from after the jump is released."""
         last, self._last_step = self._last_step, at
         if last is None:
             return
@@ -315,6 +350,8 @@ class FootballBoard:
             unseen = self._strip.clear(at, EndReason.SOURCE_STALE)
             self._trace(self._strip.changes())
             self._dropped(unseen, EndReason.SOURCE_STALE.value)
+            self._woke = True
+            self._log("woke: dimming the card until an answer from after the sleep is up")
 
     def _stale_at(self) -> MonotonicTime | None:
         """When the feed goes stale if nothing more is heard: past when its next answer was due, by
@@ -338,7 +375,8 @@ class FootballBoard:
         return stale
 
     def _take(self, reading: _Reading, at: ClockReading) -> None:
-        """A reading the broadcast has caught up to: show it, or close out the period it ends."""
+        """A reading the broadcast has caught up to: show it, close out the period it ends, or (once the final
+        is up) put what the final's drain brought over it."""
         state = reading.snapshot.state
         shown = self._showing.snapshot.state if self._showing is not None else None
         if state is not None and state.interval is not None:
@@ -350,6 +388,12 @@ class FootballBoard:
                 self._closing, self._closing_by = reading, reading.release_at + CLOSING_WAIT  # its plays first
                 self._offer(reading, at)
                 self._strip.close_out(by=self._closing_by, last=self._last_play)
+            elif state.interval is FootballInterval.FINAL and shown is not None and shown.interval is state.interval:
+                self._strip.resume()  # the final's drain: its late plays and fixes air over FINAL
+                if _field(state) != _field(shown):
+                    self._strip.invalidate()
+                self._offer(reading, at)
+                self._showing = reading
             else:
                 self._showing = reading  # already in a break, or starting in one: the strip stays empty
                 unseen = self._strip.clear(at) + self._segments(reading, reading.snapshot.events, at)
@@ -366,24 +410,23 @@ class FootballBoard:
         """Put a reading's events on the strip, noting the newest play among them.
 
         All of them go unseen if they reached the board before the wall clock jumped ahead (they're from
-        before a sleep), and a routine one does if it arrived late. Past `MAX_ROUTINE_WAITING` routine
-        entries waiting, the oldest go.
+        before a sleep), and any one does if it arrived late. Past `MAX_ROUTINE_WAITING` routine entries
+        waiting, the oldest go.
         """
         events = reading.snapshot.events
         if _jumped_since(reading, at):
             self._dropped(self._segments(reading, events, at), EndReason.SOURCE_STALE.value)
             return
         late = _arrived_late(events, reading.received_at)
-        gone = [behind and not event.major for event, behind in zip(events, late)]  # a late major stays
-        unseen = [event for event, dropped in zip(events, gone) if dropped]
-        kept = [event for event, dropped in zip(events, gone) if not dropped]
+        unseen = [event for event, behind in zip(events, late) if behind]
+        kept = [event for event, behind in zip(events, late) if not behind]
         self._dropped(self._segments(reading, unseen, at), EndReason.ARRIVED_LATE.value)
         segments = self._segments(reading, kept, at)
         plays = [event.key for event in kept if event.kind in _PLAYS]
         if segments and plays:
             self._last_play = SegmentKey(Surface.PLAY_STRIP, plays[-1])
         self._majors.update(SegmentKey(Surface.PLAY_STRIP, event.key) for event in kept if event.major)
-        self._strip.offer(segments)
+        self._strip.offer(segments, at=at)
         self._strip.shed(at, keep=MAX_ROUTINE_WAITING, among=lambda segment: segment.key not in self._majors)
 
     def _segments(
@@ -445,7 +488,7 @@ class FootballBoard:
             elif change.kind is ChangeKind.DOWN and change.reason is not None and change.reason in _EARLY:
                 self._log(f"  x {words} (cleared: {_CLEARED_WORDS.get(change.reason, change.reason.value)})")
             elif change.kind is ChangeKind.DROPPED:
-                why = change.reason.value if change.reason is not None else "dropped"
+                why = _UNSEEN_WORDS.get(change.reason, change.reason.value) if change.reason is not None else "dropped"
                 self._log(f"  - {words} (unseen: {why})")
 
     def _absorb(self, result: FeedResult, at: ClockReading) -> None:
@@ -600,7 +643,7 @@ def _card_key(reading: _Reading) -> str:
 
 def _segments(reading: _Reading, events: Sequence[FootballEvent], available: datetime) -> list[Segment[PlaySummary]]:
     """Events as strip segments: each a description, then its players' lines if it has them, to start
-    within its bound of becoming available."""
+    within its bound of becoming available, and gone by its hard end."""
     game = reading.snapshot.game
     return [
         Segment(
@@ -611,6 +654,7 @@ def _segments(reading: _Reading, events: Sequence[FootballEvent], available: dat
             available_at=available,
             parent=_card_key(reading),
             latest_start=available + (MAJOR_START_WITHIN if event.major else ROUTINE_START_WITHIN),
+            expires_at=available + (MAJOR_HARD_END if event.major else ROUTINE_HARD_END),
             hold=Hold.PLAY_RESUMES if event.kind.spans else None,
         )
         for event in events

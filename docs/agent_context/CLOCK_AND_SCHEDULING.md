@@ -326,8 +326,44 @@ entry point:
 Bounds picked during the closeout:
 - **Ratified by the user (2026-11-16):** a feed answer is current for two cadences; the final's
   confirmation bound (30 s); the NFL dead-feed bound (40 s past due) and mismatch re-reads (30 s).
-- **For round 6 to check:** the release guard's plausibility bounds (a source time up to 5 s ahead of
-  receipt or 2 minutes behind it) and its 2-minute settle after a jump.
+- **Kept by round 6 as sanity bounds:** the release guard's plausibility bounds (a source time up to 5 s
+  ahead of receipt or 2 minutes behind it) and its 2-minute settle after a jump.
+
+**Round 6 (2026-11-16)** closed C1 and C2 and held C3 and C4 open on four narrow fixes. Each was reproduced
+by a probe at its production entry point. They were built as D1–D4 in one PR:
+- **D1, a wrong host clock can't release a play early:**
+  - Before, a host clock running ahead by under 2 minutes shortened MLB's delay by that much, so a
+    big-play card could air at receipt.
+  - Now a play's age is told on the source's own clock: the answer's `as_of` less the play's end time.
+  - Release is receipt + the delay less that age, never before receipt. Our wall clock only gates whether
+    the age is believed.
+  - A play with no end time waits the full delay from receipt (its at-bat's start dated it too early).
+- **D2, a missing count is unknown, not zero:**
+  - A linescore missing a side's runs or hits once that side has batted, or either side's runs in an
+    answer the feed calls final, is a failed read, so the last good answer stands. A partial final had
+    shown FINAL 0-0.
+  - A perfect game needs walks, hit-by-pitch and errors present.
+- **D3, the NFL final drain gets its reads:**
+  - While a final drains, the feed asks at the live pace (10 s at most), never past the drain's end.
+    NFLMeta's own recommended interval runs to about 15 minutes once no game is live.
+  - A last read that leaves plays missing is noted.
+  - A play the drain brings after FINAL is up airs on FINAL's strip, and a changed score revises FINAL at
+    its own release.
+  - The feed's due times, the halftime hold, the drain and the provider's other spans run on the
+    monotonic clock.
+- **D4, the strip's bounds:**
+  - Each caption has a hard end, 90 s after release for routine and 150 s for major (the latest start plus
+    the 30 s maximum).
+  - A caption cued but never shown is dropped at its latest start or when the field moves on. A stoppage
+    caption that is on air and still current stays until play resumes.
+  - The lane pins a strip entry's bounds to the monotonic clock when it's offered.
+  - A major written more than 2 minutes before it arrived is dropped as late, like a routine one.
+  - After a wake, the card dims and the meter hides until an answer received after the jump is released.
+
+Still open from round 6:
+- MLB membership ordered by UTC freezes after a backward step (H5);
+- a receive watchdog on the Pi (A1b);
+- clock trust attested by NTP (later).
 
 An audit of A1a against the round-4 rulings found four defects, fixed before round 5:
 - **A card the display can't draw** held the board: it was cued again every frame and nothing else

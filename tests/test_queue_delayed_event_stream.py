@@ -23,9 +23,10 @@ def _stream() -> DelayedEventStream[str]:
 
 
 def _push(stream: DelayedEventStream[str], value: str, *, happened: float, received: float | None = None) -> bool:
-    """An event that happened at ``happened`` seconds, received (and admitted) at ``received``, or then."""
+    """An event that happened at ``happened`` seconds, received (and admitted) at ``received``, or then, in an
+    answer as of its receipt."""
     receipt = _at(received if received is not None else happened)
-    arrival = Arrival(received=receipt, occurred=T0 + timedelta(seconds=happened))
+    arrival = Arrival(received=receipt, occurred=T0 + timedelta(seconds=happened), as_of=receipt.utc)
     return stream.push(value, arrival, receipt, key=value)
 
 

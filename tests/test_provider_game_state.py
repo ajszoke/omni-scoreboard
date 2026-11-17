@@ -17,12 +17,14 @@ from omni.domain.baseball import (
     InningPhase,
     PitcherGameLine,
     PitchingDecisions,
+    PitchingFeatKind,
     PitchSnapshot,
     PitchType,
     PregameDetails,
     PregameSide,
     StartingPitcher,
     WinLossRecord,
+    pitching_feat_progress,
 )
 from omni.domain.contest import TeamGame
 from omni.providers.base import ProviderError
@@ -161,6 +163,11 @@ def test_batting_walks_hbp_none_when_absent_or_null() -> None:
     assert _batting_walks_hbp({"liveData": {"boxscore": None}}, "home") is None  # a null node degrades, never raises
 
 
+def test_batting_walks_hbp_unknown_when_either_count_is_missing() -> None:
+    assert _batting_walks_hbp(_boxscore({"away": {"baseOnBalls": 0}}), "away") is None
+    assert _batting_walks_hbp(_boxscore({"away": {"hitByPitch": 0}}), "away") is None
+
+
 def test_reached_base_true_on_a_hit_or_a_defensive_error() -> None:
     assert _reached_base({}, side="away", hits=1, fielding_errors=0) is True
     assert _reached_base({}, side="away", hits=0, fielding_errors=1) is True  # reached on the defense's error
@@ -178,6 +185,13 @@ def test_reached_base_clean_sheet_versus_a_walk() -> None:
     assert _reached_base(walked, side="home", hits=0, fielding_errors=0) is True
 
 
+def test_a_clean_sheet_needs_the_defense_s_errors_on_the_linescore() -> None:
+    clean = _boxscore({"home": {"baseOnBalls": 0, "hitByPitch": 0}})
+    assert _reached_base(clean, side="home", hits=0, fielding_errors=None) is None  # unknown: no perfect game
+    walked = _boxscore({"home": {"baseOnBalls": 1, "hitByPitch": 0}})
+    assert _reached_base(walked, side="home", hits=0, fielding_errors=None) is True  # a walk put a man on anyway
+
+
 def test_parse_game_state_reads_a_clean_sheet_for_a_no_hit_side() -> None:
     feed = _feed()
     line = feed["liveData"]["linescore"]
@@ -186,6 +200,66 @@ def test_parse_game_state_reads_a_clean_sheet_for_a_no_hit_side() -> None:
     feed["liveData"]["boxscore"] = {"teams": {"away": {"teamStats": {"batting": {"baseOnBalls": 0, "hitByPitch": 0}}}}}
     state = _parse_game_state(feed)
     assert state.away_hits == 0 and state.away_reached_base is False  # a clean sheet -> perfect-game eligible
+
+
+def test_a_no_hit_side_is_no_perfect_game_without_every_count_that_could_have_put_a_man_on() -> None:
+    feed = _feed()
+    line = feed["liveData"]["linescore"]
+    line["teams"]["away"]["hits"] = 0
+    del line["teams"]["home"]["errors"]  # the defense's errors are left out
+    feed["liveData"]["boxscore"] = {"teams": {"away": {"teamStats": {"batting": {"baseOnBalls": 0, "hitByPitch": 0}}}}}
+    state = _parse_game_state(feed)
+    assert state.home_errors == 0 and state.away_reached_base is None  # shown as 0, but no clean sheet claimed
+    feat = pitching_feat_progress(state, min_completed_innings=6)
+    assert feat is not None and feat.kind is PitchingFeatKind.NO_HITTER
+
+
+# --- a linescore missing its numbers ---------------------------------------------------------------
+
+_SIDE = {"runs": 1, "hits": 2, "errors": 0}
+
+
+def _linescore(
+    inning: int, inning_state: str, *, away: dict[str, int], home: dict[str, int], status: str = "In Progress"
+) -> dict[str, Any]:
+    """A bare game feed: its status, and its linescore at ``inning`` / ``inning_state`` with each side's counts."""
+    teams = {"away": away, "home": home}
+    line = {"currentInning": inning, "inningState": inning_state, "teams": teams}
+    return {"gameData": {"status": {"detailedState": status}}, "liveData": {"linescore": line}}
+
+
+@pytest.mark.parametrize(
+    "inning, inning_state, side, missing",
+    [
+        (1, "Top", "away", "runs"),  # the away side bats first: it has batted once the game is under way
+        (1, "Top", "away", "hits"),
+        (1, "Bottom", "home", "runs"),  # the home side has from the bottom of the 1st
+        (1, "End", "home", "hits"),
+        (7, "Top", "home", "hits"),  # a hitless-looking home side in the 7th: no no-hitter from a missing count
+        (9, "End", "away", "runs"),
+    ],
+)
+def test_a_side_that_has_batted_without_its_runs_or_hits_is_a_failed_read(
+    inning: int, inning_state: str, side: str, missing: str
+) -> None:
+    sides = {"away": dict(_SIDE), "home": dict(_SIDE)}
+    del sides[side][missing]
+    with pytest.raises(ProviderError, match=f"incomplete linescore: no {missing} for the {side} side"):
+        _parse_game_state(_linescore(inning, inning_state, away=sides["away"], home=sides["home"]))
+
+
+@pytest.mark.parametrize("inning_state", ["Top", "Middle"])
+def test_a_home_side_yet_to_bat_without_its_runs_or_hits_has_a_true_zero(inning_state: str) -> None:
+    state = _parse_game_state(_linescore(1, inning_state, away=_SIDE, home={}))
+    assert (state.home_score, state.home_hits, state.home_errors) == (0, 0, 0)
+    assert (state.away_score, state.away_hits) == (1, 2)
+
+
+def test_a_final_without_both_sides_runs_is_a_failed_read_however_early_it_ended() -> None:
+    with pytest.raises(ProviderError, match="no runs for the home side"):
+        _parse_game_state(_linescore(1, "Top", away=_SIDE, home={"hits": 0}, status="Final"))
+    state = _parse_game_state(_linescore(1, "Top", away=_SIDE, home={"runs": 0}, status="Final"))
+    assert (state.home_score, state.home_hits) == (0, 0)  # the hits of a side yet to bat are still a true 0
 
 
 def test_fetch_live_feed_uses_injected_fetcher() -> None:

@@ -1036,17 +1036,19 @@ def test_a_final_waits_for_its_plays_and_airs_after_its_walk_off() -> None:
     fetch = _Fetch()
     fetch.set("g1", _state(away=2, home=3))
     pipe.refresh([_game("g1")], at=_at(T), fetch_feed=fetch)  # live; first sight primes the backlog
-    # The feed's clock runs a little ahead of ours: the walk-off is stamped after we first see the final.
+    pipe.refresh([_game("g1", GameStatus.FINAL)], at=_at(T + timedelta(seconds=3)), fetch_feed=fetch)
+    # The play-by-play lags the score: the walk-off is listed only in the next answer, which gives no time of its
+    # own, so it waits the full delay from that receipt. The feed's clock runs a little ahead of ours: the walk-off
+    # is stamped after we first saw the final.
     walk_off = _walk_off("g1:ab:99", source_time=T + timedelta(seconds=5))
     fetch.set_events("g1", (walk_off,))
-    pipe.refresh([_game("g1", GameStatus.FINAL)], at=_at(T + timedelta(seconds=3)), fetch_feed=fetch)
     first_final = pipe.refresh([_game("g1", GameStatus.FINAL)], at=_at(T + timedelta(seconds=10)), fetch_feed=fetch)
     assert first_final.releases == ((_id("g1"), T + timedelta(seconds=33)),)  # its result's reveal
     held = pipe.refresh([_game("g1", GameStatus.FINAL)], at=_at(T + timedelta(seconds=33)), fetch_feed=fetch)
     assert held.finals == () and _id("g1") in held.held  # the result could show, but its walk-off can't yet
-    assert held.releases == ((_id("g1"), T + timedelta(seconds=35)),)  # then the walk-off clears
-    assert pipe.next_deadline(_at(T + timedelta(seconds=33))) == _at(T + timedelta(seconds=35)).monotonic
-    res = pipe.refresh([_game("g1", GameStatus.FINAL)], at=_at(T + timedelta(seconds=35)), fetch_feed=fetch)
+    assert held.releases == ((_id("g1"), T + timedelta(seconds=40)),)  # then the walk-off clears
+    assert pipe.next_deadline(_at(T + timedelta(seconds=33))) == _at(T + timedelta(seconds=40)).monotonic
+    res = pipe.refresh([_game("g1", GameStatus.FINAL)], at=_at(T + timedelta(seconds=40)), fetch_feed=fetch)
     assert len(res.big_plays) == 1 and [card.raw for card in res.finals] == ["g1:final"]
     final = queue.card("g1:final")
     assert final is not None and final.after == (CardFactory.big_play_key(_game("g1"), walk_off),)

@@ -19,8 +19,16 @@ loses what it showed (its panel went blank), `blanked` takes that credit back: t
 again from its next commit, with its whole dwell. A segment the display can't draw at all comes off the
 lane (`failed`), so it never holds up what follows.
 
-Availability, latest start and expiry are UTC instants. Dwell, and a close-out's bound, run on the
-monotonic clock.
+Being cued isn't being shown, so a segment's bounds hold while it waits on the display too: one cued
+but never committed is dropped once its latest start passes, or at once if it's invalidated; and one on
+air, committed or not (a stalled display, a blank panel waiting for a new one), goes at its expiry. A
+held segment whose frame is on the panel is the exception: it outlasts its expiry while it's still
+current, and goes as soon as something is pending.
+
+A segment's availability, latest start and expiry are UTC instants. Offered with a clock reading, the
+lane pins them to the monotonic clock as that reading places them, so a later wall-clock jump moves
+none of them; offered without one, they're read against the wall clock. Dwell, and a close-out's bound,
+run on the monotonic clock.
 
 Edits follow the presentation contract. A newer revision of a waiting segment takes its place in line.
 A newer revision of the segment on air swaps its frames in place, keeping its dwell (a cosmetic edit).
@@ -40,7 +48,7 @@ from __future__ import annotations
 from collections import deque
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from enum import Enum
 from typing import Generic
 
@@ -89,6 +97,28 @@ class LaneChange(Generic[PayloadT]):
     aired: timedelta | None = None  # for a segment coming down: how long its last frame was up
 
 
+@dataclass(frozen=True, slots=True)
+class _Bounds:
+    """A segment's availability, latest start and expiry, on the monotonic clock."""
+
+    available: MonotonicTime
+    latest_start: MonotonicTime | None
+    expires: MonotonicTime | None
+
+
+def _pinned(segment: Segment[PayloadT], at: ClockReading) -> _Bounds:
+    """``segment``'s UTC bounds placed on the monotonic clock as ``at`` reads both."""
+
+    def place(instant: datetime) -> MonotonicTime:
+        return at.monotonic + (instant - at.utc)
+
+    return _Bounds(
+        available=place(segment.available_at),
+        latest_start=place(segment.latest_start) if segment.latest_start is not None else None,
+        expires=place(segment.expires_at) if segment.expires_at is not None else None,
+    )
+
+
 class Lane(Generic[PayloadT]):
     """One surface's schedule: what's on air, what waits, and when each frame goes."""
 
@@ -102,10 +132,12 @@ class Lane(Generic[PayloadT]):
         self._aired = False  # whether any frame of the segment on air has been committed
         self._blanked = False  # the frame on air was committed, then blanked (so it waits for a commit)
         self._stale = False
+        self._invalidated = False  # the segment on air no longer describes what's around it
         self._brief = False
         self._by: MonotonicTime | None = None  # a close-out's bound
         self._last: SegmentKey | None = None  # the segment a bounded close-out keeps room for, last
         self._changes: list[LaneChange[PayloadT]] = []
+        self._pins: dict[SegmentKey, _Bounds] = {}  # bounds pinned when offered, by segment
 
     @property
     def idle(self) -> bool:
@@ -117,8 +149,11 @@ class Lane(Generic[PayloadT]):
         """The frame on air has been committed, so its dwell runs."""
         return self._current is not None and self._since is not None
 
-    def offer(self, segments: Iterable[Segment[PayloadT]]) -> None:
-        """Queue segments behind any waiting. One already offered changes only by a newer revision."""
+    def offer(self, segments: Iterable[Segment[PayloadT]], *, at: ClockReading | None = None) -> None:
+        """Queue segments behind any waiting. One already offered changes only by a newer revision.
+
+        With ``at``, each one taken has its bounds pinned to the monotonic clock as of then.
+        """
         for segment in segments:
             if segment.key.surface is not self._surface:
                 raise ValueError(f"a {segment.key.surface.value} segment offered to the {self._surface.value} lane")
@@ -126,6 +161,10 @@ class Lane(Generic[PayloadT]):
             if known is not None and segment.revision <= known:
                 continue
             self._known[segment.key] = segment.revision
+            if at is not None:
+                self._pins[segment.key] = _pinned(segment, at)
+            else:
+                self._pins.pop(segment.key, None)
             if known is None:
                 self._waiting.append(segment)
             elif self._current is not None and self._current.key == segment.key:
@@ -138,8 +177,9 @@ class Lane(Generic[PayloadT]):
                         break
 
     def invalidate(self) -> None:
-        """What's on air no longer describes what's around it: it goes once its frame has had its minimum."""
-        self._stale = True
+        """What's on air no longer describes what's around it: it goes once its frame has had its minimum, or
+        at once if it was never shown."""
+        self._stale = self._invalidated = True
 
     def close_out(self, *, by: MonotonicTime | None = None, last: SegmentKey | None = None) -> None:
         """What's on air and what's waiting get one frame each, at its minimum, with no holds.
@@ -213,8 +253,16 @@ class Lane(Generic[PayloadT]):
         segment's first, or nothing."""
         current = self._current
         if current is not None:
-            if current.expires_at is not None and at.utc >= current.expires_at:
-                self._down(EndReason.EXPIRED, at)
+            bounds = self._bounds(current, at)
+            if bounds.expires is not None and at.monotonic >= bounds.expires:
+                if not self._held_on_panel(current):
+                    self._down(EndReason.EXPIRED, at)  # on air or not, shown or not
+                elif (pending := self._pending(at)) is not None:
+                    self._down(pending, at)  # a hold on the panel outlasts its expiry only while it's current
+            elif not self._aired and self._invalidated:
+                self._down(EndReason.INVALIDATED, at)  # never shown, and no longer current
+            elif not self._aired and bounds.latest_start is not None and at.monotonic > bounds.latest_start:
+                self._down(EndReason.TOO_LATE, at)  # cued, but the display never showed it in time
             elif self._since is not None:
                 on_air = at.monotonic.since(self._since)
                 pending = self._pending(at)
@@ -225,10 +273,11 @@ class Lane(Generic[PayloadT]):
                         self._frame, self._since = self._frame + 1, None
                     else:
                         self._down(EndReason.RAN_ITS_TIME, at)
-        while self._current is None and self._waiting and self._waiting[0].available_at <= at.utc:
+        while self._current is None and self._waiting and self._available(self._waiting[0], at):
             segment = self._waiting.popleft()
-            late = segment.latest_start is not None and at.utc > segment.latest_start
-            if late or (segment.expires_at is not None and at.utc >= segment.expires_at):
+            bounds = self._bounds(segment, at)
+            late = bounds.latest_start is not None and at.monotonic > bounds.latest_start
+            if late or (bounds.expires is not None and at.monotonic >= bounds.expires):
                 reason = EndReason.TOO_LATE if late else EndReason.EXPIRED
                 self._changes.append(LaneChange(ChangeKind.DROPPED, segment, at, reason=reason))
                 continue
@@ -236,7 +285,7 @@ class Lane(Generic[PayloadT]):
                 self._changes.append(LaneChange(ChangeKind.DROPPED, segment, at, reason=EndReason.MISSED_WINDOW))
                 continue
             self._current, self._frame, self._since, self._aired, self._stale = segment, 0, None, False, False
-            self._blanked = False
+            self._blanked = self._invalidated = False
         return Cue(self._current, self._frame) if self._current is not None else None
 
     def committed(self, cue: Cue[PayloadT], at: ClockReading) -> None:
@@ -260,10 +309,13 @@ class Lane(Generic[PayloadT]):
         if current is None:
             if not self._waiting:
                 return None
-            return at.monotonic + max(timedelta(0), self._waiting[0].available_at - at.utc)
-        deadlines: list[MonotonicTime | None] = []
-        if current.expires_at is not None:
-            deadlines.append(at.monotonic + (current.expires_at - at.utc))
+            return max(at.monotonic, self._bounds(self._waiting[0], at).available)
+        bounds = self._bounds(current, at)
+        expired = bounds.expires is not None and at.monotonic >= bounds.expires
+        current_hold = self._held_on_panel(current) and self._pending(at) is None  # outlasts its expiry
+        deadlines: list[MonotonicTime | None] = [None if current_hold else bounds.expires]
+        if not self._aired:  # cued, not yet shown
+            deadlines.append(at.monotonic if self._invalidated else bounds.latest_start)
         if self._since is not None:
             minimum_ends = self._since + current.dwell.minimum
             if self._pending(at) is not None:
@@ -272,8 +324,8 @@ class Lane(Generic[PayloadT]):
                 if current.hold is None:
                     deadlines.append(self._since + current.dwell.maximum)
                 if self._waiting:  # the next isn't available yet; once it is, it's pending
-                    available = at.monotonic + (self._waiting[0].available_at - at.utc)
-                    deadlines.append(max(available, minimum_ends))
+                    available = self._bounds(self._waiting[0], at).available
+                    deadlines.append(available if expired else max(available, minimum_ends))
         return earliest(deadlines)
 
     def changes(self) -> list[LaneChange[PayloadT]]:
@@ -292,11 +344,23 @@ class Lane(Generic[PayloadT]):
         room += next((waiting.dwell.minimum for waiting in self._waiting if waiting.key == self._last), timedelta(0))
         return at.monotonic + room <= self._by
 
+    def _bounds(self, segment: Segment[PayloadT], at: ClockReading) -> _Bounds:
+        """``segment``'s bounds on the monotonic clock: as pinned when it was offered, or as ``at`` places them."""
+        pinned = self._pins.get(segment.key)
+        return pinned if pinned is not None else _pinned(segment, at)
+
+    def _held_on_panel(self, segment: Segment[PayloadT]) -> bool:
+        """Whether ``segment`` is held and its frame on air is on the panel (committed, not blanked)."""
+        return segment.hold is not None and self._since is not None
+
+    def _available(self, segment: Segment[PayloadT], at: ClockReading) -> bool:
+        return at.monotonic >= self._bounds(segment, at).available
+
     def _pending(self, at: ClockReading) -> EndReason | None:
         """Why the segment on air should go once its frame has had its minimum, if it should."""
         if self._brief:
             return EndReason.CLOSING
-        if self._waiting and self._waiting[0].available_at <= at.utc:
+        if self._waiting and self._available(self._waiting[0], at):
             return EndReason.NEXT_WAITING  # what's next takes over, whether or not this one still holds
         if self._stale:
             return EndReason.INVALIDATED  # nothing takes over: the surface goes blank
