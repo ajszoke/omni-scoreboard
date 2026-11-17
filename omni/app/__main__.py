@@ -23,6 +23,10 @@ The live win meter is off unless ``--meter`` is given. With it, and with ``OMNI_
 ``OMNI_CLOUD_TOKEN`` in the environment or a git-ignored ``.env``, the meter reads Omni's market
 service (``cloud/``); without them it reads Polymarket's public quotes. Either way MLB's model takes
 over when the market has nothing.
+
+Every request is counted against its provider account's quota (`omni.app.quota`), and the month's counts
+are kept under ``--state-dir`` so a restart doesn't forget them. ``--nflmeta-plan`` names the plan of the
+NFLMeta key, free unless you say otherwise.
 """
 
 from __future__ import annotations
@@ -31,12 +35,13 @@ import argparse
 import os
 from datetime import timedelta
 from pathlib import Path
-from typing import Sequence, cast
+from typing import TYPE_CHECKING, Any, Mapping, Sequence, cast
 from zoneinfo import ZoneInfo
 
 from omni.core.clock import SystemClock
 from omni.app.display import MatrixDevice, MatrixDisplaySink
 from omni.app.planned_mlb import MarketReader
+from omni.app.quota import Meter, NflMetaPlan, ProviderAccount
 from omni.app.runner import build_planned_loop, run_forever
 from omni.app.versions import DecisionConfig, PolicyName, SourceRevision, Versions, read_source_revision
 from omni.core.enum import PanelProfile
@@ -48,6 +53,9 @@ from omni.preferences.favorites import AppliedMigration, parse_favorites
 from omni.renderers.image import LogoStore
 from omni.renderers.text_lane import DEFAULT_MARQUEE, ScrollSpeed
 from omni.tower.board import BoardPolicy
+
+if TYPE_CHECKING:
+    from omni.providers.market_service import ServiceTransport
 
 __all__ = ["main"]
 
@@ -96,6 +104,18 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         help="how fast scrolling lines move at their peak: slow, medium (1.25x) or fast (1.5x)",
     )
     parser.add_argument("--fps", type=float, default=10.0, help="frames drawn a second (marquees move this fast)")
+    parser.add_argument(
+        "--nflmeta-plan",
+        choices=[plan.value for plan in NflMetaPlan],
+        default=NflMetaPlan.FREE.value,
+        help="the NFLMeta plan the key is on, whose limits the board keeps to (default free)",
+    )
+    parser.add_argument(
+        "--state-dir",
+        type=Path,
+        default=None,
+        help="where the month's quota usage is kept (default $XDG_STATE_HOME/omni, else ~/.local/state/omni)",
+    )
     args = parser.parse_args(argv)
     migrations: list[AppliedMigration] = []
 
@@ -156,29 +176,42 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
     from omni.providers.mlb_teams import MlbTeamRegistry
     from omni.providers.polymarket_us import PolymarketUsProvider
 
+    from omni.app.quota_store import default_state_dir, open_ledger
+    from omni.providers import bovada_odds
+    from omni.providers.polymarket_us import fetch_market_data
+
+    clock = SystemClock()
+    state_dir = args.state_dir if args.state_dir is not None else default_state_dir(os.environ, Path.home())
+    ledger = open_ledger(state_dir, NflMetaPlan(args.nflmeta_plan), log=lambda line: print(line, flush=True))
+
     zone = ZoneInfo(args.timezone)
     source = read_source_revision(_REPO_ROOT)
     provider = MlbStatsApiProvider(MlbTeamRegistry.from_color_file(), schedule_timezone=zone)
-    odds = None if args.no_odds else BovadaOddsProvider()
+    # The sportsbook's coupon fetch, each request counted (the provider refreshes it at its own pace).
+    sportsbook = Meter(ledger, ProviderAccount.BOVADA, clock).counted(bovada_odds._default_fetch)
+    odds = None if args.no_odds else BovadaOddsProvider(fetch=sportsbook)
 
     # With the meter on, the shared market service when this board has a token for it, else the public quotes.
     market: MarketReader | None = None
+    market_account = ProviderAccount.POLYMARKET_US
     meter = "off"
     if args.meter:
         cloud = MarketServiceConfig.from_env({**read_env_file(_REPO_ROOT / ".env"), **os.environ})
         if cloud is not None:
             transport = UrllibTransport(cloud)
             HeartbeatSender(transport, version=str(source)).start()
-            market, meter = MarketServiceClient(transport).win_probability, "market service"
+            service = _CountedTransport(transport, Meter(ledger, ProviderAccount.MARKET_SERVICE, clock))
+            market, meter = MarketServiceClient(service).win_probability, "market service"
+            market_account = ProviderAccount.MARKET_SERVICE
         else:
-            market, meter = PolymarketUsProvider().win_probability, "Polymarket public quotes"
+            quotes = Meter(ledger, ProviderAccount.POLYMARKET_US, clock).counted(fetch_market_data)
+            market, meter = PolymarketUsProvider(fetch=quotes).win_probability, "Polymarket public quotes"
 
-    from omni.app.planned_mlb import MLB_POLICIES, PlannedMlb
+    from omni.app.planned_mlb import MLB_POLICIES, PlannedMlb, mlb_accounts
     from omni.app.poll_plan import PollPlan
     from omni.app.poller import Poller
 
-    clock = SystemClock()
-    plan = PollPlan(MLB_POLICIES)
+    plan = PollPlan(MLB_POLICIES, ledger=ledger, accounts=mlb_accounts(provider.source, market=market_account))
     planned = PlannedMlb(
         plan,
         clock,
@@ -186,6 +219,7 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
         market=market,
         odds=odds.lines_for if odds is not None else None,
         favorites=args.favorites,
+        meter=Meter(ledger, ProviderAccount.MLB_STATSAPI, clock),
     )
 
     from RGBMatrixEmulator import RGBMatrix, RGBMatrixOptions
@@ -216,16 +250,35 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
         f"omni.app: {profile.value}, delay {args.delay}s, favorites {args.favorites}, meter {meter}"
         " — http://localhost:8888/"
     )
-    run_forever(
-        loop,
-        clock,
-        fps=args.fps,
-        log=lambda line: print(line, flush=True),
-        timezone=zone,
-        poller=Poller(plan, clock),
-        versions=_versions(args, source),
-    )
+    try:
+        run_forever(
+            loop,
+            clock,
+            fps=args.fps,
+            log=lambda line: print(line, flush=True),
+            timezone=zone,
+            poller=Poller(plan, clock),
+            versions=_versions(args, source),
+        )
+    except KeyboardInterrupt:
+        pass
+    finally:
+        ledger.save(clock.read(), force=True)  # the month's usage, for the next run
     return 0
+
+
+class _CountedTransport:  # pragma: no cover - wraps the real network
+    """The market service's transport, each request it makes counted against the service's account."""
+
+    def __init__(self, transport: ServiceTransport, meter: Meter) -> None:
+        self._transport = transport
+        self._meter = meter
+
+    def get(self, path: str, *, timeout_s: float) -> Any:
+        return self._meter.counted(self._transport.get)(path, timeout_s=timeout_s)
+
+    def post(self, path: str, body: Mapping[str, Any], *, timeout_s: float) -> Any:
+        return self._meter.counted(self._transport.post)(path, body, timeout_s=timeout_s)
 
 
 if __name__ == "__main__":  # pragma: no cover

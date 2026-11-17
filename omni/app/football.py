@@ -13,6 +13,11 @@ response to a recording under ``build/recordings/nflmeta/``, for diagnosing the 
 allow ordinary caching but not a standing copy of its data, so keep recordings to what a diagnosis needs
 and delete them after: the recording's ``RETENTION.json`` says by when (`omni.providers.rights`). The log
 opens with what the run decides with (`omni.app.versions`).
+
+Every NFLMeta request is counted against the month's quota (`omni.app.quota`), at the plan
+``--nflmeta-plan`` names (free unless you say otherwise), and the count is kept under ``--state-dir`` so a
+restart doesn't forget it. The game is followed at its cadence until the month is exhausted; then the
+feed stops asking and the card goes stale, saying why. At shutdown the runner prints the month's usage.
 """
 
 from __future__ import annotations
@@ -24,16 +29,18 @@ import shlex
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 from zoneinfo import ZoneInfo
 
 from omni.core.clock import Pacer, SystemClock
 from omni.app.football_board import FootballBoard
 from omni.app.football_feed import BackgroundFeed, GameFeed
+from omni.app.quota import HttpAnswer, NflMetaPlan
 from omni.app.versions import DecisionConfig, PolicyName, SourceRevision, Versions, read_source_revision
 from omni.core.enum import PanelProfile
 from omni.core.env import read_env_file
 from omni.domain.rules import RULES
+from omni.providers.base import ProviderError
 from omni.providers.nflmeta import HALFTIME_HOLD, PlayFeedPace
 from omni.providers.rights import DataSource, stamp_recording
 from omni.renderers.text_lane import DEFAULT_MARQUEE, ScrollSpeed
@@ -53,7 +60,7 @@ class NflMetaHttp:  # pragma: no cover - real network
         if record_dir is not None:
             record_dir.mkdir(parents=True, exist_ok=True)
 
-    def get(self, path: str, query: Mapping[str, str | int]) -> Any:
+    def get(self, path: str, query: Mapping[str, str | int]) -> HttpAnswer:
         from urllib.parse import urlencode
         from urllib.request import Request, urlopen
 
@@ -73,7 +80,7 @@ class NflMetaHttp:  # pragma: no cover - real network
             }
             with open(self._record_dir / name, "a", encoding="utf-8") as out:
                 out.write(json.dumps(line) + "\n")
-        return body
+        return HttpAnswer(body, headers)
 
 
 def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
@@ -110,6 +117,18 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     )
     parser.add_argument("--odds", action="store_true", help="show the win meter from the market (experimental)")
     parser.add_argument("--record", action="store_true", help="keep the NFLMeta responses, to diagnose the feed")
+    parser.add_argument(
+        "--nflmeta-plan",
+        choices=[plan.value for plan in NflMetaPlan],
+        default=NflMetaPlan.FREE.value,
+        help="the NFLMeta plan the key is on, whose limits the board keeps to (default free)",
+    )
+    parser.add_argument(
+        "--state-dir",
+        type=Path,
+        default=None,
+        help="where the month's quota usage is kept (default $XDG_STATE_HOME/omni, else ~/.local/state/omni)",
+    )
     return parser.parse_args(argv)
 
 
@@ -148,6 +167,8 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
     from omni.providers.nflmeta import NFLMETA_SOURCE, NflMetaLiveProvider
     from omni.providers.polymarket_us import PolymarketUsProvider
     from omni.renderers.image import LogoStore
+    from omni.app.quota import Meter, MeteredHttp, ProviderAccount, nflmeta_billed, usage_line
+    from omni.app.quota_store import default_state_dir, open_ledger
 
     key = {**read_env_file(_REPO_ROOT / ".env"), **os.environ}.get("NFLMETA_API_KEY")
     if not key:
@@ -158,17 +179,25 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
         day = datetime.now().strftime("%Y-%m-%d")
         record_dir = _REPO_ROOT / "build" / "recordings" / "nflmeta" / f"{day}-{away}-{home}"
         stamp_recording(record_dir, DataSource.NFLMETA, datetime.now(timezone.utc))
+    clock = SystemClock()
+    state_dir = args.state_dir if args.state_dir is not None else default_state_dir(os.environ, Path.home())
+    ledger = open_ledger(state_dir, NflMetaPlan(args.nflmeta_plan), log=lambda line: print(line, flush=True))
+    meter = Meter(ledger, ProviderAccount.NFLMETA, clock, billed=nflmeta_billed)
     provider = NflMetaLiveProvider(
         NflTeamRegistry.default(source=NFLMETA_SOURCE),
-        fetch=NflMetaHttp(key, record_dir).get,
+        fetch=MeteredHttp(NflMetaHttp(key, record_dir).get, meter),
         halftime_hold=_halftime_hold(args),
         play_feed=PlayFeedPace(args.play_feed),
     )
-    game_id = provider.find_game(away, home)
+    try:
+        game_id = provider.find_game(away, home)
+    except ProviderError as exc:
+        ledger.save(clock.read(), force=True)
+        raise SystemExit(f"omni.app.football: {exc}") from exc
     if game_id is None:
+        ledger.save(clock.read(), force=True)
         raise SystemExit(f"omni.app.football: no game today between {away} and {home}")
-
-    clock = SystemClock()
+    print(usage_line(ledger, ProviderAccount.NFLMETA, clock.read()), flush=True)
 
     def log(line: str) -> None:
         print(f"{clock.now().astimezone():%H:%M:%S}  {line}", flush=True)
@@ -191,7 +220,7 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
         sink = StreamDisplaySink(profile, writer, link)
 
     market = PolymarketUsProvider().win_probability if args.odds else None
-    feed = BackgroundFeed(GameFeed(provider, game_id, win_probability=market), clock)
+    feed = BackgroundFeed(GameFeed(provider, game_id, win_probability=market, ledger=ledger), clock)
     board = FootballBoard(
         feed,
         sink,
@@ -230,6 +259,8 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
             writer.stop(timeout=5)
         if pipe is not None:
             pipe.close()
+        ledger.save(clock.read(), force=True)
+        print(usage_line(ledger, ProviderAccount.NFLMETA, clock.read()), flush=True)
     return 0
 
 
