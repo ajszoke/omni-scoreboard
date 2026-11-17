@@ -50,10 +50,10 @@ the clock, and a way to fetch a game's live feed; the pipeline cards each game f
   final card in place, within the card's own window; a final whose window is over stays gone.
 
 **Release.** Every hold (a state, a play, a result) is pinned when it is admitted, on the monotonic
-clock, by the board's `ReleaseGuard`: never before its receipt, at the play's occurrence + the delay
-when that occurrence is credible, and otherwise at receipt + the full delay. A wall-clock jump after
-that changes nothing already held, and while the guard finds the wall clock suspect, everything waits
-its full delay from receipt.
+clock, by the board's `ReleaseGuard`: never before its receipt; for a play whose time is credible, at
+receipt + the delay less the play's age, told on the source's own clock (its time against its answer's);
+and otherwise at receipt + the full delay. A wall-clock jump after that changes nothing already held,
+and while the guard finds the wall clock suspect, everything waits its full delay from receipt.
 
 **Staleness.** A live card is current while its feed's newest answer is: for that answer's
 `current_for` from its receipt when the source says how long that is, and otherwise until a read

@@ -8,12 +8,14 @@ broadcast". An item carries three times, kept apart (`Arrival`):
 
 On admission, `DelayPolicy.release` pins the item's earliest release as a monotonic instant:
 - never before its receipt;
-- with a credible occurrence, once occurrence + the delay has passed: the embargo still left on the wall
-  clock at admission, counted on from there on the monotonic clock;
-- otherwise, at receipt + the full delay. That covers an item with no occurrence, one whose occurrence or
-  as-of doesn't fit its receipt (a source clock ahead of ours, or a board that booted without the right
-  time), one whose receipt and admission disagree about how much time passed, and anything admitted while
-  the wall clock is suspect.
+- with a credible occurrence, at receipt + the delay, less the play's age: how long before the source's
+  answer it happened, by the source's own clock. Our wall clock never enters that age, so a board whose
+  clock runs ahead or behind can't shorten the delay. An answer older than its receipt (a cached copy, a
+  slow fetch) only understates the age, so the release comes later, the safe way;
+- otherwise, at receipt + the full delay. That covers an item with no occurrence or no as-of, one whose
+  times don't fit each other or its receipt (a source clock ahead of ours, or a board that booted without
+  the right time), one whose receipt and admission disagree about how much time passed, and anything
+  admitted while the wall clock is suspect.
 
 Eligibility is then decided on the monotonic clock alone, so a later wall-clock jump can neither release a
 held item early nor hold it longer, and what has been released and dropped stays dropped.
@@ -53,13 +55,14 @@ __all__ = [
 
 T = TypeVar("T")
 
-# How far a source's timestamp may run ahead of our receipt and still be believed: two clocks never agree
-# exactly. Further ahead, one of them is wrong (a board that booted without the right time, say).
+# How far a play's time may run ahead of the answer that reports it, or a source's time ahead of our receipt,
+# and still be believed: the source dates its answer to the whole second, and two clocks never agree exactly.
+# Further ahead, one of them is wrong (a board that booted without the right time, say).
 SOURCE_LEAD = timedelta(seconds=5)
 
-# How long before its receipt a play may have happened and still be believed. A play normally reaches the
-# board within a poll or two; one reported much earlier says our clock or the source's is off. Waiting the
-# full delay from receipt costs a late play no more than the delay.
+# How long before the answer that reports it, or before our receipt, a play may have happened and still be
+# believed. A play normally reaches the board within a poll or two; one reported much earlier says a clock is
+# off. Waiting the full delay from receipt costs a late play no more than the delay.
 SOURCE_LATENESS = timedelta(minutes=2)
 
 # How far UTC may move apart from monotonic time between two readings before it counts as a jump.
@@ -109,32 +112,39 @@ class DelayPolicy:
     def release(self, arrival: Arrival, admitted: ClockReading, *, utc_trusted: bool = True) -> MonotonicTime:
         """The earliest monotonic instant an item admitted at ``admitted`` may surface.
 
-        With a credible occurrence it is the embargo left on the wall clock at admission (occurrence + the
-        delay), counted on from there on the monotonic clock, and never before receipt. Without one, or
+        With a credible age it is receipt + the delay less that age, and never before receipt. Without one, or
         while the wall clock isn't ``utc_trusted``, it is receipt + the full delay.
         """
         lag = self.broadcast_lag.as_timedelta()
-        received = arrival.received.monotonic
-        occurred = self.credible_occurrence(arrival, admitted) if utc_trusted else None
-        if occurred is None:
-            return received + lag
-        return max(received, admitted.monotonic + (occurred + lag - admitted.utc))
+        age = self.credible_age(arrival, admitted) if utc_trusted else None
+        if age is None:
+            return arrival.received.monotonic + lag
+        return arrival.received.monotonic + max(lag - age, timedelta(0))
 
-    def credible_occurrence(self, arrival: Arrival, admitted: ClockReading) -> datetime | None:
-        """The item's occurrence, if the delay can be measured from it: None when the policy measures from
-        receipt, the source gave none, its times don't fit its receipt, or the wall clock moved apart from
-        monotonic time between its receipt and its admission."""
-        occurred = arrival.occurred
-        if self.anchor is DelayAnchor.RECEIPT or occurred is None:
+    def credible_age(self, arrival: Arrival, admitted: ClockReading) -> timedelta | None:
+        """How long before the source's answer the item's play happened, by the source's own clock, if the
+        delay can be shortened by it.
+
+        None when the policy measures from receipt, or the source gave no occurrence or no as-of. None too when
+        the times don't fit: the play is dated after the answer that reports it, or implausibly long before; our
+        wall clock and the source's disagree; or the wall clock moved apart from monotonic time between the
+        item's receipt and its admission. A play dated just after its answer has no age: the answer's time is
+        to the whole second.
+        """
+        occurred, as_of = arrival.occurred, arrival.as_of
+        if self.anchor is DelayAnchor.RECEIPT or occurred is None or as_of is None:
             return None
         received = arrival.received
         if abs((admitted.utc - received.utc) - admitted.monotonic.since(received.monotonic)) > CLOCK_TOLERANCE:
             return None  # the wall clock jumped between its receipt and now
+        age = as_of - occurred
+        if not -SOURCE_LEAD <= age <= SOURCE_LATENESS:
+            return None  # by the source's clock, it happened after the answer that reports it, or long before
         if not received.utc - SOURCE_LATENESS <= occurred <= received.utc + SOURCE_LEAD:
-            return None  # it happened after it reached us, or implausibly long before
-        if arrival.as_of is not None and arrival.as_of > received.utc + SOURCE_LEAD:
+            return None  # on our clock, it happened after it reached us, or long before: one clock is wrong
+        if as_of > received.utc + SOURCE_LEAD:
             return None  # the source's clock runs ahead of ours
-        return occurred
+        return max(age, timedelta(0))
 
 
 class WallClockWatch:

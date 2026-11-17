@@ -627,12 +627,13 @@ def _last_pitch_snapshot(raw: dict[str, Any]) -> PitchSnapshot | None:
 
 
 def _parse_one_play(
-    play: Any, *, contest: TeamGame, source: SourceRef, observed_at: datetime
+    play: Any, *, contest: TeamGame, source: SourceRef, observed_at: datetime, as_of: datetime | None = None
 ) -> BaseballGameEvent | None:
     """Parse one `allPlays` entry into a typed event, or None to skip it.
 
     Returns None for a non-dict entry, an unmapped/routine outcome, or a play with no
     stable `atBatIndex` (without which the event could not be deduped across polls).
+    ``as_of`` is when the answer carrying the play stood, by the source's clock.
     """
     if not isinstance(play, dict):
         return None
@@ -644,8 +645,11 @@ def _parse_one_play(
     at_bat_index = play.get("atBatIndex", about.get("atBatIndex"))
     if at_bat_index is None:
         return None  # no stable lineage key — cannot dedupe across polls; skip
-    # Anchor the TV-delay to when the play happened; fall back to receipt time.
-    source_time = _parse_iso(about.get("endTime")) or _parse_iso(about.get("startTime")) or observed_at
+    # The TV delay is measured from when the play ended. Without that time, the play is dated by the answer
+    # that reports it, which it can't postdate, so it waits the full delay from receipt. Its at-bat's start
+    # would date it too early: a long at-bat would come out ahead of the broadcast. With no time at all, it
+    # is dated by when we read it, and an answer without its own time waits the full delay too.
+    source_time = _parse_iso(about.get("endTime")) or as_of or observed_at
     inning = int(about.get("inning") or 1)
     phase = _HALF_INNING_PHASE.get(str(about.get("halfInning", "")), InningPhase.TOP)
     rbi = int(result.get("rbi") or 0)
@@ -690,9 +694,10 @@ def _parse_game_events(
         return (), ()
     events: list[BaseballGameEvent] = []
     warnings: list[str] = []
+    as_of = _feed_as_of(raw)
     for index, play in enumerate(plays):
         try:
-            event = _parse_one_play(play, contest=contest, source=source, observed_at=observed_at)
+            event = _parse_one_play(play, contest=contest, source=source, observed_at=observed_at, as_of=as_of)
         except Exception as exc:
             warnings.append(f"play {index}: {type(exc).__name__}: {exc}")
             continue
