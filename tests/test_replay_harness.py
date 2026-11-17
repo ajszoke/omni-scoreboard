@@ -277,10 +277,10 @@ def test_a_card_that_never_drew_is_listed_as_dropped() -> None:
     from omni.tower.lane import ChangeKind, EndReason
 
     queue = InterleavedCardQueue()
-    queue.ingest(CardFactory().pregame(_game("g1", GameStatus.PREGAME), now=T0))
+    reading = ClockReading(T0, MonotonicTime(0.0))
+    queue.ingest(CardFactory().pregame(_game("g1", GameStatus.PREGAME), now=T0), reading)
     board = BoardSession(queue, QUAD, policy=BoardPolicy())
     board.publish(BoardHealth())
-    reading = ClockReading(T0, MonotonicTime(0.0))
     board.cue(reading)
     queue.remove("mlb:mlb_statsapi:g1:pregame")
     board.publish(BoardHealth())

@@ -3,7 +3,8 @@
 A refresh publishes the board's input whole, so a paint on the frame thread sees one refresh or the one
 before it, never half; a card drawn from a view books only if the latest still holds it as drawn. Past
 the takeover cap a base card's turn is reserved; a transient leaves at its own turn; a live card its own
-final replaced hands off at its minimum; and a card too late to start holds nothing up behind it.
+final replaced hands off at its minimum; and a card too late to start holds nothing up behind it. A card's
+window runs its length on the monotonic clock, whichever way the wall clock steps.
 """
 
 from __future__ import annotations
@@ -12,6 +13,8 @@ import dataclasses
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any
+
+import pytest
 
 from omni.app.contest_store import ContestStore
 from omni.app.display import RecordingDisplaySink
@@ -40,6 +43,7 @@ from omni.renderers.context import RenderContext
 from omni.renderers.registry import RendererRegistry, default_registry
 from omni.tower.board import BoardNote, BoardPolicy, FrameKind, SourceHealth
 from omni.tower.lane import ChangeKind, EndReason
+from tests.test_renderer_big_play import _event
 
 T = datetime(2026, 6, 17, 23, 0, tzinfo=timezone.utc)
 QUAD = PanelProfile.QUAD_128X64
@@ -117,13 +121,13 @@ class _PausingQueue(InterleavedCardQueue):
         self.before_publishing: Callable[[], None] | None = None
         self.pause: Callable[[], None] = lambda: None
 
-    def ingest(self, card: ScoreboardCard[Any]) -> None:
-        super().ingest(card)
+    def ingest(self, card: ScoreboardCard[Any], at: ClockReading) -> None:
+        super().ingest(card, at)
         if card.dedupe_key.raw == self.after:
             self.pause()
 
-    def prune(self, now: datetime) -> list[Missed]:
-        missed = super().prune(now)
+    def prune(self, at: ClockReading) -> list[Missed]:
+        missed = super().prune(at)
         if self.before_publishing is not None:
             self.before_publishing()
         return missed
@@ -320,7 +324,7 @@ def _card(
 
 def _staged(loop: AppLoop, queue: InterleavedCardQueue, seconds: float, *cards: ScoreboardCard[Any]) -> Painted:
     """Stage ``cards`` as a refresh's pipeline would, then refresh and paint at ``seconds``."""
-    queue.ingest_all(cards)
+    queue.ingest_all(cards, _at(seconds))
     return _step(loop, seconds)
 
 
@@ -433,7 +437,7 @@ def test_a_predecessor_too_late_to_start_is_traced_and_holds_its_final_up_no_lon
     loop, queue, _ = _loop(_Slate())
     walk_off = _card("col-lad", "walkoff", expires=5)  # 5 s left against an 8 s minimum
     final = CardFactory().final(_game("col-lad", GameStatus.FINAL), _state(), now=T, after=(walk_off.dedupe_key,))
-    queue.ingest_all((walk_off, final))
+    queue.ingest_all((walk_off, final), _at(0))
     refresh = loop.refresh(_at(0))
     assert refresh.unseen == (Missed(walk_off, MissReason.TOO_LATE),)
     assert _up(loop.paint(_at(0))) == "mlb:mlb_statsapi:col-lad:final"
@@ -444,10 +448,81 @@ def test_a_predecessor_that_failed_to_draw_holds_nothing_up_and_is_traced_with_w
     walk_off = _card("col-lad", "walkoff", attention=_BURST, expires=30)
     final = CardFactory().final(_game("col-lad", GameStatus.FINAL), _state(), now=T, after=(walk_off.dedupe_key,))
     drawn.broken.add("col-lad:walkoff")
-    queue.ingest_all((walk_off, final))
+    queue.ingest_all((walk_off, final), _at(0))
     failed = _step(loop, 0)
     assert failed.render_error is not None and _down(failed)[1] is EndReason.UNDRAWN
     assert _up(loop.paint(_at(0))) == "mlb:mlb_statsapi:col-lad:final"
     assert loop.refresh_deadline(_at(0)) == MonotonicTime(22.0)  # when it can no longer start
     refresh = loop.refresh(_at(22.5))
     assert refresh.unseen == (Missed(walk_off, MissReason.UNDRAWN),)
+
+
+# --- a card's window across a step of the wall clock ------------------------------------------------------------------
+
+_STEPS = pytest.mark.parametrize("by", [timedelta(minutes=-10), timedelta(minutes=10)], ids=["back", "ahead"])
+
+
+def _off(seconds: float, by: timedelta) -> ClockReading:
+    """``seconds`` in on the monotonic clock, with the wall clock stepped by ``by``."""
+    return ClockReading(T + timedelta(seconds=seconds) + by, MonotonicTime(seconds))
+
+
+def _step_on(loop: AppLoop, at: ClockReading) -> Painted:
+    """A refresh, then a paint, at ``at``."""
+    loop.refresh(at)
+    return loop.paint(at)
+
+
+def _big_play(seconds: float) -> ScoreboardCard[Any]:
+    """A home run in col-lad, out of the delay ``seconds`` in: its window is 120 s."""
+    return CardFactory().big_play(_game("col-lad"), _event(eid="col-lad:ab:1"), now=T + timedelta(seconds=seconds))
+
+
+@_STEPS
+def test_a_final_on_air_through_a_wall_clock_step_stays_up_and_runs_its_window_on_the_monotonic_clock(
+    by: timedelta,
+) -> None:
+    loop, queue, _ = _loop(_Slate())
+    final = CardFactory().final(_game("col-lad", GameStatus.FINAL), _state(), now=T)  # a 1800 s window
+    key = final.dedupe_key.raw
+    assert _up(_staged(loop, queue, 0, final)) == key
+    for seconds in (300, 1200, 1792):  # the wall clock steps at 300 s: back before the final, or ahead
+        assert _step_on(loop, _off(seconds, by)).changes == ()  # a lone card stays up
+    # Once less than its 8 s minimum is left the queue no longer offers it, as with no step at all.
+    assert _down(_step_on(loop, _off(1792.5, by))) == (key, EndReason.RAN_ITS_TIME, timedelta(seconds=1792.5))
+    loop.refresh(_off(1799.9, by))
+    assert queue.card(key) is not None
+    loop.refresh(_off(1800, by))
+    assert queue.card(key) is None  # its window is over, 1800 s after it was revealed
+
+
+@_STEPS
+def test_a_big_play_s_short_window_runs_its_length_on_the_monotonic_clock_whichever_way_the_wall_clock_steps(
+    by: timedelta,
+) -> None:
+    loop, queue, _ = _loop(_Slate())
+    play = _big_play(0)
+    key = play.dedupe_key.raw
+    assert _up(_staged(loop, queue, 0, _card("col-lad"), play)) == key  # it takes over at once
+    ups = [_up(_step_on(loop, _off(seconds, by))) for seconds in range(30, 112)]  # the wall clock steps at 30 s
+    assert key in ups  # it still takes its turns beside the game's live card
+    assert queue.eligible(_off(119.9, by), QUAD) == [queue.card("col-lad:live"), play]
+    loop.refresh(_off(119.9, by))
+    assert queue.card(key) is play
+    loop.refresh(_off(120, by))
+    assert queue.card(key) is None  # its 120 s are over
+
+
+@_STEPS
+def test_a_card_staged_before_a_wall_clock_step_and_first_aired_after_it_airs_within_its_monotonic_window(
+    by: timedelta,
+) -> None:
+    loop, queue, _ = _loop(_Slate())
+    assert _up(_staged(loop, queue, 0, _card("col-lad"))) == "col-lad:live"
+    play = _big_play(2)
+    assert _staged(loop, queue, 2, play).changes == ()  # staged; the live card holds its 8 s minimum
+    assert _step_on(loop, _off(5, by)).changes == ()  # the wall clock steps
+    assert _up(_step_on(loop, _off(8, by))) == play.dedupe_key.raw  # the takeover airs at the minimum
+    assert loop.refresh(_off(121.9, by)).unseen == () and queue.card(play.dedupe_key.raw) is play
+    loop.refresh(_off(122, by))
+    assert queue.card(play.dedupe_key.raw) is None  # 120 s after it was staged

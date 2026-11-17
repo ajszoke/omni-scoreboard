@@ -690,31 +690,29 @@ def test_a_timeline_that_can_t_be_replayed_is_refused(build: Callable[[], object
         build()
 
 
-# --- defects the mixed day found, left to their own owners ------------------------------------------------------------
+# --- a step of the board's wall clock, under a final on air ----------------------------------------------------------
 
 
-def _final_then_step(by: timedelta, end: timedelta) -> list[str]:
-    """A game final at 12:02, its result on air, and the board's wall clock stepping by ``by`` at 12:10."""
+def _final_day(end: timedelta, *faults: ClockStep) -> list[str]:
+    """A game final at 12:02, its result on air from 165 s until ``end``, with ``faults``."""
     game = _playing().final(SHORT + timedelta(minutes=2), _Line(9, _BOTTOM, 1, 0, 6, 6, 3))
-    step = ClockStep(at=SHORT + timedelta(minutes=10), by=by)
-    return mixed_decisions(_short(game, end=end, faults=(step,)), profile=QUAD, nfl=False)
+    return mixed_decisions(_short(game, end=end, faults=faults), profile=QUAD, nfl=False)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="A card's availability is judged on the wall clock, so a step back takes the card on air off the board "
-    "until the wall clock catches up with when it became available.",
-)
+def _step_at_12_10(by: timedelta) -> ClockStep:
+    """The board's wall clock stepping by ``by`` at 12:10, with the final on air."""
+    return ClockStep(at=SHORT + timedelta(minutes=10), by=by)
+
+
 def test_a_wall_clock_step_back_leaves_the_final_on_air_up() -> None:
-    lines = _final_then_step(timedelta(minutes=-10), timedelta(minutes=20))
+    lines = _final_day(timedelta(minutes=20), _step_at_12_10(timedelta(minutes=-10)))
     assert not any("frame   idle" in line for line in lines)
+    assert lines == _final_day(timedelta(minutes=20))  # the board decides as if the clock hadn't stepped
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="A card's expiry is judged on the wall clock, so a step ahead cuts a final's post-game window short.",
-)
 def test_a_wall_clock_step_ahead_leaves_a_final_its_whole_post_game_window() -> None:
-    lines = _final_then_step(timedelta(minutes=10), timedelta(minutes=40))
+    lines = _final_day(timedelta(minutes=40), _step_at_12_10(timedelta(minutes=10)))
     [down] = [line for line in lines if "  down    mlb:mlb_statsapi:1:final" in line]
-    assert down.endswith("(ran its time, 1800.0s)")
+    # Its 1800 s window runs from its reveal at 165 s; it airs until too little is left for a turn's 8 s minimum.
+    assert down == "  1957.0  down    mlb:mlb_statsapi:1:final  (ran its time, 1792.0s)"
+    assert lines == _final_day(timedelta(minutes=40))  # the board decides as if the clock hadn't stepped

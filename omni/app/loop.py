@@ -234,7 +234,7 @@ class AppLoop:
             fetch_pregame_details=self._fetch_pregame_details,
             fetch_game_lines=self._fetch_game_lines,
         )
-        unseen = tuple(self._queue.prune(now))
+        unseen = tuple(self._queue.prune(at))
         leagues = tuple(self._judge(league) for league in self._store.league_healths(at.monotonic))
         health, status = self._health(leagues, pipeline_result)
         self._board.publish(health)
@@ -336,8 +336,7 @@ class AppLoop:
         clearing the delay, a live card going stale or a stale game's cards coming down, the source going stale
         or offline, or a card that hasn't aired running out of time to (it's dropped then, and traced as
         missed)."""
-        miss = self._queue.next_miss(at.utc)
-        missed = at.monotonic + (miss - at.utc) if miss is not None else None
+        missed = self._queue.next_miss(at)
         return earliest((self._pipeline.next_deadline(at), self._health_changes_at, missed))
 
     def next_deadline(self, at: ClockReading) -> MonotonicTime | None:

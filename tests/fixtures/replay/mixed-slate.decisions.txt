@@ -284,11 +284,8 @@
  53700.2  frame   offline  (no feed for a game)
  53700.5  frame   held  (a game in the TV delay)
  53745.5  up      mlb:mlb_statsapi:776203:live  (rotation)
- 54600.0  down    mlb:mlb_statsapi:776203:live  (ran its time, 854.5s)
- 54600.0  frame   idle  (nothing eligible)
- 54600.5  up      mlb:mlb_statsapi:776203:live  (rotation)
  54615.2  scope   mlb 2026-11-22  complete  +mlb:mlb_statsapi:776204
- 54615.2  down    mlb:mlb_statsapi:776203:live  (ran its time, 14.8s)
+ 54615.2  down    mlb:mlb_statsapi:776203:live  (ran its time, 869.8s)
  54615.2  up      mlb:mlb_statsapi:776204:pregame  (rotation)
  54627.3  down    mlb:mlb_statsapi:776204:pregame  (ran its time, 12.0s)
  54627.3  up      mlb:mlb_statsapi:776203:live  (rotation)

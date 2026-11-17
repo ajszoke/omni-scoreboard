@@ -40,9 +40,12 @@ When no card should be up, the board says so with an explicit frame: *idle* (not
 its limit or never answered, or a game's feed has stopped answering and its card has come down). A card
 whose data is past its age airs marked *stale*.
 
-Availability and expiry are UTC instants; dwell and slots run on the monotonic clock. The session runs
-on the frame thread, but for `publish`, which the decision thread calls once a refresh is done; the
-queue is thread-safe, and the input it publishes is replaced whole.
+A card's availability and expiry are UTC instants, which the queue pins to the monotonic clock when it takes
+the card in (`CardWindow`). The board judges them on those pins, and runs dwell and slots on the monotonic
+clock too, so a step of the wall clock moves none of them.
+
+The session runs on the frame thread, but for `publish`, which the decision thread calls once a refresh is
+done; the queue is thread-safe, and the input it publishes is replaced whole.
 """
 
 from __future__ import annotations
@@ -179,6 +182,7 @@ class _OnAir:
     pick: Pick | None  # None for a frame
     slot: timedelta
     since: MonotonicTime | None = None  # when its first frame was committed
+    expires: MonotonicTime | None = None  # a card: its expiry, as the queue pinned it; None if it never expires
 
 
 class BoardSession:
@@ -221,7 +225,7 @@ class BoardSession:
             if health.source is not SourceHealth.OFFLINE:
                 pick = self._choose(board.cards, at)
             if pick is not None:
-                self._air_card(pick, at)
+                self._air_card(pick, board.cards, at)
             elif health.source is SourceHealth.OFFLINE:
                 self._air_frame(BoardFrame(FrameKind.OFFLINE, health.reason), at)
             elif health.unfed:
@@ -275,10 +279,7 @@ class BoardSession:
         )
         if on.pick is None or on.since is None:
             return upcoming  # a frame stays until a card can replace it; a card's dwell waits on its commit
-        deadlines = [upcoming, on.since + on.segment.dwell.minimum, on.since + on.slot]
-        expires = on.segment.expires_at
-        if expires is not None:
-            deadlines.append(at.monotonic + (expires - at.utc))
+        deadlines = [upcoming, on.since + on.segment.dwell.minimum, on.since + on.slot, on.expires]
         return earliest(deadline for deadline in deadlines if deadline is None or deadline > at.monotonic)
 
     def changes(self) -> list[LaneChange[BoardPayload]]:
@@ -297,8 +298,7 @@ class BoardSession:
         if board.health.source is SourceHealth.OFFLINE:
             self._down(EndReason.CLEARED, at)
             return
-        expires = on.segment.expires_at
-        if expires is not None and at.utc >= expires:
+        if on.expires is not None and at.monotonic >= on.expires:
             self._down(EndReason.EXPIRED, at)  # whether or not a refresh has pruned it yet
             return
         key = on.segment.key.subject
@@ -309,6 +309,7 @@ class BoardSession:
         if latest is not on.segment.frames[0]:
             on.segment = _card_segment(latest, revision=on.segment.revision + 1)  # same dwell: a cosmetic edit
             on.pick = Pick(latest, on.pick.reason)
+            on.expires = board.cards.windows[key].expires
         if on.since is None:
             return  # not drawn yet: no time has run
         up = at.monotonic.since(on.since)
@@ -365,7 +366,7 @@ class BoardSession:
                 run = timedelta(0)
         return run >= self._policy.takeover_cap
 
-    def _air_card(self, pick: Pick, at: ClockReading) -> None:
+    def _air_card(self, pick: Pick, view: CardView, at: ClockReading) -> None:
         if self._on_air is not None:
             self._down(EndReason.NEXT_WAITING, at)  # a frame gives way to a card at once
         segment = _card_segment(pick.card, revision=0)
@@ -373,7 +374,8 @@ class BoardSession:
         turn = pick.card.attention.takeover_for.as_timedelta() if pick.reason is SelectionReason.TAKEOVER else None
         slot = min(max(turn if turn is not None else self._policy.slot, dwell.minimum), dwell.maximum)
         self._occurrences += 1
-        self._on_air = _OnAir(segment=segment, occurrence=self._occurrences, pick=pick, slot=slot)
+        expires = view.windows[pick.card.dedupe_key.raw].expires
+        self._on_air = _OnAir(segment=segment, occurrence=self._occurrences, pick=pick, slot=slot, expires=expires)
 
     def _waiting_since(self, at: ClockReading) -> datetime:
         """When the held frame up began waiting; now, if none is up."""
