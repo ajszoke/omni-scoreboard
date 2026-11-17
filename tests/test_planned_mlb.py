@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 import threading
 from datetime import date, datetime, timedelta, timezone
@@ -34,6 +35,8 @@ from omni.domain.baseball import (
 from omni.domain.contest import TeamGame
 from omni.events.baseball import LiveBaseballFeed
 from omni.providers.base import ProviderError, ProviderUpdate
+from omni.providers.mlb_statsapi import MlbStatsApiProvider
+from omni.providers.mlb_teams import MlbTeamRegistry
 from omni.renderers.canvas import Canvas
 from omni.renderers.context import RenderContext
 from omni.renderers.registry import RendererRegistry, default_registry
@@ -587,3 +590,112 @@ def test_a_final_its_feed_keeps_calling_live_is_held_dimmed_then_taken_down() ->
     feed: PollKey[LiveBaseballFeed] = PollKey(PollSource.GAME_FEED, game.id)
     asked = board.plan.latest(feed, board.clock.read())
     assert asked is not None and asked.received.monotonic.since(board.start) > 185 * S  # still asked
+
+
+# --- a feed answer missing its numbers, read by the real provider ----------------------------------------
+
+_ROW = {
+    "game_id": 700001,
+    "away_id": 115,
+    "home_id": 119,
+    "status": "In Progress",
+    "game_datetime": "2026-06-18T01:10Z",
+}
+
+
+def _statsapi(
+    status: str, inning: int, inning_state: str, away: dict[str, int], home: dict[str, int]
+) -> dict[str, Any]:
+    """StatsAPI's game feed: its status, and its linescore with each side's counts as given."""
+    line = {"currentInning": inning, "inningState": inning_state, "teams": {"away": away, "home": home}}
+    return {"gameData": {"status": {"detailedState": status}}, "liveData": {"linescore": line}}
+
+
+class _StatsApiBoard:
+    """The running board over the real StatsAPI provider, whose one game's feed answers with ``payload`` as the
+    test sets it, stepped a second at a time: the poller asks what is due, then a refresh and a paint, each paint
+    remembered with the card drawn."""
+
+    def __init__(self, payload: dict[str, Any], *, lag: int) -> None:
+        self.payload = payload
+        self.clock = FakeClock(AFTER_MIDNIGHT)
+        provider = MlbStatsApiProvider(
+            MlbTeamRegistry.from_color_file(),
+            fetch_schedule=lambda day, sport_ids: [_ROW] if day == TODAY else [],
+            fetch_game=lambda game_pk: copy.deepcopy(self.payload),
+        )
+        self.plan = PollPlan(MLB_POLICIES)
+        self.planned = PlannedMlb(self.plan, self.clock, provider)
+        self.poller = Poller(self.plan, self.clock)
+        self.drawn = _Drawn()
+        sink = RecordingDisplaySink(QUAD)
+        self.loop = build_planned_loop(self.planned, sink, broadcast_lag=DurationSeconds(lag), registry=self.drawn)
+        self.start = self.clock.monotonic()
+        self.refreshes: list[tuple[float, Refresh]] = []
+        self.paints: list[tuple[float, ScoreboardCard[Any] | None]] = []
+        warm_up(self.loop, self.poller, self.clock)
+
+    def run_until(self, seconds: float) -> None:
+        while (elapsed := self.clock.monotonic().since(self.start).total_seconds()) < seconds:
+            self.clock.advance(S)
+            self.poller.run_due()
+            self.refreshes.append((elapsed + 1, self.loop.refresh(self.clock.read())))
+            painted = self.loop.paint(self.clock.read())
+            self.paints.append((elapsed + 1, self.drawn.card if painted.shown is not None else None))
+
+    def shown(self, kind: str) -> list[tuple[float, Any]]:
+        """Each paint of a card whose id ends with ``kind``: when, and its payload."""
+        return [(at, card.payload) for at, card in self.paints if card is not None and card.id.raw.endswith(kind)]
+
+
+def test_a_final_missing_its_runs_never_airs_and_the_complete_final_airs_once() -> None:
+    # A live 3-2 answer, then from 10 s a final whose linescore leaves out both sides' runs and hits, then from 40 s
+    # the complete final. The partial final is a failed read: the live answer stands, its failure is reported, and
+    # once that answer is out of date the live card is drawn stale. No FINAL 0-0 is ever painted. The complete
+    # final, asked at 52 s (the retries after 15 s fall at 17, 22 and 37), airs 3-2 once the delay has passed, with
+    # no correction after it.
+    board = _StatsApiBoard(
+        _statsapi("In Progress", 8, "Bottom", {"runs": 3, "hits": 7}, {"runs": 2, "hits": 5}), lag=45
+    )
+    board.run_until(10)
+    board.payload = _statsapi("Final", 9, "End", {"errors": 0}, {"errors": 1})
+    board.run_until(40)
+    feed = board.planned.fetch_feed(_game("700001"), board.clock.now())
+    assert (feed.status, feed.state.away_score, feed.state.home_score) == (GameStatus.LIVE, 3, 2)  # the last good
+    assert feed.failing == "ProviderError: incomplete linescore: no runs for the away side"
+    warnings = [(at, refresh.pipeline.warnings) for at, refresh in board.refreshes if refresh.pipeline.warnings]
+    assert warnings == [
+        (
+            30,
+            (
+                "700001: stale: its feed's newest answer is out of date "
+                "(its last ask: ProviderError: incomplete linescore: no runs for the away side)",
+            ),
+        )
+    ]
+    board.payload = _statsapi("Final", 9, "End", {"runs": 3, "hits": 7, "errors": 0}, {"runs": 2, "hits": 5})
+    board.run_until(200)
+    finals = [(at, card.raw) for at, refresh in board.refreshes for card in refresh.pipeline.finals]
+    assert finals == [(52 + 45, "700001:final")]
+    assert [refresh.pipeline.corrections for _, refresh in board.refreshes if refresh.pipeline.corrections] == []
+    shown = board.shown(":final")
+    assert shown[0][0] == 97 and {(final.away_score, final.home_score) for _, final in shown} == {(3, 2)}
+
+
+def test_a_live_answer_missing_its_hits_in_the_7th_raises_no_no_hitter() -> None:
+    # Both sides have hit by the 6th; an answer from the top of the 7th leaves out their hits. Read as zeros, it
+    # would put a no-hitter on the board; it is a failed read instead, and the 6th's answer stands.
+    board = _StatsApiBoard(_statsapi("In Progress", 6, "End", {"runs": 1, "hits": 4}, {"runs": 0, "hits": 2}), lag=45)
+    board.run_until(10)
+    board.payload = _statsapi("In Progress", 7, "Top", {"runs": 1, "errors": 0}, {"runs": 0, "errors": 0})
+    board.run_until(120)
+    assert [refresh.pipeline.no_hitters for _, refresh in board.refreshes if refresh.pipeline.no_hitters] == []
+    assert board.shown(":nohitter") == []
+    assert board.shown(":live")  # the live card airs, from the 6th's answer
+
+
+def test_an_answer_from_the_top_of_the_1st_with_nothing_yet_for_the_home_side_shows_its_true_zero() -> None:
+    board = _StatsApiBoard(_statsapi("In Progress", 1, "Top", {"runs": 1, "hits": 1}, {}), lag=0)
+    board.run_until(5)
+    [(_, live), *_] = board.shown(":live")
+    assert (live.away_line.runs, live.home_line.runs, live.home_line.hits) == (1, 0, 0)

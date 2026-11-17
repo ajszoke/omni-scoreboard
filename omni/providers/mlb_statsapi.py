@@ -15,7 +15,7 @@ from datetime import date, datetime, timezone
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
-from omni.core.enum import DisplayPriority, GameStatus, League, UpdateUrgency, try_coerce_enum
+from omni.core.enum import DisplayPriority, GameStatus, HomeAway, League, UpdateUrgency, try_coerce_enum
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.core.time import local_date
 from omni.domain.baseball import (
@@ -306,36 +306,47 @@ def _phase_from_inning_state(inning_state: str) -> InningPhase:
     return _INNING_STATE_PHASE.get(inning_state, InningPhase.TOP)
 
 
+def _count(block: dict[str, Any], key: str) -> int | None:
+    """A count from a linescore or boxscore block (``runs``, ``hits``, ``baseOnBalls``, ...), or None when the
+    feed leaves it out: unknown, not zero."""
+    value = block.get(key)
+    return None if value is None else int(value)
+
+
 def _batting_walks_hbp(raw: dict[str, Any], side: str) -> int | None:
     """Walks + hit-by-pitch for `side` from the boxscore batting line, or None if absent.
 
     These are the on-base events a no-hit line still allows — a walk is the classic blemish on a
     no-hitter — and the linescore omits them, so they come from the boxscore. ``or {}`` tolerates
-    a null node at any level; None (no batting block) means the count is *unknown*, not zero.
+    a null node at any level; None (no batting block, or either count missing from it) means the
+    count is *unknown*, not zero.
     """
     boxscore = (raw.get("liveData") or {}).get("boxscore") or {}
     batting = ((boxscore.get("teams") or {}).get(side) or {}).get("teamStats") or {}
     line = batting.get("batting")
     if not isinstance(line, dict):
         return None
-    return int(line.get("baseOnBalls", 0) or 0) + int(line.get("hitByPitch", 0) or 0)
+    walks, hit_by_pitch = _count(line, "baseOnBalls"), _count(line, "hitByPitch")
+    if walks is None or hit_by_pitch is None:
+        return None
+    return walks + hit_by_pitch
 
 
-def _reached_base(raw: dict[str, Any], *, side: str, hits: int, fielding_errors: int) -> bool | None:
+def _reached_base(raw: dict[str, Any], *, side: str, hits: int, fielding_errors: int | None) -> bool | None:
     """Whether `side` has reached base at all this game: True / False / None (unknown).
 
-    A hit, or an error by the defense, is a definite baserunner. Otherwise the call needs the
-    boxscore walks/HBP: present -> a clean sheet (False) unless a walk/HBP put a man on; absent ->
-    None, so a perfect game is never claimed without the data to rule a baserunner out. Counting a
+    A hit, an error by the defense, or a walk or HBP in the boxscore is a definite baserunner. A
+    clean sheet (False) needs each of those counts present and zero; with any missing it is None,
+    so a perfect game is never claimed without the data to rule a baserunner out. Counting a
     fielding error as a baserunner can only ever err toward a plain no-hitter (a muffed foul that
     let no one reach), never toward a false perfect game.
     """
-    if hits > 0 or fielding_errors > 0:
-        return True
     walks_hbp = _batting_walks_hbp(raw, side)
-    if walks_hbp is None:
+    if hits > 0 or (fielding_errors or 0) > 0 or (walks_hbp or 0) > 0:
+        return True
+    if walks_hbp is None or fielding_errors is None:
         return None
-    return walks_hbp > 0
+    return False
 
 
 _NAME_SUFFIXES = frozenset({"jr", "sr", "ii", "iii", "iv", "v"})
@@ -423,11 +434,37 @@ def _due_up(raw: dict[str, Any], offense: dict[str, Any]) -> DueUp | None:
     return DueUp(batters=batters) if batters else None
 
 
+def _has_batted(side: HomeAway, *, inning: int, phase: InningPhase) -> bool:
+    """Whether ``side`` has come to bat yet, by the linescore's inning and phase. The away side bats first, so it
+    has once the game is under way; the home side has from the bottom of the 1st on (not in the top of the 1st,
+    nor the break after it)."""
+    return side is HomeAway.AWAY or inning > 1 or phase in (InningPhase.BOTTOM, InningPhase.END)
+
+
+def _runs_and_hits(team: dict[str, Any], side: HomeAway, *, batted: bool, final: bool) -> tuple[int, int]:
+    """A side's runs and hits from the linescore.
+
+    A side that has batted must have both, and an answer the feed calls final must have both sides' runs:
+    without them the answer is a failed read, since a 0 put in their place could fake a tied final or a
+    no-hitter. A side yet to bat that the feed leaves out has a true 0 of each.
+    """
+    runs, hits = _count(team, "runs"), _count(team, "hits")
+    if runs is None and (batted or final):
+        raise ProviderError(f"incomplete linescore: no runs for the {side.value} side")
+    if hits is None and batted:
+        raise ProviderError(f"incomplete linescore: no hits for the {side.value} side")
+    return runs or 0, hits or 0
+
+
 def _parse_game_state(raw: dict[str, Any]) -> BaseballGameState:
     """Parse a StatsAPI game feed's linescore into typed `BaseballGameState`.
 
     Base occupancy is read from `offense.{first,second,third}` (a key is present
-    only when that base is occupied), mirroring upstream's `man_on`.
+    only when that base is occupied), mirroring upstream's `man_on`. A linescore
+    missing a side's runs or hits once that side has batted (`_has_batted`), or
+    either side's runs in a final answer, raises `ProviderError`: a failed read,
+    so the last good answer stands. A missing error count shows as 0, but no
+    perfect game is claimed without it.
     """
     try:
         line = raw["liveData"]["linescore"]
@@ -438,18 +475,22 @@ def _parse_game_state(raw: dict[str, Any]) -> BaseballGameState:
         offense = line.get("offense", {})
         away_team = teams.get("away", {})
         home_team = teams.get("home", {})
-        away_hits = int(away_team.get("hits", 0) or 0)
-        home_hits = int(home_team.get("hits", 0) or 0)
-        away_errors = int(away_team.get("errors", 0) or 0)
-        home_errors = int(home_team.get("errors", 0) or 0)
         phase = _phase_from_inning_state(str(line.get("inningState", "Top")))
+        final = _feed_status(raw) is GameStatus.FINAL
+        away_runs, away_hits = _runs_and_hits(
+            away_team, HomeAway.AWAY, batted=_has_batted(HomeAway.AWAY, inning=inning, phase=phase), final=final
+        )
+        home_runs, home_hits = _runs_and_hits(
+            home_team, HomeAway.HOME, batted=_has_batted(HomeAway.HOME, inning=inning, phase=phase), final=final
+        )
+        away_errors, home_errors = _count(away_team, "errors"), _count(home_team, "errors")
         return BaseballGameState(
-            away_score=int(away_team.get("runs", 0) or 0),
-            home_score=int(home_team.get("runs", 0) or 0),
+            away_score=away_runs,
+            home_score=home_runs,
             away_hits=away_hits,
             home_hits=home_hits,
-            away_errors=away_errors,
-            home_errors=home_errors,
+            away_errors=away_errors or 0,
+            home_errors=home_errors or 0,
             # A side's reached-base read needs the *fielding* side's errors: an away batter
             # reaching on error is charged to the home defense, and vice versa.
             away_reached_base=_reached_base(raw, side="away", hits=away_hits, fielding_errors=home_errors),
