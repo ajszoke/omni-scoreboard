@@ -438,6 +438,21 @@ def test_clearing_for_a_reason_takes_down_what_aired_for_it() -> None:
     ]
 
 
+def test_shedding_keeps_the_newest_of_what_it_picks_and_never_touches_what_is_up_or_unpicked() -> None:
+    lane = _lane(*(_segment(str(n), f"RUN {n}") for n in range(1, 4)), _segment("score", "TD"), _segment("4", "RUN 4"))
+    _air(lane, T0)  # RUN 1 is up: on air, not waiting
+    lane.changes()
+    routine = {SegmentKey(Surface.PLAY_STRIP, str(n)) for n in range(1, 5)}
+    lane.shed(_at(T0), keep=1, among=lambda segment: segment.key in routine)
+    assert _dropped(lane) == [("2", EndReason.BACKLOG), ("3", EndReason.BACKLOG)]
+    lane.shed(_at(T0), keep=1, among=lambda segment: segment.key in routine)  # within the bound: nothing goes
+    assert lane.changes() == []
+    assert [_air(lane, T0 + n * MIN) for n in range(1, 3)] == [("TD", "TD detail"), ("RUN 4", "RUN 4 detail")]
+    lane.offer([_segment("2", "RUN 2", revision=1)])  # a newer revision of one shed doesn't bring it back
+    assert _air(lane, T0 + 4 * MIN) == ("RUN 4", "C.Brown 4 YDS 1 CAR")
+    assert _air(lane, T0 + 6 * MIN) is None and lane.idle
+
+
 def test_a_lane_takes_only_its_own_surface() -> None:
     with pytest.raises(ValueError, match="board segment offered to the play_strip lane"):
         _lane(_segment("1", surface=Surface.BOARD))

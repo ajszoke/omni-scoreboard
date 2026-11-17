@@ -39,6 +39,7 @@ from omni.events.football import (
     review_headline,
     summarize_play,
 )
+from omni.events.football_clubs import club_code
 
 __all__ = ["PlayLedger", "PlayerLine"]
 
@@ -315,14 +316,14 @@ class PlayLedger:
         if penalty is None or spot is None:
             return kicker, None  # moved by a penalty this can't place: the spot is unknown, not the 35
         line = int(spot["line"])
-        own = line if self._sides.get(spot["side"]) is kicker else _FIELD - line
-        return kicker, _moved(own, int(penalty["yards"]), against_kicker=self._sides.get(penalty["team"]) is kicker)
+        own = line if self._side_coded(spot["side"]) is kicker else _FIELD - line
+        return kicker, _moved(own, int(penalty["yards"]), against_kicker=self._side_coded(penalty["team"]) is kicker)
 
     def _moved_by_penalties(self, kicker: HomeAway, own: int, play: FootballPlay) -> int:
         """``own`` yard line, moved by any penalty on ``play`` that's enforced on the kickoff."""
         for found in _ENFORCED.finditer(play.description):
             if "kickoff" in found["where"].lower():
-                flagged = self._sides.get(found["team"]) is kicker
+                flagged = self._side_coded(found["team"]) is kicker
                 own = _moved(own, int(found["yards"]), against_kicker=flagged)
         return own
 
@@ -393,7 +394,14 @@ class PlayLedger:
             return None
         kind, summary = summarized
         players = self._players_line(play) if kind is FootballEventKind.PLAY else None
-        return FootballEvent(key=f"{play.number}:{kind.value}", kind=kind, summary=summary, players_line=players)
+        return FootballEvent(
+            key=f"{play.number}:{kind.value}",
+            kind=kind,
+            summary=summary,
+            players_line=players,
+            play=play.number,
+            scored_or_turned_over=play.scored_or_turned_over,
+        )
 
     def _correction_events(self, before: FootballPlay, after: FootballPlay) -> list[FootballEvent]:
         events: list[FootballEvent] = []
@@ -408,6 +416,7 @@ class PlayLedger:
                     kind=FootballEventKind.REVIEW,
                     summary=summary,
                     players_line=self._players_line(after),
+                    play=after.number,
                 )
             )
         if before.conversion is None and after.conversion is not None:
@@ -415,13 +424,22 @@ class PlayLedger:
             tone = PlayTone.SCORE if result.scored else PlayTone.STANDARD
             summary = PlaySummary(tone=tone, headline=conversion_headline(after), detail=text.conversion)
             events.append(
-                FootballEvent(key=f"{after.number}:conversion", kind=FootballEventKind.CONVERSION, summary=summary)
+                FootballEvent(
+                    key=f"{after.number}:conversion",
+                    kind=FootballEventKind.CONVERSION,
+                    summary=summary,
+                    play=after.number,
+                )
             )
         return events
 
     def _players_line(self, play: FootballPlay) -> str | None:
         lines = [line.describe() for name in _named(play) if (line := self._totals.lines.get(name)) is not None]
         return " | ".join(lines) or None
+
+    def _side_coded(self, code: str) -> HomeAway | None:
+        """The side a club code in play text names ("BLT" names Baltimore's), if either."""
+        return self._sides.get(club_code(code))
 
     def _side_named(self, name: str) -> HomeAway | None:
         abbreviation = self._names.get(name) or next((a for n, a in self._names.items() if n and n in name), None)

@@ -306,18 +306,19 @@
   6396.00  field  Q2 3-24 -
   6396.00  strip  -
   6426.00  field  Q2 3-24 halftime
+  7494.50  drop   PLAY 96 | detail 96 (unseen: backlog)
+  7494.50  drop   PLAY 97 | detail 97 (unseen: backlog)
+  7494.50  drop   PLAY 98 | detail 98 (unseen: backlog)
+  7494.50  drop   PLAY 99 | detail 99 (unseen: backlog)
+  7494.50  drop   PLAY 100 | detail 100 (unseen: backlog)
   7494.50  field  Q3 3-24 away 2&18 @1
-  7494.50  strip  PLAY 96 | detail 96
-  7504.50  strip  PLAY 97 | detail 97
-  7514.50  strip  PLAY 98 | detail 98
-  7524.50  strip  PLAY 99 | detail 99
-  7534.50  strip  PLAY 100 | detail 100
-  7544.50  strip  PLAY 101 | detail 101
+  7494.50  strip  PLAY 101 | detail 101
+  7504.50  strip  PLAY 102 | detail 102
+  7514.50  strip  INJURY 103 | detail 103
   7544.75  field  Q3 3-24 away 3&18 @1
-  7554.50  strip  PLAY 102 | detail 102
-  7564.50  strip  INJURY 103 | detail 103
-  7574.50  strip  PLAY 104 | detail 104
-  7594.50  strip  PLAY 104 | players 104
+  7544.75  strip  PLAY 104 | detail 104
+  7564.75  strip  PLAY 104 | players 104
+  7584.75  strip  -
   7609.00  field  Q3 3-24 home 2&5 @1
   7609.00  strip  PLAY 105 | detail 105
   7629.00  strip  TV TIMEOUT 106

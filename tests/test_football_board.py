@@ -6,14 +6,22 @@ from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from omni.core.clock import ClockReading, MonotonicTime
+import re
+
+from omni.core.clock import ClockReading, FakeClock, MonotonicTime
 from omni.app.display import RecordingDisplaySink
 from omni.app.football import _parse_args
 from omni.app.football_feed import FeedResult, GameFeed
 from omni.app.football_board import (
     CLOSING_WAIT,
     FEED_STALE_AFTER,
+    LATE_AFTER,
+    MAJOR_START_WITHIN,
+    MAX_ROUTINE_WAITING,
+    ROUTINE_START_WITHIN,
     STRIP_DWELL,
+    WALL_JUMP,
+    WRITTEN_LEAD,
     FRAME_MAX,
     FRAME_MIN,
     METER_MAX_AGE,
@@ -671,9 +679,21 @@ def _state(**fields: Any) -> FootballGameState:
     return FootballGameState(**{**base, **fields})
 
 
-def _event(key: str, headline: str) -> FootballEvent:
+def _event(
+    key: str,
+    headline: str,
+    *,
+    tone: PlayTone = PlayTone.STANDARD,
+    kind: FootballEventKind = FootballEventKind.PLAY,
+    written_at: datetime | None = None,
+    players: str | None = None,
+) -> FootballEvent:
     return FootballEvent(
-        key=key, kind=FootballEventKind.PLAY, summary=PlaySummary(tone=PlayTone.STANDARD, headline=headline)
+        key=key,
+        kind=kind,
+        summary=PlaySummary(tone=tone, headline=headline),
+        written_at=written_at,
+        players_line=players,
     )
 
 
@@ -695,12 +715,17 @@ def _answer(
 
 
 def _backlog_then_final(*, walk_off_at: int) -> _Script:
-    """Seven routine plays in one answer at 0 s, the final at 10 s with its last play not in yet, and the
-    final again at ``walk_off_at`` with the walk-off kick."""
+    """Seven plays in one answer at 0 s, the final at 10 s with its last play not in yet, and the final
+    again at ``walk_off_at`` with the walk-off kick. Plays 2, 4, 5 and 6 are scores, so the three routine
+    ones stay within the routine backlog's bound."""
     live = _state(possession=HomeAway.AWAY, down=1, distance=10, yards_to_goal=30)
     final = _state(clock_seconds=0, away_score=16, interval=FootballInterval.FINAL)
+    scores = {2, 4, 5, 6}
+    plays = (
+        _event(f"r{n}", f"PLAY {n}", tone=PlayTone.SCORE if n in scores else PlayTone.STANDARD) for n in range(1, 8)
+    )
     return _Script(
-        _answer(0, live, *(_event(f"r{n}", f"PLAY {n}") for n in range(1, 8))),
+        _answer(0, live, *plays),
         _answer(10, final, phase=NflPhase.POST, caught_up=False),
         _answer(walk_off_at, final, _event("kick", "FIELD GOAL GOOD"), phase=NflPhase.POST),
     )
@@ -964,3 +989,301 @@ def test_a_caption_that_cant_be_drawn_comes_off_the_strip_and_the_card_draws_wit
         "paint failed: RuntimeError: no glyph for that",
     ]
     assert board._strip.idle and sink.committed == 2
+
+
+# Keeping the strip up with the field: latest starts, late plays, a routine backlog, and a host that slept.
+
+
+def test_the_strips_bounds_are_the_ones_the_user_approved() -> None:
+    assert (ROUTINE_START_WITHIN, MAJOR_START_WITHIN) == (timedelta(seconds=60), timedelta(seconds=120))
+    assert (LATE_AFTER, WRITTEN_LEAD, MAX_ROUTINE_WAITING, WALL_JUMP) == (
+        timedelta(minutes=2),
+        timedelta(seconds=5),
+        3,
+        timedelta(seconds=30),
+    )
+
+
+def _strip_lines(lines: list[str]) -> list[str]:
+    return [line for line in lines if line.startswith(("  =", "  -", "  x"))]
+
+
+_LIVE = _state(possession=HomeAway.AWAY, down=1, distance=10, yards_to_goal=30)
+
+
+def _run(seconds: int, *answers: FeedResult) -> list[str]:
+    """The log of a board stepped each second for ``seconds``, its feed giving ``answers`` and then, every
+    ten seconds, the same field with nothing new (so it never goes stale)."""
+    quiet = range(int((answers[-1].received_at - T0) / S) + 10, seconds, 10)
+    lines: list[str] = []
+    script = _Script(*answers, *(_answer(second, _LIVE) for second in quiet))
+    board = FootballBoard(script, RecordingDisplaySink(PanelProfile.QUAD_128X64), log=lines.append)
+    for second in range(seconds):
+        board.step(_at(T0 + second * S))
+    return lines
+
+
+def test_a_routine_entry_that_waits_past_a_minute_is_dropped_and_a_major_one_waits_up_to_two() -> None:
+    def score(n: int) -> FootballEvent:  # with others waiting, each gets 10 s (its players' line is skipped)
+        return _event(f"m{n}", f"SCORE {n}", tone=PlayTone.SCORE, players=f"players {n}")
+
+    backlog = (*(score(n) for n in range(1, 8)), _event("r", "RUN"), *(score(n) for n in range(8, 15)))
+    expected = [f"  = SCORE {n}" for n in range(1, 8)]  # 0 s to 60 s
+    expected += ["  - RUN (unseen: too late to start)"]  # its turn came at 70 s, past its minute
+    expected += [f"  = SCORE {n}" for n in range(8, 14)]  # 70 s to 120 s: the last just within its two minutes
+    expected += ["  - SCORE 14 (unseen: too late to start)"]  # at 130 s
+    assert _strip_lines(_run(160, _answer(0, _LIVE, *backlog))) == expected
+
+
+def test_past_three_routine_entries_waiting_the_oldest_go_and_a_major_is_never_one_of_them() -> None:
+    def score(n: int) -> FootballEvent:
+        return _event(f"m{n}", f"SCORE {n}", tone=PlayTone.SCORE)
+
+    answers = (
+        _answer(0, _LIVE, _event("r1", "RUN 1")),  # up at once: on air, not waiting
+        _answer(1, _LIVE, _event("r2", "RUN 2"), _event("r3", "RUN 3"), _event("r4", "RUN 4")),  # three wait
+        _answer(2, _LIVE, _event("r5", "RUN 5")),  # a fourth: the oldest waiting goes
+        _answer(3, _LIVE, score(1), _event("r6", "RUN 6"), score(2)),
+    )
+    assert _strip_lines(_run(70, *answers)) == [
+        "  = RUN 1",
+        "  - RUN 2 (unseen: backlog)",
+        "  - RUN 3 (unseen: backlog)",  # four routine entries waiting again; the scores beside them stay
+        "  = RUN 4",  # at 10 s
+        "  = RUN 5",
+        "  = SCORE 1",
+        "  = RUN 6",
+        "  = SCORE 2",  # at 50 s
+    ]
+
+
+def test_a_routine_entry_whose_play_was_written_over_two_minutes_before_it_arrived_is_dropped_at_once() -> None:
+    injury, alert = FootballEventKind.INJURY, PlayTone.ALERT
+    answers = (
+        _answer(
+            0,
+            _LIVE,
+            _event("old", "RUN 1", written_at=T0 - timedelta(minutes=3)),  # late
+            _event("pick", "INTERCEPTION", tone=PlayTone.TURNOVER, written_at=T0 - timedelta(minutes=3)),
+            _event("hurt", "INJURY 1", kind=injury, tone=alert),  # undated, beside a late play: late too
+            _event("recent", "RUN 2", written_at=T0 - 10 * S),  # in time
+            _event("ahead", "RUN 3", written_at=T0 + timedelta(minutes=1)),  # written after it arrived: a clock is off
+        ),
+        _answer(
+            30,
+            _LIVE,
+            _event("hurt2", "INJURY 2", kind=injury, tone=alert),  # undated, beside plays in time: in time
+            _event("now", "RUN 4", written_at=T0 + 25 * S),
+        ),
+    )
+    assert _strip_lines(_run(60, *answers)) == [
+        "  - RUN 1 (unseen: arrived late)",
+        "  - INJURY 1 (unseen: arrived late)",
+        "  = INTERCEPTION",  # a late major still airs, on its own bound
+        "  = RUN 2",
+        "  = RUN 3",
+        "  = INJURY 2",
+        "  = RUN 4",
+    ]
+
+
+def _numbered(line: str) -> int:
+    """The play number a synthetic play's words carry ("... play 17.")."""
+    found = re.search(r"play (\d+)\.", line)
+    assert found is not None, line
+    return int(found[1])
+
+
+def _dated(change: dict[str, Any], written: datetime) -> dict[str, Any]:
+    return {**change, "changed_at": written.isoformat()}
+
+
+_MAJORS: dict[int, dict[str, Any]] = {
+    5: {"play_type": "field_goal_good", "field_goal_result": "made"},
+    12: {"play_type": "passing_touchdown", "touchdown": True},
+    20: {"play_type": "pass_interception_return", "interception": True},
+    28: {"play_type": "fumble_recovery_opponent", "fumble_lost": True},
+    35: {"play_type": "safety"},
+    41: {"play_type": "punt_return_touchdown", "touchdown": True},
+}
+
+
+def _burst(arrives: datetime) -> list[dict[str, Any]]:
+    """46 play rows for one read at ``arrives``, written over 50 minutes: the six in `_MAJORS` are scores and
+    turnovers, the rest runs. Plays 1-41 were written 50 to 3 minutes before it; 42-46 in its last 100 s."""
+    rows = []
+    for number in range(1, 47):
+        if number <= 41:
+            written = arrives - timedelta(minutes=50) + (number - 1) * (timedelta(minutes=47) / 40)
+        else:
+            written = arrives - (47 - number) * 20 * S
+        fields = _MAJORS.get(number, {"play_type": "rush", "yards_gained": 4})
+        rows.append(_dated(_change(f"p{number}", number, f"Into the line, play {number}.", **fields), written))
+    return rows
+
+
+def test_a_burst_of_plays_written_over_50_minutes_airs_its_majors_in_order_and_only_the_newest_routine_ones() -> None:
+    feed = FakeFeed()
+    feed.scores = [_scores(_row()), _scores(_synced("p46"))]
+    feed.plays = [_page(), _page(*_burst(T0 + 10 * S))]  # caught up at the first look; the burst at 10 s
+    board, _, lines = _board(feed)
+    for second in range(0, 200):
+        board.step(_at(T0 + second * S))
+        if second == 10 + int(MAJOR_START_WITHIN.total_seconds()):
+            assert board._strip.idle  # caught up within two minutes of the burst
+    assert sum(line.startswith("  > ") for line in lines) == 46
+    assert [_numbered(line) for line in lines if line.startswith("  = ")] == [5, 12, 20, 28, 35, 41, 44]
+    reasons = {_numbered(line): line.rsplit("(unseen: ", 1)[1].rstrip(")") for line in lines if line.startswith("  - ")}
+    assert reasons == {number: "arrived late" for number in range(1, 42) if number not in _MAJORS} | {
+        42: "backlog",  # five routine plays in time: the three newest wait
+        43: "backlog",
+        45: "too late to start",  # behind six majors, their minute ran out at 70 s
+        46: "too late to start",
+    }
+
+
+def test_a_reviewed_touchdown_in_a_burst_airs_though_it_reads_as_a_ruling() -> None:
+    burst = T0 + 10 * S
+    challenged = (
+        "C.Brown up the middle for 2 yards, TOUCHDOWN. Pittsburgh challenged the touchdown ruling, and the play"
+        " was Upheld. The ruling on the field stands."
+    )
+    booth = (
+        "J.Burrow pass short left to C.Brown for 9 yards, TOUCHDOWN. The Replay Official reviewed the touchdown"
+        " ruling, and the play was Upheld. The ruling on the field stands."
+    )
+    feed = FakeFeed()
+    feed.scores = [_scores(_row()), _scores(_synced("p5"))]
+    feed.plays = [
+        _page(),
+        _page(
+            _dated(_change("p1", 1, challenged, play_type="rushing_touchdown", touchdown=True), burst - 10 * 60 * S),
+            _dated(_change("p2", 2, booth, play_type="passing_touchdown", touchdown=True), burst - 50 * S),
+            *(  # three routine plays after it, in time: with it as routine, four would wait
+                _dated(_change(f"p{n}", n, f"Into the line, play {n}.", yards_gained=1), burst - (50 - 10 * n) * S)
+                for n in range(3, 6)
+            ),
+        ),
+    ]
+    board, _, lines = _board(feed)
+    for second in range(0, 80):
+        board.step(_at(T0 + second * S))
+    assert [line.split(" | ")[0] for line in _strip_lines(lines)] == [
+        "  = PIT CHALLENGE: STANDS",  # written ten minutes before it arrived: late, but a score
+        "  = REVIEW: STANDS",  # not the oldest of four routine entries: not routine at all
+        "  = 1 YARD RUN",
+        "  = 1 YARD RUN",
+        "  = 1 YARD RUN",
+    ]
+
+
+def _one_play_a_poll(*, dated: bool) -> FakeFeed:
+    """Eight polls, ten seconds apart, each bringing one new play (written five seconds before, if dated)."""
+    rows: list[tuple[str, dict[str, Any]]] = [
+        ("Up the middle for 4 yards.", {"yards_gained": 4}),
+        ("Pass short right for 9 yards.", {"play_type": "pass_reception", "yards_gained": 9}),
+        ("Timeout #1 by PIT at 08:56.", {"play_type": "timeout"}),
+        ("Pass incomplete short left.", {"play_type": "pass_incompletion"}),
+        ("Field goal is GOOD.", {"play_type": "field_goal_good", "field_goal_result": "made"}),
+        ("Kicks 65 yards, touchback.", {"play_type": "kickoff"}),
+        ("Official Timeout at 08:26.", {"play_type": "official_timeout"}),
+        ("Around left end for 2 yards.", {"yards_gained": 2}),
+    ]
+    feed = FakeFeed()
+    feed.scores = [_scores(_synced(f"p{n}")) for n in range(len(rows))]
+    feed.plays = []
+    for n, (words, fields) in enumerate(rows):
+        change = _change(f"p{n}", n, words, **fields)
+        feed.plays.append(_page(_dated(change, T0 + (10 * n - 5) * S) if dated else change))
+    return feed
+
+
+def test_plays_arriving_one_at_a_time_soon_after_they_were_written_air_as_undated_ones_do() -> None:
+    logs = []
+    for dated in (True, False):
+        board, _, lines = _board(_one_play_a_poll(dated=dated))
+        for second in range(0, 120):
+            board.step(_at(T0 + second * S))
+        logs.append(lines)
+    assert logs[0] == logs[1]
+    assert len([line for line in logs[0] if line.startswith("  = ")]) == 8
+    assert not any(line.startswith(("  -", "  x")) for line in logs[0])
+
+
+WOKE_NOTE = "clock: the wall clock jumped +49m against the monotonic clock (the host slept?)"
+
+
+def test_a_host_that_slept_clears_what_the_strip_held_and_prunes_what_the_feed_brings_on_waking() -> None:
+    clock = FakeClock(T0)
+    woke = T0 + 12 * S + timedelta(minutes=49)
+    before = [
+        _dated(_change("p1", 1, "Up the middle, play 1.", yards_gained=3), T0 + 5 * S),
+        _dated(_change("p2", 2, "Off right tackle, play 2.", yards_gained=2), T0 + 6 * S),
+    ]
+    after = [  # written while the host slept: seven runs, a field goal, then a kickoff and a run in time
+        _dated(_change(f"p{n}", n, f"Into the line, play {n}.", yards_gained=1), woke - (13 - n) * timedelta(minutes=5))
+        for n in range(3, 10)
+    ]
+    after += [
+        _dated(
+            _change("p10", 10, "Field goal, play 10.", play_type="field_goal_good", field_goal_result="made"),
+            woke - timedelta(minutes=10),
+        ),
+        _dated(_change("p11", 11, "Kicks off, play 11.", play_type="kickoff"), woke - 30 * S),
+        _dated(_change("p12", 12, "Up the middle, play 12.", yards_gained=6), woke - 10 * S),
+    ]
+    feed = FakeFeed()
+    feed.scores = [_scores(_row()), _scores(_synced("p2")), _scores(_synced("p12"))]
+    feed.plays = [_page(), _page(*before), _page(*after)]
+    board, _, lines = _board(feed)
+    for _ in range(12):
+        board.step(clock.read())
+        clock.advance(S)
+    assert lines[-1] == "  = 3 YARD RUN | Up the middle, play 1."  # with play 2 waiting behind it
+    clock.jump(timedelta(minutes=49))  # the host sleeps: the wall clock moves on, the monotonic one doesn't
+    for _ in range(60):
+        board.step(clock.read())
+        clock.advance(S)
+    assert [line for line in lines if line.startswith("clock:")] == [WOKE_NOTE]  # once
+    woken = lines[lines.index(WOKE_NOTE) + 1 :]
+    assert woken[:2] == [
+        "  x 3 YARD RUN | Up the middle, play 1. (cleared: its source went stale)",
+        "  - 2 YARD RUN | Off right tackle, play 2. (unseen: its source went stale)",
+    ]
+    pruned = _strip_lines(woken[2:])
+    assert [line for line in pruned if line.startswith("  -")] == [
+        f"  - 1 YARD RUN | Into the line, play {n}. (unseen: arrived late)" for n in range(3, 10)
+    ]
+    assert [_numbered(line) for line in pruned if line.startswith("  =")] == [10, 11, 12]
+
+
+def test_a_wall_clock_set_back_is_only_logged() -> None:
+    clock = FakeClock(T0)
+    board, _, lines = _board(_punt())
+    for _ in range(3):
+        board.step(clock.read())
+        clock.advance(S)
+    clock.jump(-timedelta(minutes=5))
+    board.step(clock.read())
+    clock.jump(-45 * S)
+    clock.advance(S)
+    board.step(clock.read())
+    assert lines[-2:] == [
+        "clock: the wall clock jumped -5m against the monotonic clock",
+        "clock: the wall clock jumped -45s against the monotonic clock",
+    ]
+    cue = board._strip.cue(clock.read())
+    assert cue is not None and cue.payload.headline == "PUNT"  # still up, on its own time
+
+
+def test_plays_held_back_by_the_broadcast_delay_across_a_sleep_go_unseen_as_stale() -> None:
+    board, _, lines = _board(_punt(), delay=30 * S)
+    board.step(ClockReading(T0, MonotonicTime(0)))  # the punt arrives, held for 30 s
+    slept = T0 + timedelta(minutes=49)
+    board.step(ClockReading(slept + 5 * S, MonotonicTime(5)))
+    board.step(ClockReading(slept + 30 * S, MonotonicTime(30)))  # released after the sleep
+    assert lines[-2:] == [
+        "clock: the wall clock jumped +49m against the monotonic clock (the host slept?)",
+        f"  - {PUNT} (unseen: its source went stale)",
+    ]
+    assert board._strip.idle

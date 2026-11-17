@@ -24,6 +24,18 @@ older display process) is credited a few seconds in with each frame written to i
 A caption the renderer can't draw comes off the strip, and that frame is drawn without it, so a broken
 caption never holds up the strip or a break.
 
+The strip keeps up with the field. A routine entry (a play, a stoppage, a flag, an injury) that hasn't
+started within `ROUTINE_START_WITHIN` of its release goes unseen, as too late to start; a major one (a
+score, a turnover, a ruling) gets `MAJOR_START_WITHIN`. A routine entry that reached the board more than
+`LATE_AFTER` after the feed wrote its play goes at once, as having arrived late; a major one stays, on
+its own bound. And no more than `MAX_ROUTINE_WAITING` routine entries wait at once: the oldest go, as a
+backlog, since the newest are closest to the field the card shows. So when the feed delivers a long
+stretch of plays at once, the strip shows its majors in order and the newest few plays, then catches up.
+
+When the wall clock jumps ahead of the monotonic one (a host that slept and woke), the jump is logged,
+and whatever reached the board before it comes off the strip as stale, so a caption from before the
+sleep never airs after it. A jump back is only logged.
+
 A field change shows at once. If its play comes with it, the play comes straight up; if not, what the
 strip still shows no longer describes the field, so it clears (once its frame has had 10 seconds) and
 the strip waits, blank, for the play.
@@ -59,7 +71,7 @@ from __future__ import annotations
 
 import dataclasses
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, tzinfo
 from typing import Any
@@ -88,13 +100,19 @@ from omni.tower import Surface, earliest
 __all__ = [
     "CLOSING_WAIT",
     "FEED_STALE_AFTER",
+    "LATE_AFTER",
+    "MAJOR_START_WITHIN",
+    "MAX_ROUTINE_WAITING",
     "METER_LAG",
     "METER_MAX_AGE",
     "FRAME_MAX",
     "FRAME_MIN",
+    "ROUTINE_START_WITHIN",
     "STRIP_DWELL",
     "UNCONFIRMED_NOTE",
     "UNSHOWN_AFTER",
+    "WALL_JUMP",
+    "WRITTEN_LEAD",
     "FootballBoard",
 ]
 
@@ -111,6 +129,12 @@ UNSHOWN_AFTER = timedelta(seconds=30)  # a frame the display hasn't shown this l
 UNCONFIRMED_NOTE = (
     "display: no frame acknowledgements; showing frames unconfirmed (update board_frame_sink.py on the board)"
 )
+ROUTINE_START_WITHIN = timedelta(seconds=60)  # a routine entry not started this long after its release goes
+MAJOR_START_WITHIN = timedelta(seconds=120)  # a score, a turnover or a ruling gets this long
+LATE_AFTER = timedelta(minutes=2)  # an entry that reaches the board this long after its play was written is late
+WRITTEN_LEAD = timedelta(seconds=5)  # a play written this long after it reached the board says a clock is off
+MAX_ROUTINE_WAITING = 3  # past this many routine entries waiting, the oldest go
+WALL_JUMP = timedelta(seconds=30)  # the wall clock moving this much more than the monotonic one is a jump
 # What can close a period's story on the strip: a play, a score, a try, a ruling. Not a stoppage or an injury.
 _PLAYS = frozenset(
     {FootballEventKind.PLAY, FootballEventKind.SCORE, FootballEventKind.CONVERSION, FootballEventKind.REVIEW}
@@ -220,6 +244,8 @@ class FootballBoard:
         self._stale = False  # the feed has gone quiet: the card is dimmed
         self._last_line: str | None = None
         self._prices: deque[_Price] = deque()  # the market's readings, oldest first
+        self._last_step: ClockReading | None = None  # the previous step's reading, to notice a clock jump
+        self._majors: set[SegmentKey] = set()  # the strip entries offered as major, which no backlog drops
 
     @property
     def showing(self) -> NflLiveSnapshot | None:
@@ -228,6 +254,7 @@ class FootballBoard:
     def step(self, at: ClockReading) -> None:
         """Take what the display showed and the feed's new answers, then draw what the broadcast has caught
         up to."""
+        self._watch_clock(at)
         self._credit(at)
         for result in self._feed.collect(at):
             self._absorb(result, at)
@@ -270,6 +297,25 @@ class FootballBoard:
             deadlines.append(self._stale_at())
         return earliest(deadlines)
 
+    def _watch_clock(self, at: ClockReading) -> None:
+        """Log a jump of the wall clock against the monotonic one since the last step. After a jump ahead (a
+        host that slept), what the strip holds is from before it: it comes off, as stale."""
+        last, self._last_step = self._last_step, at
+        if last is None:
+            return
+        jump = (at.utc - last.utc) - at.monotonic.since(last.monotonic)
+        if abs(jump) <= WALL_JUMP:
+            return
+        slept = jump > timedelta(0)
+        self._log(
+            f"clock: the wall clock jumped {_signed(jump)} against the monotonic clock"
+            + (" (the host slept?)" if slept else "")
+        )
+        if slept:
+            unseen = self._strip.clear(at, EndReason.SOURCE_STALE)
+            self._trace(self._strip.changes())
+            self._dropped(unseen, EndReason.SOURCE_STALE.value)
+
     def _stale_at(self) -> MonotonicTime | None:
         """When the feed goes stale if nothing more is heard: past when its next answer was due, by
         `FEED_STALE_AFTER`. Never while a halftime hold keeps it quiet on purpose."""
@@ -306,7 +352,8 @@ class FootballBoard:
                 self._strip.close_out(by=self._closing_by, last=self._last_play)
             else:
                 self._showing = reading  # already in a break, or starting in one: the strip stays empty
-                self._dropped(self._strip.clear(at) + self._segments(reading, at), "during a break")
+                unseen = self._strip.clear(at) + self._segments(reading, reading.snapshot.events, at)
+                self._dropped(unseen, "during a break")
             return
         self._closing = None
         self._strip.resume()
@@ -316,16 +363,34 @@ class FootballBoard:
         self._showing = reading
 
     def _offer(self, reading: _Reading, at: ClockReading) -> None:
-        """Put a reading's events on the strip, noting the newest play among them."""
-        segments = self._segments(reading, at)
-        plays = [event.key for event in reading.snapshot.events if event.kind in _PLAYS]
+        """Put a reading's events on the strip, noting the newest play among them.
+
+        All of them go unseen if they reached the board before the wall clock jumped ahead (they're from
+        before a sleep), and a routine one does if it arrived late. Past `MAX_ROUTINE_WAITING` routine
+        entries waiting, the oldest go.
+        """
+        events = reading.snapshot.events
+        if _jumped_since(reading, at):
+            self._dropped(self._segments(reading, events, at), EndReason.SOURCE_STALE.value)
+            return
+        late = _arrived_late(events, reading.received_at)
+        gone = [behind and not event.major for event, behind in zip(events, late)]  # a late major stays
+        unseen = [event for event, dropped in zip(events, gone) if dropped]
+        kept = [event for event, dropped in zip(events, gone) if not dropped]
+        self._dropped(self._segments(reading, unseen, at), EndReason.ARRIVED_LATE.value)
+        segments = self._segments(reading, kept, at)
+        plays = [event.key for event in kept if event.kind in _PLAYS]
         if segments and plays:
             self._last_play = SegmentKey(Surface.PLAY_STRIP, plays[-1])
+        self._majors.update(SegmentKey(Surface.PLAY_STRIP, event.key) for event in kept if event.major)
         self._strip.offer(segments)
+        self._strip.shed(at, keep=MAX_ROUTINE_WAITING, among=lambda segment: segment.key not in self._majors)
 
-    def _segments(self, reading: _Reading, at: ClockReading) -> list[Segment[PlaySummary]]:
+    def _segments(
+        self, reading: _Reading, events: Sequence[FootballEvent], at: ClockReading
+    ) -> list[Segment[PlaySummary]]:
         """A reading's events for the strip, on a profile that draws one, available from its release."""
-        return _segments(reading, min(reading.show_at, at.utc)) if self._strip_drawn else []
+        return _segments(reading, events, min(reading.show_at, at.utc)) if self._strip_drawn else []
 
     def _dropped(self, segments: list[Segment[PlaySummary]], why: str) -> None:
         for segment in segments:
@@ -533,8 +598,9 @@ def _card_key(reading: _Reading) -> str:
     return f"nfl-{reading.snapshot.game.id.raw}:live"
 
 
-def _segments(reading: _Reading, available: datetime) -> list[Segment[PlaySummary]]:
-    """A reading's events as strip segments: each a description, then its players' lines if it has them."""
+def _segments(reading: _Reading, events: Sequence[FootballEvent], available: datetime) -> list[Segment[PlaySummary]]:
+    """Events as strip segments: each a description, then its players' lines if it has them, to start
+    within its bound of becoming available."""
     game = reading.snapshot.game
     return [
         Segment(
@@ -544,10 +610,46 @@ def _segments(reading: _Reading, available: datetime) -> list[Segment[PlaySummar
             provenance=Provenance(source=game.id.source, received_at=reading.received_at),
             available_at=available,
             parent=_card_key(reading),
+            latest_start=available + (MAJOR_START_WITHIN if event.major else ROUTINE_START_WITHIN),
             hold=Hold.PLAY_RESUMES if event.kind.spans else None,
         )
-        for event in reading.snapshot.events
+        for event in events
     ]
+
+
+def _arrived_late(events: Sequence[FootballEvent], received: datetime) -> list[bool]:
+    """Whether each of a reading's entries reached the board late: more than `LATE_AFTER` after the feed
+    wrote its play.
+
+    A play written more than `WRITTEN_LEAD` after it arrived says one of the clocks is off, so its date
+    says nothing and it isn't late. An entry the feed doesn't date (an injury, a score read off the
+    scoreboard) may be as old as the oldest play it came with, so it's late if any of them is.
+    """
+    dated = [_written_late(event.written_at, received) if event.written_at is not None else None for event in events]
+    behind = any(dated)
+    return [behind if late is None else late for late in dated]
+
+
+def _written_late(written: datetime, received: datetime) -> bool:
+    if written - received > WRITTEN_LEAD:
+        return False  # written after it arrived: a clock is off
+    return received - written > LATE_AFTER
+
+
+def _jumped_since(reading: _Reading, at: ClockReading) -> bool:
+    """Whether the wall clock has jumped ahead of the monotonic one, by more than `WALL_JUMP`, since the
+    reading arrived: what it brought is from before the host slept."""
+    return (at.utc - reading.show_at) - at.monotonic.since(reading.release_at) > WALL_JUMP
+
+
+def _signed(span: timedelta) -> str:
+    """A clock jump's size and direction: "+45s", "-12m", "+1h05m"."""
+    sign = "+" if span >= timedelta(0) else "-"
+    seconds = round(abs(span.total_seconds()))
+    if seconds < 60:
+        return f"{sign}{seconds}s"
+    hours, minutes = divmod(round(seconds / 60), 60)
+    return f"{sign}{hours}h{minutes:02d}m" if hours else f"{sign}{minutes}m"
 
 
 def _frames(event: FootballEvent) -> tuple[PlaySummary, ...]:

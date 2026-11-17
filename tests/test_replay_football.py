@@ -138,9 +138,10 @@ def test_a_trace_reads_back_every_answer_as_written() -> None:
         key="t", kind=FootballEventKind.TV_TIMEOUT, summary=PlaySummary(tone=PlayTone.ALERT, headline="TV TIMEOUT")
     )
     late = START + 70 * S
+    dated = dataclasses.replace(_play("1"), written_at=START + 7.5 * S, scored_or_turned_over=True)
     answers = [
         _answer(0 * S, None, phase=NflPhase.PRE, caught_up=False),
-        _answer(10 * S, full, _play("1"), stoppage, observed_at=START + 2 * S),
+        _answer(10 * S, full, dated, stoppage, observed_at=START + 2 * S),
         FeedResult(
             asked_at=START + 20 * S, received_at=START + 21 * S, next_ask=START + 50 * S, snapshot=None, error="down"
         ),

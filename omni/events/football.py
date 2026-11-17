@@ -3,21 +3,26 @@
 A `FootballPlay` is one row of a game's play-by-play, typed. Its words are the league's own play text,
 whose grammar is regular enough to read who did what ("J.Burrow pass short right to J.Chase to PIT 26 for
 4 yards (J.Dean)"); `PlayText` reads it. A review rewrites a play's text in place, appending the ruling
-and then the play as it now stands, so everything here reads the text after the last ruling.
+and then the play as it now stands, so everything here reads the text after the last ruling. The text
+names a few clubs by play-by-play codes ("BLT" for Baltimore): `PlayText` reads and shows them as the
+board's abbreviations.
 
 A `FootballEvent` is what a board's play strip shows: a play, a timeout, a review's result, a conversion
 or an injury, already put into a headline, a description, and the involved players' lines for the game.
+A score, a turnover or a ruling is *major*: still worth showing when the strip has fallen behind the field.
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 from typing import Any
 
 from omni.core.enum import StrEnumMixin
 from omni.domain.football import PlaySummary, PlayTone
+from omni.events.football_clubs import canonical_play_text, club_code
 
 __all__ = [
     "ConversionResult",
@@ -147,6 +152,11 @@ _SPANNING = frozenset(
 )
 
 
+# A touchdown or a safety is toned as a score, or as a turnover when the defense scores it (a pick six).
+_MAJOR_TONES = frozenset({PlayTone.SCORE, PlayTone.TURNOVER})
+_MAJOR_KINDS = frozenset({FootballEventKind.SCORE, FootballEventKind.REVIEW})
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class FootballEvent:
     """One entry for the play strip: its headline and description, then the players' lines."""
@@ -155,6 +165,16 @@ class FootballEvent:
     kind: FootballEventKind
     summary: PlaySummary
     players_line: str | None = None  # the named players' game lines, shown after the description
+    play: int | None = None  # the number of the play-by-play row it's about; None when no row is behind it
+    written_at: datetime | None = None  # when the feed wrote that row (or the correction this entry announces)
+    scored_or_turned_over: bool = False  # the play behind it did, however its summary is toned
+
+    @property
+    def major(self) -> bool:
+        """A score, a turnover, or a review's ruling, by its kind, its tone, or the play behind it (a play
+        first seen with a ruling on it is toned as the ruling). Everything else is routine: a play, a
+        stoppage, a flag, an injury."""
+        return self.kind in _MAJOR_KINDS or self.summary.tone in _MAJOR_TONES or self.scored_or_turned_over
 
 
 @dataclass(frozen=True, slots=True)
@@ -202,11 +222,11 @@ class PlayText:
     """A play's description: as published, and as the play stands after any ruling.
 
     A reversed play's text goes on to describe the play as it now stands; an upheld one stands as first
-    described, before the ruling.
+    described, before the ruling. Clubs read as the board's abbreviations, wherever the text names them.
     """
 
     def __init__(self, raw: str) -> None:
-        self.raw = raw.strip()
+        self.raw = canonical_play_text(raw.strip())
         self._ruling: re.Match[str] | None = None
         for self._ruling in _REVIEW.finditer(self.raw):
             pass
@@ -228,7 +248,8 @@ class PlayText:
             return None
         verdict = ReviewVerdict.REVERSED if found["verdict"].upper() == "REVERSED" else ReviewVerdict.STANDS
         charged = int(found["charged"]) if found["charged"] else None
-        return Review(found["challenger"], found["ruling"], verdict, charged)
+        challenger = club_code(found["challenger"]) if found["challenger"] else None
+        return Review(challenger, found["ruling"], verdict, charged)
 
     @property
     def timeout(self) -> TimeoutCall | None:
@@ -239,13 +260,13 @@ class PlayText:
         if clock is not None:
             minutes, seconds = clock.split(":")
             clock = f"{int(minutes)}:{seconds}"
-        return TimeoutCall(found["team"], int(found["number"]), clock)
+        return TimeoutCall(club_code(found["team"]), int(found["number"]), clock)
 
     @property
     def penalty(self) -> tuple[str, str] | None:
         """The penalized club and the foul, if a flag was thrown."""
         found = _PENALTY.search(self.standing)
-        return (found["team"], found["foul"]) if found else None
+        return (club_code(found["team"]), found["foul"]) if found else None
 
     @property
     def conversion(self) -> str | None:
@@ -281,6 +302,12 @@ class FootballPlay:
     @property
     def conversion(self) -> ConversionResult | None:
         return self.extra_point if self.extra_point is not None else self.two_point
+
+    @property
+    def scored_or_turned_over(self) -> bool:
+        """Whether the play, as it now stands, scored (a touchdown, a safety, a made field goal) or turned the
+        ball over (an interception, a lost fumble, a missed or blocked kick), however a ruling on it is worded."""
+        return self.play_type not in _MARKERS and _standing(self, self.text).tone in _MAJOR_TONES
 
 
 class _Gain(Enum):
@@ -387,6 +414,19 @@ def review_headline(review: Review, teams: dict[str, str]) -> str:
     return f"{who.upper()}: {_VERDICT_WORDS[review.verdict]}"
 
 
+def _standing(play: FootballPlay, text: PlayText) -> _Reading:
+    """How a play reads as it now stands, as if no ruling on it were worded."""
+    reading = _READINGS[play.play_type]
+    if reading.kind is FootballEventKind.PLAY:
+        reading = next((r for words, r in _TEXT_READINGS if words.search(text.standing)), reading)
+        reading = next((r for flags, r in _FLAG_READINGS if all(getattr(play, f) for f in flags)), reading)
+        if play.field_goal is not None:
+            reading = _FIELD_GOAL_READINGS.get(play.field_goal, reading)
+    if text.nullified and (penalty := text.penalty) is not None:
+        reading = _Reading(_ALERT, f"FLAG {penalty[0]}: {penalty[1].upper()}")
+    return reading
+
+
 def summarize_play(
     play: FootballPlay, *, teams: dict[str, str] | None = None
 ) -> tuple[FootballEventKind, PlaySummary] | None:
@@ -398,17 +438,10 @@ def summarize_play(
         return None
     text = play.text
     detail = text.standing or None
-    reading = _READINGS[play.play_type]
     if (review := text.review) is not None:
         summary = PlaySummary(tone=_ALERT, headline=review_headline(review, teams or {}), detail=detail)
         return FootballEventKind.PLAY, summary
-    if reading.kind is FootballEventKind.PLAY:
-        reading = next((r for words, r in _TEXT_READINGS if words.search(text.standing)), reading)
-        reading = next((r for flags, r in _FLAG_READINGS if all(getattr(play, f) for f in flags)), reading)
-        if play.field_goal is not None:
-            reading = _FIELD_GOAL_READINGS.get(play.field_goal, reading)
-    if text.nullified and (penalty := text.penalty) is not None:
-        reading = _Reading(_ALERT, f"FLAG {penalty[0]}: {penalty[1].upper()}")
+    reading = _standing(play, text)
     timeout = text.timeout
     team = timeout.team if timeout is not None else (play.offense or "")
     if reading.gain is not None:

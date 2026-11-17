@@ -23,6 +23,7 @@ from omni.events.football import (
     review_headline,
     summarize_play,
 )
+from omni.events.football_clubs import PLAY_BY_PLAY_CODES, canonical_play_text, club_code
 from omni.events.football_ledger import PlayerLine, PlayLedger
 from omni.providers.nfl_teams import NflTeamRegistry
 
@@ -281,6 +282,120 @@ def test_a_correction_is_announced_only_when_it_changes_what_happened() -> None:
     again = ledger.absorb([play(1, CHALLENGE_UPHELD, revision=3), play(1, CHALLENGE_UPHELD + " More.", revision=4)])
     assert [event.kind for event in again] == [FootballEventKind.REVIEW]  # corrected twice in a read: once
     assert ledger.absorb([play(5, "D", revision=3, extra_point=ConversionResult.FAILED)]) == []
+
+
+def test_a_score_a_turnover_or_a_ruling_is_major_and_the_rest_is_routine() -> None:
+    ledger = _ledger()
+    first = ledger.absorb(
+        [
+            play(1, "D, TOUCHDOWN.", "rushing_touchdown", touchdown=True),
+            play(2, "D", "rush", touchdown=True, interception=True),  # a pick six, toned as a turnover
+            play(3, "D", "safety"),
+            play(4, "D", "field_goal_good", field_goal=FieldGoalResult.MADE),
+            play(5, "D", "other", field_goal=FieldGoalResult.MISSED),
+            play(6, "D", "rush", fumble_lost=True),
+            play(7, "D", "rush", yards_gained=3),
+            play(8, "A.B pass incomplete.PENALTY on PIT-A.C, Offensive Offside, 5 yards - No Play.", "penalty"),
+            play(9, "Timeout #1 by PIT at 01:27.", "timeout"),
+            play(10, "Official Timeout at 08:26.", "official_timeout"),
+            play(11, "Two-Minute Warning", "two_minute_warning"),
+            play(12, "D, TOUCHDOWN.", "rushing_touchdown", touchdown=True),
+            play(13, BOOTH_REVERSED.split("The Replay")[0], "pass_interception_return", interception=True),
+        ]
+    )
+    assert [event.major for event in first] == [True] * 6 + [False] * 5 + [True] * 2
+    assert [event.play for event in first] == list(range(1, 14))  # each names the play it's about
+    corrections = ledger.absorb(
+        [
+            play(
+                1,
+                "D, TOUCHDOWN. X.K extra point is GOOD.",
+                revision=2,
+                touchdown=True,
+                extra_point=ConversionResult.GOOD,
+            ),
+            play(
+                12,
+                "D, TOUCHDOWN. X.K extra point is No Good.",
+                revision=2,
+                touchdown=True,
+                extra_point=ConversionResult.FAILED,
+            ),
+            play(13, BOOTH_REVERSED, "pass_incompletion", revision=2),
+        ]
+    )
+    assert [(event.kind, event.major, event.play) for event in corrections] == [
+        (FootballEventKind.CONVERSION, True, 1),  # points
+        (FootballEventKind.CONVERSION, False, 12),  # a missed try changes nothing on the board
+        (FootballEventKind.REVIEW, True, 13),  # a ruling
+    ]
+    assert not dataclasses.replace(first[6], kind=FootballEventKind.INJURY).major
+    assert dataclasses.replace(first[6], kind=FootballEventKind.SCORE).major  # points the scoreboard showed
+
+
+def test_a_play_first_seen_with_a_ruling_is_major_when_it_scored_or_turned_the_ball_over() -> None:
+    upheld_touchdown = (
+        "C.Brown up the middle for 2 yards, TOUCHDOWN. Pittsburgh challenged the touchdown ruling, and the play"
+        " was Upheld. The ruling on the field stands. (Timeout #1.)"
+    )
+    events = _ledger().absorb(
+        [
+            play(1, upheld_touchdown, "rushing_touchdown", touchdown=True),
+            play(2, BOOTH_REVERSED, "pass_incompletion"),  # an interception, reversed: an incompletion now
+            play(3, CHALLENGE_UPHELD, "pass_reception", yards_gained=5),
+        ]
+    )
+    assert [(event.summary.tone, event.summary.headline) for event in events] == [
+        (PlayTone.ALERT, "PIT CHALLENGE: STANDS"),  # worded and toned as the ruling
+        (PlayTone.ALERT, "REVIEW: REVERSED"),
+        (PlayTone.ALERT, "CIN CHALLENGE: STANDS"),
+    ]
+    assert [event.major for event in events] == [True, False, False]  # only the touchdown stands as a score
+    assert not play(4, "END QUARTER 1", "end_period").scored_or_turned_over
+
+
+def test_each_play_by_play_code_reads_as_the_boards_abbreviation_and_any_other_code_as_written() -> None:
+    assert PLAY_BY_PLAY_CODES == {"BLT": "BAL", "CLV": "CLE", "ARZ": "ARI", "HST": "HOU", "LA": "LAR"}
+    assert [club_code(code) for code in ("BLT", "CLV", "ARZ", "HST", "LA")] == ["BAL", "CLE", "ARI", "HOU", "LAR"]
+    assert [club_code(code) for code in ("CIN", "XYZ")] == ["CIN", "XYZ"]
+    text = "A.B pass to C.D to BLT 12 for 3 yards. PENALTY on CLV-E.F, Holding, enforced at ARZ 40 (HST), LA 20."
+    assert canonical_play_text(text) == (
+        "A.B pass to C.D to BAL 12 for 3 yards. PENALTY on CLE-E.F, Holding, enforced at ARI 40 (HOU), LAR 20."
+    )
+    untouched = "blt BLTS ABLT HSTN la LAC 20, LAS 5, WSH 30"  # not a whole word in capitals, or not one of the five
+    assert canonical_play_text(untouched) == untouched
+
+
+def test_play_text_names_clubs_by_the_boards_abbreviations_in_headlines_details_and_counts() -> None:
+    timeout = summarize_play(play(1, "Timeout #3 by BLT at 01:47.", "timeout"))
+    assert timeout is not None and (timeout[1].headline, timeout[1].detail) == ("TIMEOUT BAL", "BAL #3 at 1:47")
+    flag = summarize_play(play(2, "A.B pass incomplete.PENALTY on CLV-A.C, Offside, 5 yards - No Play.", "penalty"))
+    assert flag is not None and flag[1].headline == "FLAG CLE: OFFSIDE"
+    assert flag[1].detail == "A.B pass incomplete.PENALTY on CLE-A.C, Offside, 5 yards - No Play."
+    run = summarize_play(play(3, "A.Back up the middle to HST 12 for 3 yards (C.D).", yards_gained=3))
+    assert run is not None and run[1].detail == "A.Back up the middle to HOU 12 for 3 yards (C.D)."
+    challenged = PlayText(CHALLENGE_UPHELD.replace("Cincinnati", "ARZ")).review
+    assert challenged is not None and challenged.challenger == "ARI"
+
+    ledger = PlayLedger(_TEAMS.resolve("BAL"), _TEAMS.resolve("CLE"))
+    ledger.absorb(
+        [
+            play(n, f"Timeout #{n} by BLT at 0{n}:00.", "timeout", quarter=2)
+            for n in range(1, 4)  # Baltimore spends all three
+        ]
+        + [play(4, "Timeout #1 by CLV at 00:40.", "timeout", quarter=2)]
+    )
+    assert ledger.timeouts(2) == TeamTimeouts(away=0, home=2)
+    rekick = play(
+        5,
+        "X.K kicks 65 yards from BLT 35 to CLV 0. PENALTY on BLT-X.Y, Illegal Formation, 5 yards, enforced at"
+        " BLT 35 - No Play.",
+        "kickoff",
+        offense="CLE",
+        quarter=2,
+    )
+    ledger.absorb([rekick])
+    assert ledger.next_kickoff(2) == (HomeAway.AWAY, 30)  # Baltimore kicks again, five yards back
 
 
 def test_a_failed_try_arriving_late_is_announced_plainly() -> None:
