@@ -42,7 +42,7 @@ Odds and win probability (measured 2026-11-01):
   - Once no game is live, `recommended_poll_seconds` runs long: after LAC @ BAL's final (2026-11-16) the next recommended poll came about 15 minutes later.
   - Cost: about 490 requests an hour at the recommended pace, so roughly 1,500 for a game.
   - **Free can't carry a Sunday slate:** `live-scores` bills a row per game, so nine games read every 10 s for a three-hour window is 9,720 rows, against Free's 25,000 a month (review round 6). A shared board needs a budgeted background cadence, or Builder.
-  - **Stoppages, PIT@CIN (minimized trace, arrival to the next play's arrival, 10 s polls):** a TV timeout 171 s median (p90 181 s); a team timeout 81 s; the two-minute warning 141 s; after a score, through the try and kickoff, 201 s; an injury or a review 111 s; an ordinary snap 40 s.
+  - **Stoppages, PIT@CIN (minimized trace, arrival to the next play's arrival, 10 s polls):** an official timeout (its reason unknown; most look like commercial breaks) 171 s median (p90 181 s); a team timeout 81 s; the two-minute warning 141 s; after a score, through the try and kickoff, 201 s; an injury or a review 111 s; an ordinary snap 40 s.
   - Kickoff rows list the receiving team in `posteam_abbr`, and punt rows the punting team.
   - Club timeouts appear only in play text ("Timeout #2 by CIN at 01:52."). So does one charged for a lost challenge ("...was Upheld. ... (Timeout #1.)").
   - Over halftime, the scoreboard row has `situation: null`.

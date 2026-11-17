@@ -296,8 +296,7 @@ Goal: first non-MLB league.
 
 Data:
 
-- Start with ESPN site API scoreboard data.
-- Treat ESPN as unofficial/fragile; isolate behind provider interface.
+- NFLMeta (chosen 2026-11-15), behind a provider; ESPN's terms bar automated access. Terms and quotas: `SOURCES.md`.
 - Add optional commercial fallback later only if needed.
 
 Minimum cards:
@@ -350,7 +349,7 @@ Goal: support tournament/leaderboard viewing before NCAA.
 
 Data:
 
-- Start with ESPN PGA scoreboard endpoint for schedule/current tournament/leaderboard.
+- Source not yet chosen (ESPN is out: its terms bar automated access); candidates are in `SOURCES.md`.
 - Consider DataGolf API for live model probabilities and finish/cut-line probabilities if low-cost access fits.
 - Consider SportsDataIO Golf only if a paid/trial feed becomes necessary.
 

@@ -2,10 +2,19 @@
 
 _Living status doc. Keep it short; update whenever project state changes (branch, PR, milestone). This is the first thing an agent should read after `AGENTS.md`._
 
-## Now (2026-11-16)
+## Now (2026-11-17)
 
+- **2026-11-17, external review round 7: policy v2 ratified, and two fixes (this PR).** Details: `~/omni-review/plans/omni-build-fidelity-REVIEWS.md` (round 7).
+  - **The board policy is `BOARD_POLICY.md`**, `omni-board-policy/2`:
+    - leverage (LI) per league on offline-built models, with a labeled proxy until each passes validation;
+    - ranked favorites as weights (×4, ×2.5) with a combined floor that scales with leverage: 30% in a blowout to 70% close and late (the user's pick);
+    - interrupt bars of 1.10 in a favorite's action, 0.85 in a micro-break and 0.35 in a break, one promoted card per 60 s, and a 24 s hold;
+    - per-league break leases as ceilings.
+  - **MLB:** a perfect-game bid needs a complete play log showing no batter reached. The counts alone miss a batter who reached on a dropped third strike.
+  - **NFL strip:** the feed's "Official Timeout" row airs as "OFFICIAL TIMEOUT", not "TV TIMEOUT". It may be a commercial, an injury or a measurement; the feed doesn't say.
+  - **Sequence:** H5, then NFL onto the shared board with policy v2 (A1b alongside, now with receiver-side frame expiry), then NBA v1.
 - **2026-11-16, external review round 6, and round 7 briefed.** Details: `~/omni-review/plans/omni-build-fidelity-REVIEWS.md` (round 6).
-  - **C1 and C2 close; C3 and C4 close after four narrow fixes, D1–D4 (this PR).** Every finding was reproduced by a probe at its production entry point before it was fixed. What changed is in `CLOCK_AND_SCHEDULING.md`, "After A1a".
+  - **C1 and C2 close; C3 and C4 close after four narrow fixes, D1–D4 (PR #112, merged).** Every finding was reproduced by a probe at its production entry point before it was fixed. What changed is in `CLOCK_AND_SCHEDULING.md`, "After A1a".
     - **D1, MLB:** a play's age is told on the source's clock, so a host clock running ahead can't release a big play early.
     - **D2, MLB:** a missing run or hit count is a failed read, not a 0. A partial final had shown FINAL 0-0.
     - **D3, NFL:** the final drain asks at the live pace, a play it brings after FINAL airs, and the feed's timing runs on the monotonic clock.
@@ -16,7 +25,7 @@ _Living status doc. Keep it short; update whenever project state changes (branch
     - a favorite in a blowout gets less of the board;
     - about 2.5x airtime for a close, late game over a blowout;
     - "excitement" is **leverage**.
-  - **Round 7** (briefed) designs leverage per league, policy v2, a micro-break catalog and the adjacent elements not yet named. Measured break lengths are in `SOURCES.md`.
+  - **Round 7** (reviewed 2026-11-17, above) designed leverage per league, policy v2, a micro-break catalog and the adjacent elements not yet named. Measured break lengths are in `SOURCES.md`.
   - **Sequence (round 6):** D1–D4, then H5, then NFL onto the shared board with the policy (A1b alongside), then NBA v1 and A1c.
 - **2026-11-16, MNF LAC @ BAL live on the board, and the NBA slate recorded (PR #111 fixes what it found):** the first live test of the A1a closeout. Details: `~/omni-review/sources/evidence/live-2026-11-16.md`.
   - **Held:** every strip frame was credited on the Pi's acknowledgement (none unconfirmed), and the 13-minute halftime hold ended 1.5 minutes before the second-half kickoff showed.
@@ -109,8 +118,8 @@ _Living status doc. Keep it short; update whenever project state changes (branch
 - **2026-11-15, central clock plan:** `CLOCK_AND_SCHEDULING.md` surveys every timer in the app and plans one clock and one scheduler (the "tower") for multi-league airtime. Backlog: `M11`. Its first step is a real bug: the MLB app draws only once per 12-second tick.
 - **2026-11-15, NFL live on the board (PR #100, merged):** `python -m omni.app.football` followed PIT@CIN live on the 2x2.
   - **Feed:** `omni/providers/nflmeta.py` reads one game from NFLMeta. It reads the play feed once the scoreboard matches a play, watches for corrections when the scoreboard moves on its own, and polls the injury list. Once a game reaches halftime and its last play has landed, it makes no requests for 15 minutes.
-  - **Plays:** `omni/events/football.py` types the plays and summarizes them ("4 YARD RUN"). `football_ledger.py` derives events (plays, timeouts, TV timeouts, review rulings, tries, injuries), players' game lines, timeout and challenge pips, and who kicks off from where; the live feed carries no counts.
-  - **Strip:** each event shows its description for 20 seconds, then its players' lines for 20, then nothing. A stoppage (timeout, TV timeout, injury, review ruling) holds until play resumes. Events that arrive together get 10 seconds each, and the strip clears when the field moves on. A period's last plays get 10 seconds each before the break or FINAL, and the strip stays empty through breaks.
+  - **Plays:** `omni/events/football.py` types the plays and summarizes them ("4 YARD RUN"). `football_ledger.py` derives events (plays, timeouts, official timeouts, review rulings, tries, injuries), players' game lines, timeout and challenge pips, and who kicks off from where; the live feed carries no counts.
+  - **Strip:** each event shows its description for 20 seconds, then its players' lines for 20, then nothing. A stoppage (timeout, official timeout, injury, review ruling) holds until play resumes. Events that arrive together get 10 seconds each, and the strip clears when the field moves on. A period's last plays get 10 seconds each before the break or FINAL, and the strip stays empty through breaks.
   - **Feed gaps:** NFLMeta can publish a scoring play late or never; the Q3 touchdown came 4 minutes late, after the next kickoff, and its extra point never came. It can also leave a stale down line.
     - The provider drops a down line the score left behind.
     - A score no shown play accounts for gets a neutral event ("CIN +7"), once the feed moves past it or after 2 minutes.
@@ -131,17 +140,26 @@ _Living status doc. Keep it short; update whenever project state changes (branch
 - Dev env: **uv + `.venv`** (Py 3.12); emulator runs headless (`http://localhost:8888/`). `pytest`/`pytest-cov` pinned in `requirements.dev.txt`; `starter_code/` excluded from `mypy`/`black`; `*/__main__.py` omitted from coverage. Coverage: `--cov=omni --cov-branch` (see `test` skill). See `docs/dev_setup.md`.
 - Physical **`quad_128x64` reference board** is live on the LAN running the pre-revival code; reachable from WSL (`ssh omni-board`). Details in `CLAUDE.local.md`. Deploying the revived repo to it is future work.
 
-## Next — round-6 sequence (2026-11-16): D1–D4 → H5 → NFL onto the shared board with the board policy, A1b alongside → NBA → A1c
+## Next — round-7 sequence (2026-11-17): H5 → NFL onto the shared board with policy v2, A1b alongside → NBA → A1c
 
-- **A1a closeout: C1–C4 built** (PR #109). **D1–D4 built** (round 6's narrow fixes; one PR by the user's call). The defaults stand: the 12 s turn, the 30 s takeover threshold, 40% stale dimming, 2-minute stale live removal and the 10-minute source offline limit.
-- **The board policy:** round 7 designs leverage and policy v2; the user ratifies; it's built with NFL onto the shared board, on H5's types.
+- **A1a closeout: C1–C4 built** (PR #109). **D1–D4 merged** (PR #112). The defaults stand: the 12 s turn, the 30 s takeover threshold, 40% stale dimming, 2-minute stale live removal and the 10-minute source offline limit.
+- **The board policy:** `BOARD_POLICY.md` (v2, ratified 2026-11-17). It's built with NFL onto the shared board, on H5's types, with proxies for leverage until the MLB and NFL models pass validation in shadow.
 - **H5, the data boundary, behind replay** (round 6 adds: MLB membership ordered by monotonic receipt, and an NFLMeta quota budget for a Sunday slate):
   - a typed poll scope per provider, league and coverage window, with complete, partial and failed observations and their own watermarks;
   - full identities in card, event, `after`, cache and booking keys;
   - favorites scoped by league;
-  - an explicit contest↔market mapping that fails closed.
+  - an explicit contest↔market mapping that fails closed;
+  - round 7 adds contracts:
+    - capability and uncertainty per field (zero vs unknown vs inferred), so no leverage comes from a default;
+    - the ranked-favorites schema with mutes;
+    - policy, config and rule versioning;
+    - an account-wide quota ledger (requests and rows);
+    - a per-source retention and rights manifest;
+    - the schedule schema;
+    - doubleheader, resumed-game and neutral-site identity;
+    - a mixed-slate replay seed.
 - **NFL onto the shared board:** league producers over the common scheduler and release policy, with a per-board, per-league viewer delay. Round 5's R5-3, R5-4 and R5-8 land here, along with a mixed MLB/NFL replay that measures committed airtime and waits. The single-game runner stays as the rollback.
-- **A1b, alongside:** typed topology, a native smoke run on the Pi, and the frame-acknowledgement contract with the local driver. Then p50/p95/p99 costs, a canary with sink and feed interruptions, and bounded shutdown.
+- **A1b, alongside:** typed topology, a native smoke run on the Pi, and the frame-acknowledgement contract with the local driver; the receiver enforces each frame's generation and expiry, and its ACK carries the swap time. Then p50/p95/p99 costs, a canary with sink and feed interruptions, and bounded shutdown.
 - **NBA, once mixed MLB/NFL passes:** the Free `/games` capability first, keeping unknown apart from zero and provisional apart from final. The 2026-11-16 slate recording is analyzed in `SOURCES.md`. Poll about every 15 s, and parse the clock with a typed parser ("Q2 1:17", "Q1 :50.9"). There's no visible NBA probability in v1.
 - **A1c, deferred:** a guarded cutover of one board, and a soak.
 
