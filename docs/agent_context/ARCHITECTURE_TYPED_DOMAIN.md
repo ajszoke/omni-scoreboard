@@ -525,27 +525,36 @@ class GolfLeaderboardCardPayload:
 
 ## Provider boundaries
 
-Provider modules own raw API shape. The rest of the system never sees raw JSON.
+Provider modules own raw API shape. The rest of the system never sees raw JSON. As built since H5
+(2026-11-17; `omni/providers/base.py`, `omni/app/contest_store.py`):
 
-```python
-class Provider(Protocol):
-    source: SourceRef
-    league: League
+- **Scopes.** A schedule is asked scope by scope: `PollScope(source, league, window)`, where the window is
+  a `LocalDate` or a `CurrentSlate`. Each answer is a `ScopeObservation`: `COMPLETE`, `PARTIAL` (the
+  parser skipped rows, so what it leaves out isn't refuted) or `FAILED`, stamped with its receipt as a
+  `ClockReading`. A `ScopeSource` (MLB's is `PlannedMlb`) reports each pass's `ScopeSpan` (its current
+  scope and the earlier ones still in its window) and its observations. A plain `Provider` with
+  `refresh(now) -> ProviderUpdate` is wrapped by `ProviderSupervisor` as one `CurrentSlate` scope.
+- **The store** keeps each scope's membership and reconciles the union by full id:
+  - observations are ordered by **monotonic receipt** per scope, never UTC;
+  - a complete answer replaces its scope's members, and an empty one removes only those;
+  - a partial answer adds and updates; a failed one keeps what was there;
+  - the newest receipt wins across scopes;
+  - rolled-off scopes retire under `RollingDates`, keeping a game still in play, and a final through
+    `FINAL_HOLD`.
+- **Health is per scope** (`ScopeHealth`, on the monotonic clock). A league's health is its current
+  scope's (`LeagueHealth`), so one league can be offline while another is live. The board draws one
+  health today, its healthiest league's; per-league dimming lands with the shared board.
+- **Identity.** Every key that names a game uses its full `LeagueScopedId` (`league:source:raw`): card
+  ids, dedupe keys, booking, traces, market caches. Favorites are typed and ranked per league
+  (`omni/preferences/favorites.py`; `--favorite mlb:ATL`, a bare abbreviation meaning MLB). A market link
+  (`MarketLink`) is confirmed by slug, start time and side, and fails closed.
+- **What a value rests on.** Game states carry a `CoverageMap` of `FieldCoverage` per field (`REPORTED`,
+  `INFERRED`, `DEFAULTED`, `UNAVAILABLE`, `NOT_APPLICABLE`; `omni/domain/coverage.py`). Displayed values
+  keep their stand-ins; `state.known(field)` is what a leverage model reads.
+- **Schedule facts** on `Contest`: `stage` (`SeasonStage`), `game_number`, `start_tbd`, `provider_date`,
+  `neutral_site`, `national_broadcast` and `resumed_from`, each unknown by default.
 
-    def refresh(self) -> "ProviderUpdate": ...
-```
-
-Provider update should contain typed domain objects:
-
-```python
-@dataclass(frozen=True, slots=True)
-class ProviderUpdate:
-    source: SourceRef
-    observed_at: datetime
-    contests: tuple[Contest, ...]
-    events: tuple[GameEvent, ...]
-    warnings: tuple[str, ...] = ()
-```
+Plays travel with each game's feed, not in `ProviderUpdate`.
 
 ## Queue responsibilities
 

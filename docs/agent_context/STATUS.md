@@ -4,6 +4,15 @@ _Living status doc. Keep it short; update whenever project state changes (branch
 
 ## Now (2026-11-17)
 
+- **2026-11-17, H5 steps 1–3, the data boundary (this PR).** As built: `ARCHITECTURE_TYPED_DOMAIN.md`, "Provider boundaries".
+  - **Scopes:** each league's slate is kept scope by scope (source, league, date), complete, partial or failed, ordered by monotonic receipt, with health per scope and per league. A UTC backstep no longer freezes membership, and a skipped row no longer drops its game.
+  - **Identity:** full game ids in every key. Favorites are typed and ranked per league: `--favorite mlb:ATL --favorite mlb:COL --favorite nfl:CAR`, and a bare abbreviation still means MLB.
+  - **Field coverage:** each game-state field says whether it was reported, inferred, defaulted, unavailable or not applicable. The schedule carries stage, doubleheader number, TBD start, national TV (MLB), provider date and resumed-from.
+  - **Carried to the shared board:**
+    - the board draws one health, its healthiest league's, so per-league dimming is still to come;
+    - one schedule source per league;
+    - a slate that always skips a row stays partial and never removes a game until its date retires;
+    - the cloud meter names NFL and NBA games by market slug, so their readings can't reach a board until the cloud maps them to the board's schedule ids. Its `_MAX_GAMES` (30) may also refuse a large mixed slate.
 - **2026-11-17, external review round 7: policy v2 ratified, and two fixes (this PR).** Details: `~/omni-review/plans/omni-build-fidelity-REVIEWS.md` (round 7).
   - **The board policy is `BOARD_POLICY.md`**, `omni-board-policy/2`:
     - leverage (LI) per league on offline-built models, with a labeled proxy until each passes validation;
@@ -144,7 +153,7 @@ _Living status doc. Keep it short; update whenever project state changes (branch
 
 - **A1a closeout: C1–C4 built** (PR #109). **D1–D4 merged** (PR #112). The defaults stand: the 12 s turn, the 30 s takeover threshold, 40% stale dimming, 2-minute stale live removal and the 10-minute source offline limit.
 - **The board policy:** `BOARD_POLICY.md` (v2, ratified 2026-11-17). It's built with NFL onto the shared board, on H5's types, with proxies for leverage until the MLB and NFL models pass validation in shadow.
-- **H5, the data boundary, behind replay** (round 6 adds: MLB membership ordered by monotonic receipt, and an NFLMeta quota budget for a Sunday slate):
+- **H5, the data boundary, behind replay. Steps 1–3 done** (identities and ranked favorites, scoped observations and health, field coverage and schedule facts). **Left: step 4,** an account-wide quota ledger (requests and rows per account, persisted monthly) and an NFLMeta Sunday-slate budget replay (Builder is the user's call); **step 5,** policy/config/rule versioning, a per-source retention and rights manifest, and the mixed-slate replay seed. The original scope (round 6 adds: MLB membership ordered by monotonic receipt, and an NFLMeta quota budget for a Sunday slate):
   - a typed poll scope per provider, league and coverage window, with complete, partial and failed observations and their own watermarks;
   - full identities in card, event, `after`, cache and booking keys;
   - favorites scoped by league;

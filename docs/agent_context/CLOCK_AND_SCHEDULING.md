@@ -361,7 +361,7 @@ by a probe at its production entry point. They were built as D1–D4 in one PR:
   - After a wake, the card dims and the meter hides until an answer received after the jump is released.
 
 Still open from round 6:
-- MLB membership ordered by UTC freezes after a backward step (H5);
+- ~~MLB membership ordered by UTC freezes after a backward step~~: done in H5 (scopes ordered by monotonic receipt);
 - a receive watchdog on the Pi (A1b);
 - clock trust attested by NTP (later).
 
@@ -390,7 +390,7 @@ Still open, with where each lands:
 | Airtime debt across leagues | one league's weighted rotation | step 7, after the mixed-league identity work (M6-004) |
 | Clamp release against a wall-clock jump | done for releases (C3, C4). A queued card's availability and expiry still read UTC, so a backward jump lengthens its window; nothing releases early | step 6 (the air clock) |
 | A final from an authoritative result besides the feed | only the feed's own final is shown; the schedule's score isn't carried on `TeamGame` | H5, with the typed observations |
-| A DELAYED or SUSPENDED game from an earlier date whose slate keeps failing | its status card stays up until the slate answers (it reveals no score) | H5 (per-scope observations) |
+| A DELAYED or SUSPENDED game from an earlier date whose slate keeps failing | its status card stays up until the slate answers (it reveals no score). Since H5 that date's scope goes stale on its own clock, but the board doesn't dim by scope yet | NFL onto the shared board (per-league health on the board) |
 | The MLB meter aged at paint | its age is bounded by the state releases and by a stale card's 2.5 minutes; it is opt-in | NFL onto the shared board |
 | Device contrast from config (round-4 L2) | the default policy everywhere | A1b, with the hardware |
 | Football: revisions replace what's pending; corrections and retractions explicit (round-4 M2) | the lane supports revisions, but `FootballEvent` carries none. Only review and conversion corrections are announced | NFL onto the shared board |
