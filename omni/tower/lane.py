@@ -27,6 +27,9 @@ A newer revision of the segment on air swaps its frames in place, keeping its dw
 An edit to one that has already aired doesn't bring it back: a material correction comes as a segment
 of its own.
 
+A backlog can be bounded: `shed` keeps at most so many of the waiting segments a caller picks (say, the
+routine ones), dropping the oldest unseen.
+
 `changes` reports, for the trace, what happened since it was last asked: a segment up (its first
 frame committed), a later frame up, a frame blanked and up again, a segment down and why, a segment
 dropped unseen and why.
@@ -35,7 +38,7 @@ dropped unseen and why.
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import timedelta
 from enum import Enum
@@ -61,6 +64,8 @@ class EndReason(StrEnumMixin, str, Enum):
     UNDRAWN = "failed to draw"  # the display couldn't draw it
     MISSED_WINDOW = "missed its air window"  # a bounded close-out had no room left for it
     SOURCE_STALE = "its source went stale"  # what it came from stopped answering
+    ARRIVED_LATE = "arrived late"  # it reached the board long after its source wrote it
+    BACKLOG = "backlog"  # too many like it were waiting: the oldest go
 
 
 class ChangeKind(StrEnumMixin, str, Enum):
@@ -192,6 +197,16 @@ class Lane(Generic[PayloadT]):
                 dropped.insert(0, self._current)
                 self._current = None
         return dropped
+
+    def shed(self, at: ClockReading, *, keep: int, among: Callable[[Segment[PayloadT]], bool]) -> None:
+        """Of the waiting segments ``among`` picks, keep the newest ``keep``: the older ones are dropped unseen,
+        as a backlog. What's on air, and what ``among`` passes over, stay."""
+        picked = [segment.key for segment in self._waiting if among(segment)]
+        excess = set(picked[: max(len(picked) - keep, 0)])
+        for segment in self._waiting:
+            if segment.key in excess:
+                self._changes.append(LaneChange(ChangeKind.DROPPED, segment, at, reason=EndReason.BACKLOG))
+        self._waiting = deque(segment for segment in self._waiting if segment.key not in excess)
 
     def cue(self, at: ClockReading) -> Cue[PayloadT] | None:
         """The frame that should be on air at ``at``, once the rules have run: the one up, its next, the next

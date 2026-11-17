@@ -12,10 +12,11 @@ as the board's feed would have asked, against a stand-in NFLMeta built from the 
 It writes two traces of the answers the board would have received (`omni.replay.football`):
 - ``board-trace.jsonl`` beside the recording (git-ignored), as the provider worded them;
 - ``--out``, minimized for the repo. It keeps the timing, the phases and breaks, the score, who has the
-  ball, the timeouts and challenges, and each strip entry's kind and order. It has no NFLMeta text or
-  ids: entries are renamed by their order ("PLAY 17"), and the next snap's down, distance and spot,
-  like the game clock, are stand-ins. The stand-ins change exactly when the real values did, so a
-  board decides alike on both traces. This tool checks that before it writes.
+  ball, the timeouts and challenges, and each strip entry's kind, order and when its play was written
+  (so a play that arrived late replays as late). It has no NFLMeta text or ids: entries are renamed by
+  their order ("PLAY 17"), and the next snap's down, distance and spot, like the game clock, are
+  stand-ins. The stand-ins change exactly when the real values did, so a board decides alike on both
+  traces. This tool checks that before it writes.
 """
 
 from __future__ import annotations

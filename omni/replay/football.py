@@ -1,9 +1,10 @@
 """Football replay: a game's feed answers, as a board received them, run back through a board.
 
 A *football trace* is a board's input written down: each answer of its feed (a `FeedResult`), with
-when it arrived, the game's state and the strip entries it brought. The format is JSON lines: a
-header naming the game and the trace's start, then an answer a line, its times in seconds since
-that start. `header_record` and `answer_record` write the lines, and `load_trace` reads them back.
+when it arrived, the game's state and the strip entries it brought (with when the feed wrote each
+one's play, if it said, and whether that play scored or turned the ball over). The format is JSON lines: a header naming the game and the trace's start,
+then an answer a line, its times in seconds since that start. `header_record` and `answer_record`
+write the lines, and `load_trace` reads them back.
 
 `ReplayFeed` hands a trace's answers to a board as a clock passes their arrival. `replay_board` runs
 a board over a whole trace under a fake clock, stepping at a frame rate, and returns its decisions,
@@ -115,7 +116,7 @@ def answer_record(result: FeedResult, start: datetime) -> dict[str, Any]:
     if snapshot.observed_at is not None:
         shot["as_of"] = _seconds(snapshot.observed_at - start)
     if snapshot.events:
-        shot["events"] = [_event_record(event) for event in snapshot.events]
+        shot["events"] = [_event_record(event, start) for event in snapshot.events]
     if snapshot.notes:
         shot["notes"] = [{"kind": note.kind.value, "detail": note.detail} for note in snapshot.notes]
     record["snapshot"] = shot
@@ -316,7 +317,7 @@ def _answer(record: dict[str, Any], start: datetime, game: TeamGame) -> FeedResu
         ),
         phase=phase,
         state=_state(shot["state"]) if "state" in shot else None,
-        events=tuple(_event(event) for event in shot.get("events", ())),
+        events=tuple(_event(event, start) for event in shot.get("events", ())),
         caught_up=shot.get("caught_up", False),
         break_ends_at=start + timedelta(seconds=shot["break_ends"]) if "break_ends" in shot else None,
         observed_at=start + timedelta(seconds=shot["as_of"]) if "as_of" in shot else None,
@@ -372,7 +373,7 @@ def _state(record: dict[str, Any]) -> FootballGameState:
     )
 
 
-def _event_record(event: FootballEvent) -> dict[str, Any]:
+def _event_record(event: FootballEvent, start: datetime) -> dict[str, Any]:
     record: dict[str, Any] = {
         "key": event.key,
         "kind": event.kind.value,
@@ -383,15 +384,21 @@ def _event_record(event: FootballEvent) -> dict[str, Any]:
         record["detail"] = event.summary.detail
     if event.players_line is not None:
         record["players"] = event.players_line
+    if event.written_at is not None:
+        record["written"] = _seconds(event.written_at - start)
+    if event.scored_or_turned_over:
+        record["scored_or_turned_over"] = True
     return record
 
 
-def _event(record: dict[str, Any]) -> FootballEvent:
+def _event(record: dict[str, Any], start: datetime) -> FootballEvent:
     return FootballEvent(
         key=record["key"],
         kind=FootballEventKind(record["kind"]),
         summary=PlaySummary(tone=PlayTone(record["tone"]), headline=record["headline"], detail=record.get("detail")),
         players_line=record.get("players"),
+        written_at=start + timedelta(seconds=record["written"]) if "written" in record else None,
+        scored_or_turned_over=record.get("scored_or_turned_over", False),
     )
 
 

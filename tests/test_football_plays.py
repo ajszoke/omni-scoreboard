@@ -283,6 +283,76 @@ def test_a_correction_is_announced_only_when_it_changes_what_happened() -> None:
     assert ledger.absorb([play(5, "D", revision=3, extra_point=ConversionResult.FAILED)]) == []
 
 
+def test_a_score_a_turnover_or_a_ruling_is_major_and_the_rest_is_routine() -> None:
+    ledger = _ledger()
+    first = ledger.absorb(
+        [
+            play(1, "D, TOUCHDOWN.", "rushing_touchdown", touchdown=True),
+            play(2, "D", "rush", touchdown=True, interception=True),  # a pick six, toned as a turnover
+            play(3, "D", "safety"),
+            play(4, "D", "field_goal_good", field_goal=FieldGoalResult.MADE),
+            play(5, "D", "other", field_goal=FieldGoalResult.MISSED),
+            play(6, "D", "rush", fumble_lost=True),
+            play(7, "D", "rush", yards_gained=3),
+            play(8, "A.B pass incomplete.PENALTY on PIT-A.C, Offensive Offside, 5 yards - No Play.", "penalty"),
+            play(9, "Timeout #1 by PIT at 01:27.", "timeout"),
+            play(10, "Official Timeout at 08:26.", "official_timeout"),
+            play(11, "Two-Minute Warning", "two_minute_warning"),
+            play(12, "D, TOUCHDOWN.", "rushing_touchdown", touchdown=True),
+            play(13, BOOTH_REVERSED.split("The Replay")[0], "pass_interception_return", interception=True),
+        ]
+    )
+    assert [event.major for event in first] == [True] * 6 + [False] * 5 + [True] * 2
+    assert [event.play for event in first] == list(range(1, 14))  # each names the play it's about
+    corrections = ledger.absorb(
+        [
+            play(
+                1,
+                "D, TOUCHDOWN. X.K extra point is GOOD.",
+                revision=2,
+                touchdown=True,
+                extra_point=ConversionResult.GOOD,
+            ),
+            play(
+                12,
+                "D, TOUCHDOWN. X.K extra point is No Good.",
+                revision=2,
+                touchdown=True,
+                extra_point=ConversionResult.FAILED,
+            ),
+            play(13, BOOTH_REVERSED, "pass_incompletion", revision=2),
+        ]
+    )
+    assert [(event.kind, event.major, event.play) for event in corrections] == [
+        (FootballEventKind.CONVERSION, True, 1),  # points
+        (FootballEventKind.CONVERSION, False, 12),  # a missed try changes nothing on the board
+        (FootballEventKind.REVIEW, True, 13),  # a ruling
+    ]
+    assert not dataclasses.replace(first[6], kind=FootballEventKind.INJURY).major
+    assert dataclasses.replace(first[6], kind=FootballEventKind.SCORE).major  # points the scoreboard showed
+
+
+def test_a_play_first_seen_with_a_ruling_is_major_when_it_scored_or_turned_the_ball_over() -> None:
+    upheld_touchdown = (
+        "C.Brown up the middle for 2 yards, TOUCHDOWN. Pittsburgh challenged the touchdown ruling, and the play"
+        " was Upheld. The ruling on the field stands. (Timeout #1.)"
+    )
+    events = _ledger().absorb(
+        [
+            play(1, upheld_touchdown, "rushing_touchdown", touchdown=True),
+            play(2, BOOTH_REVERSED, "pass_incompletion"),  # an interception, reversed: an incompletion now
+            play(3, CHALLENGE_UPHELD, "pass_reception", yards_gained=5),
+        ]
+    )
+    assert [(event.summary.tone, event.summary.headline) for event in events] == [
+        (PlayTone.ALERT, "PIT CHALLENGE: STANDS"),  # worded and toned as the ruling
+        (PlayTone.ALERT, "REVIEW: REVERSED"),
+        (PlayTone.ALERT, "CIN CHALLENGE: STANDS"),
+    ]
+    assert [event.major for event in events] == [True, False, False]  # only the touchdown stands as a score
+    assert not play(4, "END QUARTER 1", "end_period").scored_or_turned_over
+
+
 def test_a_failed_try_arriving_late_is_announced_plainly() -> None:
     ledger = _ledger()
     ledger.absorb([play(1, "D, TOUCHDOWN.", "rushing_touchdown")])

@@ -393,7 +393,14 @@ class PlayLedger:
             return None
         kind, summary = summarized
         players = self._players_line(play) if kind is FootballEventKind.PLAY else None
-        return FootballEvent(key=f"{play.number}:{kind.value}", kind=kind, summary=summary, players_line=players)
+        return FootballEvent(
+            key=f"{play.number}:{kind.value}",
+            kind=kind,
+            summary=summary,
+            players_line=players,
+            play=play.number,
+            scored_or_turned_over=play.scored_or_turned_over,
+        )
 
     def _correction_events(self, before: FootballPlay, after: FootballPlay) -> list[FootballEvent]:
         events: list[FootballEvent] = []
@@ -408,6 +415,7 @@ class PlayLedger:
                     kind=FootballEventKind.REVIEW,
                     summary=summary,
                     players_line=self._players_line(after),
+                    play=after.number,
                 )
             )
         if before.conversion is None and after.conversion is not None:
@@ -415,7 +423,12 @@ class PlayLedger:
             tone = PlayTone.SCORE if result.scored else PlayTone.STANDARD
             summary = PlaySummary(tone=tone, headline=conversion_headline(after), detail=text.conversion)
             events.append(
-                FootballEvent(key=f"{after.number}:conversion", kind=FootballEventKind.CONVERSION, summary=summary)
+                FootballEvent(
+                    key=f"{after.number}:conversion",
+                    kind=FootballEventKind.CONVERSION,
+                    summary=summary,
+                    play=after.number,
+                )
             )
         return events
 

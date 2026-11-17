@@ -282,6 +282,51 @@ def test_watches_the_feed_for_a_correction_when_the_scoreboard_moves_on_its_own(
     assert feed.play_reads() == reads
 
 
+def test_each_play_entry_carries_when_the_feed_wrote_it_and_a_correction_when_the_correction_was() -> None:
+    feed = FakeFeed()
+    touchdown = "C.Brown up the middle for 2 yards, TOUCHDOWN."
+    hurt = {"player_name": "Dalton Risner", "team_abbr": "CIN", "state": "out"}
+
+    def written(change: dict[str, Any], second: int) -> dict[str, Any]:
+        return {**change, "changed_at": (T0 + timedelta(seconds=second)).isoformat()}
+
+    feed.scores = [_scores(_row()), _scores(_synced("p2", injuries=[hurt])), _scores(_synced("p3", injuries=[hurt]))]
+    feed.plays = [
+        _page(),
+        _page(
+            written(_change("p1", 1, touchdown, play_type="rushing_touchdown", touchdown=True), -200),
+            written(_change("p1", 1, touchdown + " Spot moved.", revision=2, touchdown=True), -150),
+            written(_change("p2", 2, "S.Perine right guard for 2 yards.", yards_gained=2), 5),
+            _change("p2b", 3, "A.Rodgers pass incomplete short right.", play_type="pass_incompletion"),  # undated
+        ),
+        _page(
+            written(
+                _change(
+                    "p1", 1, touchdown + " E.McPherson extra point is GOOD.", revision=3, extra_point_result="good"
+                ),
+                14,
+            ),
+            written(_change("p3", 4, "C.Brown left end for 1 yard.", yards_gained=1), 15),
+            written(_change("p3", 4, "C.Brown left end for 1 yard. Corrected.", revision=2, yards_gained=1), 18),
+        ),
+    ]
+    provider = _provider(feed)
+    provider.poll(GAME, T0 - timedelta(seconds=300))  # caught up, with nothing yet
+    plays = provider.poll(GAME, T0 + timedelta(seconds=10)).events
+    dates = [(event.play, event.written_at) for event in plays]
+    assert dates == [
+        (1, T0 - timedelta(seconds=200)),  # the earliest change to the play in the read
+        (2, T0 + timedelta(seconds=5)),
+        (3, None),  # the feed didn't say
+        (None, None),  # an injury: no play row is behind it
+    ]
+    later = provider.poll(GAME, T0 + timedelta(seconds=20)).events
+    assert [(event.kind, event.play, event.written_at) for event in later] == [
+        (FootballEventKind.CONVERSION, 1, T0 + timedelta(seconds=14)),  # the try, dated by its own change
+        (FootballEventKind.PLAY, 4, T0 + timedelta(seconds=15)),
+    ]
+
+
 def test_a_watch_that_finds_nothing_ends_on_its_own() -> None:
     feed = FakeFeed()
     feed.scores = [_scores(_synced("p1")), _scores(_synced("p1", clock="8:29"))]
