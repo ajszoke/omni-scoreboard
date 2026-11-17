@@ -4,13 +4,20 @@ _Living status doc. Keep it short; update whenever project state changes (branch
 
 ## Now (2026-11-16)
 
+- **2026-11-16, the A1a closeout (C1–C4, PR #109; one PR for the set, by the user's call):** round 5's four gates are built, each tested at its production entry point. What changed is in `CLOCK_AND_SCHEDULING.md`, "After A1a".
+  - **C1:** MLB books a card at the clock reading after the display commits its frame. The NFL display process (`board_frame_sink.py`, now on the Pi) acknowledges each swapped frame, and the strip credits only acknowledged frames, by sink generation.
+  - **C2:** each refresh publishes one numbered view; the turn after 30 s of takeovers is reserved; a lone takeover leaves at its turn; a game's own final takes over from its live card; an unusable predecessor no longer blocks a final.
+  - **C3:** poll leases start when a worker begins, with workers per source; each date's slate keeps its games; pregame details and odds come from the plan; the MLB meter is opt-in (`--meter`) and gated on the visible state; a final airs only from the feed's own final; a live card dims two cadences after its last good answer; release is pinned on the monotonic clock against wall-clock jumps.
+  - **C4:** the NFL final drain reads on its boundary; a period's close is bounded at 30 s apart from a decisive caption; an undrawable caption is dropped; a dead feed dims, clears the strip and hides the meter; the halftime hold defaults to 13 minutes.
+  - **Replay:** the MLB slate fixture changed only in C2 (the final lines, and atl-nym's 1-second live flash gone); the PIT@CIN fixture is unchanged. 1,998 tests, 100% line and branch.
+  - **Picked, to ratify:** a few new bounds, listed in `CLOCK_AND_SCHEDULING.md`, "After A1a".
 - **2026-11-16, external review round 5: conditional sign-off on A1a.** The four steps are in place. Four gates close the first slice; the details are in `~/omni-review/plans/omni-build-fidelity-REVIEWS.md` (round 5).
   - **C1, credit the exact presented frame:** MLB books at the clock reading after the display commits. The NFL display process acknowledges each frame it swaps, by frame and sink generation.
   - **C2, a coherent board input:** each refresh publishes one complete view, with a generation, that the frame thread selects from. It also makes a reminder unable to break the turn owed after takeovers, a game's own final able to replace its live card, and an unusable predecessor unable to block a final.
   - **C3, the production MLB path:** a corroborated final, each date's slate covered on its own, poll leases that can't strand work, pregame details and odds in the plan, the MLB meter off by default until it can prove it matches the visible score, release pinned on the monotonic clock against wall-clock jumps, and staleness from the last good receipt.
   - **C4, the NFL closeout:** the final drain reads on its last boundary, a closeout bound apart from routine captions, an undrawable caption isolated (#108 left it holding the strip), a dead feed shown as such, the market aged at paint, and a short drain before a quiet hold.
   - **Rulings:** NFL strip semantics wait for the shared board (blessed). Latest start goes in step 7. Semantic lane ids come with shared NFL.
-  - **Halftime hold:** the head recommends a configurable 13-minute default; 15 minutes stands until the user decides.
+  - **Halftime hold:** a configurable 13-minute default, as the head recommended (the user accepted, 2026-11-16).
   - **Sequence (C):** C1–C4, then H5, then NFL onto the shared board with an A1b hardware track alongside, then NBA once mixed MLB/NFL passes. A1c is deferred.
 - **2026-11-16, round 5 prep (PR #108, merged):** an audit of A1a against the round-4 rulings found four defects, now fixed. The open rulings are listed in `CLOCK_AND_SCHEDULING.md`, "After A1a".
   - **Board:** a card the display can't draw no longer holds the board. It comes down, traced, and is set aside until it changes or a minute passes.
@@ -104,7 +111,7 @@ _Living status doc. Keep it short; update whenever project state changes (branch
 
 ## Next — round-5 sequence (2026-11-16): A1a closeout (C1–C4) → H5 → NFL onto the shared board, with A1b alongside → NBA → A1c
 
-- **A1a closeout, the current ship.** One PR per gate, in this order: C1, then C4 (NFL is live now), then C2, then C3. Each adds its counterexamples at the production entry points, keeps all three profiles in the replay run, and re-baselines only intended decision changes. The defaults stand: the 12 s turn, the 30 s takeover threshold, 40% stale dimming, 2-minute stale live removal and the 10-minute source offline limit. The MLB meter is off by default until the gate in C3.
+- **A1a closeout: built** (PR #109; the user stacked the four gates there rather than one PR each). In this order: C1, then C4 (NFL is live now), then C2, then C3. Each adds its counterexamples at the production entry points, keeps all three profiles in the replay run, and re-baselines only intended decision changes. The defaults stand: the 12 s turn, the 30 s takeover threshold, 40% stale dimming, 2-minute stale live removal and the 10-minute source offline limit. The MLB meter is off by default until the gate in C3.
 - **H5, the data boundary, behind replay:**
   - a typed poll scope per provider, league and coverage window, with complete, partial and failed observations and their own watermarks;
   - full identities in card, event, `after`, cache and booking keys;

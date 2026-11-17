@@ -47,9 +47,9 @@ Issue the board a token. This writes `OMNI_CLOUD_URL` and `OMNI_CLOUD_TOKEN` int
 .venv/bin/python cloud/tools/issue_board_token.py BOARD_ID --env-file .env
 ```
 
-`python -m omni.app` then reads the meter from the service, sends a heartbeat every 5 minutes and says
-`meter market service` when it starts. Without those two settings it reads Polymarket's public quotes
-as before. The board ignores a reading more than a minute old by the service's clock, so a stopped
+With `--meter` (the live meter is off by default), `python -m omni.app` then reads the meter from the
+service, sends a heartbeat every 5 minutes and says `meter market service` when it starts. Without those
+two settings it reads Polymarket's public quotes as before. The board ignores a reading more than a minute old by the service's clock, so a stopped
 poller or an unreachable service falls through to the pipeline's 3-minute hold and then MLB's model.
 
 ## Deploying

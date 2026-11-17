@@ -28,18 +28,18 @@ has to be handled like flights at a control tower:
 
 | Where | What it times | Driven by |
 |---|---|---|
-| `omni/app/runner.py` `run_forever`, `AppLoop.refresh` and `AppLoop.paint` (MLB) | refreshes (pipeline into the card queue, the source's health) on a worker thread, reading the plan's answers; painting what the board has up on the main thread | a refresh when an answer lands, at the pipeline's or the source's next deadline, and at least every 5 s; frames at `--fps`, 10 by default |
-| `PollPlan` + `Poller` + `PlannedMlb` (MLB) | what to ask when: slates for the previous and current local dates, each live game's feed, market and model probabilities; one ask in flight per key (given up on after `answer_within`, 30 s), priority cadence within a per-source quota, three quick retries, last good until `keep_for` | the plan on monotonic time; a poller thread checking every 250 ms, with four workers |
+| `omni/app/runner.py` `run_forever`, `AppLoop.refresh` and `AppLoop.paint` (MLB) | refreshes (pipeline into the card queue, the source's health) on a worker thread, reading the plan's answers, each published as one numbered view; painting what the board has up on the main thread, choosing from the latest complete view and booking at the clock reading taken after the display commits the frame | a refresh when an answer lands, at the pipeline's or the source's next deadline, and at least every 5 s; frames at `--fps`, 10 by default |
+| `PollPlan` + `Poller` + `PlannedMlb` (MLB) | what to ask when: slates for the previous and current local dates (each date's games kept on their own until final and shown), each live game's feed (current for two cadences after its receipt), pregame details and odds, and, with `--meter`, market and model probabilities; one ask in flight per key, its lease (`answer_within`, 30 s) started when a worker begins it and checked again before the request, with ask numbers never reused; priority cadence within a per-source quota; three quick retries, last good until `keep_for` | the plan on monotonic time; a poller thread checking every 250 ms, with workers per source, so blocked feeds can't starve the slate |
 | `ProviderSupervisor` | last-known-good and stale status for the slate (its backoff is off for a planned slate) | `now` passed per call |
-| `LiveBaseballPipeline` (`DelayPolicy`, `DelayedFeed`, `DelayedEventStream`) | TV delay anchored to when a play happened; meter readings; the final's embargo | `now` per tick |
-| `InterleavedCardQueue` | which card should air next (`peek`): eligibility, required order (finals by when their games ended, a final after its walk-off), a usable window, then a takeover, a due reminder, or two-level rotation; `book` records a turn at commit | UTC for availability and expiry; reminder cooldowns on monotonic time |
-| The board, a `BoardSession` (`omni/tower/board.py`) | one card at a time: dwell from the first committed frame, preemption after a minimum, a turn (`--slot`, 12 s) within the card's min and max, a cap on takeovers back to back, explicit idle, held and offline frames, stale cards dimmed; a card the display can't draw set aside for a minute or until it changes | the frame thread; dwell on monotonic time; `next_deadline` |
-| `FootballBoard.step` (single-game NFL) | a receipt-anchored `--delay` buffer, meter lag, closing out a period before a break | ~10 fps frame loop on `ClockReading`s, taking whatever answers have arrived; publishes `next_deadline` |
-| `GameFeed` in a `BackgroundFeed` (`football_feed.py`) | poll cadence, retry after failure, parking after the final; answers dated by arrival | its own thread, checking every 250 ms whether an ask is due |
-| `BackgroundFrameWriter` (`frame_stream.py`) | writing frames to the display process, retrying until one lands | its own thread; only the newest frame waits |
+| `LiveBaseballPipeline` (`DelayPolicy`, `DelayedFeed`, `DelayedEventStream`) | TV delay anchored to when a play happened, pinned at admission on the monotonic clock (`ReleaseGuard`: receipt + the full delay when the occurrence isn't credible or the wall clock just jumped); meter readings, admitted only up to the visible state's receipt; a final only from the feed's own final, then its embargo; a live card stale two cadences after its last good answer, or at the first failed read | a `ClockReading` per refresh; releases on monotonic time |
+| `InterleavedCardQueue` | which card should air next (`peek`): eligibility, required order (finals by when their games ended, else by first confirmation, traced; a final after its walk-off; a predecessor that can no longer fit its minimum doesn't block), a usable window, then a takeover, a due reminder, or two-level rotation; `book` records a turn at commit | UTC for availability and expiry; reminder cooldowns on monotonic time |
+| The board, a `BoardSession` (`omni/tower/board.py`) | one card at a time: dwell from the first committed frame, preemption after a minimum, a turn (`--slot`, 12 s) within the card's min and max, a cap on takeovers back to back, then a reserved rotation turn a reminder can't cut, a lone takeover or spent reminder leaving at its turn, a cue booked only while the published view still holds the card as cued, explicit idle, held and offline frames, stale cards dimmed; a card the display can't draw set aside for a minute or until it changes | the frame thread; dwell on monotonic time; `next_deadline` |
+| `FootballBoard.step` (single-game NFL) | a `--delay` buffer released at monotonic receipt + the delay; meter lag, with the meter aged at every draw; closing out a period before a break within `CLOSING_WAIT` (30 s: a decisive caption keeps its minimum, routine backlog that can't fit is dropped and traced); a dead feed (40 s past due, outside a halftime hold) dimmed, its strip cleared; strip time credited when the display acknowledges the frame | ~10 fps frame loop on `ClockReading`s, taking whatever answers have arrived; publishes `next_deadline` |
+| `GameFeed` in a `BackgroundFeed` (`football_feed.py`) | poll cadence, retry after failure, a terminal read on the final drain's boundary (a gap traced if it's incomplete) before parking, re-reads for 30 s while a matched play is missing; answers dated by arrival on both clocks | its own thread, checking every 250 ms whether an ask is due |
+| `BackgroundFrameWriter` (`frame_stream.py`) | writing id-stamped frames (`OMN2`) to the display process, which acknowledges each after its swap; a new process is a new generation, and a frame counts as shown only when its generation acknowledges it (a display process that never acknowledges is credited after 5 s, logged as unconfirmed); a failed spawn retries | its own thread, plus a reader for acknowledgements; only the newest frame waits |
 | The play strip, a `Lane` of segments (`omni/tower`) | frames (10 s min, 20 s max each), stoppage holds, invalidation on a field change, close-out; availability, latest start, expiry, edits by revision | dwell on monotonic time from each frame's first commit; `next_deadline` |
-| `NflMetaLiveProvider` | halftime hold (plus its grace), correction watch, score backstop, injury news window | private datetimes on per-game state |
-| Market (`PolymarketUsProvider`, the market-service client, the heartbeat thread, the cloud poller) | 30 s REST refresh; 10 s/60 s freshness; 30 s retry; 300 s heartbeat; 1 min cloud schedule | each its own |
+| `NflMetaLiveProvider` | halftime hold (13 minutes by default, `--halftime-hold`; plus its grace, after a short drain when the half's last read failed), correction watch, score backstop, injury news window | private datetimes on per-game state |
+| Market (`PolymarketUsProvider`, the market-service client, the heartbeat thread, the cloud poller; the live meter is opt-in on both boards: `--meter` for MLB, `--odds` for NFL) | 30 s REST refresh; 10 s/60 s freshness; 30 s retry; 300 s heartbeat; 1 min cloud schedule | each its own |
 | Rendering (`text_lane.py`, `LaneClock`, the halftime countdown) | marquee offsets, line start times, the colon blink | a line's start on monotonic time, by presentation (a card's time on the board, a strip frame) and lane, kept once its frame is committed; the countdown and its blink off `RenderContext.now` |
 | Launchers | time itself | `SystemClock` in both, read two ways (`ClockReading`: UTC and monotonic); loops paced by `Pacer` on monotonic time |
 
@@ -167,9 +167,9 @@ Round 4 groups the first five as A1a:
    - **Dwell:** a card gets its minimum from its first commit. After that it yields to a stronger claim
      (a takeover over a reminder, a reminder over rotation); after its turn (`--slot`, 12 s by default,
      held within its own min and max) to any other card; and at once if it leaves the queue, expires,
-     or its source goes offline. A card with nothing else waiting stays up.
+     or its source goes offline. A card with nothing else waiting stays up. (Since the A1a closeout, only a rotation card does: a lone takeover or spent reminder leaves at its turn.)
    - **Takeovers:** a BURST card takes over once, the first time it airs. After 30 s of takeovers back
-     to back, a rotation card gets a full turn before the next one.
+     to back, a rotation card gets a full turn before the next one. (Since the A1a closeout, that turn is reserved: a due reminder can't cut it.)
    - **Order:** finals that haven't aired go in the order their games ended, and a final airs after its
      game's walk-off (`ScoreboardCard.after`); its reveal waits for the game's plays still in the delay.
    - **Explicit frames:** *idle* (nothing to show), *held* (a game's card is still inside the TV delay)
@@ -273,8 +273,8 @@ Round 4 groups the first five as A1a:
   - A newer revision replaces a waiting segment in its place, or swaps the frames of the one on air
     and keeps its dwell; an edit to one already gone doesn't bring it back.
   - Latest start and expiry drop a segment unseen, with the reason traced.
-  - A football board counts a frame committed once its sink takes it; proof that it reached the
-    matrix is round 4's open question 2.
+  - A football frame counts as committed only when the display process acknowledges it, by frame id and
+    sink generation (since the A1a closeout); proof that it lit the LEDs stays with A1b.
 
   As built in A1a step 4 (`omni/tower/board.py`), for the board:
   - A card airs as a segment: its dedupe key, its revision as refreshes replace it, its game as the
@@ -292,6 +292,41 @@ ruled on the table below are in STATUS "Next" and `~/omni-review/plans/omni-buil
 - **Inline fetches, and the release guard against clock jumps:** both move into C3.
 - **The football strip's semantics:** they land with NFL on the shared board (blessed).
 - **Lane identity:** semantic lane ids within a presentation come with shared NFL.
+
+**The A1a closeout (C1–C4, PR #109, 2026-11-16)** built the four gates, each tested at its production
+entry point:
+- **C1, the frame actually shown:** MLB books a card at the clock reading taken after the display commits
+  its frame, so a slow swap moves the dwell, the booking and the marquee epoch with it. The NFL display
+  process acknowledges each frame it swaps (`ACK <id>`, wire `OMN2`), a restarted process is a new
+  generation, and the strip credits only acknowledged frames. A short stall keeps the caption on air; a
+  lost generation presents it again, with a full first dwell.
+- **C2, one board input per refresh:** a refresh stages its card changes and health and publishes them
+  as one numbered view; a cue superseded while it rendered doesn't book. After 30 s of takeovers the
+  rotation turn is reserved, a lone takeover leaves at its turn, a game's own final hands off from its
+  live card at the live card's minimum, and an unusable predecessor no longer blocks a final (traced as
+  too late, expired or failed to draw).
+- **C3, the production MLB path:** poll leases start when a worker begins the ask, each source has its own
+  workers, and a given-up ask makes no request. Each date's slate keeps its games until they're final
+  and shown. Pregame details and odds are plan sources, so no decision fetches. The meter is opt-in
+  (`--meter`) and admits a reading only if it arrived by the visible state's receipt. A final comes only
+  from the feed's own final; while the schedule says final and the feed doesn't, the card keeps
+  updating, and after `CONFIRM_WITHIN` (30 s) it dims and comes down 2 minutes later, with no score
+  invented. A later different final corrects the card in place. A live card is stale two cadences after
+  its last good answer, or at the first failed read. Release is pinned at admission on the monotonic
+  clock (`ReleaseGuard` in `omni/queue/delay_policy.py`), with receipt + the full delay for an implausible
+  source time and for 2 minutes after a wall-clock jump.
+- **C4, the NFL closeout:** the final drain reads once on its 2-minute boundary and traces a gap if that
+  read is incomplete. A period's close is bounded (`CLOSING_WAIT`, 30 s) apart from a decisive
+  caption's minimum; routine backlog that can't fit is dropped and traced, and an undrawable caption is
+  dropped (`failed to draw`). Closing finishes while the display is down. A dead feed (40 s past due,
+  outside a halftime hold) dims the card, clears the strip and hides the meter; the meter is aged at
+  every draw; a matched play missing from a complete page is re-read for 30 s; and the halftime hold is
+  13 minutes by default (the user accepted the recommendation, 2026-11-16).
+
+Picked during the closeout, for the user or round 6 to ratify: a feed answer is current for two
+cadences; the final's confirmation bound (30 s); the release guard's plausibility bounds (a source time
+up to 5 s ahead of receipt or 2 minutes behind it) and its 2-minute settle after a jump; the NFL dead-feed
+bound (40 s past due) and mismatch re-reads (30 s).
 
 An audit of A1a against the round-4 rulings found four defects, fixed before round 5:
 - **A card the display can't draw** held the board: it was cued again every frame and nothing else
@@ -316,13 +351,15 @@ Still open, with where each lands:
 |---|---|---|
 | Latest start apart from hard end (about 60 s routine, 120 s major, from eligibility) | `Segment.latest_start` exists, but no card sets it. A big play can start up to about 114 s after release (its expiry is 120 s) | step 7 (freshness), or sooner as a small change |
 | Airtime debt across leagues | one league's weighted rotation | step 7, after the mixed-league identity work (M6-004) |
-| Clamp release against a wall-clock jump | releases are pure UTC, so a forward jump releases early | step 6 (the air clock) |
-| Decisions never fetch | slates, feeds and probabilities come from the plan; pregame details and odds are still fetched inline, under their timeouts | the `PollPlan`, next time pregame is touched |
+| Clamp release against a wall-clock jump | done for releases (C3, C4). A queued card's availability and expiry still read UTC, so a backward jump lengthens its window; nothing releases early | step 6 (the air clock) |
+| A final from an authoritative result besides the feed | only the feed's own final is shown; the schedule's score isn't carried on `TeamGame` | H5, with the typed observations |
+| A DELAYED or SUSPENDED game from an earlier date whose slate keeps failing | its status card stays up until the slate answers (it reveals no score) | H5 (per-scope observations) |
+| The MLB meter aged at paint | its age is bounded by the state releases and by a stale card's 2.5 minutes; it is opt-in | NFL onto the shared board |
 | Device contrast from config (round-4 L2) | the default policy everywhere | A1b, with the hardware |
 | Football: revisions replace what's pending; corrections and retractions explicit (round-4 M2) | the lane supports revisions, but `FootballEvent` carries none. Only review and conversion corrections are announced | NFL onto the shared board |
 | Football: field and caption move together; an invalid caption clears at once | the caption keeps its 10 s minimum while the field moves | NFL onto the shared board |
-| Football: a stoppage ends on credible resumption or a traced stale-source timeout; a dead feed is shown as such | any new entry ends a hold; the football board has no stale or offline state | NFL onto the shared board |
-| A stalled display link recovers in bounded time (R4-5) | no frame counts while it's stalled, but nothing restarts it | A1b (the app on the Pi) |
+| Football: a stoppage ends on credible resumption or a traced stale-source timeout; a dead feed is shown as such | a dead feed is shown, and its timeout ends a held stoppage, traced (C4); any new entry still ends a hold | NFL onto the shared board |
+| A stalled display link recovers in bounded time (R4-5) | frames count only when acknowledged, by generation (C1), but nothing restarts a stalled link | A1b (the app on the Pi) |
 
 The takeover cap bounds back-to-back takeovers at the cap plus one takeover's turn ("after 30 s of
 takeovers, a rotation card gets a full turn": the default the user ratified, 2026-11-16).
