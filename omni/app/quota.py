@@ -269,7 +269,7 @@ class BillingMonth:
 
     @classmethod
     def of(cls, instant: datetime) -> BillingMonth:
-        utc = instant.astimezone(timezone.utc)
+        utc = instant if instant.tzinfo is timezone.utc else instant.astimezone(timezone.utc)
         return cls(utc.year, utc.month)
 
     @classmethod
@@ -411,14 +411,16 @@ class QuotaLedger:
     def exhausted(self, account: ProviderAccount, at: ClockReading) -> bool:
         """Whether nothing is left of ``account`` this month: no ask of any class is admitted."""
         with self._lock:
-            return self._exhausted(self._account(account, at), Demand(PollPriority.FOCUS)) is not None
+            held = self._account(account, at)
+            return _exhausted(held, self._left(held, Demand(PollPriority.FOCUS))) is not None
 
     def admit(self, account: ProviderAccount, demand: Demand, at: ClockReading) -> Admission:
         """Whether an ask of ``demand``'s class may go out now. An admitted one holds its place in the minute."""
         rule = self._policy.rules[demand.priority]
         with self._lock:
             held = self._account(account, at)
-            refused = self._exhausted(held, demand)
+            lefts = self._left(held, demand)
+            refused = _exhausted(held, lefts)
             if refused is not None:
                 return Admission(
                     account=account,
@@ -427,7 +429,7 @@ class QuotaLedger:
                     measure=refused.measure,
                     left=0,
                 )
-            tighter = min(self._left(held, demand), key=lambda left: left.share, default=None)
+            tighter = min(lefts, key=lambda left: left.share, default=None)
             slowed_by = 1
             if tighter is not None and not _keeps(tighter, rule.above):
                 if rule.slowed_above is None or not _keeps(tighter, rule.slowed_above):
@@ -540,13 +542,6 @@ class QuotaLedger:
             lefts.append(_Left(Measure.ROWS, limits.rows_a_month, before, before - demand.rows))
         return lefts
 
-    def _exhausted(self, held: _Account, demand: Demand) -> _Exhausted | None:
-        """Why nothing is left this month, if nothing is."""
-        for left in self._left(held, demand):
-            if left.before <= 0:
-                return _Exhausted(left.measure)
-        return _Exhausted(None) if held.exhausted else None
-
     @staticmethod
     def _prune(held: _Account, now: MonotonicTime) -> None:
         while held.minute and now.since(held.minute[0]) >= _MINUTE:
@@ -556,6 +551,14 @@ class QuotaLedger:
 @dataclass(frozen=True, slots=True)
 class _Exhausted:
     measure: Measure | None  # None: the provider said so, of a measure the ledger has no limit for
+
+
+def _exhausted(held: _Account, lefts: list[_Left]) -> _Exhausted | None:
+    """Why nothing is left this month, if nothing is."""
+    for left in lefts:
+        if left.before <= 0:
+            return _Exhausted(left.measure)
+    return _Exhausted(None) if held.exhausted else None
 
 
 def _keeps(left: _Left, percent: int) -> bool:
