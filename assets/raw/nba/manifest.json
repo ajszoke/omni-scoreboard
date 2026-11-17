@@ -1,0 +1,423 @@
+{
+  "ATL": {
+    "sources": {
+      "primary_on_dark.svg": {
+        "sha256": "efe7639e6daac1a103c13a1c3cc0b2d00979397ab70333e9d8ded492ea250504",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612737/primary/D/logo.svg"
+      },
+      "primary_on_light.svg": {
+        "sha256": "efe7639e6daac1a103c13a1c3cc0b2d00979397ab70333e9d8ded492ea250504",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612737/primary/L/logo.svg"
+      }
+    }
+  },
+  "BKN": {
+    "sources": {
+      "primary_on_dark.svg": {
+        "sha256": "6a3b134fbf97503b196848f6c933246a87c33ee623f13022c4cf7219a785ab34",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612751/primary/D/logo.svg"
+      },
+      "primary_on_light.svg": {
+        "sha256": "6a3b134fbf97503b196848f6c933246a87c33ee623f13022c4cf7219a785ab34",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612751/primary/L/logo.svg"
+      }
+    }
+  },
+  "BOS": {
+    "sources": {
+      "primary_on_dark.png": {
+        "sha256": "3c0acea2e6aaa797b8ca2fc3a8733bf250880eb2d0ea3471e32b02d2b5630eb2",
+        "source": "espn",
+        "url": "https://a.espncdn.com/i/teamlogos/nba/500-dark/scoreboard/bos.png"
+      },
+      "primary_on_light.png": {
+        "sha256": "0d0d6b85971b1d18428ba1161772b8c2f7e3ee103846ec4b4763bf0cc849ece0",
+        "source": "espn",
+        "url": "https://a.espncdn.com/i/teamlogos/nba/500/scoreboard/bos.png"
+      }
+    }
+  },
+  "CHA": {
+    "sources": {
+      "alternate.png": {
+        "fetched_sha256": "610d912ad2c985632fc6d003edcea4a0479b44a8fed73363f7d8b9a7f34b2843",
+        "sha256": "0c263fdc7a074e06585e90c2e53dfaf16e45150b105b3f03b66858d53d0b1291",
+        "source": "curated",
+        "url": "https://static.wikia.nocookie.net/sports-logos5931/images/9/97/Charlotte_hornets_2014-present_a.png/revision/latest?cb=20260523052842"
+      }
+    }
+  },
+  "CHI": {
+    "sources": {
+      "primary_on_dark.svg": {
+        "sha256": "a11d0d6480b75e4eebca54130d195a462547705c8c7e6b501a11a62d57854068",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612741/primary/D/logo.svg"
+      },
+      "primary_on_light.svg": {
+        "sha256": "a11d0d6480b75e4eebca54130d195a462547705c8c7e6b501a11a62d57854068",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612741/primary/L/logo.svg"
+      }
+    }
+  },
+  "CLE": {
+    "sources": {
+      "primary_on_dark.svg": {
+        "sha256": "ef345729b4d9f69863d2f6f20b80bda21191ecf5f49a40a0a4f428d0864a301b",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612739/primary/D/logo.svg"
+      },
+      "primary_on_light.svg": {
+        "sha256": "ef345729b4d9f69863d2f6f20b80bda21191ecf5f49a40a0a4f428d0864a301b",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612739/primary/L/logo.svg"
+      }
+    }
+  },
+  "DAL": {
+    "sources": {
+      "primary_on_dark.svg": {
+        "sha256": "1547494512746c1827808f1650407e675025b20b07bb5bd185093ac49630db5c",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612742/primary/D/logo.svg"
+      },
+      "primary_on_light.svg": {
+        "sha256": "1547494512746c1827808f1650407e675025b20b07bb5bd185093ac49630db5c",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612742/primary/L/logo.svg"
+      }
+    }
+  },
+  "DEN": {
+    "sources": {
+      "primary_on_dark.svg": {
+        "sha256": "4e180a9d1906a726d1eb5d5074ae3468cdf25da5e388a98a112563683b6c8730",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612743/primary/D/logo.svg"
+      },
+      "primary_on_light.svg": {
+        "sha256": "4e180a9d1906a726d1eb5d5074ae3468cdf25da5e388a98a112563683b6c8730",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612743/primary/L/logo.svg"
+      }
+    }
+  },
+  "DET": {
+    "sources": {
+      "primary_on_dark.svg": {
+        "sha256": "efc20345b37e52206e025a0dbe5b57e28d8f4226b1a70573a9792a2e18595e0b",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612765/primary/D/logo.svg"
+      },
+      "primary_on_light.svg": {
+        "sha256": "efc20345b37e52206e025a0dbe5b57e28d8f4226b1a70573a9792a2e18595e0b",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612765/primary/L/logo.svg"
+      }
+    }
+  },
+  "GSW": {
+    "sources": {
+      "primary_on_dark.svg": {
+        "sha256": "99af50c32a1b1c19ede6286cda294e98cd19263d1d2b50cd4b79b0e868c96a0a",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612744/primary/D/logo.svg"
+      },
+      "primary_on_light.svg": {
+        "sha256": "99af50c32a1b1c19ede6286cda294e98cd19263d1d2b50cd4b79b0e868c96a0a",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612744/primary/L/logo.svg"
+      }
+    }
+  },
+  "HOU": {
+    "sources": {
+      "primary_on_dark.svg": {
+        "sha256": "28a113342d6fda3ef404931bacb6612b8183930d900110ea4dee5efd21b9aa91",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612745/primary/D/logo.svg"
+      },
+      "primary_on_light.svg": {
+        "sha256": "9a0fd3d351f0726db427e8bed6db098bf88d15e98582b4b8dfd5a3638d6263f0",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612745/primary/L/logo.svg"
+      }
+    }
+  },
+  "IND": {
+    "sources": {
+      "primary_on_dark.svg": {
+        "sha256": "07b320f178a5bf9a800e1369289b1af59d777feff21936856b6f8cf9ef66ea8a",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612754/primary/D/logo.svg"
+      },
+      "primary_on_light.svg": {
+        "sha256": "07b320f178a5bf9a800e1369289b1af59d777feff21936856b6f8cf9ef66ea8a",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612754/primary/L/logo.svg"
+      }
+    }
+  },
+  "LAC": {
+    "sources": {
+      "primary_on_dark.svg": {
+        "sha256": "5fe984156d6abde0e6f6b5fddbbd48deb5ead7ff4661bcaa0abee0ece018ccd5",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612746/primary/D/logo.svg"
+      },
+      "primary_on_light.svg": {
+        "sha256": "6fe94cd7b648afe8a700d2ae7c0a78bec1685adb7374214cbde7251520aa6a5a",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612746/primary/L/logo.svg"
+      }
+    }
+  },
+  "LAL": {
+    "sources": {
+      "primary_on_dark.svg": {
+        "sha256": "5b68f7b92ba7d05878ef7130162c77c1e5e7d4c5ac0608c7bb9f13f995a678b7",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612747/primary/D/logo.svg"
+      },
+      "primary_on_light.svg": {
+        "sha256": "5b68f7b92ba7d05878ef7130162c77c1e5e7d4c5ac0608c7bb9f13f995a678b7",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612747/primary/L/logo.svg"
+      }
+    }
+  },
+  "MEM": {
+    "sources": {
+      "primary_on_dark.svg": {
+        "sha256": "677c8053201e90471f0eda3fdd8364c7a598bcba72a7a6e61ed26cbc9ecadcaf",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612763/primary/D/logo.svg"
+      },
+      "primary_on_light.svg": {
+        "sha256": "677c8053201e90471f0eda3fdd8364c7a598bcba72a7a6e61ed26cbc9ecadcaf",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612763/primary/L/logo.svg"
+      }
+    }
+  },
+  "MIA": {
+    "sources": {
+      "primary_on_dark.svg": {
+        "sha256": "bb56d6319628bed94e5154d20cef555b20321939e05c37f3af7d9fea486b74b3",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612748/primary/D/logo.svg"
+      },
+      "primary_on_light.svg": {
+        "sha256": "bb56d6319628bed94e5154d20cef555b20321939e05c37f3af7d9fea486b74b3",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612748/primary/L/logo.svg"
+      }
+    }
+  },
+  "MIL": {
+    "sources": {
+      "primary_on_dark.svg": {
+        "sha256": "1a315b6ea7d465c48fc58d42cea16732089422e631d8453e8f2945032d0ff4c5",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612749/primary/D/logo.svg"
+      },
+      "primary_on_light.svg": {
+        "sha256": "1a315b6ea7d465c48fc58d42cea16732089422e631d8453e8f2945032d0ff4c5",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612749/primary/L/logo.svg"
+      }
+    }
+  },
+  "MIN": {
+    "sources": {
+      "primary_on_dark.svg": {
+        "sha256": "e23cca4da95fe6a0629cd0a425e5dbefbf410948abf7499718d8fb858df5fa9d",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612750/primary/D/logo.svg"
+      },
+      "primary_on_light.svg": {
+        "sha256": "e23cca4da95fe6a0629cd0a425e5dbefbf410948abf7499718d8fb858df5fa9d",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612750/primary/L/logo.svg"
+      }
+    }
+  },
+  "NOP": {
+    "sources": {
+      "primary_on_dark.svg": {
+        "sha256": "3d74bfcf573428a09814ddae46db420a31dfe5e77faf75b0d7da7b1649ba93b1",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612740/primary/D/logo.svg"
+      },
+      "primary_on_light.svg": {
+        "sha256": "3d74bfcf573428a09814ddae46db420a31dfe5e77faf75b0d7da7b1649ba93b1",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612740/primary/L/logo.svg"
+      }
+    }
+  },
+  "NYK": {
+    "sources": {
+      "primary_on_dark.svg": {
+        "sha256": "42e914c5226c3ff71fa09fe018e8604a4abb6a935e1896e5414733d6cd5fcde9",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612752/primary/D/logo.svg"
+      },
+      "primary_on_light.svg": {
+        "sha256": "42e914c5226c3ff71fa09fe018e8604a4abb6a935e1896e5414733d6cd5fcde9",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612752/primary/L/logo.svg"
+      }
+    }
+  },
+  "OKC": {
+    "sources": {
+      "primary_on_dark.svg": {
+        "sha256": "fb684464e11e07989b3121108b54f12fafc85631644ad534f3fef53fd9927d89",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612760/primary/D/logo.svg"
+      },
+      "primary_on_light.svg": {
+        "sha256": "fb684464e11e07989b3121108b54f12fafc85631644ad534f3fef53fd9927d89",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612760/primary/L/logo.svg"
+      }
+    }
+  },
+  "ORL": {
+    "sources": {
+      "primary_on_dark.svg": {
+        "sha256": "aa38562ae665b4266e21f38698abdd2b45bb5a099e23246973a6bd8b71f056bf",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612753/primary/D/logo.svg"
+      },
+      "primary_on_light.svg": {
+        "sha256": "aa38562ae665b4266e21f38698abdd2b45bb5a099e23246973a6bd8b71f056bf",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612753/primary/L/logo.svg"
+      }
+    }
+  },
+  "PHI": {
+    "sources": {
+      "primary_on_dark.svg": {
+        "sha256": "2ef30b0b388620376f706dbaa87e279e1676c8089636b3665ee8d691bd1d92a6",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612755/primary/D/logo.svg"
+      },
+      "primary_on_light.svg": {
+        "sha256": "1e3fbaf4f2d48a4e8e3ce38cea06af858f1ac103e24d16cfb64728d39e29780d",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612755/primary/L/logo.svg"
+      }
+    }
+  },
+  "PHX": {
+    "sources": {
+      "primary_on_dark.svg": {
+        "sha256": "b4ec319fc4551e87c13bdfbe4eddcaeb38701a2a946fc977887669bbb6bb06e1",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612756/primary/D/logo.svg"
+      },
+      "primary_on_light.svg": {
+        "sha256": "b4ec319fc4551e87c13bdfbe4eddcaeb38701a2a946fc977887669bbb6bb06e1",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612756/primary/L/logo.svg"
+      }
+    }
+  },
+  "POR": {
+    "sources": {
+      "primary_on_dark.svg": {
+        "sha256": "65fbdafe950a7064f5303a1a45942b1519061cf9f56681e304763c81f87ca719",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612757/primary/D/logo.svg"
+      },
+      "primary_on_light.svg": {
+        "sha256": "65fbdafe950a7064f5303a1a45942b1519061cf9f56681e304763c81f87ca719",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612757/primary/L/logo.svg"
+      }
+    }
+  },
+  "SAC": {
+    "sources": {
+      "primary_on_dark.svg": {
+        "sha256": "36bcebbe9c06361db15791796bd6fd1ee39dd88047b1ecb7d3a00702617141cf",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612758/primary/D/logo.svg"
+      },
+      "primary_on_light.svg": {
+        "sha256": "36bcebbe9c06361db15791796bd6fd1ee39dd88047b1ecb7d3a00702617141cf",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612758/primary/L/logo.svg"
+      }
+    }
+  },
+  "SAS": {
+    "sources": {
+      "primary_on_dark.svg": {
+        "sha256": "c5e5d747ab0c3f76c45747e0333488036662caa03786498e781d04b8de9c6687",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612759/primary/D/logo.svg"
+      },
+      "primary_on_light.svg": {
+        "sha256": "c4df842e0d660dbc6dd1f8e523b1ca03dd2cfee314624071a6ab8425ab885271",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612759/primary/L/logo.svg"
+      }
+    }
+  },
+  "TOR": {
+    "sources": {
+      "primary_on_dark.svg": {
+        "sha256": "cb754caf37f8132f366e20d5af618575c314bc7d716253566d11932e4d723883",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612761/primary/D/logo.svg"
+      },
+      "primary_on_light.svg": {
+        "sha256": "cb754caf37f8132f366e20d5af618575c314bc7d716253566d11932e4d723883",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612761/primary/L/logo.svg"
+      }
+    }
+  },
+  "UTA": {
+    "sources": {
+      "primary_on_dark.svg": {
+        "sha256": "1f4de5a0f0dd090a397e713f80e0460dbbecd4b382fd05ac1bf2a7b291efb477",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612762/primary/D/logo.svg"
+      },
+      "primary_on_light.svg": {
+        "sha256": "f1df72b502f198c452085fc01dcfcb1f352a93a5fa085cb0314bd0fa1aea1358",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612762/primary/L/logo.svg"
+      }
+    }
+  },
+  "WAS": {
+    "sources": {
+      "primary_on_dark.svg": {
+        "sha256": "4e99c8f715c1af7e5cce17d507d5a4b21cf83f3c721cbb526f1b8597d58660b4",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612764/primary/D/logo.svg"
+      },
+      "primary_on_light.svg": {
+        "sha256": "4e99c8f715c1af7e5cce17d507d5a4b21cf83f3c721cbb526f1b8597d58660b4",
+        "source": "nbacdn",
+        "url": "https://cdn.nba.com/logos/nba/1610612764/primary/L/logo.svg"
+      }
+    }
+  },
+  "_color_table": {
+    "license": "CC BY-SA 4.0 (Wikipedia contributors); the logos themselves are team trademarks",
+    "sha256": "9af8f0d24da1de9ef99168005b37db28cb5eea91cae00011e904bbf5c3e45872",
+    "url": "https://en.wikipedia.org/w/index.php?title=Module:Sports_color/basketball&oldid=1386095329&action=raw"
+  }
+}

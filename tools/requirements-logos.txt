@@ -6,6 +6,8 @@
 #   python tools/render_mlb_logo_variants.py # composite the 20x20 base + alt tiles
 #   python tools/fetch_nfl_logos.py          # the same for the NFL
 #   python tools/render_nfl_logo_variants.py
+#   python tools/fetch_nba_logos.py          # and the NBA
+#   python tools/render_nba_logo_variants.py
 #
 # The fetch tools use only the standard library; the render steps need:
 cairosvg==2.9.0

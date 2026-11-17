@@ -36,6 +36,9 @@ class LogoSource(StrEnumMixin, str, Enum):
 
     MLBSTATIC = "mlbstatic"  # MLB's static CDN (edit-quality, team-id keyed)
     WIKIMEDIA = "wikimedia"  # a club mark the CDN lacks (HOU's bare cap, the BOS socks)
+    NBA_CDN = "nbacdn"  # the NBA's logo CDN (each club's clean primary mark, team-id keyed)
+    ESPN = "espn"  # ESPN's scoreboard marks, where the league's own reads poorly (the BOS shamrock)
+    CURATED = "curated"  # a file the user picked by hand; the manifest's URL says where
 
 
 class LogoVariant(StrEnumMixin, str, Enum):

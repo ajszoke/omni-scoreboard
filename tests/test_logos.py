@@ -15,7 +15,7 @@ def test_logo_surface_members() -> None:
 
 
 def test_logo_source_members_and_string_value() -> None:
-    assert {s.value for s in LogoSource} == {"mlbstatic", "wikimedia"}
+    assert {s.value for s in LogoSource} == {"mlbstatic", "wikimedia", "nbacdn", "espn", "curated"}
     assert LogoSource.WIKIMEDIA.value == "wikimedia"  # tagged into the cache manifest as a plain string
 
 
