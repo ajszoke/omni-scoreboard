@@ -109,7 +109,9 @@ class CardFactory:
     """Turns domain game state into renderable cards.
 
     Default min/max on-screen durations are configurable so device profiles can
-    tune dwell time without touching call sites.
+    tune dwell time without touching call sites. Every card's id and dedupe key
+    start with its game's full identity (``league:source:raw``), so games from two
+    leagues or sources never share a key, even when their raw ids are equal.
     """
 
     live_min_display: DurationSeconds = DurationSeconds(8)
@@ -155,7 +157,7 @@ class CardFactory:
             last_pitch=state.last_pitch,
             due_up=state.due_up,
         )
-        key = f"{game.id.raw}:live"
+        key = f"{game.id}:live"
         return ScoreboardCard(
             id=CardId(key),
             kind=CardKind.LIVE_GAME,
@@ -186,7 +188,7 @@ class CardFactory:
         countdown from the render clock, so one card stays correct across ticks.
         """
         payload = PregameCardPayload(scheduled_start=game.scheduled_start, away=away, home=home)
-        key = f"{game.id.raw}:pregame"
+        key = f"{game.id}:pregame"
         return ScoreboardCard(
             id=CardId(key),
             kind=CardKind.PREGAME,
@@ -230,7 +232,7 @@ class CardFactory:
             home_line=TeamLinescore(runs=state.home_score, hits=state.home_hits, errors=state.home_errors),
             inning=state.inning,
         )
-        key = f"{game.id.raw}:final"
+        key = f"{game.id}:final"
         return ScoreboardCard(
             id=CardId(key),
             kind=CardKind.FINAL,
@@ -298,8 +300,11 @@ class CardFactory:
 
     @staticmethod
     def big_play_key(game: TeamGame, event: BaseballGameEvent) -> DedupeKey:
-        """The dedupe key of the big-play card for ``event``, whether or not it has been built."""
-        return DedupeKey(f"{game.id.raw}:bigplay:{event.id.raw}")
+        """The dedupe key of the big-play card for ``event``, whether or not it has been built.
+
+        The game's full identity scopes the key; the event's own id only has to be unique within its game.
+        """
+        return DedupeKey(f"{game.id}:bigplay:{event.id.raw}")
 
     def no_hitter(
         self,
@@ -319,7 +324,7 @@ class CardFactory:
         ends. One card per game (keyed `:nohitter`), refreshed as the bid carries deeper.
         """
         payload = NoHitterCardPayload(pitching_side=pitching_side, through_inning=through_inning, perfect=perfect)
-        key = f"{game.id.raw}:nohitter"
+        key = f"{game.id}:nohitter"
         return ScoreboardCard(
             id=CardId(key),
             kind=CardKind.NO_HITTER,
@@ -353,7 +358,7 @@ class CardFactory:
         (keyed `:status`), refreshed while the game stays paused.
         """
         payload = StatusCardPayload(status=status)
-        key = f"{game.id.raw}:status"
+        key = f"{game.id}:status"
         return ScoreboardCard(
             id=CardId(key),
             kind=CardKind.STATUS,

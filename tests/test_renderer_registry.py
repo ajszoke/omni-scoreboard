@@ -75,7 +75,7 @@ def test_render_routes_to_the_registered_renderer() -> None:
     registry = RendererRegistry()
     registry.register(Sport.BASEBALL, CardKind.LIVE_GAME, renderer)
     registry.render(_live_card(), CTX, RecordingCanvas(128, 64))
-    assert renderer.calls == [("g1:live", QUAD)]
+    assert renderer.calls == [("mlb:mlb_statsapi:g1:live", QUAD)]
 
 
 def test_render_rejects_card_that_does_not_support_the_profile() -> None:

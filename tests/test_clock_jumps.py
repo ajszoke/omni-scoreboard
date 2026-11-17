@@ -152,7 +152,9 @@ def test_a_plausible_source_time_releases_a_play_the_delay_after_it_happened() -
     rig.answer("g1", at=10, away=1, events=(_event("g1:ab:1", source_time=T + 5 * S),))  # it reached us 5 s late
     rig.at(10)
     assert _plays(rig.at(49)) == []
-    assert _plays(rig.at(50)) == ["g1:bigplay:g1:ab:1"]  # it happened at 5: 45 s on, not 45 s after receipt
+    assert _plays(rig.at(50)) == [
+        "mlb:mlb_statsapi:g1:bigplay:g1:ab:1"
+    ]  # it happened at 5: 45 s on, not 45 s after receipt
 
 
 def test_a_forward_wall_jump_while_holding_releases_nothing_early() -> None:
@@ -171,10 +173,10 @@ def test_a_forward_wall_jump_while_holding_releases_nothing_early() -> None:
     rig.answer("g1", at=20, away=2, events=plays)
     assert _cards(rig.at(20)) == []
     assert _cards(rig.at(44)) == []
-    assert _cards(rig.at(45)) == ["g1:live", "g2:final"]
-    assert _cards(rig.at(50)) == ["g1:bigplay:g1:ab:1", "g1:live"]
+    assert _cards(rig.at(45)) == ["mlb:mlb_statsapi:g1:live", "mlb:mlb_statsapi:g2:final"]
+    assert _cards(rig.at(50)) == ["mlb:mlb_statsapi:g1:bigplay:g1:ab:1", "mlb:mlb_statsapi:g1:live"]
     assert _cards(rig.at(64)) == []
-    assert _cards(rig.at(65)) == ["g1:bigplay:g1:ab:2", "g1:live"]
+    assert _cards(rig.at(65)) == ["mlb:mlb_statsapi:g1:bigplay:g1:ab:2", "mlb:mlb_statsapi:g1:live"]
 
 
 def test_a_backward_wall_jump_holds_nothing_longer_and_brings_nothing_back() -> None:
@@ -189,16 +191,20 @@ def test_a_backward_wall_jump_holds_nothing_longer_and_brings_nothing_back() -> 
     plays = (_event("g1:ab:1", source_time=T + 5 * S), _event("g1:ab:2", source_time=T + 18 * S))
     rig.answer("g1", at=20, away=2, events=plays)  # its play's time is ten minutes ahead of our wall clock now
     rig.at(20)
-    assert _cards(rig.at(45)) == ["g1:live"]  # on time, not ten minutes late
-    assert _cards(rig.at(50)) == ["g1:bigplay:g1:ab:1", "g1:live"]
+    assert _cards(rig.at(45)) == ["mlb:mlb_statsapi:g1:live"]  # on time, not ten minutes late
+    assert _cards(rig.at(50)) == ["mlb:mlb_statsapi:g1:bigplay:g1:ab:1", "mlb:mlb_statsapi:g1:live"]
     assert _cards(rig.at(64)) == []
-    assert _cards(rig.at(65)) == ["g1:bigplay:g1:ab:2", "g1:live"]  # it waited from receipt
+    assert _cards(rig.at(65)) == [
+        "mlb:mlb_statsapi:g1:bigplay:g1:ab:2",
+        "mlb:mlb_statsapi:g1:live",
+    ]  # it waited from receipt
     rig.failing.add("g1")
     assert rig.at(70).pipeline.stale == (_game("g1").id,)  # its feed stops answering: stale from 70
     clock.jump(-10 * 60 * S)  # and the wall clock jumps back again
-    assert rig.at(189).pipeline.removed == () and rig.loop._queue.card("g1:live") is not None
+    assert rig.at(189).pipeline.removed == () and rig.loop._queue.card("mlb:mlb_statsapi:g1:live") is not None
     rig.at(190)
-    assert rig.loop._queue.card("g1:live") is None  # two minutes after it went stale, as measured, not twelve
+    # Two minutes after it went stale, as measured, not twelve:
+    assert rig.loop._queue.card("mlb:mlb_statsapi:g1:live") is None
 
 
 def test_a_board_that_booted_without_the_right_time_waits_the_full_delay_from_receipt() -> None:
@@ -212,9 +218,11 @@ def test_a_board_that_booted_without_the_right_time_waits_the_full_delay_from_re
     rig.at(10)
     clock.set(T + 20 * S)  # the clock is set right
     assert _cards(rig.at(20)) == []
-    assert _cards(rig.at(45)) == ["g1:live"]
+    assert _cards(rig.at(45)) == ["mlb:mlb_statsapi:g1:live"]
     assert _plays(rig.at(54)) == []
-    assert _plays(rig.at(55)) == ["g1:bigplay:g1:ab:1"]  # its receipt (10) + the delay: not months away, not early
+    assert _plays(rig.at(55)) == [
+        "mlb:mlb_statsapi:g1:bigplay:g1:ab:1"
+    ]  # its receipt (10) + the delay: not months away, not early
 
 
 @pytest.mark.parametrize("off, released, aired", [(60, 50, 53), (-60, 55, 55)])
@@ -231,7 +239,7 @@ def test_a_wall_clock_off_since_boot_never_airs_a_play_sooner_than_the_delay_aft
     rig.answer("g1", at=0)
     rig.at(0)
     rig.answer("g1", at=10, away=1, events=(_event("g1:ab:1", source_time=T + 5 * S),))
-    assert _released_and_aired(rig, "g1:bigplay:g1:ab:1", start=10, until=60) == (released, aired)
+    assert _released_and_aired(rig, "mlb:mlb_statsapi:g1:bigplay:g1:ab:1", start=10, until=60) == (released, aired)
 
 
 @pytest.mark.parametrize("jump", [120, -120])
@@ -244,7 +252,7 @@ def test_a_two_minute_wall_jump_while_a_play_is_held_moves_its_release_neither_w
     rig.at(10)  # held: 5 s old by the source's clock, it may clear the delay at 50
     rig.at(20)
     clock.jump(jump * S)
-    released, aired = _released_and_aired(rig, "g1:bigplay:g1:ab:1", start=21, until=70)
+    released, aired = _released_and_aired(rig, "mlb:mlb_statsapi:g1:bigplay:g1:ab:1", start=21, until=70)
     assert released == 50 and aired == 53  # as without the jump: the live card, up since 45, has its minimum turn
 
 
@@ -258,7 +266,7 @@ def test_a_play_without_its_end_time_waits_the_full_delay_from_receipt(ended: in
     rig.answer_from("g1", _statsapi(0), at=0)
     rig.at(0)
     rig.answer_from("g1", _statsapi(100, _home_run(started=0, ended=ended), home=1), at=100)
-    assert _released_and_aired(rig, "g1:bigplay:g1:ab:40", start=100, until=150) == (aired, aired)
+    assert _released_and_aired(rig, "mlb:mlb_statsapi:g1:bigplay:g1:ab:40", start=100, until=150) == (aired, aired)
 
 
 @pytest.mark.parametrize("jump, aired", [(0, 30), (60, 75)])
@@ -276,4 +284,4 @@ def test_a_late_play_received_while_the_wall_clock_is_suspect_waits_the_full_del
     clock.jump(jump * S)
     rig.at(21)
     rig.answer("g1", at=30, away=1, events=(_event("g1:ab:1", source_time=T - 20 * S),))
-    assert _released_and_aired(rig, "g1:bigplay:g1:ab:1", start=30, until=80) == (aired, aired)
+    assert _released_and_aired(rig, "mlb:mlb_statsapi:g1:bigplay:g1:ab:1", start=30, until=80) == (aired, aired)

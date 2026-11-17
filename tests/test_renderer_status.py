@@ -64,7 +64,7 @@ def _render(card: ScoreboardCard[StatusCardPayload], profile: PanelProfile) -> R
 def test_factory_builds_a_status_card() -> None:
     card = _card()
     assert card.kind is CardKind.STATUS
-    assert card.dedupe_key.raw == "g1:status"  # one per game, refreshed while paused
+    assert card.dedupe_key.raw == "mlb:mlb_statsapi:g1:status"  # one per game, refreshed while paused
     assert card.timing.expires_at is None  # lives until the pipeline removes it (resume / final)
     assert card.attention.mode is AttentionMode.NORMAL  # a paused game sits in normal rotation
     assert card.layout_support.compromise_notes == ()  # matchup + banner fit every profile

@@ -40,6 +40,7 @@ from omni.app.trace import DecisionTracer
 from omni.cards.factory import CardFactory
 from omni.core.clock import Clock, MonotonicTime, Pacer
 from omni.core.time import DurationSeconds
+from omni.preferences.favorites import Favorites
 from omni.providers.base import Provider, ScopeSource
 from omni.queue.delay_policy import DelayPolicy
 from omni.queue.priority import PriorityScorer
@@ -60,7 +61,7 @@ def build_loop(
     fetch_feed: FeedFetcher,
     sink: DisplaySink,
     *,
-    favorites: frozenset[str] = frozenset(),
+    favorites: Favorites = Favorites(),
     broadcast_lag: DurationSeconds = DurationSeconds(45),
     max_age: DurationSeconds = DurationSeconds(120),
     backoff: BackoffPolicy | None = None,
@@ -123,7 +124,7 @@ def build_planned_loop(
     sink: DisplaySink,
     *,
     meter: bool = False,
-    favorites: frozenset[str] = frozenset(),
+    favorites: Favorites = Favorites(),
     broadcast_lag: DurationSeconds = DurationSeconds(45),
     logos: LogoStore | None = None,
     display_timezone: tzinfo | None = None,

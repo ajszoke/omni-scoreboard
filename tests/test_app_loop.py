@@ -324,7 +324,7 @@ def test_a_card_without_two_team_rows_has_no_matchup_treatment() -> None:
     )
     loop, _, _ = _build(lag=0)
     loop.refresh(_at(T))
-    card = loop._queue.card(f"{_game().id.raw}:live")
+    card = loop._queue.card(f"{_game().id}:live")
     assert card is not None
     golfing = dataclasses.replace(card, contest=golf)
     assert _treatment(golfing, RenderContext(profile=QUAD, now=T)) is None

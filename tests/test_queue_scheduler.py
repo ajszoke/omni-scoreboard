@@ -73,9 +73,9 @@ def _sibling(
     """A second card for the SAME contest (same group, different dedupe key)."""
     return dataclasses.replace(
         card,
-        id=CardId(f"{card.contest.id.raw}:{suffix}"),
+        id=CardId(f"{card.contest.id}:{suffix}"),
         kind=CardKind.BIG_PLAY,
-        dedupe_key=DedupeKey(f"{card.contest.id.raw}:{suffix}"),
+        dedupe_key=DedupeKey(f"{card.contest.id}:{suffix}"),
         priority=CardPriority(band=band, score=0.0),
     )
 
@@ -92,7 +92,7 @@ def test_empty_queue_returns_none() -> None:
 def test_ingest_dedupes_by_key_latest_wins() -> None:
     queue = InterleavedCardQueue()
     queue.ingest(_card("g1", score=1.0))
-    queue.ingest(_card("g1", score=99.0))  # same dedupe key "g1:live"
+    queue.ingest(_card("g1", score=99.0))  # same dedupe key "mlb:mlb_statsapi:g1:live"
     assert len(queue) == 1
     chosen = queue.next_card(_at(NOW), QUAD)
     assert chosen is not None and chosen.priority.score == 99.0
@@ -215,7 +215,7 @@ def test_rotation_resumes_after_burst_card_removed() -> None:
     queue.ingest(_card("g2"))
     queue.ingest(_card("walkoff", band=DisplayPriority.ALERT, attention=_BURST_8S))
     assert _shown(queue.next_card(_at(NOW), QUAD)) == "walkoff"  # bursting
-    queue.remove("walkoff:live")
+    queue.remove("mlb:mlb_statsapi:walkoff:live")
     resumed = {_shown(queue.next_card(_at(NOW), QUAD)) for _ in range(4)}
     assert resumed == {"g1", "g2"}
 
@@ -231,15 +231,15 @@ def test_sibling_cards_for_one_contest_share_airtime() -> None:
         card = queue.next_card(_at(NOW), QUAD)
         assert card is not None
         shown[card.dedupe_key.raw] += 1
-    assert shown["g1:live"] > 0 and shown["g1:bigplay"] > 0  # neither sibling starves
+    assert shown["mlb:mlb_statsapi:g1:live"] > 0 and shown["mlb:mlb_statsapi:g1:bigplay"] > 0  # neither sibling starves
 
 
 def test_removing_a_card_forgets_its_recency() -> None:
     queue = InterleavedCardQueue()
     queue.ingest(_card("g1"))
     queue.next_card(_at(NOW), QUAD)  # records recency for g1
-    queue.remove("g1:live")
-    assert queue.aired("g1:live")  # until a refresh publishes the change
+    queue.remove("mlb:mlb_statsapi:g1:live")
+    assert queue.aired("mlb:mlb_statsapi:g1:live")  # until a refresh publishes the change
     queue.publish()
     assert queue._card_last_shown == {} and queue._group_last_shown == {}  # no leak
 
@@ -388,9 +388,9 @@ def test_a_card_reads_back_as_its_newest_version() -> None:
     queue = InterleavedCardQueue()
     queue.ingest(_card("g1", score=1.0))
     queue.ingest(_card("g1", score=2.0))
-    newest = queue.card("g1:live")
+    newest = queue.card("mlb:mlb_statsapi:g1:live")
     assert newest is not None and newest.priority.score == 2.0
-    assert queue.card("g2:live") is None
+    assert queue.card("mlb:mlb_statsapi:g2:live") is None
 
 
 def test_a_reason_ranks_a_takeover_over_a_reminder_over_rotation() -> None:
@@ -429,10 +429,11 @@ def test_a_preferred_card_takes_its_rotation_turn_first_if_it_can_air() -> None:
     queue.publish()
     usual = queue.peek(_at(NOW), QUAD)
     assert usual is not None
-    other = "g2:live" if _shown(usual.card) == "g1" else "g1:live"
+    other = "mlb:mlb_statsapi:g2:live" if _shown(usual.card) == "g1" else "mlb:mlb_statsapi:g1:live"
     preferred = queue.peek(_at(NOW), QUAD, prefer=other)
     assert preferred is not None and preferred.card.dedupe_key.raw == other
-    assert queue.peek(_at(NOW), QUAD, prefer="later:live") == usual  # not available yet: the usual turn
+    # Not available yet: the usual turn.
+    assert queue.peek(_at(NOW), QUAD, prefer="mlb:mlb_statsapi:later:live") == usual
 
 
 # --- required ordering and a usable window --------------------------------------------
@@ -440,7 +441,7 @@ def test_a_preferred_card_takes_its_rotation_turn_first_if_it_can_air() -> None:
 
 def _final(gid: str, *, ended: datetime, after: tuple[DedupeKey, ...] = ()) -> ScoreboardCard[LiveBaseballCardPayload]:
     card = _card(gid, available_at=ended)
-    key = f"{gid}:final"
+    key = f"{card.contest.id}:final"
     return dataclasses.replace(card, id=CardId(key), kind=CardKind.FINAL, dedupe_key=DedupeKey(key), after=after)
 
 
@@ -459,12 +460,13 @@ def test_a_card_waits_for_an_eligible_predecessor_to_air() -> None:
     queue.ingest(_final("g1", ended=NOW, after=(walk_off.dedupe_key,)))
     queue.ingest(_card("g2"))
     order = [card.dedupe_key.raw for card in (queue.next_card(_at(NOW), QUAD) for _ in range(4)) if card is not None]
-    assert order.index("g1:bigplay") < order.index("g1:final")  # the walk-off airs before its final
+    # The walk-off airs before its final:
+    assert order.index("mlb:mlb_statsapi:g1:bigplay") < order.index("mlb:mlb_statsapi:g1:final")
 
 
 def test_a_predecessor_that_cannot_air_holds_nothing_up() -> None:
     queue = InterleavedCardQueue()
-    gone = DedupeKey("g1:bigplay:gone")
+    gone = DedupeKey("mlb:mlb_statsapi:g1:bigplay:gone")
     unsupported = dataclasses.replace(_card("g9", profiles=[PanelProfile.SINGLE_64X32]), dedupe_key=DedupeKey("g9:x"))
     queue.ingest(unsupported)
     queue.ingest(_final("g1", ended=NOW, after=(gone, unsupported.dedupe_key)))
@@ -506,7 +508,7 @@ def test_a_predecessor_too_late_to_start_holds_nothing_up() -> None:
     queue.ingest(_final("g1", ended=NOW, after=(walk_off.dedupe_key,)))
     queue.publish()
     pick = queue.peek(_at(NOW), QUAD)  # 5 s left against its 8 s minimum: it can't start, so it doesn't block
-    assert pick is not None and pick.card.dedupe_key.raw == "g1:final"
+    assert pick is not None and pick.card.dedupe_key.raw == "mlb:mlb_statsapi:g1:final"
 
 
 def test_a_card_with_less_time_left_than_its_minimum_is_passed_over() -> None:

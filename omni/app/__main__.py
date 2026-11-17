@@ -1,6 +1,6 @@
 """``python -m omni.app`` — run the live scoreboard on the RGBMatrixEmulator.
 
-    python -m omni.app --emulated --profile quad_128x64 --favorite COL --favorite LAD
+    python -m omni.app --emulated --profile quad_128x64 --favorite mlb:ATL --favorite mlb:COL
 
 Polls the MLB StatsAPI, runs the delay-safe pipeline, and rotates cards on the
 emulator (browser at http://localhost:8888/). This is the thin I/O shell around the
@@ -10,6 +10,11 @@ unless a bigger moment takes over, and frames draw ``--fps`` times a second, so 
 and countdowns move. Each change on the board is traced. The network is read by a poller on its
 own threads, on the cadences in `omni.app.planned_mlb.MLB_POLICIES`, pregame details and odds
 included; a refresh reads its latest answers whenever one lands, and never waits on a request.
+
+Each ``--favorite`` is a league and a team, and their order is the rank within each league: above, ATL
+is MLB's first and COL its second. A bare team (``--favorite COL``) is read as MLB's, the only league
+the flag once meant, and the app says so as it starts. An unknown league or team stops it with a usage
+error that names the entry.
 
 The live win meter is off unless ``--meter`` is given. With it, and with ``OMNI_CLOUD_URL`` and
 ``OMNI_CLOUD_TOKEN`` in the environment or a git-ignored ``.env``, the meter reads Omni's market
@@ -34,6 +39,7 @@ from omni.core.enum import PanelProfile
 from omni.core.env import read_env_file
 from omni.core.time import DurationSeconds
 from omni.panels.geometry import geometry_for
+from omni.preferences.favorites import parse_favorites
 from omni.renderers.image import LogoStore
 from omni.renderers.text_lane import DEFAULT_MARQUEE, ScrollSpeed
 from omni.tower.board import BoardPolicy
@@ -50,7 +56,11 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         "--emulated", action="store_true", help="render on the RGBMatrixEmulator (the only target today)"
     )
     parser.add_argument(
-        "--favorite", action="append", default=[], metavar="ABBR", help="favorite team abbreviation (repeatable)"
+        "--favorite",
+        action="append",
+        default=[],
+        metavar="LEAGUE:ABBR",
+        help="a favorite team, e.g. mlb:ATL or nfl:CAR (repeatable; the order is the rank, and a bare ABBR is MLB)",
     )
     parser.add_argument("--delay", type=int, default=45, help="TV broadcast delay in seconds (default 45)")
     parser.add_argument(
@@ -81,7 +91,12 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         help="how fast scrolling lines move at their peak: slow, medium (1.25x) or fast (1.5x)",
     )
     parser.add_argument("--fps", type=float, default=10.0, help="frames drawn a second (marquees move this fast)")
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    try:
+        args.favorites = parse_favorites(args.favorite, note=lambda line: print(f"omni.app: {line}"))
+    except ValueError as exc:
+        parser.error(str(exc))
+    return args
 
 
 def _app_version() -> str:  # pragma: no cover - reads the checkout
@@ -143,7 +158,7 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
         provider,
         market=market,
         odds=odds.lines_for if odds is not None else None,
-        favorites=frozenset(args.favorite),
+        favorites=args.favorites,
     )
 
     from RGBMatrixEmulator import RGBMatrix, RGBMatrixOptions
@@ -163,7 +178,7 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
         planned,
         sink,
         meter=args.meter,
-        favorites=frozenset(args.favorite),
+        favorites=args.favorites,
         broadcast_lag=DurationSeconds(args.delay),
         logos=LogoStore(),  # resolve committed team tiles from assets/ (lazy, cached)
         display_timezone=zone,
@@ -171,7 +186,7 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
         policy=BoardPolicy(slot=timedelta(seconds=args.slot)),
     )
     print(
-        f"omni.app: {profile.value}, delay {args.delay}s, favorites {sorted(args.favorite)}, meter {meter}"
+        f"omni.app: {profile.value}, delay {args.delay}s, favorites {args.favorites}, meter {meter}"
         " — http://localhost:8888/"
     )
     run_forever(

@@ -33,12 +33,13 @@ from omni.domain.contest import TeamGame
 from omni.events.baseball import BaseballGameEvent, BaseballGameEventType, BaseballPlayPayload
 from omni.providers.mlb_statsapi import _event_importance
 from omni.providers.mlb_teams import MlbTeamRegistry
+from omni.preferences.favorites import Favorites
 from omni.replay.timeline import GameFrame, Outage, Timeline
 
 T0 = datetime(2026, 6, 17, 23, 0, tzinfo=timezone.utc)
 END = T0 + timedelta(minutes=55)
 LAG = DurationSeconds(45)
-FAVORITES = frozenset({"ATL", "COL"})
+FAVORITES = Favorites({League.MLB: ("ATL", "COL")})
 SOURCE = SourceRef("mlb_statsapi", "https://statsapi.mlb.com")
 
 _REG = MlbTeamRegistry.from_color_file()

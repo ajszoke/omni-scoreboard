@@ -29,6 +29,7 @@ from omni.core.time import DurationSeconds
 from omni.domain.baseball import BaseballBaseState, BaseballCount, BaseballGameState, InningPhase
 from omni.domain.contest import TeamGame
 from omni.events.baseball import LiveBaseballFeed
+from omni.preferences.favorites import Favorites
 from omni.providers.base import ProviderError, ProviderUpdate
 from omni.providers.mlb_teams import MlbTeamRegistry
 from omni.queue.delay_policy import DelayPolicy
@@ -153,7 +154,7 @@ def _loop(
     slate: _Slate,
     *,
     lag: int = 0,
-    favorites: frozenset[str] = frozenset(),
+    favorites: Favorites = Favorites(),
     policy: BoardPolicy = BoardPolicy(),
 ) -> tuple[AppLoop, _PausingQueue, _Drawing]:
     queue = _PausingQueue()
@@ -216,15 +217,22 @@ def test_a_paint_between_two_final_inserts_sees_the_refresh_before_and_the_earli
         generations.append(queue.published.generation)
         seen.append(loop.paint(_at(80)))
 
-    queue.after, queue.pause = "bos-nyy:final", frame_thread
+    queue.after, queue.pause = "mlb:mlb_statsapi:bos-nyy:final", frame_thread
     before = queue.published.generation
     refresh = loop.refresh(_at(80))  # both results show: bos-nyy's is staged first
     [mid] = seen
     assert generations == [before] and queue.published.generation == before + 1  # one refresh, one view
     assert mid.shown is not None and mid.shown.raw.endswith(":live")  # the last whole refresh: no final yet
-    assert [card.raw for card, _ in refresh.pipeline.ends] == ["bos-nyy:final", "atl-nym:final"]
+    assert [card.raw for card, _ in refresh.pipeline.ends] == [
+        "mlb:mlb_statsapi:bos-nyy:final",
+        "mlb:mlb_statsapi:atl-nym:final",
+    ]
     finals = [_up(loop.paint(_at(seconds))) for seconds in (80, 88, 100)]
-    assert finals == [None, "atl-nym:final", "bos-nyy:final"]  # the live card's minimum, then in order
+    assert finals == [
+        None,
+        "mlb:mlb_statsapi:atl-nym:final",
+        "mlb:mlb_statsapi:bos-nyy:final",
+    ]  # the live card's minimum, then in order
 
 
 def test_a_paint_between_the_new_cards_and_their_health_sees_the_old_cards_with_the_old_health() -> None:
@@ -278,12 +286,17 @@ def test_a_card_replaced_while_its_first_frame_is_drawn_counts_from_the_new_vers
 
     drawn.while_drawing = scored
     painted = loop.paint(_at(0))
-    assert painted.presented is None and not queue.aired("col-lad:live")  # the old version doesn't book the new
+    # The old version doesn't book the new:
+    assert painted.presented is None and not queue.aired("mlb:mlb_statsapi:col-lad:live")
     after = loop.paint(_at(0.1))
     assert after.presented is not None and after.presented.at == T + timedelta(seconds=0.1)
     [up] = after.changes
     card = up.segment.frames[0]
-    assert isinstance(card, ScoreboardCard) and card.payload.away_line.runs == 3 and queue.aired("col-lad:live")
+    assert (
+        isinstance(card, ScoreboardCard)
+        and card.payload.away_line.runs == 3
+        and queue.aired("mlb:mlb_statsapi:col-lad:live")
+    )
 
 
 # --- takeovers, the recovery turn, and transients ---------------------------------------------------------
@@ -380,36 +393,40 @@ def test_a_lone_reminder_due_again_leaves_at_its_turn_and_returns_as_a_new_beat_
 
 def test_a_live_card_its_own_final_replaced_keeps_its_minimum_then_the_final_airs_in_its_place() -> None:
     slate = _Slate("atl-nym", "bos-nyy")
-    loop, _, _ = _loop(slate, favorites=frozenset({"ATL"}))
-    assert _up(_step(loop, 0)) == "atl-nym:live"
+    loop, _, _ = _loop(slate, favorites=Favorites({League.MLB: ("ATL",)}))
+    assert _up(_step(loop, 0)) == "mlb:mlb_statsapi:atl-nym:live"
     slate.status["atl-nym"] = GameStatus.FINAL
     held = _step(loop, 4)  # its result shows: the final replaces the live card
-    assert held.shown == CardId("atl-nym:live") and held.changes == ()  # the game's last frame, through its minimum
+    # The game's last frame, through its minimum:
+    assert held.shown == CardId("mlb:mlb_statsapi:atl-nym:live") and held.changes == ()
     handed = loop.paint(_at(8))
-    assert _down(handed) == ("atl-nym:live", EndReason.INVALIDATED, timedelta(seconds=8))
-    assert _up(handed) == "atl-nym:final"  # in its place, ahead of the other game's turn
+    assert _down(handed) == ("mlb:mlb_statsapi:atl-nym:live", EndReason.INVALIDATED, timedelta(seconds=8))
+    assert _up(handed) == "mlb:mlb_statsapi:atl-nym:final"  # in its place, ahead of the other game's turn
     assert handed.presented is not None and handed.presented.reason is SelectionReason.ROTATION
 
 
 def test_a_live_card_hands_off_to_the_final_that_ended_first_while_its_own_waits_its_order() -> None:
     slate = _Slate("atl-nym", "bos-nyy")
-    loop, _, _ = _loop(slate, lag=30, favorites=frozenset({"ATL"}))
+    loop, _, _ = _loop(slate, lag=30, favorites=Favorites({League.MLB: ("ATL",)}))
     _step(loop, 0)
-    assert _up(_step(loop, 30)) == "atl-nym:live"
+    assert _up(_step(loop, 30)) == "mlb:mlb_statsapi:atl-nym:live"
     slate.status["bos-nyy"] = GameStatus.FINAL
     _step(loop, 31)
     slate.status["atl-nym"] = GameStatus.FINAL
     _step(loop, 32)
-    assert [_up(_step(loop, seconds)) for seconds in (42, 54)] == ["bos-nyy:live", "atl-nym:live"]
+    assert [_up(_step(loop, seconds)) for seconds in (42, 54)] == [
+        "mlb:mlb_statsapi:bos-nyy:live",
+        "mlb:mlb_statsapi:atl-nym:live",
+    ]
     revealed = loop.refresh(_at(61))
     assert revealed.pipeline.ends == (
-        (CardId("bos-nyy:final"), GameEnd(T + timedelta(seconds=31), EndBasis.FIRST_SEEN)),
+        (CardId("mlb:mlb_statsapi:bos-nyy:final"), GameEnd(T + timedelta(seconds=31), EndBasis.FIRST_SEEN)),
     )
     assert loop.paint(_at(61)).changes == ()  # the other game's final waits for this card's turn
     handed = _step(loop, 62)  # its own result shows, after its minimum: it hands off at once
-    assert _down(handed) == ("atl-nym:live", EndReason.INVALIDATED, timedelta(seconds=8))
-    assert _up(handed) == "bos-nyy:final"  # the game that ended first goes first
-    assert _up(_step(loop, 74)) == "atl-nym:final"
+    assert _down(handed) == ("mlb:mlb_statsapi:atl-nym:live", EndReason.INVALIDATED, timedelta(seconds=8))
+    assert _up(handed) == "mlb:mlb_statsapi:bos-nyy:final"  # the game that ended first goes first
+    assert _up(_step(loop, 74)) == "mlb:mlb_statsapi:atl-nym:final"
 
 
 def test_a_predecessor_too_late_to_start_is_traced_and_holds_its_final_up_no_longer() -> None:
@@ -419,7 +436,7 @@ def test_a_predecessor_too_late_to_start_is_traced_and_holds_its_final_up_no_lon
     queue.ingest_all((walk_off, final))
     refresh = loop.refresh(_at(0))
     assert refresh.unseen == (Missed(walk_off, MissReason.TOO_LATE),)
-    assert _up(loop.paint(_at(0))) == "col-lad:final"
+    assert _up(loop.paint(_at(0))) == "mlb:mlb_statsapi:col-lad:final"
 
 
 def test_a_predecessor_that_failed_to_draw_holds_nothing_up_and_is_traced_with_why_when_it_runs_out() -> None:
@@ -430,7 +447,7 @@ def test_a_predecessor_that_failed_to_draw_holds_nothing_up_and_is_traced_with_w
     queue.ingest_all((walk_off, final))
     failed = _step(loop, 0)
     assert failed.render_error is not None and _down(failed)[1] is EndReason.UNDRAWN
-    assert _up(loop.paint(_at(0))) == "col-lad:final"
+    assert _up(loop.paint(_at(0))) == "mlb:mlb_statsapi:col-lad:final"
     assert loop.refresh_deadline(_at(0)) == MonotonicTime(22.0)  # when it can no longer start
     refresh = loop.refresh(_at(22.5))
     assert refresh.unseen == (Missed(walk_off, MissReason.UNDRAWN),)

@@ -299,7 +299,7 @@ def test_one_league_offline_leaves_the_other_s_cards_and_health_alone() -> None:
         painted = board.loop.paint(board.clock.read())
         assert refresh.health.source is SourceHealth.FRESH  # the board's health is MLB's
         assert _league(refresh, League.MLB).source is SourceHealth.FRESH
-        assert painted.shown is not None and painted.shown.raw == "g1:live" and not painted.stale
+        assert painted.shown is not None and painted.shown.raw == "mlb:mlb_statsapi:g1:live" and not painted.stale
         nba_timeline.append((second, _league(refresh, League.NBA).source))
     assert _first(nba_timeline, SourceHealth.STALE) == 125  # over its 2 minutes since its last answer
     assert _first(nba_timeline, SourceHealth.OFFLINE) == 605  # over 10

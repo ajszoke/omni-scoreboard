@@ -323,7 +323,7 @@ class LiveBaseballPipeline:
         for game in upcoming:
             details, detail_warnings = self._pregame_details_for(game, fetch_pregame_details)
             lines, line_warnings = self._game_lines_for(game, fetch_game_lines, now=now)
-            out.warnings.extend(f"{game.id.raw}: {warning}" for warning in (*detail_warnings, *line_warnings))
+            out.warnings.extend(f"{game.id}: {warning}" for warning in (*detail_warnings, *line_warnings))
             out.pregames.append(self._surface_pregame(game, details, lines, now=now))
 
         # Paused (delayed/suspended) games also card without a fetch — the banner reveals no score,
@@ -388,10 +388,10 @@ class LiveBaseballPipeline:
             feed = fetch_feed(game, at.utc)
         except ProviderError as exc:
             if report:
-                out.skipped.append(f"{game.id.raw}: {exc}")
+                out.skipped.append(f"{game.id}: {exc}")
             return None
         if report:
-            out.warnings.extend(f"{game.id.raw}: {warning}" for warning in feed.warnings)
+            out.warnings.extend(f"{game.id}: {warning}" for warning in feed.warnings)
         return feed
 
     def _final_game(
@@ -578,7 +578,7 @@ class LiveBaseballPipeline:
             return  # its cards are down for staleness: nothing goes back up until its feed is current again
         # The meter takes the newest reading that arrived no later than the state now on the card.
         win_prob, wp_warnings = self._safe_win_probability(game, *meters, visible=safe.arrival.received, at=at)
-        out.warnings.extend(f"{game.id.raw}: {warning}" for warning in wp_warnings)
+        out.warnings.extend(f"{game.id}: {warning}" for warning in wp_warnings)
         priority = self._scorer.score_live_baseball(game, safe.value)
         card = self._factory.live_baseball(game, safe.value, now=at.utc, priority=priority, win_probability=win_prob)
         self._queue.ingest(card)
@@ -700,7 +700,7 @@ class LiveBaseballPipeline:
         self._stale[game_id] = point
         if since is None and why:
             last = f" (its last ask: {feed.failing})" if feed is not None and feed.failing is not None else ""
-            out.warnings.append(f"{game_id.raw}: stale: {why}{last}")
+            out.warnings.append(f"{game_id}: stale: {why}{last}")
 
     def _enforce_staleness(self, game_id: LeagueScopedId, at: ClockReading) -> None:
         """A game whose live card isn't current: its cards are marked stale, and come down `STALE_FOR` after."""

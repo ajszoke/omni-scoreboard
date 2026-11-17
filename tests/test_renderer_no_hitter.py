@@ -69,7 +69,7 @@ def _render(card: ScoreboardCard[NoHitterCardPayload], profile: PanelProfile) ->
 def test_factory_builds_a_no_hitter_card() -> None:
     card = _card()
     assert card.kind is CardKind.NO_HITTER
-    assert card.dedupe_key.raw == "g1:nohitter"  # one per game, refreshed as it carries
+    assert card.dedupe_key.raw == "mlb:mlb_statsapi:g1:nohitter"  # one per game, refreshed as it carries
     assert card.source_event_ids == ()  # a standing condition, not a one-shot event
     assert card.timing.expires_at is None  # lives until the pipeline removes it
 

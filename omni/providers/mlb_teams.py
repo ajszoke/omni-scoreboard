@@ -23,7 +23,7 @@ from omni.domain.base import LogoAsset
 from omni.domain.teams import BaseballTeam
 from omni.providers.mlb_palette import FREED_BASE_METER_COLOR, LOGO_ALT_COLOR, LOGO_BASE_COLOR
 
-__all__ = ["MlbTeamRegistry"]
+__all__ = ["MLB_ABBREVIATIONS", "MlbTeamRegistry", "canonical_abbreviation"]
 
 _DEFAULT_SOURCE = SourceRef("mlb_statsapi", "https://statsapi.mlb.com")
 _DEFAULT_COLOR_FILE = Path(__file__).resolve().parents[2] / "colors" / "teams.example.json"
@@ -62,6 +62,17 @@ _TEAM_ID_INFO: dict[int, tuple[str, str]] = {
     147: ("NYY", "Yankees"),
     158: ("MIL", "Brewers"),
 }
+
+# Every current club's abbreviation, as StatsAPI spells it and every MLB `Team` carries it.
+MLB_ABBREVIATIONS = frozenset(abbreviation for abbreviation, _ in _TEAM_ID_INFO.values())
+
+
+def canonical_abbreviation(raw: str) -> str:
+    """A club's abbreviation in StatsAPI's spelling, from any case; `KeyError` for an unknown club."""
+    abbreviation = raw.strip().upper()
+    if abbreviation not in MLB_ABBREVIATIONS:
+        raise KeyError(raw)
+    return abbreviation
 
 
 class MlbTeamRegistry:

@@ -3,8 +3,8 @@
 One line per change, so a running board's log reads as a story rather than a heartbeat:
 
     refresh 19:05:12 in 0.0s: source fresh | next 19:05:31
-    up 19:05:12: mlb-745123:live (rotation) | away COL base tile meter #C4CED4 | home LAD base tile ...
-    down 19:05:24: mlb-745123:live (ran its time, 12.0s)
+    up 19:05:12: mlb:mlb_statsapi:745123:live (rotation) | away COL base tile meter #C4CED4 | home LAD ...
+    down 19:05:24: mlb:mlb_statsapi:745123:live (ran its time, 12.0s)
     frame 19:31:40: idle (nothing eligible)
 
 - A **refresh** line is written when the source's health, the number of games held in the TV delay, or
@@ -72,7 +72,7 @@ class DecisionTracer:
         for card in pipeline.corrections:
             self._log(f"  corrected: {card.raw}")
         for game in pipeline.unconfirmed:
-            self._log(f"  unconfirmed: {game.raw} (final on the schedule; its feed hasn't said so)")
+            self._log(f"  unconfirmed: {game} (final on the schedule; its feed hasn't said so)")
 
     def painted(self, painted: Painted) -> None:
         for change in painted.changes:

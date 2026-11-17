@@ -68,16 +68,16 @@ def test_a_card_that_left_before_it_aired_is_written_with_why() -> None:
     tracer = DecisionTracer(lines.append, timezone=timezone.utc)
     loop, _, _ = _build(lag=0)
     refresh = loop.refresh(_at(T))
-    card = loop._queue.card("g1:live")
+    card = loop._queue.card("mlb:mlb_statsapi:g1:live")
     assert card is not None
     tracer.refreshed(refresh, took=timedelta(0), next_at=LATER)
     unseen = (Missed(card, MissReason.TOO_LATE), Missed(card, MissReason.EXPIRED), Missed(card, MissReason.UNDRAWN))
     tracer.refreshed(dataclasses.replace(refresh, unseen=unseen), took=timedelta(0), next_at=LATER)
     assert lines[1:] == [
         lines[0],
-        "  unseen: g1:live (too late to start)",
-        "  unseen: g1:live (expired before it aired)",
-        "  unseen: g1:live (failed to draw)",
+        "  unseen: mlb:mlb_statsapi:g1:live (too late to start)",
+        "  unseen: mlb:mlb_statsapi:g1:live (expired before it aired)",
+        "  unseen: mlb:mlb_statsapi:g1:live (failed to draw)",
     ]
 
 
@@ -87,15 +87,15 @@ def test_a_final_revealed_is_written_with_when_its_game_ended_and_on_what_basis(
     refresh = _refresh()
     tracer.refreshed(refresh, took=timedelta(0), next_at=LATER)
     ends = (
-        (CardId("g1:final"), GameEnd(T - timedelta(seconds=40), EndBasis.DECISIVE_PLAY)),
-        (CardId("g2:final"), GameEnd(T, EndBasis.FIRST_SEEN)),
+        (CardId("mlb:mlb_statsapi:g1:final"), GameEnd(T - timedelta(seconds=40), EndBasis.DECISIVE_PLAY)),
+        (CardId("mlb:mlb_statsapi:g2:final"), GameEnd(T, EndBasis.FIRST_SEEN)),
     )
     pipeline = dataclasses.replace(refresh.pipeline, ends=ends)
     tracer.refreshed(dataclasses.replace(refresh, pipeline=pipeline), took=timedelta(0), next_at=LATER)
     assert lines[1:] == [
         lines[0],
-        "  final: g1:final ended 22:59:20 (its decisive play)",
-        "  final: g2:final ended 23:00:00 (first seen final)",
+        "  final: mlb:mlb_statsapi:g1:final ended 22:59:20 (its decisive play)",
+        "  final: mlb:mlb_statsapi:g2:final ended 23:00:00 (first seen final)",
     ]
 
 
@@ -107,20 +107,20 @@ def test_a_corrected_final_and_a_final_its_feed_hasnt_confirmed_are_written() ->
     waiting = dataclasses.replace(refresh.pipeline, unconfirmed=(_game("g2").id,))
     tracer.refreshed(dataclasses.replace(refresh, pipeline=waiting), took=timedelta(0), next_at=LATER)
     tracer.refreshed(dataclasses.replace(refresh, pipeline=waiting), took=timedelta(0), next_at=LATER)  # no change
-    corrected = dataclasses.replace(refresh.pipeline, corrections=(CardId("g1:final"),))
+    corrected = dataclasses.replace(refresh.pipeline, corrections=(CardId("mlb:mlb_statsapi:g1:final"),))
     tracer.refreshed(dataclasses.replace(refresh, pipeline=corrected), took=timedelta(0), next_at=LATER)
     assert lines[1:] == [
         lines[0],
-        "  unconfirmed: g2 (final on the schedule; its feed hasn't said so)",
+        "  unconfirmed: mlb:mlb_statsapi:g2 (final on the schedule; its feed hasn't said so)",
         lines[0],
-        "  corrected: g1:final",
+        "  corrected: mlb:mlb_statsapi:g1:final",
     ]
 
 
 def test_a_board_note_is_written_when_the_paint_made_it() -> None:
     lines: list[str] = []
     DecisionTracer(lines.append, timezone=timezone.utc).painted(
-        Painted(at=LATER, shown=CardId("g1:bigplay:g1:ab:3"), notes=(BoardNote.NO_BASE_CARD,))
+        Painted(at=LATER, shown=CardId("mlb:mlb_statsapi:g1:bigplay:g1:ab:3"), notes=(BoardNote.NO_BASE_CARD,))
     )
     assert lines == ["note 23:00:12: no base card for the recovery turn"]
 

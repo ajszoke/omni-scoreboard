@@ -49,6 +49,7 @@ from omni.core.time import local_date
 from omni.domain.baseball import GameLines, PregameDetails, WinProbability
 from omni.domain.contest import TeamGame
 from omni.events.baseball import LiveBaseballFeed
+from omni.preferences.favorites import Favorites
 from omni.providers.base import (
     Coverage,
     LocalDate,
@@ -145,7 +146,7 @@ class PlannedMlb:
         *,
         market: MarketReader | None = None,
         odds: OddsReader | None = None,
-        favorites: frozenset[str] = frozenset(),
+        favorites: Favorites = Favorites(),
     ) -> None:
         self._plan = plan
         self._clock = clock
@@ -273,5 +274,4 @@ class PlannedMlb:
         as if it were live (a final its feed hasn't confirmed)."""
         if game.status is not GameStatus.LIVE and not as_live:
             return PollPriority.BACKGROUND
-        favorite = game.away.abbreviation in self._favorites or game.home.abbreviation in self._favorites
-        return PollPriority.FOCUS if favorite else PollPriority.NORMAL
+        return PollPriority.FOCUS if self._favorites.of(game) is not None else PollPriority.NORMAL

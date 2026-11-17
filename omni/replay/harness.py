@@ -43,6 +43,7 @@ from omni.domain.contest import TeamGame
 from omni.cards.base import ScoreboardCard
 from omni.events.baseball import LiveBaseballFeed
 from omni.panels.geometry import geometry_for
+from omni.preferences.favorites import Favorites
 from omni.providers.base import ProviderError, ProviderUpdate
 from omni.queue.scheduler import SelectionReason
 from omni.renderers.canvas import Canvas, RecordingCanvas
@@ -112,7 +113,7 @@ def replay(
     tick: DurationSeconds,
     until: datetime | None = None,
     broadcast_lag: DurationSeconds = DurationSeconds(0),
-    favorites: frozenset[str] = frozenset(),
+    favorites: Favorites = Favorites(),
     policy: BoardPolicy = BoardPolicy(),
 ) -> list[TraceEntry]:
     """Drive the real `AppLoop` across ``timeline`` and sample what was on the panel every ``tick``.
@@ -149,7 +150,7 @@ def replay_decisions(
     profile: PanelProfile,
     until: datetime | None = None,
     broadcast_lag: DurationSeconds = DurationSeconds(0),
-    favorites: frozenset[str] = frozenset(),
+    favorites: Favorites = Favorites(),
     policy: BoardPolicy = BoardPolicy(),
     seek: Seek | None = None,
 ) -> list[str]:
@@ -209,7 +210,7 @@ def _drive(
     profile: PanelProfile,
     until: datetime | None,
     broadcast_lag: DurationSeconds,
-    favorites: frozenset[str],
+    favorites: Favorites,
     policy: BoardPolicy,
     observe: _Observer,
     *,
@@ -231,7 +232,7 @@ def _drive(
             arrivals.clear()  # the first answer after the outage is new, however old the state in it
             raise ProviderError("replay outage")
         if frame is None or frame.state is None:
-            raise ProviderError(f"no replay state for {game.id.raw}")
+            raise ProviderError(f"no replay state for {game.id}")
         return LiveBaseballFeed(
             state=frame.state,
             events=frame.events,

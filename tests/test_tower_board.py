@@ -169,7 +169,7 @@ def test_a_reminder_takes_the_board_from_rotation_and_yields_to_nothing_once_its
     _air(board, 0)
     queue.ingest(_card("nono", attention=_REMINDER, band=DisplayPriority.ALERT))
     assert _name(_air(board, 8)) == "nono"  # due on first sight: after the live card's minimum
-    queue.remove("g1:live")
+    queue.remove("mlb:mlb_statsapi:g1:live")
     assert _name(_air(board, 19.9)) == "nono"
     idle = _air(board, 20)  # its beat has passed, and nothing else is eligible
     assert isinstance(idle.payload, BoardFrame) and idle.payload == BoardFrame(FrameKind.IDLE, "nothing eligible")
@@ -181,7 +181,7 @@ def test_a_card_that_leaves_the_queue_or_expires_comes_down_at_once() -> None:
     board = BoardSession(queue, QUAD)
     _air(board, 0)
     queue.ingest(_card("g2", expires=40))
-    queue.remove("g1:live")
+    queue.remove("mlb:mlb_statsapi:g1:live")
     assert _name(_air(board, 1)) == "g2"  # factual invalidation doesn't wait for a minimum
     assert _name(_air(board, 40)) == "idle"  # expired, and nothing else
     reasons = [change.reason for change in board.changes() if change.kind is ChangeKind.DOWN]
@@ -333,7 +333,7 @@ def test_offline_clears_the_card_and_the_frame_before_it() -> None:
     offline = _air(board, 1)
     assert isinstance(offline.payload, BoardFrame) and offline.payload.kind is FrameKind.OFFLINE
     board.publish(BoardHealth())
-    queue.remove("g1:live")
+    queue.remove("mlb:mlb_statsapi:g1:live")
     _air(board, 2)  # idle: the offline frame comes down for it
     downs = [change.reason for change in board.changes() if change.kind is ChangeKind.DOWN]
     assert downs == [EndReason.CLEARED, EndReason.NEXT_WAITING]
