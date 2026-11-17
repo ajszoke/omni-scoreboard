@@ -11,6 +11,7 @@ both, so callers never double-fetch. Everything it returns is typed.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
@@ -332,19 +333,107 @@ def _batting_walks_hbp(raw: dict[str, Any], side: str) -> int | None:
     return walks + hit_by_pitch
 
 
-def _reached_base(raw: dict[str, Any], *, side: str, hits: int, fielding_errors: int | None) -> bool | None:
+def _obj(value: Any) -> dict[str, Any]:
+    """``value`` if it is a JSON object, else an empty one, so a malformed node reads as absent."""
+    return value if isinstance(value, dict) else {}
+
+
+# Where a batter can end a play safely: on a base, or home.
+_SAFE_ENDS = ("1B", "2B", "3B", "score")
+
+# A play's `about.halfInning` -> the side at bat: the away side bats in the top of each inning.
+_BATTING_SIDE: dict[str, HomeAway] = {"top": HomeAway.AWAY, "bottom": HomeAway.HOME}
+
+
+@dataclass(frozen=True, slots=True)
+class _ReachLedger:
+    """What the play log says about each side's batters reaching base.
+
+    `reached` holds the sides with a batter who reached safely on some play; `complete` holds the
+    sides whose every finished play is on record with its runners, so that finding no reach for
+    them means none happened.
+    """
+
+    reached: frozenset[HomeAway]
+    complete: frozenset[HomeAway]
+
+    def reached_base(self, side: HomeAway) -> bool | None:
+        """True if a batter of ``side`` reached safely, False if its full record shows none did, else None."""
+        if side in self.reached:
+            return True
+        return False if side in self.complete else None
+
+
+def _reach_ledger(raw: dict[str, Any]) -> _ReachLedger:
+    """Each side's batters' safe reaches, from the play log (``liveData.plays.allPlays``).
+
+    The log lists every plate appearance from the game's start. A play's batter is its runner with
+    no ``originBase``; he reached safely if his ``end`` is a base or ``score`` and he was not put
+    out. That catches what no count does: a batter who reached on a dropped third strike, say.
+
+    A side's record is complete only when the log is a list whose ``atBatIndex`` values run 0, 1,
+    2, ... in order, every play names its half, every finished play of that side carries a readable
+    list of runners, and the side has at least one finished play. Only the at-bat in progress, the
+    last entry, may still lack its runners. A play out of place, or one without a half, could be
+    either side's, so it leaves both records incomplete.
+
+    It is read afresh from the whole log on every answer, so a scoring change that rewrites a play
+    shows at once, with nothing carried over from an earlier read.
+    """
+    plays = _obj(_obj(raw.get("liveData")).get("plays")).get("allPlays")
+    if not isinstance(plays, list):
+        return _ReachLedger(reached=frozenset(), complete=frozenset())
+    reached: set[HomeAway] = set()
+    on_record: set[HomeAway] = set()  # sides with a finished play in the log
+    gaps: set[HomeAway] = set()
+    for position, entry in enumerate(plays):
+        play = _obj(entry)
+        about = _obj(play.get("about"))
+        if play.get("atBatIndex", about.get("atBatIndex")) != position:
+            gaps.update(HomeAway)  # a play missing before this one, or this one out of place
+        side = _BATTING_SIDE.get(str(about.get("halfInning")))
+        if side is None:
+            gaps.update(HomeAway)
+            continue
+        runners = play.get("runners")
+        in_progress = position == len(plays) - 1 and about.get("isComplete") is False
+        if not isinstance(runners, list) or not runners:
+            if not in_progress:
+                gaps.add(side)
+            continue
+        if not in_progress:
+            on_record.add(side)
+        for runner in runners:
+            movement = _obj(runner).get("movement")
+            if not isinstance(movement, dict):
+                gaps.add(side)  # an unreadable runner could be the batter
+            elif (
+                movement.get("originBase") is None
+                and movement.get("end") in _SAFE_ENDS
+                and movement.get("isOut") is not True
+            ):
+                reached.add(side)
+    return _ReachLedger(reached=frozenset(reached), complete=frozenset(on_record - gaps))
+
+
+def _reached_base(
+    raw: dict[str, Any], *, side: HomeAway, hits: int, fielding_errors: int | None, ledger: _ReachLedger
+) -> bool | None:
     """Whether `side` has reached base at all this game: True / False / None (unknown).
 
-    A hit, an error by the defense, or a walk or HBP in the boxscore is a definite baserunner. A
-    clean sheet (False) needs each of those counts present and zero; with any missing it is None,
-    so a perfect game is never claimed without the data to rule a baserunner out. Counting a
-    fielding error as a baserunner can only ever err toward a plain no-hitter (a muffed foul that
-    let no one reach), never toward a false perfect game.
+    A hit, an error by the defense, a walk or HBP in the boxscore, or a batter reaching safely in
+    the play log is a definite baserunner. A clean sheet (False) needs each of those counts present
+    and zero, and the side's play log complete with no batter reaching: the counts alone miss a
+    batter who reached on a dropped third strike. Short of that it is None, so a perfect game is
+    never claimed without the data to rule a baserunner out. Counting a fielding error as a
+    baserunner can only ever err toward a plain no-hitter (a muffed foul that let no one reach),
+    never toward a false perfect game.
     """
-    walks_hbp = _batting_walks_hbp(raw, side)
-    if hits > 0 or (fielding_errors or 0) > 0 or (walks_hbp or 0) > 0:
+    walks_hbp = _batting_walks_hbp(raw, side.value)
+    logged = ledger.reached_base(side)
+    if hits > 0 or (fielding_errors or 0) > 0 or (walks_hbp or 0) > 0 or logged is True:
         return True
-    if walks_hbp is None or fielding_errors is None:
+    if walks_hbp is None or fielding_errors is None or logged is None:
         return None
     return False
 
@@ -464,7 +553,7 @@ def _parse_game_state(raw: dict[str, Any]) -> BaseballGameState:
     missing a side's runs or hits once that side has batted (`_has_batted`), or
     either side's runs in a final answer, raises `ProviderError`: a failed read,
     so the last good answer stands. A missing error count shows as 0, but no
-    perfect game is claimed without it.
+    perfect game is claimed without it, nor without a complete play log (`_reach_ledger`).
     """
     try:
         line = raw["liveData"]["linescore"]
@@ -484,6 +573,7 @@ def _parse_game_state(raw: dict[str, Any]) -> BaseballGameState:
             home_team, HomeAway.HOME, batted=_has_batted(HomeAway.HOME, inning=inning, phase=phase), final=final
         )
         away_errors, home_errors = _count(away_team, "errors"), _count(home_team, "errors")
+        ledger = _reach_ledger(raw)
         return BaseballGameState(
             away_score=away_runs,
             home_score=home_runs,
@@ -493,8 +583,12 @@ def _parse_game_state(raw: dict[str, Any]) -> BaseballGameState:
             home_errors=home_errors or 0,
             # A side's reached-base read needs the *fielding* side's errors: an away batter
             # reaching on error is charged to the home defense, and vice versa.
-            away_reached_base=_reached_base(raw, side="away", hits=away_hits, fielding_errors=home_errors),
-            home_reached_base=_reached_base(raw, side="home", hits=home_hits, fielding_errors=away_errors),
+            away_reached_base=_reached_base(
+                raw, side=HomeAway.AWAY, hits=away_hits, fielding_errors=home_errors, ledger=ledger
+            ),
+            home_reached_base=_reached_base(
+                raw, side=HomeAway.HOME, hits=home_hits, fielding_errors=away_errors, ledger=ledger
+            ),
             batter=_current_batter(raw),
             pitcher=_current_pitcher(raw),
             last_pitch=_last_pitch_snapshot(raw),
@@ -867,9 +961,10 @@ def _default_fetch_schedule(game_date: date, sport_ids: str) -> list[dict[str, A
 
 # StatsAPI `fields` is a hierarchical key-name whitelist. The first group keeps the linescore
 # and a slice of the boxscore (-> BaseballGameState, including reached-base); the second keeps
-# play-by-play (allPlays -> events) and the current play (-> the live last-pitch snapshot). A name
-# must be listed for its nested object to survive, so omitting one silently drops that data — keep
-# this in sync with what `_parse_game_state` / `_parse_game_events` read.
+# play-by-play (allPlays -> events, and each play's runners -> the reach ledger) and the current play
+# (-> the live last-pitch snapshot). A name must be listed for its nested object to survive, so
+# omitting one silently drops that data — keep this in sync with what `_parse_game_state` /
+# `_parse_game_events` / `_reach_ledger` read.
 _GAME_FIELDS = (
     "liveData,linescore,teams,home,away,runs,hits,errors,currentInning,inningState,balls,strikes,outs,"
     "offense,defense,first,second,third,batter,onDeck,inHole,pitcher,id,"  # current batter/pitcher (lines below), due up
@@ -878,6 +973,9 @@ _GAME_FIELDS = (
     "seasonStats,wins,losses,saves,"  # season totals for the final card's decisions
     "plays,allPlays,currentPlay,result,eventType,description,rbi,awayScore,homeScore,about,inning,halfInning,atBatIndex,"
     "endTime,startTime,count,playEvents,isPitch,pitchData,startSpeed,details,type,code,decisions,winner,loser,save,fullName,"
+    # Each play's runners -> the reach ledger. `end` and `originBase` occur only under `movement`; `isOut` also
+    # keeps a flag on each play's result and pitch events.
+    "isComplete,runners,movement,originBase,end,isOut,"
     "gameData,status,detailedState,metaData,timeStamp"  # the feed's own status and timestamp
 )
 
