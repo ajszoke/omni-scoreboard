@@ -18,11 +18,14 @@ rules in one place:
   (a favorite's live game sooner than another game's). A source's per-minute quota is shared out in
   priority order, so when asks queue, the most important go first.
 - **Bounded retries.** After a failure a key is retried on a short schedule a few times. After that it
-  waits its normal cadence, so a source that is down isn't hammered.
+  waits its normal cadence, so a source that is down isn't hammered. While a key is failing, its latest
+  failure says why and when it was filed.
 - **Last good, until it expires.** A failed ask doesn't erase the last answer. That answer stands for
   `keep_for`, so a blip doesn't drop a game from the board, and an outage eventually does. Answers that
   still stand are kept, so a read can ask for the newest one that arrived by an earlier moment.
 - **Forgetting.** A key that no decision has asked about for `forget_after` is dropped.
+- **Keys.** A game's key names the game by its full id; a slate's names its `PollScope` (source, league and
+  window), so two leagues' slates for the same date are two keys.
 
 Cadence, retries and expiry run on the clock's monotonic reading. Each answer is stamped with both
 readings when it arrives, so the decision pass can date what it shows by receipt.
@@ -34,15 +37,16 @@ import threading
 from collections import deque
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from enum import Enum, IntEnum
 from typing import Any, Generic, TypeVar
 
 from omni.core.clock import ClockReading, MonotonicTime
 from omni.core.enum import StrEnumMixin
 from omni.core.ids import LeagueScopedId
+from omni.providers.base import PollScope
 
-__all__ = ["Answer", "Ask", "PollKey", "PollPlan", "PollPolicy", "PollPriority", "PollSource"]
+__all__ = ["Answer", "Ask", "Failure", "PollKey", "PollPlan", "PollPolicy", "PollPriority", "PollSource"]
 
 T = TypeVar("T")
 
@@ -52,7 +56,7 @@ _HISTORY = 64  # answers kept per key at most, newest last; older ones go sooner
 class PollSource(StrEnumMixin, str, Enum):
     """A kind of thing the board asks a provider for."""
 
-    SLATE = "slate"  # one local date's schedule
+    SLATE = "slate"  # one scope's schedule: a league's slate for one local date
     GAME_FEED = "game_feed"  # one game's live feed
     MARKET_WIN_PROBABILITY = "market_win_probability"  # one game's market price
     MODEL_WIN_PROBABILITY = "model_win_probability"  # one game's model probability, the fallback
@@ -100,10 +104,10 @@ class PollPolicy:
 
 @dataclass(frozen=True, slots=True)
 class PollKey(Generic[T]):
-    """What is asked: a source, about one subject (a game, or a date's slate)."""
+    """What is asked: a source, about one subject (a game, or a slate's scope)."""
 
     source: PollSource
-    subject: LeagueScopedId | date
+    subject: LeagueScopedId | PollScope
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,6 +116,14 @@ class Answer(Generic[T]):
 
     value: T
     received: ClockReading
+
+
+@dataclass(frozen=True, slots=True)
+class Failure:
+    """Why a key's latest ask failed, and when that failure was filed."""
+
+    error: str
+    at: ClockReading
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,7 +152,7 @@ class _Entry:
     due: MonotonicTime
     out: _Out | None = None  # the ask out for it, if one is
     failures: int = 0
-    error: str | None = None
+    failure: Failure | None = None  # the latest failure, while the key is failing
     answers: deque[Answer[Any]] = field(default_factory=lambda: deque(maxlen=_HISTORY))
 
 
@@ -221,9 +233,14 @@ class PollPlan:
 
     def last_error(self, key: PollKey[Any]) -> str | None:
         """Why the last ask of this key failed, while it's still failing."""
+        failure = self.failure(key)
+        return failure.error if failure is not None else None
+
+    def failure(self, key: PollKey[Any]) -> Failure | None:
+        """The last ask of this key's failure, and when it was filed, while it's still failing."""
         with self._lock:
             entry = self._entries.get(key)
-            return entry.error if entry is not None else None
+            return entry.failure if entry is not None else None
 
     def take_due(self, at: ClockReading, *, room: Mapping[PollSource, int] | None = None) -> list[Ask]:
         """Hand out every ask that is due, most important first, as far as each quota allows.
@@ -278,7 +295,7 @@ class PollPlan:
             entry = self._entries.get(key)
             if entry is None or (ask is not None and not _answers(entry, ask)):
                 return  # forgotten while out, or given up on
-            entry.out, entry.failures, entry.error = None, 0, None
+            entry.out, entry.failures, entry.failure = None, 0, None
             entry.answers.append(Answer(value, received))
             while len(entry.answers) > 1 and not self._standing(key, entry.answers[0], received):
                 entry.answers.popleft()
@@ -313,7 +330,7 @@ class PollPlan:
     def _failed(self, key: PollKey[Any], entry: _Entry, error: str, at: ClockReading) -> None:
         """The ask out failed: retry on the short schedule, then at the normal cadence."""
         policy = self._policy(key)
-        entry.out, entry.error = None, error
+        entry.out, entry.failure = None, Failure(error, at)
         entry.failures += 1
         retry = policy.retries[entry.failures - 1] if entry.failures <= len(policy.retries) else None
         entry.due = at.monotonic + (retry if retry is not None else policy.cadence(entry.priority))

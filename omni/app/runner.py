@@ -1,10 +1,13 @@
 """Assemble and drive the running app.
 
-`build_loop` wires the spine's collaborators into an `AppLoop` from a provider, a
+`build_loop` wires the spine's collaborators into an `AppLoop` from a schedule, a
 feed fetcher, and a display sink — the one place the standard wiring lives, so the
-emulator entry, a future hardware entry, and tests all build the loop the same way.
+emulator entry, a future hardware entry, and tests all build the loop the same way. A plain
+provider is asked inline, once a refresh, through a `ProviderSupervisor`; a scope source
+hands the board its scopes itself.
 `build_planned_loop` is the running MLB board's wiring on top of it: every source read from a
-`PlannedMlb`, so a refresh never waits on the network, and the live win meter off unless asked for.
+`PlannedMlb`, which hands the board its slate date by date, so a refresh never waits on the network,
+and the live win meter off unless asked for. The plan does the retrying: nothing backs off on top of it.
 `run_forever` is the thin real-time wrapper: refreshes on a thread of their own, and frames on
 this one at a steady rate, so a slow fetch never freezes the panel. Each frame (`paint_frame`)
 counts from when the display took it, so a slow draw or swap doesn't eat into a card's time. A
@@ -23,7 +26,7 @@ from omni.app.background import Waking
 from omni.app.contest_store import ContestStore
 from omni.app.display import DisplaySink
 from omni.app.loop import AppLoop, Painted
-from omni.app.planned_mlb import NO_BACKOFF, PlannedMlb
+from omni.app.planned_mlb import PlannedMlb
 from omni.app.poller import Poller
 from omni.app.pipeline import (
     FeedFetcher,
@@ -37,7 +40,7 @@ from omni.app.trace import DecisionTracer
 from omni.cards.factory import CardFactory
 from omni.core.clock import Clock, MonotonicTime, Pacer
 from omni.core.time import DurationSeconds
-from omni.providers.base import Provider
+from omni.providers.base import Provider, ScopeSource
 from omni.queue.delay_policy import DelayPolicy
 from omni.queue.priority import PriorityScorer
 from omni.queue.scheduler import InterleavedCardQueue
@@ -53,7 +56,7 @@ _REFRESH_AT_LEAST_EVERY = timedelta(seconds=5)  # for what changes with nothing 
 
 
 def build_loop(
-    provider: Provider,
+    schedule: Provider | ScopeSource,
     fetch_feed: FeedFetcher,
     sink: DisplaySink,
     *,
@@ -73,6 +76,9 @@ def build_loop(
 ) -> AppLoop:
     """Wire the standard spine into an `AppLoop` (deterministic; no I/O performed here).
 
+    A plain `Provider` ``schedule`` is supervised: its answers count as fresh for `max_age`, and after a
+    failure it's asked again only after `backoff`. A `ScopeSource` paces and ages its own scopes.
+
     `fetch_win_probability`, when given, feeds each live game's win-prob meter (delayed in
     the pipeline so it never leads the shown score); omitted, the live card carries no meter.
     `fetch_fallback_win_probability` takes over when that source goes quiet or has no reading.
@@ -91,8 +97,10 @@ def build_loop(
         factory=CardFactory(),
         queue=queue,
     )
+    if isinstance(schedule, Provider):
+        schedule = ProviderSupervisor(schedule, max_age=max_age, backoff=backoff)
     return AppLoop(
-        supervisor=ProviderSupervisor(provider, max_age=max_age, backoff=backoff),
+        schedules=(schedule,),
         store=ContestStore(),
         pipeline=pipeline,
         queue=queue,
@@ -129,12 +137,11 @@ def build_planned_loop(
     beside a score only if it arrived no later than that score's feed answer.
     """
     return build_loop(
-        planned,  # the slate, from the plan
+        planned,  # the slate, date by date, from the plan
         planned.fetch_feed,
         sink,
         favorites=favorites,
         broadcast_lag=broadcast_lag,
-        backoff=NO_BACKOFF,  # the plan does the retrying
         fetch_win_probability=planned.fetch_win_probability if meter else None,
         fetch_fallback_win_probability=planned.fetch_fallback_win_probability if meter else None,
         fetch_pregame_details=planned.fetch_pregame_details,

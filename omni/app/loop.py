@@ -3,8 +3,10 @@
 The board refreshes and paints on separate cadences:
 
 - **`refresh(at)`**, the decision pass, wires the spine end to end:
-  1. poll the provider (`ProviderSupervisor`, last-known-good on failure);
-  2. reconcile the contest set (`ContestStore`);
+  1. ask each schedule source (a `ScopeSource`) what its scopes said: the scopes its window covers, and what
+     each one it asked last answered, or why it failed;
+  2. take each answer into its scope and reconcile the board's contests across scopes (`ContestStore`), so a
+     scope that fails keeps what it had and another league's scopes carry on regardless;
   3. run the live-card pipeline (`LiveBaseballPipeline`, delay-safe, no spoilers), which stages the
      card queue's changes, and drop what can no longer air. The pipeline gets the whole clock reading:
      its holds are pinned, and released, on the monotonic clock, so a wall-clock jump can't release one
@@ -12,6 +14,9 @@ The board refreshes and paints on separate cadences:
   4. publish the staged cards to the board together with how far their source can be trusted, and how
      many games have nothing to show because they wait out the TV delay or their feed has stopped
      answering: one numbered input, so a paint on the frame thread sees all of a refresh or none of it.
+     Each league's health is its current scope's, judged on the monotonic clock. The board's is its
+     healthiest league's, so one league going offline doesn't take another's cards down; with one league
+     it is that league's.
 - **`paint(at)`** asks the board (`BoardSession`) what should be up: a card, chosen by the queue and
   held by its dwell, or an explicit frame (idle, held, offline). It draws that through the
   `RendererRegistry`, a stale card dimmed, and commits it to the `DisplaySink`. The commit starts a
@@ -35,12 +40,12 @@ Each card that reaches the panel is traced at its first committed frame, with ho
 
 from __future__ import annotations
 
-from collections.abc import Hashable
+from collections.abc import Hashable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, tzinfo
 from typing import Any
 
-from omni.app.contest_store import ContestStore, Reconciliation
+from omni.app.contest_store import ContestStore, ProviderStatus, Reconciliation, ScopeHealth
 from omni.app.display import DisplaySink
 from omni.app.pipeline import (
     FeedFetcher,
@@ -50,10 +55,11 @@ from omni.app.pipeline import (
     PregameDetailsFetcher,
     WinProbFetcher,
 )
-from omni.app.supervisor import ProviderStatus, ProviderSupervisor, SupervisedSnapshot
 from omni.cards.base import CardId, ScoreboardCard
 from omni.core.clock import Clock, ClockReading, MonotonicTime
+from omni.core.enum import League
 from omni.domain.contest import TeamGame
+from omni.providers.base import ScopeSource
 from omni.queue.scheduler import InterleavedCardQueue, Missed, SelectionReason
 from omni.renderers.board_frame import BoardFrameRenderer
 from omni.renderers.canvas import DimmedCanvas
@@ -75,10 +81,24 @@ from omni.tower.board import (
 from omni.tower.lane import ChangeKind, LaneChange, earliest
 from omni.tower.segment import Surface
 
-__all__ = ["OFFLINE_AFTER", "AppLoop", "Painted", "Presentation", "Refresh", "TickResult"]
+__all__ = ["OFFLINE_AFTER", "AppLoop", "LeagueHealth", "Painted", "Presentation", "Refresh", "TickResult"]
 
 # How long the schedule may go unanswered before the board takes its cards down and says it's offline.
 OFFLINE_AFTER = timedelta(minutes=10)
+
+# The board's health is its healthiest league's.
+_HEALTHIEST_FIRST = {SourceHealth.FRESH: 0, SourceHealth.STALE: 1, SourceHealth.OFFLINE: 2}
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class LeagueHealth:
+    """How far the board can trust one league's schedule, judged from its current scope's health."""
+
+    league: League
+    source: SourceHealth
+    scope: ScopeHealth  # the league's current scope, as the store has it
+    reason: str = ""  # why it's stale or offline
+    changes_at: MonotonicTime | None = None  # when this next changes by itself
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -86,11 +106,12 @@ class Refresh:
     """What one refresh found (deterministic for a given input)."""
 
     at: datetime
-    provider_status: ProviderStatus
+    provider_status: ProviderStatus  # the status of the league whose health the board was told
     health: BoardHealth  # what the board was told: its source's health, and games held in the TV delay
-    reconciliation: Reconciliation | None  # None when no snapshot was available to apply
+    reconciliation: Reconciliation  # what changed in the board's contests
     pipeline: PipelineResult
     unseen: tuple[Missed, ...] = ()  # cards that left before they ever aired, and why
+    leagues: tuple[LeagueHealth, ...] = ()  # each covered league's health, in the order first covered
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -124,7 +145,7 @@ class TickResult:
     """A trace of one ``run_once`` pass: a refresh, then a paint (deterministic for a given input)."""
 
     provider_status: ProviderStatus
-    reconciliation: Reconciliation | None  # None when no snapshot was available to apply
+    reconciliation: Reconciliation  # what changed in the board's contests
     pipeline: PipelineResult
     shown: CardId | None  # the card committed to the display this tick
     frame: FrameKind | None  # the explicit frame committed this tick
@@ -137,7 +158,7 @@ class AppLoop:
     def __init__(
         self,
         *,
-        supervisor: ProviderSupervisor,
+        schedules: Sequence[ScopeSource],
         store: ContestStore,
         pipeline: LiveBaseballPipeline,
         queue: InterleavedCardQueue,
@@ -154,7 +175,9 @@ class AppLoop:
         policy: BoardPolicy = BoardPolicy(),
         offline_after: timedelta = OFFLINE_AFTER,
     ) -> None:
-        self._supervisor = supervisor
+        if not schedules:
+            raise ValueError("a board needs at least one schedule source")
+        self._schedules = tuple(schedules)
         self._store = store
         self._pipeline = pipeline
         self._queue = queue
@@ -172,13 +195,15 @@ class AppLoop:
         self._offline_after = offline_after
         self._board = BoardSession(queue, sink.profile, policy=policy)
         self._frames = BoardFrameRenderer()
-        self._health_changes_at: datetime | None = None  # when the source's health next changes by itself
+        self._health_changes_at: MonotonicTime | None = None  # when a league's health next changes by itself
 
     def refresh(self, at: ClockReading) -> Refresh:
         """One refresh as of ``at``: bring the cards up to date, and tell the board how its source stands."""
         now = at.utc
-        snapshot = self._supervisor.poll(now)
-        reconciliation = self._store.apply(snapshot.update) if snapshot.update is not None else None
+        held = self._store.scopes
+        for schedule in self._schedules:
+            self._store.take(schedule.observe(at, held))
+        reconciliation = self._store.reconcile(at.monotonic)
 
         team_games = [contest for contest in self._store.contests if isinstance(contest, TeamGame)]
         pipeline_result = self._pipeline.refresh(
@@ -191,15 +216,17 @@ class AppLoop:
             fetch_game_lines=self._fetch_game_lines,
         )
         unseen = tuple(self._queue.prune(now))
-        health = self._health(snapshot, pipeline_result)
+        leagues = tuple(self._judge(league) for league in self._store.league_healths(at.monotonic))
+        health, status = self._health(leagues, pipeline_result)
         self._board.publish(health)
         return Refresh(
             at=now,
-            provider_status=snapshot.status,
+            provider_status=status,
             health=health,
             reconciliation=reconciliation,
             pipeline=pipeline_result,
             unseen=unseen,
+            leagues=leagues,
         )
 
     def paint(self, at: ClockReading, *, clock: Clock | None = None) -> Painted:
@@ -290,47 +317,52 @@ class AppLoop:
         clearing the delay, a live card going stale or a stale game's cards coming down, the source going stale
         or offline, or a card that hasn't aired running out of time to (it's dropped then, and traced as
         missed)."""
-        instants = [self._health_changes_at, self._queue.next_miss(at.utc)]
-        projected = (at.monotonic + (instant - at.utc) for instant in instants if instant is not None)
-        return earliest((self._pipeline.next_deadline(at), *projected))
+        miss = self._queue.next_miss(at.utc)
+        missed = at.monotonic + (miss - at.utc) if miss is not None else None
+        return earliest((self._pipeline.next_deadline(at), self._health_changes_at, missed))
 
     def next_deadline(self, at: ClockReading) -> MonotonicTime | None:
         """When either pass next has something to do by itself, as of ``at``."""
         return earliest((self.refresh_deadline(at), self._board.next_deadline(at)))
 
-    def _health(self, snapshot: SupervisedSnapshot, result: PipelineResult) -> BoardHealth:
-        """The board's view of its source, from the schedule's last-known-good, and how many games have nothing
-        on the board because their card is still inside the TV delay."""
+    def _health(self, leagues: Sequence[LeagueHealth], result: PipelineResult) -> tuple[BoardHealth, ProviderStatus]:
+        """The board's view of its source (its healthiest league's schedule) and that league's status, with how
+        many games have nothing on the board because their card is still inside the TV delay or their feed has
+        stopped answering. Notes when any league's health next changes by itself."""
         carded = self._queue.contests()
         held = sum(1 for game_id in result.held if game_id not in carded)
         held_until = min((at for game_id, at in result.releases if game_id not in carded), default=None)
         unfed = sum(1 for game_id in result.stale if game_id not in carded)
-        update, age = snapshot.update, snapshot.age
-        error = snapshot.last_error or "no answer"
-        if update is None or age is None:
-            self._health_changes_at = None
-            return BoardHealth(
-                source=SourceHealth.OFFLINE,
-                reason=f"no schedule yet: {error}",
-                held=held,
-                held_until=held_until,
-                unfed=unfed,
+        self._health_changes_at = earliest(league.changes_at for league in leagues)
+        healthiest = min(leagues, key=lambda league: _HEALTHIEST_FIRST[league.source])
+        health = BoardHealth(
+            source=healthiest.source, reason=healthiest.reason, held=held, held_until=held_until, unfed=unfed
+        )
+        return health, healthiest.scope.status
+
+    def _judge(self, scope: ScopeHealth) -> LeagueHealth:
+        """How far the board can trust a league's schedule, from its current scope's health."""
+        league = scope.scope.league
+        error = scope.error or "no answer"
+        if scope.fresh_from is None or scope.age is None:
+            return LeagueHealth(
+                league=league, source=SourceHealth.OFFLINE, scope=scope, reason=f"no schedule yet: {error}"
             )
         # Ages are whole seconds, and a limit is passed only once a full second over it.
         second = timedelta(seconds=1)
-        max_age = self._supervisor.max_age.as_timedelta()
-        if age.as_timedelta() > self._offline_after:
-            self._health_changes_at = None
+        since = scope.fresh_from.monotonic
+        if scope.age > self._offline_after:
             reason = f"no schedule for over {_span(self._offline_after)}: {error}"
-            return BoardHealth(
-                source=SourceHealth.OFFLINE, reason=reason, held=held, held_until=held_until, unfed=unfed
+            return LeagueHealth(league=league, source=SourceHealth.OFFLINE, scope=scope, reason=reason)
+        if scope.status is ProviderStatus.STALE:
+            reason = f"no schedule for over {_span(scope.max_age)}: {error}"
+            changes_at = since + self._offline_after + second
+            return LeagueHealth(
+                league=league, source=SourceHealth.STALE, scope=scope, reason=reason, changes_at=changes_at
             )
-        if snapshot.status is ProviderStatus.STALE:
-            self._health_changes_at = update.observed_at + self._offline_after + second
-            reason = f"no schedule for over {_span(max_age)}: {error}"
-            return BoardHealth(source=SourceHealth.STALE, reason=reason, held=held, held_until=held_until, unfed=unfed)
-        self._health_changes_at = update.observed_at + max_age + second
-        return BoardHealth(source=SourceHealth.FRESH, held=held, held_until=held_until, unfed=unfed)
+        return LeagueHealth(
+            league=league, source=SourceHealth.FRESH, scope=scope, changes_at=since + scope.max_age + second
+        )
 
 
 class _ShownLines(LaneFrame):

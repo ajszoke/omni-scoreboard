@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from omni.app.supervisor import ProviderStatus
+from omni.app.contest_store import ProviderStatus
 from omni.core.enum import GameStatus, League, PanelProfile
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.core.time import DurationSeconds

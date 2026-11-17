@@ -75,7 +75,6 @@ def test_refresh_parses_known_games_and_warns_on_unknown_team() -> None:
     assert calls == [(NOW.date(), "1,51")]  # 21:00Z == 17:00 ET same day, so local == UTC date here
     assert update.observed_at == NOW
     assert update.source.name == "mlb_statsapi"
-    assert update.events == ()
 
     # 5 fixture rows; the one with an unknown team id is skipped + recorded.
     assert len(update.contests) == 4

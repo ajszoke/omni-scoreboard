@@ -165,7 +165,7 @@ def _loop(
         queue=queue,
     )
     loop = AppLoop(
-        supervisor=ProviderSupervisor(slate, max_age=DurationSeconds(120)),
+        schedules=(ProviderSupervisor(slate, max_age=DurationSeconds(120)),),
         store=ContestStore(),
         pipeline=pipeline,
         queue=queue,

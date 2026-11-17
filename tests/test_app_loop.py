@@ -6,11 +6,11 @@ import dataclasses
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from omni.app.contest_store import ContestStore
+from omni.app.contest_store import ContestStore, ProviderStatus
 from omni.app.display import RecordingDisplaySink
 from omni.app.loop import AppLoop, _treatment
 from omni.app.pipeline import LiveBaseballPipeline
-from omni.app.supervisor import ProviderStatus, ProviderSupervisor
+from omni.app.supervisor import ProviderSupervisor
 from omni.core.clock import ClockReading, MonotonicTime
 from omni.cards.base import ScoreboardCard
 from omni.cards.factory import CardFactory
@@ -119,7 +119,7 @@ def _build(
     provider = provider if provider is not None else _Provider(_game())
     sink = RecordingDisplaySink(QUAD)
     loop = AppLoop(
-        supervisor=ProviderSupervisor(provider, max_age=DurationSeconds(120)),
+        schedules=(ProviderSupervisor(provider, max_age=DurationSeconds(120)),),
         store=ContestStore(),
         pipeline=pipeline,
         queue=queue,
@@ -155,7 +155,7 @@ def test_run_once_survives_a_provider_outage_from_the_start() -> None:
     loop, sink, _ = _build(lag=0, provider=provider)
     res = loop.run_once(_at(T))
     assert res.provider_status is ProviderStatus.NEVER_LOADED
-    assert res.reconciliation is None  # nothing to apply
+    assert not res.reconciliation.changed  # nothing to apply
     assert res.shown is None and res.frame is FrameKind.OFFLINE and res.render_error is None
     assert sink.committed == 1  # the offline frame, drawn on purpose
 

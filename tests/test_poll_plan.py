@@ -7,7 +7,10 @@ from datetime import date, datetime, timedelta, timezone
 import pytest
 
 from omni.core.clock import FakeClock, MonotonicTime
-from omni.app.poll_plan import PollKey, PollPlan, PollPolicy, PollPriority, PollSource
+from omni.app.poll_plan import Failure, PollKey, PollPlan, PollPolicy, PollPriority, PollSource
+from omni.core.enum import League
+from omni.core.ids import SourceRef
+from omni.providers.base import LocalDate, PollScope
 
 T0 = datetime(2026, 6, 17, 23, 0, tzinfo=timezone.utc)
 S = timedelta(seconds=1)
@@ -19,8 +22,12 @@ def _plan(policy: PollPolicy = _POLICY, *, forget_after: timedelta = 120 * S) ->
     return PollPlan({FEED: policy}, forget_after=forget_after), FakeClock(T0)
 
 
+def _scope(day: int) -> PollScope:
+    return PollScope(SourceRef("test"), League.MLB, LocalDate(date(2026, 6, day)))
+
+
 def _key(day: int) -> PollKey[str]:
-    return PollKey(FEED, date(2026, 6, day))
+    return PollKey(FEED, _scope(day))
 
 
 def _want(plan: PollPlan, clock: FakeClock, key: PollKey[str], priority: PollPriority = PollPriority.NORMAL) -> None:
@@ -104,6 +111,23 @@ def test_a_failing_key_is_retried_a_few_times_then_waits_its_cadence() -> None:
     plan.take_due(clock.read())
     plan.answered(key, "back", clock.read())
     assert plan.last_error(key) is None
+
+
+def test_a_failing_key_says_why_and_when_it_failed_until_it_answers() -> None:
+    plan, clock = _plan()
+    key = _key(1)
+    assert plan.failure(key) is None  # never asked about
+    _want(plan, clock, key)
+    plan.take_due(clock.read())
+    clock.advance(3 * S)
+    failed = clock.read()
+    plan.failed(key, "TimeoutError: slow", failed)
+    clock.advance(S)
+    assert plan.failure(key) == Failure("TimeoutError: slow", failed)  # filed when it failed, not when read
+    clock.advance(S)
+    plan.take_due(clock.read())
+    plan.answered(key, "back", clock.read())
+    assert plan.failure(key) is None
 
 
 def test_the_last_good_answer_stands_through_failures_until_it_expires() -> None:
@@ -226,7 +250,7 @@ def test_ask_numbers_are_never_reused_when_a_key_is_dropped_and_wanted_again() -
 
 
 def test_a_due_ask_waits_for_a_free_worker_of_its_own_source() -> None:
-    slate: PollKey[str] = PollKey(PollSource.SLATE, date(2026, 6, 17))
+    slate: PollKey[str] = PollKey(PollSource.SLATE, _scope(17))
     plan = PollPlan({FEED: PollPolicy(every=15 * S, keep_for=90 * S, at_once=2), PollSource.SLATE: _POLICY})
     clock = FakeClock(T0)
     assert plan.capacity() == {FEED: 2, PollSource.SLATE: 1}

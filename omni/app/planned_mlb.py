@@ -6,18 +6,13 @@ latest answer back at once. Each call also tells the plan the key is still wante
 priority: a favorite's live game is focus, a finished one background. The poller does the fetching,
 so no read here ever waits on the network.
 
-- **The slate** covers the previous and current local dates, deduplicated by game. Each date is asked
-  on its own and keeps its own membership: the games its last answer listed. A date whose answer fails
-  or expires keeps that membership as it was, and a new answer replaces it. Today's slate is the
-  snapshot's freshness: without a standing answer for it, the refresh fails and the board's supervisor
-  keeps the last snapshot.
-- **The previous date** adds its games that aren't final, and its finals this session has already
-  handed out, so a game running past midnight keeps its card and still gets its final. On a fresh
-  start, yesterday's finished games stay away.
-- **Retirement.** When a date leaves the window at local midnight, its games retire with it, except a
-  game this session has handed out that is still being played, or whose final hasn't had its time on
-  the board yet (`FINAL_HOLD` since it was first handed out final). Those stay, and their date is
-  still asked, until each is final and shown.
+- **The slate** is asked date by date, each date its own scope (`PollScope` over a `LocalDate`): today's,
+  yesterday's, and any older date the board still holds a game from. Each pass hands the board what each
+  date it asks last said: its standing answer, complete or, when the parser skipped rows, partial; and
+  its failure, while its latest ask is failing. A date asked but not answered yet hands nothing. The
+  board's `ContestStore` keeps each date's membership, and its rolling-date rules decide what stays:
+  yesterday's games until they're final and shown, and an older date's game still being played, or whose
+  final hasn't had its time, until it has. Today is the current scope, whose health is the league's.
 - **A game's feed** carries when its answer arrived, read both ways, which dates the state for the TV
   delay. It also says how long that answer counts as current (`CURRENT_FOR_CADENCES` of its cadence:
   the next answer is due one cadence after it, and has one more to arrive), and why the latest ask
@@ -33,36 +28,41 @@ so no read here ever waits on the network.
 - **Pregame details and odds** are asked slowly, on their own workers; a game without an answer yet
   simply shows less.
 
-A slate or feed with no standing answer raises `ProviderError`, with the last failure if there was
-one, which the pipeline reports just as it reported a failed fetch.
+A feed with no standing answer raises `ProviderError`, with the last failure if there was one, which the
+pipeline reports just as it reported a failed fetch.
 """
 
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Collection
 from datetime import date, datetime, timedelta
 from typing import Protocol, TypeVar
 from zoneinfo import ZoneInfo
 
-from omni.core.clock import Clock, ClockReading, MonotonicTime
+from omni.core.clock import Clock, ClockReading
 from omni.app.pipeline import MeterReading
-from omni.app.poll_plan import Answer, PollKey, PollPlan, PollPolicy, PollPriority, PollSource
-from omni.app.supervisor import BackoffPolicy
+from omni.app.poll_plan import PollKey, PollPlan, PollPolicy, PollPriority, PollSource
 from omni.core.enum import GameStatus, League
-from omni.core.ids import LeagueScopedId, SourceRef
-from omni.core.time import DurationSeconds, local_date
+from omni.core.ids import SourceRef
+from omni.core.time import local_date
 from omni.domain.baseball import GameLines, PregameDetails, WinProbability
-from omni.domain.contest import Contest, TeamGame
+from omni.domain.contest import TeamGame
 from omni.events.baseball import LiveBaseballFeed
-from omni.providers.base import ProviderError, ProviderUpdate
+from omni.providers.base import (
+    Coverage,
+    LocalDate,
+    PollScope,
+    ProviderError,
+    ProviderUpdate,
+    ScopeObservation,
+    ScopeReport,
+)
 
 __all__ = [
     "CURRENT_FOR_CADENCES",
-    "FINAL_HOLD",
     "MLB_POLICIES",
-    "NO_BACKOFF",
+    "SLATE_MAX_AGE",
     "MarketReader",
     "MlbSources",
     "OddsReader",
@@ -71,16 +71,9 @@ __all__ = [
 
 T = TypeVar("T")
 
-# The supervisor's backoff for a planned schedule: the plan already paces retries, and a supervisor
-# backing off on top would keep reading a stale answer after the plan has a fresh one.
-NO_BACKOFF = BackoffPolicy(base=DurationSeconds(0), cap=DurationSeconds(0))
-
-# How long a game from a date that has left the window stays once first handed out final: time for its
-# final to clear the TV delay and live out its post-game window.
-FINAL_HOLD = timedelta(hours=1)
-
-# A game still being played: kept past its date's window until it ends.
-_IN_PLAY = frozenset({GameStatus.LIVE, GameStatus.DELAYED})
+# How long a date's slate answer counts as fresh. Today's is the league's health: past this the board's
+# cards are drawn stale.
+SLATE_MAX_AGE = timedelta(minutes=2)
 
 # How many of its cadences a feed answer counts as current: the next answer is due one cadence after it,
 # and has a whole further cadence to arrive.
@@ -139,17 +132,8 @@ class MlbSources(Protocol):
     def fetch_pregame_details(self, game: TeamGame) -> PregameDetails: ...
 
 
-@dataclass(frozen=True, slots=True)
-class _Membership:
-    """What one date's slate last said: its games and warnings, and when that answer arrived."""
-
-    games: tuple[Contest, ...]
-    warnings: tuple[str, ...]
-    received: MonotonicTime
-
-
 class PlannedMlb:
-    """The pipeline's MLB sources and schedule provider, answered from a plan."""
+    """The pipeline's MLB sources and the board's MLB schedule, answered from a plan."""
 
     league = League.MLB
 
@@ -169,57 +153,31 @@ class PlannedMlb:
         self._market = market
         self._odds = odds
         self._favorites = favorites
-        self._dates: dict[date, _Membership] = {}  # each date's games, as its last answer listed them
-        self._shown: set[LeagueScopedId] = set()  # games in the last slate handed out
-        self._final_since: dict[LeagueScopedId, MonotonicTime] = {}  # when each was first handed out final
 
     @property
     def source(self) -> SourceRef:
         return self._provider.source
 
-    def refresh(self, now: datetime) -> ProviderUpdate:
-        """The slate across the previous and current local dates (the schedule provider's call)."""
-        at = self._clock.read()
-        today = local_date(now, self._provider.schedule_timezone)
+    def observe(self, at: ClockReading, held: Collection[PollScope]) -> ScopeReport:
+        """Ask today's and yesterday's slates, and any older date's the board still ``held``; report each one's
+        standing answer and its failure, if it's failing."""
+        today = local_date(at.utc, self._provider.schedule_timezone)
         yesterday = today - timedelta(days=1)
-        current_key = self._slate(today, PollPriority.NORMAL, at)
-        earlier = sorted({yesterday, *(day for day in self._dates if day < yesterday)}, reverse=True)
-        for day in earlier:
-            self._remember(day, self._plan.latest(self._slate(day, PollPriority.BACKGROUND, at), at))
-        current = self._plan.latest(current_key, at)
-        if current is None:
-            raise ProviderError(self._plan.last_error(current_key) or "MLB schedule: no answer yet")
-        self._remember(today, current)
-        contests: list[Contest] = list(current.value.contests)
-        warnings = list(current.value.warnings)
-        listed = {contest.id for contest in contests}
-        for day in earlier:
-            membership = self._dates.get(day)
-            if membership is None:
-                continue  # no answer for it yet
-            kept = [
-                contest
-                for contest in membership.games
-                if contest.id not in listed  # on a later date too: that entry is the current one
-                and self._keeps(contest, day == yesterday, at.monotonic)
-            ]
-            contests.extend(kept)
-            listed.update(contest.id for contest in kept)
-            warnings.extend(membership.warnings)
-            if day < yesterday and not kept:
-                del self._dates[day]  # every game it held has retired: it's no longer asked
-        self._shown = listed
-        self._final_since = {
-            contest.id: self._final_since.get(contest.id, at.monotonic)
-            for contest in contests
-            if contest.status is GameStatus.FINAL
-        }
-        return ProviderUpdate(
-            source=current.value.source,
-            observed_at=current.received.utc,
-            contests=tuple(contests),
-            warnings=tuple(warnings),
+        older = sorted(
+            (
+                scope.window.day
+                for scope in held
+                if (scope.source, scope.league) == (self.source, self.league)
+                and isinstance(scope.window, LocalDate)
+                and scope.window.day < yesterday
+            ),
+            reverse=True,
         )
+        observations = self._observe(today, PollPriority.NORMAL, at)
+        for day in (yesterday, *older):
+            observations.extend(self._observe(day, PollPriority.BACKGROUND, at))
+        coverage = Coverage(current=self._scope(today), earlier=(self._scope(yesterday),), max_age=SLATE_MAX_AGE)
+        return ScopeReport(coverage=coverage, observations=tuple(observations))
 
     def fetch_feed(self, game: TeamGame, now: datetime) -> LiveBaseballFeed:
         """A game's newest standing feed answer, with when it arrived, how long it counts as current, and why
@@ -268,30 +226,22 @@ class PlannedMlb:
         key: PollKey[GameLines | None] = PollKey(PollSource.GAME_LINES, game.id)
         return self._optional(key, lambda asked: odds(game, asked))
 
-    def _slate(self, day: date, priority: PollPriority, at: ClockReading) -> PollKey[ProviderUpdate]:
-        key: PollKey[ProviderUpdate] = PollKey(PollSource.SLATE, day)
+    def _scope(self, day: date) -> PollScope:
+        return PollScope(self.source, self.league, LocalDate(day))
+
+    def _observe(self, day: date, priority: PollPriority, at: ClockReading) -> list[ScopeObservation]:
+        """Want a date's slate at ``priority``; its standing answer, then its failure if one came since."""
+        scope = self._scope(day)
+        key: PollKey[ProviderUpdate] = PollKey(PollSource.SLATE, scope)
         self._plan.want(key, lambda asked: self._provider.fetch_schedule(day, now=asked), priority=priority, at=at)
-        return key
-
-    def _remember(self, day: date, answer: Answer[ProviderUpdate] | None) -> None:
-        """Take a date's standing answer as its membership, if it's newer than the one kept."""
-        if answer is None:
-            return  # missed or expired: the date keeps the membership it had
-        kept = self._dates.get(day)
-        if kept is None or answer.received.monotonic > kept.received:
-            self._dates[day] = _Membership(answer.value.contests, answer.value.warnings, answer.received.monotonic)
-
-    def _keeps(self, contest: Contest, in_window: bool, now: MonotonicTime) -> bool:
-        """Whether a game from an earlier date belongs in the slate."""
-        final = contest.status is GameStatus.FINAL
-        if in_window:
-            return not final or contest.id in self._shown
-        if contest.id not in self._shown:
-            return False  # its date has left the window, and the board never had it
-        if final:
-            since = self._final_since.get(contest.id)
-            return since is None or now.since(since) < FINAL_HOLD  # its final hasn't had its time yet
-        return contest.status in _IN_PLAY
+        observed: list[ScopeObservation] = []
+        answer = self._plan.latest(key, at)
+        if answer is not None:
+            observed.append(ScopeObservation.answer(scope, answer.value, answer.received))
+        failure = self._plan.failure(key)
+        if failure is not None:
+            observed.append(ScopeObservation.failure(scope, failure.error, failure.at))
+        return observed
 
     def _reading(
         self,

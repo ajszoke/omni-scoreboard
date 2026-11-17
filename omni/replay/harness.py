@@ -33,7 +33,8 @@ from typing import Any
 from omni.app.display import RecordingDisplaySink
 from omni.app.loop import Painted, Refresh
 from omni.app.runner import build_loop
-from omni.app.supervisor import BackoffPolicy, ProviderStatus
+from omni.app.contest_store import ProviderStatus
+from omni.app.supervisor import BackoffPolicy
 from omni.core.clock import ClockReading, FakeClock
 from omni.core.enum import League, PanelProfile
 from omni.core.ids import LeagueScopedId, SourceRef

@@ -11,16 +11,17 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from omni.app.contest_store import FINAL_HOLD, ContestStore, ProviderStatus
 from omni.app.display import RecordingDisplaySink
 from omni.app.loop import AppLoop, Painted, Refresh
 from omni.app.pipeline import MeterReading
-from omni.app.planned_mlb import FINAL_HOLD, MLB_POLICIES, NO_BACKOFF, PlannedMlb
+from omni.app.planned_mlb import MLB_POLICIES, PlannedMlb
 from omni.app.poll_plan import PollKey, PollPlan, PollSource
 from omni.app.poller import Poller
 from omni.app.runner import build_loop, build_planned_loop, warm_up
 from omni.cards.base import ScoreboardCard
 from omni.core.clock import ClockReading, FakeClock, MonotonicTime
-from omni.core.enum import GameStatus, PanelProfile
+from omni.core.enum import GameStatus, League, PanelProfile
 from omni.core.ids import SourceRef
 from omni.core.time import DurationSeconds
 from omni.domain.baseball import (
@@ -34,7 +35,7 @@ from omni.domain.baseball import (
 )
 from omni.domain.contest import TeamGame
 from omni.events.baseball import LiveBaseballFeed
-from omni.providers.base import ProviderError, ProviderUpdate
+from omni.providers.base import LocalDate, PollScope, ProviderError, ProviderUpdate, ScopeOutcome, ScopeReport
 from omni.providers.mlb_statsapi import MlbStatsApiProvider
 from omni.providers.mlb_teams import MlbTeamRegistry
 from omni.renderers.canvas import Canvas
@@ -63,6 +64,7 @@ class _FakeMlb:
     def __init__(self, clock: FakeClock) -> None:
         self.clock = clock
         self.slates: dict[date, tuple[TeamGame, ...]] = {}
+        self.skipped: dict[date, tuple[str, ...]] = {}  # rows a date's slate couldn't read, as its warnings
         self.failing: set[date] = set()
         self.asked: list[tuple[date, datetime]] = []  # each schedule request: its date, and when
         self.states: dict[str, BaseballGameState] = {}
@@ -76,7 +78,8 @@ class _FakeMlb:
         self.asked.append((day, now))
         if day in self.failing:
             raise ProviderError("schedule down")
-        return ProviderUpdate(source=SOURCE, observed_at=now, contests=self.slates.get(day, ()), warnings=(f"{day}",))
+        contests, skipped = self.slates.get(day, ()), self.skipped.get(day, ())
+        return ProviderUpdate(source=SOURCE, observed_at=now, contests=contests, warnings=skipped)
 
     def fetch_live_feed(self, game: TeamGame, *, now: datetime) -> LiveBaseballFeed:
         raw = game.id.raw
@@ -112,18 +115,32 @@ def _setup(
     return planned, plan, clock, provider, Poller(plan, clock)
 
 
-def _ids(update: ProviderUpdate) -> list[str]:
-    return [contest.id.raw for contest in update.contests]
+def _ids(store: ContestStore) -> list[str]:
+    return [contest.id.raw for contest in store.contests]
 
 
-def _asked_and_read(planned: PlannedMlb, poller: Poller, clock: FakeClock) -> ProviderUpdate:
-    """A refresh that names what it wants, the asks, then the refresh that reads their answers."""
-    try:
-        planned.refresh(clock.now())
-    except ProviderError:
-        pass  # a new date with no answer yet
+def _scope(day: date) -> PollScope:
+    return PollScope(SOURCE, League.MLB, LocalDate(day))
+
+
+def _slate(day: date) -> PollKey[ProviderUpdate]:
+    return PollKey(PollSource.SLATE, _scope(day))
+
+
+def _pass(planned: PlannedMlb, store: ContestStore, clock: FakeClock) -> ScopeReport:
+    """One refresh's pass over the slate: the dates asked, taken into ``store`` as observed, then reconciled."""
+    report = planned.observe(clock.read(), store.scopes)
+    store.take(report)
+    store.reconcile(clock.monotonic())
+    return report
+
+
+def _asked_and_read(planned: PlannedMlb, store: ContestStore, poller: Poller, clock: FakeClock) -> list[str]:
+    """A pass that names what it wants, the asks, then the pass that reads their answers: the board's games."""
+    _pass(planned, store, clock)
     poller.run_due()
-    return planned.refresh(clock.now())
+    _pass(planned, store, clock)
+    return _ids(store)
 
 
 class _Drawn(RendererRegistry):
@@ -144,51 +161,68 @@ class _Drawn(RendererRegistry):
 
 def test_the_slate_spans_yesterday_and_today_and_keeps_a_game_through_its_final() -> None:
     planned, _, clock, provider, poller = _setup()
+    store = ContestStore()
     late, done, tonight = _game("late"), _game("done", GameStatus.FINAL), _game("tonight", GameStatus.SCHEDULED)
     provider.slates = {YESTERDAY: (late, done), TODAY: (tonight,)}
-    with pytest.raises(ProviderError, match="no answer yet"):
-        planned.refresh(clock.now())
+    first = _pass(planned, store, clock)
+    assert first.observations == () and first.coverage.scopes == (_scope(TODAY), _scope(YESTERDAY))  # asked
     poller.run_due()
-    update = planned.refresh(clock.now())
-    assert _ids(update) == ["tonight", "late"]  # yesterday's finished game stays away on a fresh start
-    assert update.observed_at == AFTER_MIDNIGHT and update.warnings == ("2026-06-18", "2026-06-17")
+    report = _pass(planned, store, clock)
+    assert _ids(store) == ["tonight", "late"]  # yesterday's finished game stays away on a fresh start
+    assert [(seen.scope, seen.outcome, seen.received.utc) for seen in report.observations] == [
+        (_scope(TODAY), ScopeOutcome.COMPLETE, AFTER_MIDNIGHT),
+        (_scope(YESTERDAY), ScopeOutcome.COMPLETE, AFTER_MIDNIGHT),
+    ]
     provider.slates[YESTERDAY] = (dataclasses.replace(late, status=GameStatus.FINAL), done)
     clock.advance(60 * S)  # yesterday's slate is asked once a minute
     poller.run_due()
-    finished = planned.refresh(clock.now())
-    assert _ids(finished) == ["tonight", "late"]  # the late game stays through its final
-    assert finished.contests[1].status is GameStatus.FINAL
+    _pass(planned, store, clock)
+    assert _ids(store) == ["tonight", "late"]  # the late game stays through its final
+    assert store.contests[1].status is GameStatus.FINAL
+
+
+def test_a_slate_that_skipped_a_row_keeps_the_game_it_couldnt_read() -> None:
+    planned, _, clock, provider, poller = _setup()
+    store = ContestStore()
+    first, second = _game("g1", GameStatus.SCHEDULED), _game("g2", GameStatus.SCHEDULED)
+    provider.slates = {TODAY: (first, second)}
+    assert _asked_and_read(planned, store, poller, clock) == ["g1", "g2"]
+    provider.slates[TODAY], provider.skipped[TODAY] = (first,), ("game g2: unknown team 999",)
+    clock.advance(15 * S)
+    poller.run_due()
+    assert [seen.outcome for seen in _pass(planned, store, clock).observations][0] is ScopeOutcome.PARTIAL
+    assert _ids(store) == ["g1", "g2"]  # its row was skipped, not refuted
+    provider.skipped.clear()
+    clock.advance(15 * S)
+    poller.run_due()
+    _pass(planned, store, clock)
+    assert _ids(store) == ["g1"]  # a complete answer without it: it has left
 
 
 def test_a_game_on_both_dates_shows_todays_entry() -> None:
     planned, _, clock, provider, poller = _setup()
+    store = ContestStore()
     resumed = _game("resumed", GameStatus.SUSPENDED)
     provider.slates = {YESTERDAY: (resumed,), TODAY: (dataclasses.replace(resumed, status=GameStatus.LIVE),)}
-    with pytest.raises(ProviderError):
-        planned.refresh(clock.now())
-    poller.run_due()
-    [game] = planned.refresh(clock.now()).contests
+    _asked_and_read(planned, store, poller, clock)  # both answered at once: the later window's entry
+    [game] = store.contests
     assert game.status is GameStatus.LIVE
 
 
 def test_without_a_slate_answer_the_schedule_says_why() -> None:
     planned, _, clock, provider, poller = _setup()
     provider.failing = {TODAY}
-    with pytest.raises(ProviderError):
-        planned.refresh(clock.now())
+    loop = build_planned_loop(planned, RecordingDisplaySink(QUAD))
+    assert loop.refresh(clock.read()).health.reason == "no schedule yet: no answer"  # asked, not answered yet
     poller.run_due()
-    with pytest.raises(ProviderError, match="ProviderError: schedule down"):
-        planned.refresh(clock.now())
+    assert loop.refresh(clock.read()).health.reason == "no schedule yet: ProviderError: schedule down"
 
 
 def test_without_an_answer_for_yesterday_the_slate_is_todays() -> None:
     planned, _, clock, provider, poller = _setup()
     provider.slates = {YESTERDAY: (_game("late"),), TODAY: (_game("tonight", GameStatus.SCHEDULED),)}
     provider.failing = {YESTERDAY}
-    with pytest.raises(ProviderError):
-        planned.refresh(clock.now())
-    poller.run_due()
-    assert _ids(planned.refresh(clock.now())) == ["tonight"]
+    assert _asked_and_read(planned, ContestStore(), poller, clock) == ["tonight"]
 
 
 def test_a_live_game_from_yesterday_outlasts_its_dates_failing_slate_and_ends_when_it_returns() -> None:
@@ -203,9 +237,11 @@ def test_a_live_game_from_yesterday_outlasts_its_dates_failing_slate_and_ends_wh
         clock.advance(30 * S)
         poller.run_due()
         refreshes.append(loop.refresh(clock.read()))
-    removed = {game.raw for refresh in refreshes if refresh.reconciliation for game in refresh.reconciliation.removed}
+    removed = {game.raw for refresh in refreshes for game in refresh.reconciliation.removed}
     assert removed == set() and all(refresh.health.source is SourceHealth.FRESH for refresh in refreshes)
-    assert _ids(planned.refresh(clock.now())) == ["tonight", "late"]  # still on the slate, its card still up
+    assert _ids(loop._store) == ["tonight", "late"]  # still on the slate, its card still up
+    yesterday = loop._store.health(_scope(YESTERDAY), clock.monotonic())  # stale on its own clock
+    assert yesterday is not None and yesterday.status is ProviderStatus.STALE and yesterday.error is not None
     provider.failing = set()
     provider.slates[YESTERDAY] = (dataclasses.replace(late, status=GameStatus.FINAL),)
     finals: list[str] = []
@@ -231,40 +267,41 @@ def test_a_live_game_from_a_date_whose_slate_keeps_failing_gets_its_final_from_i
         poller.run_due()
         finals.extend(card.raw for card in loop.refresh(clock.read()).pipeline.finals)
     assert finals == ["late:final"]
-    assert [contest.status for contest in planned.refresh(clock.now()).contests][1] is GameStatus.LIVE
+    assert [contest.status for contest in loop._store.contests][1] is GameStatus.LIVE
 
 
 def test_a_date_that_leaves_the_window_retires_its_games_but_one_still_being_played() -> None:
     planned, plan, clock, provider, poller = _setup(market=False)
+    store = ContestStore()
     late, marathon = _game("late"), _game("marathon")
     rained, early = _game("rained", GameStatus.POSTPONED), _game("early", GameStatus.FINAL)
     tonight = _game("tonight", GameStatus.SCHEDULED)
     provider.slates = {YESTERDAY: (late, marathon, rained, early), TODAY: (tonight,)}
-    assert _ids(_asked_and_read(planned, poller, clock)) == ["tonight", "late", "marathon", "rained"]
+    assert _asked_and_read(planned, store, poller, clock) == ["tonight", "late", "marathon", "rained"]
     provider.slates[YESTERDAY] = (dataclasses.replace(late, status=GameStatus.FINAL), marathon, rained, early)
     clock.advance(60 * S)
-    assert _ids(_asked_and_read(planned, poller, clock)) == ["tonight", "late", "marathon", "rained"]
+    assert _asked_and_read(planned, store, poller, clock) == ["tonight", "late", "marathon", "rained"]
 
     # A day on, the 17th leaves the window. Its finished game and its game never played retire; the one
     # still being played stays, and its date is still asked.
     clock.advance(timedelta(days=1))
     provider.slates[TODAY] = (dataclasses.replace(tonight, status=GameStatus.FINAL),)
-    assert _ids(_asked_and_read(planned, poller, clock)) == ["tonight", "marathon"]
+    assert _asked_and_read(planned, store, poller, clock) == ["tonight", "marathon"]
     ended = (dataclasses.replace(late, status=GameStatus.FINAL), dataclasses.replace(marathon, status=GameStatus.FINAL))
     provider.slates[YESTERDAY] = (*ended, rained, early)
     clock.advance(60 * S)
-    update = _asked_and_read(planned, poller, clock)
-    assert _ids(update) == ["tonight", "marathon"] and update.contests[1].status is GameStatus.FINAL
+    assert _asked_and_read(planned, store, poller, clock) == ["tonight", "marathon"]
+    assert store.contests[1].status is GameStatus.FINAL
 
     # Once its final has had its time on the board, it retires too, and its date is no longer asked.
     clock.advance(FINAL_HOLD)
-    assert _ids(_asked_and_read(planned, poller, clock)) == ["tonight"]
+    assert _asked_and_read(planned, store, poller, clock) == ["tonight"]
     retired = clock.now()
     for _ in range(4):
         clock.advance(61 * S)
-        _asked_and_read(planned, poller, clock)
+        _asked_and_read(planned, store, poller, clock)
     assert [at for day, at in provider.asked if day == YESTERDAY and at > retired + 2 * 60 * S] == []
-    assert plan.latest(PollKey(PollSource.SLATE, YESTERDAY), clock.read()) is None
+    assert plan.latest(_slate(YESTERDAY), clock.read()) is None
 
 
 # --- feeds -----------------------------------------------------------------------------------------
@@ -316,7 +353,7 @@ def test_warming_up_takes_the_board_from_nothing_to_a_live_card() -> None:
     planned, _, clock, provider, poller = _setup()
     provider.slates = {TODAY: (_game("g1"),)}
     sink = RecordingDisplaySink(QUAD)
-    loop = build_loop(planned, planned.fetch_feed, sink, broadcast_lag=DurationSeconds(0), backoff=NO_BACKOFF)
+    loop = build_loop(planned, planned.fetch_feed, sink, broadcast_lag=DurationSeconds(0))
     assert loop.refresh(clock.read()).health.source is SourceHealth.OFFLINE  # no schedule answered yet
     assert loop.paint(clock.read()).frame is FrameKind.OFFLINE
     warm_up(loop, poller, clock)
@@ -366,7 +403,7 @@ def test_a_hung_pregame_read_never_delays_an_on_time_score_release() -> None:
     poller.start()
     try:
         loop.refresh(clock.read())  # wants the slates
-        assert _until(lambda: plan.latest(PollKey(PollSource.SLATE, TODAY), clock.read()) is not None)
+        assert _until(lambda: plan.latest(_slate(TODAY), clock.read()) is not None)
         loop.refresh(clock.read())  # wants g1's feed, and g2's details and odds
         feed: PollKey[LiveBaseballFeed] = PollKey(PollSource.GAME_FEED, live.id)
         assert _until(lambda: odds_asked.is_set() and plan.latest(feed, clock.read()) is not None)
