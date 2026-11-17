@@ -15,9 +15,11 @@ the whole slate in one request every ``--every`` seconds; the Free tier allows 5
 13 seconds leaves a little room. It stops a few polls after every game is final, or at the request cap
 or deadline.
 
-Everything lands in ``build/recordings/balldontlie/nba/``: the raw responses as JSON lines, stamped with
-when they arrived, and, when recording, ``<date>/summary.log``, a readable line per change in any game
-(``tail -f`` it during the games).
+Everything lands in ``build/recordings/balldontlie/nba/``, a folder per probe (``probe-<instant>/``) or
+night (``<date>/``): the raw responses as JSON lines, stamped with when they arrived, and, when
+recording, ``<date>/summary.log``, a readable line per change in any game (``tail -f`` it during the
+games). Each folder is made with a ``RETENTION.json`` stamp; BALLDONTLIE's terms allow keeping what it
+answers, so the stamp says so (``tools/recordings_due.py`` lists the stamps).
 """
 
 from __future__ import annotations
@@ -39,6 +41,7 @@ _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT))  # so `omni` resolves when this script is run directly
 
 from omni.core.env import read_env_file
+from omni.providers.rights import DataSource, stamp_recording
 
 _BASE = "https://api.balldontlie.io/v1"
 _KEY_VAR = "BALLDONTLIE_API_KEY"
@@ -204,7 +207,9 @@ def _append(path: Path, record: dict[str, Any]) -> None:
 def _probe(client: Client) -> int:
     now = datetime.now(timezone.utc)
     today = now.astimezone(_EASTERN).date()
-    saved = _OUT / f"probe-{now:%Y%m%dT%H%M%SZ}.jsonl"
+    folder = _OUT / f"probe-{now:%Y%m%dT%H%M%SZ}"
+    stamp_recording(folder, DataSource.BALLDONTLIE, now)
+    saved = folder / "responses.jsonl"
     print(f"BALLDONTLIE NBA probe at {_local(now)} local ({now.astimezone(_EASTERN):%Y-%m-%d %H:%M} US Eastern)")
     fields: set[str] = set()
     first_headers: dict[str, str] = {}
@@ -349,7 +354,7 @@ def main() -> int:
         return _probe(client)
     day = args.date or datetime.now(_EASTERN).date()
     out = _OUT / day.isoformat()
-    out.mkdir(parents=True, exist_ok=True)
+    stamp_recording(out, DataSource.BALLDONTLIE, datetime.now(timezone.utc))
     recorder = Recorder(client, day, out, every=args.every, final_polls=args.final_polls)
     deadline = datetime.now(timezone.utc) + timedelta(hours=args.hours) if args.hours else None
     try:

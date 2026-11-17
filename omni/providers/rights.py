@@ -1,0 +1,480 @@
+"""What each outside source's terms let us do with its data, and how long a recording of it may be kept.
+
+`MANIFEST` holds one `SourceRights` per source the project reads or ships. Each says whether we may:
+- **display** it: draw it on a board, holding the latest answer in memory while it's shown;
+- **cache** it: "normal application caching", keeping answers in a store outside the board's own
+  process (on disk, or a shared service like Omni's market service) to serve them again;
+- **archive** it: keep a recording past its use. `Archive.DIAGNOSIS` allows one only to diagnose a
+  problem, deleted after the entry's `retention`; `Archive.KEEP` allows keeping it;
+- **train** models on it, and **redistribute** it;
+- share one **key** between boards.
+It also gives the attribution the source requires, what happens to what we hold when access ends, and
+where and when we read the terms. A permission the terms don't speak to is `Permission.UNSTATED`, which
+counts as refused: no permission is assumed.
+
+Telemetry comes in two classes (`Telemetry`). **Our own decision telemetry** (ids, kinds, reasons, timings,
+versions, counts) may be kept. **Third-party content** (raw rows, play text, injury text, anything a
+provider worded) follows its source's archive rule. A recording is third-party content: each recording
+folder gets a `RETENTION.json` stamp when it's made (`stamp_recording`), naming the source, when it was
+made, when it must be deleted by, and the terms' date. `recordings_due` lists recording folders with their
+stamps, reading nothing but the stamps; deleting stays the user's step.
+
+`READS` says which sources each module reads or ships, so a new provider without an entry fails a test.
+"""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Iterator, Mapping
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta, timezone
+from enum import Enum
+from pathlib import Path, PurePosixPath
+from typing import Any
+
+from omni.core.enum import StrEnumMixin
+
+__all__ = [
+    "MANIFEST",
+    "READS",
+    "RETENTION_FILE",
+    "Archive",
+    "DataSource",
+    "DueRecording",
+    "DueStatus",
+    "OnTermination",
+    "Permission",
+    "RetentionStamp",
+    "SourceRights",
+    "Telemetry",
+    "read_stamp",
+    "recordings_due",
+    "retention_stamp",
+    "stamp_recording",
+]
+
+RETENTION_FILE = "RETENTION.json"
+_STAMP_VERSION = 1
+
+
+class DataSource(StrEnumMixin, str, Enum):
+    """An outside source the project reads or ships. A provider's `SourceRef` name is its value."""
+
+    MLB_STATSAPI = "mlb_statsapi"
+    NFLMETA = "nflmeta"
+    BALLDONTLIE = "balldontlie"
+    POLYMARKET_US = "polymarket_us"
+    BOVADA = "bovada"
+    OMNI_MARKET_SERVICE = "omni_market_service"
+    NFLVERSE = "nflverse"
+    RETROSHEET = "retrosheet"
+    WIKIPEDIA_COLORS = "wikipedia_colors"
+    TEAM_LOGOS = "team_logos"
+
+
+class Permission(StrEnumMixin, str, Enum):
+    """What a source's terms say about one use."""
+
+    ALLOWED = "allowed"
+    DENIED = "denied"
+    UNSTATED = "unstated"  # the terms we read don't say: counts as refused
+
+    @property
+    def granted(self) -> bool:
+        return self is Permission.ALLOWED
+
+
+class Archive(StrEnumMixin, str, Enum):
+    """Whether a source's data may be kept past its use."""
+
+    NONE = "none"
+    DIAGNOSIS = "diagnosis"  # only to diagnose a problem, and deleted after the entry's retention
+    KEEP = "keep"
+
+
+class OnTermination(StrEnumMixin, str, Enum):
+    """What happens to what we hold of a source when our access ends."""
+
+    DELETE = "delete"
+    KEEP = "keep"
+
+
+class Telemetry(StrEnumMixin, str, Enum):
+    """The two classes of what the project writes down."""
+
+    OWN_DECISIONS = "own_decisions"  # ids, kinds, reasons, timings, versions, counts: may be kept
+    THIRD_PARTY_CONTENT = "third_party_content"  # anything a provider worded: its source's archive rule
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class SourceRights:
+    """One source's terms, as far as they bear on what the project does with its data."""
+
+    source: DataSource
+    terms_url: str | None  # None when no single page holds them
+    terms_read: date
+    display: Permission
+    cache: Permission
+    archive: Archive
+    retention: timedelta | None = None  # how long a diagnosis recording may be kept; only for DIAGNOSIS
+    train: Permission
+    redistribute: Permission
+    attribution: str | None  # the text the source requires, or None
+    on_termination: OnTermination
+    key_shared: Permission | None  # one key on several boards; None when the source takes no key
+    notes: str
+
+    def __post_init__(self) -> None:
+        if (self.archive is Archive.DIAGNOSIS) != (self.retention is not None):
+            raise ValueError(f"{self.source}: a retention goes with a diagnosis archive, and only with one")
+
+
+_RETROSHEET_NOTICE = (
+    "The information used here was obtained free of charge from and is copyrighted by Retrosheet.  Interested"
+    ' parties may contact Retrosheet at "www.retrosheet.org".'
+)
+
+# Where each term comes from: "SOURCES.md" is docs/agent_context/SOURCES.md, already verified there;
+# "read 2026-11-17" is a read of the terms themselves on that day, for this manifest.
+_ENTRIES = (
+    SourceRights(
+        source=DataSource.MLB_STATSAPI,
+        terms_url="http://gdx.mlb.com/components/copyright.txt",  # the notice StatsAPI's `copyright` field names
+        terms_read=date(2026, 11, 17),  # read 2026-11-17
+        display=Permission.ALLOWED,  # read 2026-11-17: "individual, non-commercial, non-bulk use" is permitted
+        cache=Permission.UNSTATED,  # read 2026-11-17: the notice doesn't speak to it
+        archive=Archive.NONE,  # read 2026-11-17: any other use needs MLBAM's written authorization; stricter
+        train=Permission.DENIED,  # read 2026-11-17: bulk use isn't permitted
+        redistribute=Permission.DENIED,  # read 2026-11-17: only individual, non-commercial use
+        attribution=None,  # read 2026-11-17: the notice asks for none
+        on_termination=OnTermination.DELETE,  # no agreement to end; the stricter value
+        key_shared=None,
+        notes="MLBAM's notice: individual, non-commercial, non-bulk use only; every other use needs its consent.",
+    ),
+    SourceRights(
+        source=DataSource.NFLMETA,
+        terms_url="https://nflmeta.org/terms",
+        terms_read=date(2026, 11, 17),  # read 2026-11-17 (last updated 2026-09-19); SOURCES.md read 2026-11-15
+        display=Permission.ALLOWED,  # SOURCES.md: Free is personal, non-commercial; paid plans may display scores
+        cache=Permission.ALLOWED,  # SOURCES.md: "normal application caching", never a standing copy
+        archive=Archive.DIAGNOSIS,  # SOURCES.md: no standing copy, no systematic accumulation
+        retention=timedelta(days=7),  # the user's rule since 2026-11-15
+        train=Permission.DENIED,  # read 2026-11-17: "does not include model training or fine-tuning"
+        redistribute=Permission.DENIED,  # read 2026-11-17: no redistributing, republishing or reselling
+        attribution=None,  # read 2026-11-17: none of its own; material from nflverse carries nflverse's
+        on_termination=OnTermination.DELETE,  # SOURCES.md: termination doesn't entitle keeping; a breach deletes
+        key_shared=Permission.UNSTATED,  # read 2026-11-17: keys stay server-side and the holder answers for them
+        notes="No standing copy and no training; a recording is for a diagnosis, deleted within 7 days.",
+    ),
+    SourceRights(
+        source=DataSource.BALLDONTLIE,
+        terms_url="https://www.balldontlie.io/terms",
+        terms_read=date(2026, 11, 16),  # SOURCES.md: terms last updated 2026-10-20, re-checked 2026-11-16
+        display=Permission.ALLOWED,  # SOURCES.md: §6, any lawful personal or commercial use
+        cache=Permission.ALLOWED,  # SOURCES.md: copying, caching, storing and archiving are allowed
+        archive=Archive.KEEP,  # SOURCES.md: no retention deadline
+        train=Permission.ALLOWED,  # BOARD_POLICY.md §2: its terms allow fitting a model on its archive
+        redistribute=Permission.DENIED,  # SOURCES.md: §6 bars a substitute feed; serving our own boards is allowed
+        attribution=None,  # SOURCES.md: no attribution is required
+        on_termination=OnTermination.KEEP,  # SOURCES.md: §17, data may be kept after access ends
+        key_shared=Permission.DENIED,  # SOURCES.md: §5 and §7(b) bar sharing keys
+        notes="One key in a central poller may serve every Omni board; a key on each board would be sharing it.",
+    ),
+    SourceRights(
+        source=DataSource.POLYMARKET_US,
+        terms_url="https://www.polymarketexchange.com/files/legal/latest/participant-agreement",
+        terms_read=date(2026, 11, 1),  # SOURCES.md files it with the odds research of 2026-11-01
+        display=Permission.UNSTATED,  # SOURCES.md: the agreement read binds key holders; nothing on display
+        cache=Permission.UNSTATED,  # SOURCES.md: nothing on caching
+        archive=Archive.NONE,  # nothing allows keeping it; the stricter value
+        train=Permission.UNSTATED,  # SOURCES.md: nothing on training
+        redistribute=Permission.DENIED,  # SOURCES.md: clause 22, "may not be redistributed except as PMUS ... permits"
+        attribution=None,
+        on_termination=OnTermination.DELETE,  # nothing allows keeping it; the stricter value
+        key_shared=Permission.UNSTATED,  # SOURCES.md: the agreement binds each account holder
+        notes="Public market data needs no key; the keyed stream's key stays in Omni's market service.",
+    ),
+    SourceRights(
+        source=DataSource.BOVADA,
+        terms_url="https://www.bovada.lv/terms-of-service",
+        terms_read=date(2026, 11, 2),  # SOURCES.md: read through a summarizing fetch
+        display=Permission.ALLOWED,  # SOURCES.md: 8.1, content licensed for private personal use
+        cache=Permission.DENIED,  # SOURCES.md: 9.3, no storing in another electronic retrieval system
+        archive=Archive.NONE,  # SOURCES.md: 9.3
+        train=Permission.DENIED,  # SOURCES.md: licensed for private personal use only; 9.9, no commercial use
+        redistribute=Permission.DENIED,  # SOURCES.md: 9.3
+        attribution=None,
+        on_termination=OnTermination.DELETE,  # nothing allows keeping it; the stricter value
+        key_shared=None,
+        notes="Private personal use: a board shows pregame lines for its owner, and the cloud poller leaves it off.",
+    ),
+    SourceRights(
+        source=DataSource.OMNI_MARKET_SERVICE,
+        terms_url="https://github.com/ajszoke/omni-scoreboard/blob/main/cloud/README.md",  # our own service
+        terms_read=date(2026, 11, 17),  # read 2026-11-17: cloud/README.md
+        display=Permission.ALLOWED,
+        cache=Permission.ALLOWED,  # read 2026-11-17: its rows expire after an hour
+        archive=Archive.NONE,  # what it holds is Polymarket US's prices, so Polymarket's rule
+        train=Permission.UNSTATED,  # Polymarket US's rule
+        redistribute=Permission.DENIED,  # it serves Omni's boards only
+        attribution=None,
+        on_termination=OnTermination.DELETE,
+        key_shared=Permission.DENIED,  # read 2026-11-17: one token per board
+        notes="Omni's own relay of market prices to its boards; what it holds follows the market's source.",
+    ),
+    SourceRights(
+        source=DataSource.NFLVERSE,
+        terms_url="https://github.com/nflverse#licensing",
+        terms_read=date(2026, 11, 17),  # read 2026-11-17; SOURCES.md: the team table is CC BY 4.0
+        display=Permission.ALLOWED,  # read 2026-11-17: CC BY 4.0, any use with attribution
+        cache=Permission.ALLOWED,
+        archive=Archive.KEEP,
+        train=Permission.ALLOWED,
+        redistribute=Permission.ALLOWED,  # with the attribution
+        attribution="Data from nflverse (https://github.com/nflverse), CC BY 4.0.",
+        on_termination=OnTermination.KEEP,
+        key_shared=None,
+        notes="FTN's charting columns are CC BY-SA 4.0 (share-alike), so they're excluded; nothing here reads them.",
+    ),
+    SourceRights(
+        source=DataSource.RETROSHEET,
+        terms_url="https://www.retrosheet.org/notice.txt",
+        terms_read=date(2026, 11, 17),  # read 2026-11-17
+        display=Permission.ALLOWED,  # read 2026-11-17: "free to make any desired use of the information"
+        cache=Permission.ALLOWED,
+        archive=Archive.KEEP,
+        train=Permission.ALLOWED,  # read 2026-11-17: including "producing a commercial product"
+        redistribute=Permission.ALLOWED,  # read 2026-11-17: "selling it, giving it away"
+        attribution=_RETROSHEET_NOTICE,  # read 2026-11-17: verbatim, and it "must appear prominently"
+        on_termination=OnTermination.KEEP,
+        key_shared=None,
+        notes="Not read yet: the planned MLB win-probability table's source. Its notice ships with it and in About.",
+    ),
+    SourceRights(
+        source=DataSource.WIKIPEDIA_COLORS,
+        terms_url="https://en.wikipedia.org/wiki/Module:Sports_color/basketball",
+        terms_read=date(2026, 11, 16),  # SOURCES.md: CC BY-SA 4.0, pinned at revision 1386095329
+        display=Permission.ALLOWED,  # SOURCES.md: CC BY-SA 4.0
+        cache=Permission.ALLOWED,
+        archive=Archive.KEEP,
+        train=Permission.ALLOWED,  # share-alike: what's built from it carries the same license
+        redistribute=Permission.ALLOWED,  # with the attribution, under the same license
+        attribution="Colors from Wikipedia's Module:Sports color/basketball, by Wikipedia contributors, CC BY-SA 4.0.",
+        on_termination=OnTermination.KEEP,
+        key_shared=None,
+        notes="The NBA palette's starting colors; share-alike.",
+    ),
+    SourceRights(
+        source=DataSource.TEAM_LOGOS,
+        terms_url=None,  # the teams' trademarks, wherever they're hosted
+        terms_read=date(2026, 11, 16),  # SOURCES.md: the user's ruling of 2026-11-16
+        display=Permission.ALLOWED,  # SOURCES.md: league CDN and ESPN-hosted logo files are fine tile sources
+        cache=Permission.ALLOWED,  # the committed tiles the boards draw
+        archive=Archive.KEEP,  # kept only as those tiles
+        train=Permission.DENIED,  # display only
+        redistribute=Permission.DENIED,  # never beyond the boards
+        attribution=None,
+        on_termination=OnTermination.DELETE,  # no agreement to end; the stricter value
+        key_shared=None,
+        notes="Team trademarks: display only, as the boards' committed tiles; never redistributed beyond the boards.",
+    ),
+)
+
+MANIFEST: Mapping[DataSource, SourceRights] = {entry.source: entry for entry in _ENTRIES}
+
+# Which outside sources each module reads or ships, by its path from the repo root. Every module in the
+# provider packages has an entry, an empty one when it reads none, so a new provider can't go unlisted.
+READS: Mapping[str, frozenset[DataSource]] = {
+    "omni/providers/__init__.py": frozenset(),
+    "omni/providers/base.py": frozenset(),
+    "omni/providers/bovada_odds.py": frozenset({DataSource.BOVADA}),
+    "omni/providers/market_service.py": frozenset({DataSource.OMNI_MARKET_SERVICE}),
+    "omni/providers/mlb_palette.py": frozenset({DataSource.TEAM_LOGOS}),  # each tile's background
+    "omni/providers/mlb_statsapi.py": frozenset({DataSource.MLB_STATSAPI}),
+    "omni/providers/mlb_teams.py": frozenset({DataSource.MLB_STATSAPI}),
+    "omni/providers/nba_palette.py": frozenset({DataSource.WIKIPEDIA_COLORS}),
+    "omni/providers/nba_teams.py": frozenset({DataSource.BALLDONTLIE}),  # names, conferences, divisions
+    "omni/providers/nfl_palette.py": frozenset({DataSource.NFLVERSE}),
+    "omni/providers/nfl_teams.py": frozenset({DataSource.NFLVERSE}),
+    "omni/providers/nflmeta.py": frozenset({DataSource.NFLMETA}),
+    "omni/providers/polymarket_us.py": frozenset({DataSource.POLYMARKET_US}),
+    "omni/providers/rights.py": frozenset(),
+    "cloud/market_service/__init__.py": frozenset(),
+    "cloud/market_service/api.py": frozenset(),
+    "cloud/market_service/api_handler.py": frozenset(),
+    "cloud/market_service/auth.py": frozenset(),
+    "cloud/market_service/poller.py": frozenset({DataSource.POLYMARKET_US}),
+    "cloud/market_service/poller_handler.py": frozenset(
+        {DataSource.MLB_STATSAPI, DataSource.POLYMARKET_US, DataSource.BOVADA}
+    ),
+    "cloud/market_service/quote_stream.py": frozenset({DataSource.POLYMARKET_US}),
+    "cloud/market_service/readings.py": frozenset(),
+    "cloud/market_service/slate.py": frozenset({DataSource.MLB_STATSAPI, DataSource.POLYMARKET_US}),
+    "cloud/market_service/store.py": frozenset(),
+    # Readers outside the provider packages.
+    "omni/app/football.py": frozenset({DataSource.NFLMETA}),
+    "tools/balldontlie_record.py": frozenset({DataSource.BALLDONTLIE}),
+    "tools/fetch_mlb_logos.py": frozenset({DataSource.TEAM_LOGOS}),
+    "tools/fetch_nba_logos.py": frozenset({DataSource.TEAM_LOGOS, DataSource.WIKIPEDIA_COLORS}),
+    "tools/fetch_nfl_logos.py": frozenset({DataSource.NFLVERSE, DataSource.TEAM_LOGOS}),
+    "tools/nflmeta_record.py": frozenset({DataSource.NFLMETA}),
+    "tools/nflmeta_replay_trace.py": frozenset({DataSource.NFLMETA}),  # reads a recording
+}
+
+
+# --- retention --------------------------------------------------------------------------------------------
+
+
+class DueStatus(StrEnumMixin, str, Enum):
+    """Where a recording stands against its stamp."""
+
+    OVERDUE = "overdue"
+    CURRENT = "current"
+    KEPT = "kept"  # its source allows keeping it
+    UNSTAMPED = "unstamped"
+    UNREADABLE = "unreadable"  # a stamp that can't be read
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RetentionStamp:
+    """What a recording folder's `RETENTION.json` says: its source, when it was made, and when it goes."""
+
+    source: DataSource
+    created: datetime
+    archive: Archive
+    delete_by: datetime | None  # None when its source allows keeping it
+    terms_read: date
+
+    @property
+    def manifest(self) -> str:
+        """Where the source's entry is."""
+        return f"omni/providers/rights.py#{self.source}"
+
+    def record(self) -> dict[str, Any]:
+        return {
+            "retention": _STAMP_VERSION,
+            "source": self.source.value,
+            "created": self.created.isoformat(),
+            "archive": self.archive.value,
+            "delete_by": self.delete_by.isoformat() if self.delete_by is not None else None,
+            "terms_read": self.terms_read.isoformat(),
+            "terms_url": MANIFEST[self.source].terms_url,
+            "manifest": self.manifest,
+        }
+
+    def status(self, now: datetime) -> DueStatus:
+        if self.delete_by is None:
+            return DueStatus.KEPT
+        return DueStatus.OVERDUE if now >= self.delete_by else DueStatus.CURRENT
+
+
+def retention_stamp(source: DataSource, created: datetime) -> RetentionStamp:
+    """The stamp for a recording of ``source`` made at ``created``: a diagnosis's is due its retention later.
+
+    Raises `ValueError` for a source whose terms allow no recording, or a naive instant.
+    """
+    if created.tzinfo is None:
+        raise ValueError("a recording's creation instant carries its offset")
+    rights = MANIFEST[source]
+    if rights.archive is Archive.NONE:
+        raise ValueError(f"{source}'s terms allow no recording")
+    delete_by = created + rights.retention if rights.retention is not None else None
+    return RetentionStamp(
+        source=source, created=created, archive=rights.archive, delete_by=delete_by, terms_read=rights.terms_read
+    )
+
+
+def stamp_recording(folder: Path, source: DataSource, now: datetime) -> RetentionStamp:
+    """Make a recording folder with its stamp, or keep the stamp it has: the stamp in force.
+
+    A folder already stamped for another source raises `ValueError`: one folder holds one source.
+    """
+    existing = read_stamp(folder)
+    if existing is not None:
+        if existing.source is not source:
+            raise ValueError(f"{folder} already holds a recording of {existing.source}")
+        return existing
+    stamp = retention_stamp(source, now)
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / RETENTION_FILE).write_text(json.dumps(stamp.record(), indent=2) + "\n", encoding="utf-8")
+    return stamp
+
+
+def read_stamp(folder: Path) -> RetentionStamp | None:
+    """A folder's stamp, or None if it has none; `ValueError` for one that can't be read."""
+    path = folder / RETENTION_FILE
+    if not path.is_file():
+        return None
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+        delete_by = record["delete_by"]
+        return RetentionStamp(
+            source=DataSource(record["source"]),
+            created=_instant(record["created"]),
+            archive=Archive(record["archive"]),
+            delete_by=_instant(delete_by) if delete_by is not None else None,
+            terms_read=date.fromisoformat(record["terms_read"]),
+        )
+    except (ValueError, KeyError, TypeError) as exc:
+        raise ValueError(f"{path}: {type(exc).__name__}: {exc}") from None
+
+
+@dataclass(frozen=True, slots=True)
+class DueRecording:
+    """One recording under the recordings folder, with its stamp and where it stands."""
+
+    path: PurePosixPath  # from the recordings folder
+    status: DueStatus
+    stamp: RetentionStamp | None = None
+
+    def line(self) -> str:
+        """The recording as the due-list prints it: its name and its stamp, never its content."""
+        stamp = self.stamp
+        if stamp is None:
+            why = "stamp unreadable" if self.status is DueStatus.UNREADABLE else "unstamped"
+            return f"{self.path}  {why}: follow the source's rule by hand"
+        if stamp.delete_by is None:
+            return f"{self.path}  {stamp.source}  kept: its terms allow keeping"
+        due = f"{stamp.delete_by.astimezone(timezone.utc):%Y-%m-%d %H:%M} UTC"
+        return f"{self.path}  {stamp.source}  delete by {due}" + (
+            "  OVERDUE" if self.status is DueStatus.OVERDUE else ""
+        )
+
+
+def recordings_due(root: Path, now: datetime) -> tuple[DueRecording, ...]:
+    """Every recording under ``root``, by its path, with where it stands at ``now``. Deletes nothing.
+
+    A folder with a stamp is a recording, and nothing under it is looked at. A folder with no stamp and no
+    folders in it is an unstamped recording, and so is a file lying beside folders. Only stamps are read.
+    """
+    if not root.is_dir():
+        return ()
+    return tuple(sorted(_walk(root, root, now), key=lambda due: due.path))
+
+
+def _walk(folder: Path, root: Path, now: datetime) -> Iterator[DueRecording]:
+    name = PurePosixPath(folder.relative_to(root).as_posix())
+    try:
+        stamp = read_stamp(folder)
+    except ValueError:
+        yield DueRecording(name, DueStatus.UNREADABLE)
+        return
+    if stamp is not None:
+        yield DueRecording(name, stamp.status(now), stamp)
+        return
+    children = sorted(folder.iterdir())
+    if folder != root and not any(child.is_dir() for child in children):
+        yield DueRecording(name, DueStatus.UNSTAMPED)
+        return
+    for child in children:
+        if child.is_dir():
+            yield from _walk(child, root, now)
+        else:
+            yield DueRecording(PurePosixPath(child.relative_to(root).as_posix()), DueStatus.UNSTAMPED)
+
+
+def _instant(raw: str) -> datetime:
+    instant = datetime.fromisoformat(raw)
+    if instant.tzinfo is None:
+        raise ValueError(f"an instant without its offset: {raw}")
+    return instant

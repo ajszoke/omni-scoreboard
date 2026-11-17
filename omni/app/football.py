@@ -11,7 +11,8 @@ the RGBMatrixEmulator instead. The feed is read on one thread and frames are wri
 neither a slow request nor a stalled display holds up drawing. ``--record`` appends every NFLMeta
 response to a recording under ``build/recordings/nflmeta/``, for diagnosing the feed; NFLMeta's terms
 allow ordinary caching but not a standing copy of its data, so keep recordings to what a diagnosis needs
-and delete them after. The log opens with what the run decides with (`omni.app.versions`).
+and delete them after: the recording's ``RETENTION.json`` says by when (`omni.providers.rights`). The log
+opens with what the run decides with (`omni.app.versions`).
 """
 
 from __future__ import annotations
@@ -34,6 +35,7 @@ from omni.core.enum import PanelProfile
 from omni.core.env import read_env_file
 from omni.domain.rules import RULES
 from omni.providers.nflmeta import HALFTIME_HOLD, PlayFeedPace
+from omni.providers.rights import DataSource, stamp_recording
 from omni.renderers.text_lane import DEFAULT_MARQUEE, ScrollSpeed
 
 __all__ = ["main"]
@@ -155,6 +157,7 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
     if args.record:
         day = datetime.now().strftime("%Y-%m-%d")
         record_dir = _REPO_ROOT / "build" / "recordings" / "nflmeta" / f"{day}-{away}-{home}"
+        stamp_recording(record_dir, DataSource.NFLMETA, datetime.now(timezone.utc))
     provider = NflMetaLiveProvider(
         NflTeamRegistry.default(source=NFLMETA_SOURCE),
         fetch=NflMetaHttp(key, record_dir).get,
