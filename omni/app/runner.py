@@ -37,6 +37,7 @@ from omni.app.pipeline import (
 )
 from omni.app.supervisor import BackoffPolicy, ProviderSupervisor
 from omni.app.trace import DecisionTracer
+from omni.app.versions import Versions
 from omni.cards.factory import CardFactory
 from omni.core.clock import Clock, MonotonicTime, Pacer
 from omni.core.time import DurationSeconds
@@ -175,9 +176,14 @@ def run_forever(
     log: Callable[[str], None] = print,
     timezone: tzinfo | None = None,
     poller: Poller | None = None,
+    versions: Versions | None = None,
 ) -> None:  # pragma: no cover - real-time loop
-    """Refresh on a worker thread whenever there's reason to, and paint `fps` times a second here."""
+    """Refresh on a worker thread whenever there's reason to, and paint `fps` times a second here.
+
+    ``versions``, when given, opens the trace: what the run decides with."""
     tracer = DecisionTracer(log, timezone=timezone)
+    if versions is not None:
+        tracer.versions(versions)
 
     def refresh() -> MonotonicTime | None:
         started = clock.read()

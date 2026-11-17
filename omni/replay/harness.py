@@ -10,9 +10,9 @@ The loop runs a refresh and a paint at every instant something can change: a fra
 timeline landing, an outage starting or ending, or a deadline the loop itself names (a card's
 minimum or turn, a play clearing the delay, the source going stale). Stepped only there, it
 decides as it would at any finer pace. `replay()` samples what was on the panel every
-``tick``; `replay_decisions()` lists every change, with its reason. Identical timeline +
-parameters always yield an identical trace, so a fixture timeline proves entry, fairness,
-delay, and removal without real time or network.
+``tick``; `replay_decisions()` lists every change, with its reason, under a header naming what the
+replay decided with (`replay_versions`). Identical timeline + parameters always yield an identical
+trace, so a fixture timeline proves entry, fairness, delay, and removal without real time or network.
 
 A feed's answer arrives when the replay first reads its frame, which is the frame's own instant
 (the replay steps there), or the end of an outage since: the first answer after one is new,
@@ -35,11 +35,13 @@ from omni.app.loop import Painted, Refresh
 from omni.app.runner import build_loop
 from omni.app.contest_store import ProviderStatus
 from omni.app.supervisor import BackoffPolicy
+from omni.app.versions import DecisionConfig, PolicyName, Versions
 from omni.core.clock import ClockReading, FakeClock
 from omni.core.enum import League, PanelProfile
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.core.time import DurationSeconds
 from omni.domain.contest import TeamGame
+from omni.domain.rules import RULES
 from omni.cards.base import ScoreboardCard
 from omni.events.baseball import LiveBaseballFeed
 from omni.panels.geometry import geometry_for
@@ -49,11 +51,12 @@ from omni.queue.scheduler import SelectionReason
 from omni.renderers.canvas import Canvas, RecordingCanvas
 from omni.renderers.context import RenderContext
 from omni.renderers.registry import RendererRegistry, default_registry
+from omni.renderers.text_lane import ScrollSpeed
 from omni.replay.timeline import Timeline
 from omni.tower.board import BoardFrame, BoardPayload, BoardPolicy, FrameKind
 from omni.tower.lane import ChangeKind, LaneChange
 
-__all__ = ["TraceEntry", "ReplayProvider", "Seek", "replay", "replay_decisions"]
+__all__ = ["TraceEntry", "ReplayProvider", "Seek", "replay", "replay_decisions", "replay_versions"]
 
 _REPLAY_SOURCE = SourceRef("replay", "fixture://timeline")
 _NUDGE = timedelta(milliseconds=1)  # past a deadline, so spans measured in floating point have surely run
@@ -156,14 +159,16 @@ def replay_decisions(
 ) -> list[str]:
     """Every change on the board across ``timeline``, one line each, timed in seconds from its start.
 
-    ``up`` names a card that went up and why the queue chose it; ``down`` one that came down, why,
+    The first line is the replay's header: its policy, config digest, rules and models
+    (`replay_versions`). Then ``up`` names a card that went up and why the queue chose it; ``down`` one that came down, why,
     and how long it was up; ``drop`` one that came down before it drew; ``frame`` an explicit frame
     and why; ``stale`` a card on air whose data passed its age; ``unseen`` one that left before it
     ever aired, and why; ``final`` a final revealed, with when its game ended and what that rests on;
     ``note`` something else the board decided; ``source`` a change in how far the board trusts its
     source. With ``seek``, the replay's wall clock jumps once, and the times follow it.
     """
-    lines: list[str] = []
+    versions = replay_versions(profile, broadcast_lag=broadcast_lag, favorites=favorites, policy=policy)
+    lines: list[str] = [versions.header()]
     seen: dict[str, object] = {"source": None, "stale": None}
 
     def observe(at: datetime, refresh: Refresh, painted: Painted) -> None:
@@ -189,6 +194,31 @@ def replay_decisions(
 
     _drive(timeline, profile, until, broadcast_lag, favorites, policy, observe, every=None, draw=False, seek=seek)
     return lines
+
+
+def replay_versions(
+    profile: PanelProfile,
+    *,
+    broadcast_lag: DurationSeconds = DurationSeconds(0),
+    favorites: Favorites = Favorites(),
+    policy: BoardPolicy = BoardPolicy(),
+) -> Versions:
+    """What a replay of the shared board decides with. A replay wires no win meter, no odds and no clock
+    zone: the meter and odds are off, and its marquees scroll at the default speed."""
+    return Versions(
+        policy=PolicyName.BOARD_V1,
+        config=DecisionConfig(
+            profile=profile,
+            delay=broadcast_lag.as_timedelta(),
+            favorites=favorites,
+            turn=policy.slot,
+            takeover_cap=policy.takeover_cap,
+            meter=False,
+            odds=False,
+            scroll_speed=ScrollSpeed.SLOW,
+        ),
+        rules=RULES,
+    )
 
 
 def _describe(change: LaneChange[BoardPayload], chosen: SelectionReason | None) -> str | None:

@@ -11,7 +11,7 @@ the RGBMatrixEmulator instead. The feed is read on one thread and frames are wri
 neither a slow request nor a stalled display holds up drawing. ``--record`` appends every NFLMeta
 response to a recording under ``build/recordings/nflmeta/``, for diagnosing the feed; NFLMeta's terms
 allow ordinary caching but not a standing copy of its data, so keep recordings to what a diagnosis needs
-and delete them after.
+and delete them after. The log opens with what the run decides with (`omni.app.versions`).
 """
 
 from __future__ import annotations
@@ -24,13 +24,16 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, cast
+from zoneinfo import ZoneInfo
 
 from omni.core.clock import Pacer, SystemClock
 from omni.app.football_board import FootballBoard
 from omni.app.football_feed import BackgroundFeed, GameFeed
+from omni.app.versions import DecisionConfig, PolicyName, SourceRevision, Versions, read_source_revision
 from omni.core.enum import PanelProfile
 from omni.core.env import read_env_file
-from omni.providers.nflmeta import PlayFeedPace
+from omni.domain.rules import RULES
+from omni.providers.nflmeta import HALFTIME_HOLD, PlayFeedPace
 from omni.renderers.text_lane import DEFAULT_MARQUEE, ScrollSpeed
 
 __all__ = ["main"]
@@ -108,17 +111,39 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _versions(args: argparse.Namespace, source: SourceRevision) -> Versions:
+    """What a run with these flags decides with. The game it follows is its input, not a setting; the
+    display, the recording and the frame rate don't change a decision."""
+    return Versions(
+        policy=PolicyName.NFL_SOLO_V1,
+        config=DecisionConfig(
+            profile=PanelProfile(args.profile),
+            delay=timedelta(seconds=args.delay),
+            timezone=ZoneInfo(args.timezone),
+            meter=args.odds,  # the market's win meter is the one thing --odds turns on
+            scroll_speed=ScrollSpeed(args.scroll_speed),
+            halftime_hold=_halftime_hold(args),
+            play_feed=PlayFeedPace(args.play_feed),
+            meter_lag=timedelta(seconds=args.meter_lag),
+        ),
+        rules=RULES,
+        source=source,
+    )
+
+
+def _halftime_hold(args: argparse.Namespace) -> timedelta:
+    return timedelta(seconds=args.halftime_hold) if args.halftime_hold is not None else HALFTIME_HOLD
+
+
 def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives the network and a display
     args = _parse_args(argv)
     profile = PanelProfile(args.profile)
-
-    from zoneinfo import ZoneInfo
 
     from omni.app.display import DisplaySink, MatrixDevice, MatrixDisplaySink
     from omni.app.frame_stream import BackgroundFrameWriter, DisplayLink, SinkProcess, StreamDisplaySink, StreamFrame
     from omni.panels.geometry import geometry_for
     from omni.providers.nfl_teams import NflTeamRegistry
-    from omni.providers.nflmeta import HALFTIME_HOLD, NFLMETA_SOURCE, NflMetaLiveProvider
+    from omni.providers.nflmeta import NFLMETA_SOURCE, NflMetaLiveProvider
     from omni.providers.polymarket_us import PolymarketUsProvider
     from omni.renderers.image import LogoStore
 
@@ -130,11 +155,10 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
     if args.record:
         day = datetime.now().strftime("%Y-%m-%d")
         record_dir = _REPO_ROOT / "build" / "recordings" / "nflmeta" / f"{day}-{away}-{home}"
-    hold = timedelta(seconds=args.halftime_hold) if args.halftime_hold is not None else HALFTIME_HOLD
     provider = NflMetaLiveProvider(
         NflTeamRegistry.default(source=NFLMETA_SOURCE),
         fetch=NflMetaHttp(key, record_dir).get,
-        halftime_hold=hold,
+        halftime_hold=_halftime_hold(args),
         play_feed=PlayFeedPace(args.play_feed),
     )
     game_id = provider.find_game(away, home)
@@ -176,6 +200,9 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
         log=log,
     )
     print(f"omni.app.football: {away} @ {home} (game {game_id}), {profile.value}, delay {args.delay}s", flush=True)
+    versions = _versions(args, read_source_revision(_REPO_ROOT))
+    log(versions.line())
+    log(versions.config.line())
     if writer is not None:
         writer.start()
     feed.start()

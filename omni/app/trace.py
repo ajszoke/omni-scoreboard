@@ -2,11 +2,16 @@
 
 One line per change, so a running board's log reads as a story rather than a heartbeat:
 
+    versions: policy omni-board-policy/1 | config omni-config/1 ee88362b3fae | rules omni-rules/2026.1 | ...
+    config ee88362b3fae: delay=45s;favorites=mlb:ATL,mlb:COL;meter=off;odds=on;profile=quad_128x64;...
     refresh 19:05:12 in 0.0s: source fresh | next 19:05:31
     up 19:05:12: mlb:mlb_statsapi:745123:live (rotation) | away COL base tile meter #C4CED4 | home LAD ...
     down 19:05:24: mlb:mlb_statsapi:745123:live (ran its time, 12.0s)
     frame 19:31:40: idle (nothing eligible)
 
+- A **versions** line names what the run decides with (`omni.app.versions`): when the run starts, and again
+  only if any of it changes. A **config** line under it spells out the settings its digest stands for,
+  whenever that digest is new.
 - A **refresh** line is written when the source's health, the number of games held in the TV delay, or
   the games the schedule calls final that their feed doesn't yet change, and whenever a refresh drops a
   game or a play, misses a card, reveals a final or corrects one. Each one names the next refresh due by
@@ -28,6 +33,7 @@ from collections.abc import Callable
 from datetime import datetime, timedelta, tzinfo
 
 from omni.app.loop import Painted, Presentation, Refresh
+from omni.app.versions import Versions
 from omni.core.colors import RGBColor
 from omni.renderers.visual_treatment import MarkTreatment
 from omni.tower.board import BoardFrame, BoardPayload
@@ -45,6 +51,16 @@ class DecisionTracer:
         self._last_refresh: tuple[object, ...] | None = None
         self._stale: bool = False
         self._paint_error: str | None = None
+        self._versions: Versions | None = None
+
+    def versions(self, versions: Versions) -> None:
+        """Write what the run decides with: the first time, and after that only when any of it changed."""
+        if versions == self._versions:
+            return
+        last, self._versions = self._versions, versions
+        self._log(versions.line())
+        if last is None or last.config.digest != versions.config.digest:
+            self._log(versions.config.line())
 
     def refreshed(self, refresh: Refresh, *, took: timedelta, next_at: datetime | None) -> None:
         health = refresh.health

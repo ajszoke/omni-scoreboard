@@ -8,7 +8,7 @@ write the lines, and `load_trace` reads them back.
 
 `ReplayFeed` hands a trace's answers to a board as a clock passes their arrival. `replay_board` runs
 a board over a whole trace under a fake clock, stepping at a frame rate, and returns its decisions,
-a line each:
+under a header naming what it decided with (`football_versions`), a line each:
 - the strip's entry and frame, or a blank strip;
 - the field it draws (the score, the period, and the next snap or the break);
 - each entry dropped unseen, and why.
@@ -27,9 +27,10 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from omni.core.clock import ClockReading, FakeClock
-from omni.app.football_board import FootballBoard
+from omni.app.football_board import METER_LAG, FootballBoard
 from omni.app.football_feed import FeedResult
 from omni.app.frame_stream import DisplayReceipt, FrameShown
+from omni.app.versions import DecisionConfig, PolicyName, Versions
 from omni.cards.base import ScoreboardCard
 from omni.cards.football import LiveFootballCardPayload
 from omni.core.enum import GameStatus, HomeAway, League, PanelProfile
@@ -45,12 +46,14 @@ from omni.domain.football import (
     TeamChallenges,
     TeamTimeouts,
 )
+from omni.domain.rules import RULES
 from omni.events.football import FootballEvent, FootballEventKind
 from omni.panels.geometry import geometry_for
 from omni.providers.nfl_teams import NflTeamRegistry
 from omni.providers.nflmeta import FeedNote, FeedNoteKind, NflLiveSnapshot, NflPhase
 from omni.renderers.canvas import Canvas, RecordingCanvas
 from omni.renderers.context import RenderContext
+from omni.renderers.text_lane import ScrollSpeed
 
 __all__ = [
     "REPLAY_SOURCE",
@@ -58,6 +61,7 @@ __all__ = [
     "FootballTrace",
     "ReplayFeed",
     "answer_record",
+    "football_versions",
     "header_record",
     "load_trace",
     "replay_board",
@@ -177,7 +181,8 @@ def replay_board(
     tail: timedelta = timedelta(minutes=2),
     profile: PanelProfile = PanelProfile.QUAD_128X64,
 ) -> list[str]:
-    """Run a board over ``trace`` from its start to ``tail`` past its last answer; its decisions.
+    """Run a board over ``trace`` from its start to ``tail`` past its last answer; its decisions, under the
+    header naming what it decided with.
 
     With ``fps`` the board steps at that frame rate, as it does live. With None it steps only when
     something is due: the next answer's arrival, or the board's own next deadline.
@@ -187,7 +192,7 @@ def replay_board(
     logs: list[str] = []
     feed = ReplayFeed(trace.answers)
     board = FootballBoard(feed, _NullSink(profile), delay=delay, renderer=cards, log=logs.append)
-    decisions = _Decisions(trace.start)
+    decisions = _Decisions(trace.start, football_versions(profile, delay=delay))
     end = (trace.answers[-1].received_at if trace.answers else trace.start) + delay + tail
     while clock.now() <= end:
         at = clock.read()
@@ -206,14 +211,27 @@ def replay_board(
     return decisions.lines
 
 
-class _Decisions:
-    """Turns what a board drew and logged, step by step, into its decisions."""
+def football_versions(profile: PanelProfile, *, delay: timedelta = timedelta(0)) -> Versions:
+    """What a replayed football board decides with. The trace already holds the feed's answers, so the
+    feed's own settings (the halftime hold, the play feed's pace) aren't the replay's; it wires no market,
+    so the meter is off, and its marquees scroll at the default speed."""
+    return Versions(
+        policy=PolicyName.NFL_SOLO_V1,
+        config=DecisionConfig(
+            profile=profile, delay=delay, meter=False, scroll_speed=ScrollSpeed.SLOW, meter_lag=METER_LAG
+        ),
+        rules=RULES,
+    )
 
-    def __init__(self, start: datetime) -> None:
+
+class _Decisions:
+    """Turns what a board drew and logged, step by step, into its decisions, under the replay's header."""
+
+    def __init__(self, start: datetime, versions: Versions) -> None:
         self._start = start
         self._strip: str | None = None
         self._field: str | None = None
-        self.lines: list[str] = []
+        self.lines: list[str] = [versions.header()]
 
     def take(self, now: datetime, card: ScoreboardCard[LiveFootballCardPayload] | None, logs: list[str]) -> None:
         for line in logs:

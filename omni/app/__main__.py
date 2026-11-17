@@ -16,6 +16,9 @@ is MLB's first and COL its second. A bare team (``--favorite COL``) is read as M
 the flag once meant, and the app says so as it starts. An unknown league or team stops it with a usage
 error that names the entry.
 
+The trace opens with what the run decides with (`omni.app.versions`): the board policy, a digest of the
+settings that change its decisions (spelled out on the line under it), the rule table, and the commit.
+
 The live win meter is off unless ``--meter`` is given. With it, and with ``OMNI_CLOUD_URL`` and
 ``OMNI_CLOUD_TOKEN`` in the environment or a git-ignored ``.env``, the meter reads Omni's market
 service (``cloud/``); without them it reads Polymarket's public quotes. Either way MLB's model takes
@@ -26,20 +29,22 @@ from __future__ import annotations
 
 import argparse
 import os
-import subprocess
 from datetime import timedelta
 from pathlib import Path
 from typing import Sequence, cast
+from zoneinfo import ZoneInfo
 
 from omni.core.clock import SystemClock
 from omni.app.display import MatrixDevice, MatrixDisplaySink
 from omni.app.planned_mlb import MarketReader
 from omni.app.runner import build_planned_loop, run_forever
+from omni.app.versions import DecisionConfig, PolicyName, SourceRevision, Versions, read_source_revision
 from omni.core.enum import PanelProfile
 from omni.core.env import read_env_file
 from omni.core.time import DurationSeconds
+from omni.domain.rules import RULES
 from omni.panels.geometry import geometry_for
-from omni.preferences.favorites import parse_favorites
+from omni.preferences.favorites import AppliedMigration, parse_favorites
 from omni.renderers.image import LogoStore
 from omni.renderers.text_lane import DEFAULT_MARQUEE, ScrollSpeed
 from omni.tower.board import BoardPolicy
@@ -92,22 +97,45 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     )
     parser.add_argument("--fps", type=float, default=10.0, help="frames drawn a second (marquees move this fast)")
     args = parser.parse_args(argv)
+    migrations: list[AppliedMigration] = []
+
+    def migrated(applied: AppliedMigration) -> None:
+        migrations.append(applied)
+        print(f"omni.app: {applied}")
+
     try:
-        args.favorites = parse_favorites(args.favorite, note=lambda line: print(f"omni.app: {line}"))
+        args.favorites = parse_favorites(args.favorite, note=migrated)
     except ValueError as exc:
         parser.error(str(exc))
+    args.migrations = tuple(migrations)
     return args
 
 
-def _app_version() -> str:  # pragma: no cover - reads the checkout
-    """The checked-out commit, which is what a heartbeat reports."""
-    try:
-        result = subprocess.run(
-            ["git", "-C", str(_REPO_ROOT), "rev-parse", "--short", "HEAD"], capture_output=True, text=True, timeout=5
-        )
-    except (OSError, subprocess.SubprocessError):
-        return "unknown"
-    return result.stdout.strip() or "unknown"
+def _versions(args: argparse.Namespace, source: SourceRevision) -> Versions:
+    """What a run with these flags decides with. The display target and the frame rate aren't settings
+    that change a decision, so they're left out."""
+    board = _board_policy(args)
+    return Versions(
+        policy=PolicyName.BOARD_V1,
+        config=DecisionConfig(
+            profile=PanelProfile(args.profile),
+            delay=timedelta(seconds=args.delay),
+            favorites=args.favorites,
+            turn=board.slot,
+            takeover_cap=board.takeover_cap,
+            timezone=ZoneInfo(args.timezone),
+            meter=args.meter,
+            odds=not args.no_odds,
+            scroll_speed=ScrollSpeed(args.scroll_speed),
+        ),
+        rules=RULES,
+        source=source,
+        migrations=args.migrations,
+    )
+
+
+def _board_policy(args: argparse.Namespace) -> BoardPolicy:
+    return BoardPolicy(slot=timedelta(seconds=args.slot))
 
 
 def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives the live emulator + network
@@ -116,8 +144,6 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
 
     # Lazy imports keep the network library and emulator out of import time and tests.
     import statsapi  # noqa: F401  (ensures the dependency is present before we start)
-
-    from zoneinfo import ZoneInfo
 
     from omni.providers.bovada_odds import BovadaOddsProvider
     from omni.providers.market_service import (
@@ -131,6 +157,7 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
     from omni.providers.polymarket_us import PolymarketUsProvider
 
     zone = ZoneInfo(args.timezone)
+    source = read_source_revision(_REPO_ROOT)
     provider = MlbStatsApiProvider(MlbTeamRegistry.from_color_file(), schedule_timezone=zone)
     odds = None if args.no_odds else BovadaOddsProvider()
 
@@ -141,7 +168,7 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
         cloud = MarketServiceConfig.from_env({**read_env_file(_REPO_ROOT / ".env"), **os.environ})
         if cloud is not None:
             transport = UrllibTransport(cloud)
-            HeartbeatSender(transport, version=_app_version()).start()
+            HeartbeatSender(transport, version=str(source)).start()
             market, meter = MarketServiceClient(transport).win_probability, "market service"
         else:
             market, meter = PolymarketUsProvider().win_probability, "Polymarket public quotes"
@@ -183,7 +210,7 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
         logos=LogoStore(),  # resolve committed team tiles from assets/ (lazy, cached)
         display_timezone=zone,
         marquee=DEFAULT_MARQUEE.at(ScrollSpeed(args.scroll_speed)),
-        policy=BoardPolicy(slot=timedelta(seconds=args.slot)),
+        policy=_board_policy(args),
     )
     print(
         f"omni.app: {profile.value}, delay {args.delay}s, favorites {args.favorites}, meter {meter}"
@@ -196,6 +223,7 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
         log=lambda line: print(line, flush=True),
         timezone=zone,
         poller=Poller(plan, clock),
+        versions=_versions(args, source),
     )
     return 0
 
