@@ -307,6 +307,137 @@ def test_an_edit_on_air_swaps_the_frames_and_keeps_the_dwell() -> None:
     assert _air(lane, T0 + 4 * MAX) is None
 
 
+def test_a_commit_of_an_older_revision_than_the_one_on_air_starts_no_dwell() -> None:
+    lane = _lane(_segment("1", "RUN +4"))
+    drawn = lane.cue(_at(T0))
+    assert drawn is not None
+    lane.offer([_segment("1", "RUN +6", revision=1)])  # edited before the display showed it
+    lane.committed(drawn, _at(T0 + S))  # the display showed the older revision
+    assert not lane.dwelling and lane.next_deadline(_at(T0 + S)) is None
+    assert _air(lane, T0 + 2 * S) == ("RUN +6", "RUN +6 detail")
+    assert lane.dwelling and lane.next_deadline(_at(T0 + 2 * S)) == MonotonicTime(22)
+
+
+def test_a_blanked_frame_goes_up_again_from_its_next_commit_with_its_whole_dwell() -> None:
+    lane = _lane(_segment("1"))
+    _air(lane, T0)
+    lane.blanked(_at(T0 + 5 * S))  # the display went away: the panel no longer shows it
+    assert not lane.dwelling and lane.next_deadline(_at(T0 + 5 * S)) is None  # no time runs on a blank panel
+    cue = lane.cue(_at(T0 + timedelta(minutes=1)))
+    assert cue is not None and cue.frame == 0  # still on air, waiting
+    lane.committed(cue, _at(T0 + timedelta(minutes=1)))  # a new display shows it
+    later = T0 + timedelta(minutes=1)
+    assert lane.next_deadline(_at(later)) == MonotonicTime(80)  # its whole 20 s, from the new commit
+    assert _air(lane, later + MAX) == ("RUN +4", "C.Brown 4 YDS 1 CAR")  # then on as usual
+    changes = lane.changes()
+    assert [(change.kind, change.frame, change.aired) for change in changes] == [
+        (ChangeKind.UP, 0, None),
+        (ChangeKind.BLANKED, 0, 5 * S),  # how long it was up before the display went
+        (ChangeKind.AGAIN, 0, None),
+        (ChangeKind.FRAME, 1, None),
+    ]
+
+
+def test_blanking_what_never_drew_changes_nothing_and_a_new_segment_goes_up_as_new() -> None:
+    lane = _lane()
+    lane.blanked(_at(T0))  # nothing on air
+    lane.offer([_segment("1"), _segment("2")])
+    lane.cue(_at(T0))
+    lane.blanked(_at(T0))  # on air, never drawn
+    assert lane.changes() == []
+    _air(lane, T0 + S)
+    lane.blanked(_at(T0 + 2 * S))
+    lane.clear(_at(T0 + 3 * S))  # it aired, so it comes down, not dropped unseen
+    lane.offer([_segment("3")])
+    _air(lane, T0 + 4 * S)
+    assert [(change.kind, change.segment.key.subject) for change in lane.changes()] == [
+        (ChangeKind.UP, "1"),
+        (ChangeKind.BLANKED, "1"),
+        (ChangeKind.DOWN, "1"),
+        (ChangeKind.UP, "3"),
+    ]
+
+
+KICK = SegmentKey(Surface.PLAY_STRIP, "kick")
+
+
+def _dropped(lane: Lane[PlaySummary]) -> list[tuple[str, EndReason | None]]:
+    return [
+        (change.segment.key.subject, change.reason) for change in lane.changes() if change.kind is ChangeKind.DROPPED
+    ]
+
+
+def test_a_bounded_close_out_keeps_room_for_its_last_segment_and_drops_what_cant_fit() -> None:
+    lane = _lane(*(_segment(str(n), f"PLAY {n}") for n in range(1, 8)), _segment("kick", "FIELD GOAL"))
+    _air(lane, T0)  # the first is up
+    lane.close_out(by=MonotonicTime(30.0), last=KICK)
+    assert _air(lane, T0 + MIN) == ("PLAY 2", "PLAY 2 detail")  # its minimum and the kick's both fit by 30 s
+    assert _air(lane, T0 + 2 * MIN) == ("FIELD GOAL", "FIELD GOAL detail")  # nothing else does
+    assert lane.keeping(_at(T0 + 2 * MIN + 9 * S))
+    assert _air(lane, T0 + 3 * MIN) is None and lane.idle and not lane.keeping(_at(T0 + 3 * MIN))
+    assert _dropped(lane) == [(str(n), EndReason.MISSED_WINDOW) for n in range(3, 8)]
+
+
+def test_a_close_outs_last_segment_starts_until_the_bound_and_keeps_its_minimum_past_it() -> None:
+    lane = _lane(_segment("1"))
+    _air(lane, T0)
+    lane.close_out(by=MonotonicTime(15.0), last=KICK)
+    lane.offer([_segment("kick", "FIELD GOAL", players=None)])  # the period's last play lands late
+    assert not lane.keeping(_at(T0 + 5 * S))  # waiting, not on air
+    kick = lane.cue(_at(T0 + MIN))
+    assert kick is not None and not lane.keeping(_at(T0 + MIN))  # on air, not shown yet
+    lane.committed(kick, _at(T0 + MIN))  # up at 10 s, before the bound
+    assert lane.keeping(_at(T0 + 19 * S))  # past the bound, still owed its minimum
+    assert _air(lane, T0 + 2 * MIN) is None and not lane.keeping(_at(T0 + 2 * MIN))
+
+    late = _lane(_segment("1"))
+    _air(late, T0)
+    late.close_out(by=MonotonicTime(5.0), last=KICK)
+    late.offer([_segment("kick", "FIELD GOAL"), _segment("2", "PLAY 2")])
+    assert _air(late, T0 + MIN) is None  # the bound passed while the first had its minimum
+    assert _dropped(late) == [("kick", EndReason.MISSED_WINDOW), ("2", EndReason.MISSED_WINDOW)]
+    late.resume()  # the next period: no bound
+    late.offer([_segment("3", "PLAY 3")])
+    assert _air(late, T0 + 2 * MIN) == ("PLAY 3", "PLAY 3 detail")
+
+    unbounded = _lane(_segment("1"), _segment("2", "PLAY 2"))
+    _air(unbounded, T0)
+    unbounded.close_out(by=MonotonicTime(19.0))  # nothing kept for last: a segment fits on its own minimum
+    assert _air(unbounded, T0 + MIN) is None and _dropped(unbounded) == [("2", EndReason.MISSED_WINDOW)]
+
+
+def test_a_segment_the_display_cant_draw_comes_off_the_lane() -> None:
+    lane = _lane()
+    lane.failed(Cue(_segment("1"), 0), _at(T0))  # nothing on air: nothing to do
+    lane.offer([_segment("1"), _segment("2", "PASS +9")])
+    cue = lane.cue(_at(T0))
+    assert cue is not None
+    lane.failed(Cue(_segment("2", "PASS +9"), 0), _at(T0))  # not what's on air
+    lane.failed(Cue(_segment("1", revision=1), 0), _at(T0))  # another revision of it
+    lane.failed(cue, _at(T0))
+    assert _air(lane, T0) == ("PASS +9", "PASS +9 detail")  # the next goes straight up
+    players = lane.cue(_at(T0 + MAX))
+    assert players is not None and players.frame == 1
+    lane.failed(players, _at(T0 + MAX))  # its players' frame can't be drawn: it comes down, having aired
+    assert lane.idle
+    assert [(change.kind, change.segment.key.subject, change.reason) for change in lane.changes()] == [
+        (ChangeKind.DROPPED, "1", EndReason.UNDRAWN),
+        (ChangeKind.UP, "2", None),
+        (ChangeKind.DOWN, "2", EndReason.UNDRAWN),
+    ]
+
+
+def test_clearing_for_a_reason_takes_down_what_aired_for_it() -> None:
+    lane = _lane(_stoppage("t", "TV TIMEOUT"), _segment("2"))
+    _air(lane, T0)
+    gone = lane.clear(_at(T0 + timedelta(minutes=2)), EndReason.SOURCE_STALE)  # a held stoppage too
+    assert [segment.key.subject for segment in gone] == ["2"]
+    assert [(change.kind, change.reason) for change in lane.changes()] == [
+        (ChangeKind.UP, None),
+        (ChangeKind.DOWN, EndReason.SOURCE_STALE),
+    ]
+
+
 def test_a_lane_takes_only_its_own_surface() -> None:
     with pytest.raises(ValueError, match="board segment offered to the play_strip lane"):
         _lane(_segment("1", surface=Surface.BOARD))

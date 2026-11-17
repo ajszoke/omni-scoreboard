@@ -86,7 +86,7 @@ class _Provider:
 
 
 def _fetch_feed(game: TeamGame, now: datetime) -> LiveBaseballFeed:
-    return LiveBaseballFeed(state=_state(), received_at=T)
+    return LiveBaseballFeed(state=_state(), received=_at(T))
 
 
 class _CapturingRegistry(RendererRegistry):
@@ -144,7 +144,7 @@ def test_run_once_holds_the_board_within_the_delay_then_surfaces() -> None:
     loop, sink, _ = _build(lag=30)
     first = loop.run_once(_at(T))
     assert first.shown is None and first.frame is FrameKind.HELD  # the game's card is still inside the TV delay
-    assert loop.refresh(T).health.held_until == T + timedelta(seconds=30)  # when it clears: the bar's end
+    assert loop.refresh(_at(T)).health.held_until == T + timedelta(seconds=30)  # when it clears: the bar's end
     second = loop.run_once(_later(30))
     assert second.shown is not None and sink.committed == 2
 
@@ -173,10 +173,10 @@ def test_run_once_keeps_serving_last_known_good_when_provider_drops() -> None:
 def test_a_stale_source_dims_the_card_and_an_expired_one_takes_it_down() -> None:
     provider = _Provider(_game())
     loop, sink, _ = _build(lag=0, provider=provider)
-    fresh = loop.paint(_at(T)) if loop.refresh(T) else None
+    fresh = loop.paint(_at(T)) if loop.refresh(_at(T)) else None
     assert fresh is not None and not fresh.stale
     provider.fail = True
-    stale = loop.refresh(T + timedelta(seconds=121))
+    stale = loop.refresh(_at(T + timedelta(seconds=121)))
     assert (
         stale.health.source is SourceHealth.STALE
         and stale.health.reason == "no schedule for over 2m: ProviderError: schedule fetch down"
@@ -184,7 +184,7 @@ def test_a_stale_source_dims_the_card_and_an_expired_one_takes_it_down() -> None
     painted = loop.paint(_later(121))
     assert painted.stale and painted.shown is not None
     assert _colors(sink.frames[-1]) < _colors(sink.frames[0])  # the same card, dimmer
-    gone = loop.refresh(T + timedelta(seconds=601))
+    gone = loop.refresh(_at(T + timedelta(seconds=601)))
     assert gone.health.source is SourceHealth.OFFLINE
     assert gone.health.reason == "no schedule for over 10m: ProviderError: schedule fetch down"
     assert loop.paint(_later(601)).frame is FrameKind.OFFLINE
@@ -192,14 +192,14 @@ def test_a_stale_source_dims_the_card_and_an_expired_one_takes_it_down() -> None
 
 def test_the_refresh_deadline_names_the_source_s_next_change_and_the_delay_s_next_release() -> None:
     loop, _, provider = _build(lag=30)
-    loop.refresh(T)
+    loop.refresh(_at(T))
     assert loop.refresh_deadline(_at(T)) == MonotonicTime(30.0)  # the state clears the delay
-    loop.refresh(T + timedelta(seconds=30))
+    loop.refresh(_at(T + timedelta(seconds=30)))
     assert loop.refresh_deadline(_later(30)) == MonotonicTime(151.0)  # the schedule goes stale
     provider.fail = True
-    loop.refresh(T + timedelta(seconds=151))
+    loop.refresh(_at(T + timedelta(seconds=151)))
     assert loop.refresh_deadline(_later(151)) == MonotonicTime(631.0)  # and then offline
-    loop.refresh(T + timedelta(seconds=631))
+    loop.refresh(_at(T + timedelta(seconds=631)))
     assert loop.refresh_deadline(_later(631)) is None
     assert loop.next_deadline(_later(631)) == MonotonicTime(631.0)  # nothing cued yet: the board is due now
     assert loop.paint(_later(631)).frame is FrameKind.OFFLINE
@@ -238,7 +238,7 @@ def test_painting_draws_what_the_board_has_up_and_presents_a_card_once() -> None
     loop, sink, _ = _build(lag=0)
     before = loop.paint(_at(T))
     assert before.shown is None and before.frame is FrameKind.IDLE  # nothing refreshed yet
-    loop.refresh(T)
+    loop.refresh(_at(T))
     first = loop.paint(_at(T))
     assert first.shown is not None and first.reason is SelectionReason.ROTATION
     assert first.presented is not None and first.presented.card == first.shown
@@ -247,7 +247,7 @@ def test_painting_draws_what_the_board_has_up_and_presents_a_card_once() -> None
     assert [change.kind for change in first.changes] == [ChangeKind.DOWN, ChangeKind.UP]  # the idle frame, then it
     later = loop.paint(_later(0.1))  # frames between refreshes
     assert later.shown == first.shown and later.presented is None and later.changes == ()
-    loop.refresh(T + timedelta(seconds=12))
+    loop.refresh(_at(T + timedelta(seconds=12)))
     again = loop.paint(_later(12))
     assert again.shown == first.shown and again.presented is None  # a lone card stays up: no new presentation
     assert sink.committed == 4
@@ -255,7 +255,7 @@ def test_painting_draws_what_the_board_has_up_and_presents_a_card_once() -> None
 
 def test_a_card_that_cant_be_drawn_is_set_aside_and_spends_no_dwell() -> None:
     loop, sink, _ = _build(lag=0, registry=RendererRegistry())  # no renderers: every card fails to draw
-    loop.refresh(T)
+    loop.refresh(_at(T))
     painted = loop.paint(_at(T))
     assert painted.render_error is not None and painted.shown is None and painted.presented is None
     assert sink.committed == 0
@@ -282,7 +282,7 @@ def test_a_display_that_fails_spends_no_airtime_and_keeps_the_card_cued() -> Non
     loop, _, _ = _build(lag=0)
     sink = _FailingSink(QUAD)
     loop._sink = sink
-    loop.refresh(T)
+    loop.refresh(_at(T))
     failed = loop.paint(_at(T))
     assert failed.render_error == "OSError: display gone" and failed.changes == ()
     sink.failing = False
@@ -298,7 +298,7 @@ class _NoFrames(RecordingDisplaySink):
 def test_a_display_with_no_frame_to_draw_on_spends_nothing() -> None:
     loop, _, _ = _build(lag=0)
     loop._sink = _NoFrames(QUAD)
-    loop.refresh(T)
+    loop.refresh(_at(T))
     painted = loop.paint(_at(T))
     assert painted.render_error == "OSError: no buffer" and painted.changes == ()
 
@@ -308,7 +308,7 @@ def test_a_card_that_leaves_comes_down_and_the_board_says_why() -> None:
     loop, _, _ = _build(lag=0, provider=provider)
     loop.run_once(_at(T))
     provider._contests = ()  # the game leaves the schedule
-    painted = loop.paint(_later(1)) if loop.refresh(T + timedelta(seconds=1)) else None
+    painted = loop.paint(_later(1)) if loop.refresh(_at(T + timedelta(seconds=1))) else None
     assert painted is not None and painted.frame is FrameKind.IDLE
     down = [change for change in painted.changes if change.kind is ChangeKind.DOWN]
     assert down[0].reason is EndReason.INVALIDATED
@@ -323,7 +323,7 @@ def test_a_card_without_two_team_rows_has_no_matchup_treatment() -> None:
         tournament_name="Open",
     )
     loop, _, _ = _build(lag=0)
-    loop.refresh(T)
+    loop.refresh(_at(T))
     card = loop._queue.card(f"{_game().id.raw}:live")
     assert card is not None
     golfing = dataclasses.replace(card, contest=golf)

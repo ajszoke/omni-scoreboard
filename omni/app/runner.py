@@ -3,12 +3,15 @@
 `build_loop` wires the spine's collaborators into an `AppLoop` from a provider, a
 feed fetcher, and a display sink — the one place the standard wiring lives, so the
 emulator entry, a future hardware entry, and tests all build the loop the same way.
+`build_planned_loop` is the running MLB board's wiring on top of it: every source read from a
+`PlannedMlb`, so a refresh never waits on the network, and the live win meter off unless asked for.
 `run_forever` is the thin real-time wrapper: refreshes on a thread of their own, and frames on
-this one at a steady rate, so a slow fetch never freezes the panel. A refresh runs whenever a
-poll answer lands, when the last one said something would change by itself (a play clearing the
-delay, the source going stale), and at least every few seconds. Given a `Poller`, it warms the
-plan up first (the slate, then its games, then a pass that can show them) and then leaves the
-fetching to the poller's workers.
+this one at a steady rate, so a slow fetch never freezes the panel. Each frame (`paint_frame`)
+counts from when the display took it, so a slow draw or swap doesn't eat into a card's time. A
+refresh runs whenever a poll answer lands, when the last one said something would change by itself
+(a play clearing the delay, the source going stale), and at least every few seconds. Given a
+`Poller`, it warms the plan up first (the slate, then its games, then a pass that can show them)
+and then leaves the fetching to the poller's workers.
 """
 
 from __future__ import annotations
@@ -19,7 +22,8 @@ from datetime import timedelta, tzinfo
 from omni.app.background import Waking
 from omni.app.contest_store import ContestStore
 from omni.app.display import DisplaySink
-from omni.app.loop import AppLoop
+from omni.app.loop import AppLoop, Painted
+from omni.app.planned_mlb import NO_BACKOFF, PlannedMlb
 from omni.app.poller import Poller
 from omni.app.pipeline import (
     FeedFetcher,
@@ -42,7 +46,7 @@ from omni.renderers.registry import RendererRegistry, default_registry
 from omni.renderers.text_lane import DEFAULT_MARQUEE, MarqueeStyle
 from omni.tower.board import BoardPolicy
 
-__all__ = ["build_loop", "run_forever", "warm_up"]
+__all__ = ["build_loop", "build_planned_loop", "paint_frame", "run_forever", "warm_up"]
 
 _WARM_UP_PASSES = 3  # the slate, then its games' feeds, then a pass that can show them
 _REFRESH_AT_LEAST_EVERY = timedelta(seconds=5)  # for what changes with nothing to wake it (an answer expiring)
@@ -106,11 +110,53 @@ def build_loop(
     )
 
 
+def build_planned_loop(
+    planned: PlannedMlb,
+    sink: DisplaySink,
+    *,
+    meter: bool = False,
+    favorites: frozenset[str] = frozenset(),
+    broadcast_lag: DurationSeconds = DurationSeconds(45),
+    logos: LogoStore | None = None,
+    display_timezone: tzinfo | None = None,
+    marquee: MarqueeStyle = DEFAULT_MARQUEE,
+    policy: BoardPolicy = BoardPolicy(),
+    registry: RendererRegistry | None = None,
+) -> AppLoop:
+    """The running MLB board: the slate, feeds, pregame details and odds all read from ``planned``'s plan.
+
+    The live win meter (the market, then MLB's model) is on only with ``meter``. Each reading stands
+    beside a score only if it arrived no later than that score's feed answer.
+    """
+    return build_loop(
+        planned,  # the slate, from the plan
+        planned.fetch_feed,
+        sink,
+        favorites=favorites,
+        broadcast_lag=broadcast_lag,
+        backoff=NO_BACKOFF,  # the plan does the retrying
+        fetch_win_probability=planned.fetch_win_probability if meter else None,
+        fetch_fallback_win_probability=planned.fetch_fallback_win_probability if meter else None,
+        fetch_pregame_details=planned.fetch_pregame_details,
+        fetch_game_lines=planned.fetch_game_lines,
+        logos=logos,
+        display_timezone=display_timezone,
+        marquee=marquee,
+        policy=policy,
+        registry=registry,
+    )
+
+
 def warm_up(loop: AppLoop, poller: Poller, clock: Clock) -> None:
     """Fill the plan before the board starts: refresh, then ask what that refresh wanted, a few times."""
     for _ in range(_WARM_UP_PASSES):
-        loop.refresh(clock.now())
+        loop.refresh(clock.read())
         poller.run_due()
+
+
+def paint_frame(loop: AppLoop, clock: Clock) -> Painted:
+    """One of the running board's frames: what should be up now, counted from when the display took it."""
+    return loop.paint(clock.read(), clock=clock)
 
 
 def run_forever(
@@ -127,7 +173,7 @@ def run_forever(
 
     def refresh() -> MonotonicTime | None:
         started = clock.read()
-        result = loop.refresh(started.utc)
+        result = loop.refresh(started)
         deadline = loop.refresh_deadline(clock.read())
         next_at = started.utc + deadline.since(started.monotonic) if deadline is not None else None
         tracer.refreshed(result, took=clock.monotonic().since(started.monotonic), next_at=next_at)
@@ -141,5 +187,5 @@ def run_forever(
     refresher.start()
     frames = Pacer(clock, timedelta(seconds=1.0 / fps))
     while True:
-        tracer.painted(loop.paint(clock.read()))
+        tracer.painted(paint_frame(loop, clock))
         frames.wait()

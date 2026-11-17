@@ -200,6 +200,45 @@ def test_a_malformed_answer_is_a_failed_fetch(answer: Any) -> None:
         MarketServiceClient(service).win_probability(_game(), NOW)
 
 
+# --- callers on several threads -------------------------------------------------------------------
+
+
+class _HeldFirst(_Service):
+    """A service whose first request is held open until released, so a later one can finish first."""
+
+    def __init__(self, entries: dict[str, Any]) -> None:
+        super().__init__(entries)
+        self.first_out = threading.Event()
+        self.release_first = threading.Event()
+
+    def get(self, path: str, *, timeout_s: float) -> Any:
+        first = not self.gets
+        answer = super().get(path, timeout_s=timeout_s)
+        if first:
+            self.first_out.set()
+            self.release_first.wait(5.0)
+        return answer
+
+
+def test_an_older_answer_finishing_last_never_overwrites_a_newer_batch() -> None:
+    second = "mlb:mlb_statsapi:2"
+    service = _HeldFirst({GAME_ID: {"win": _win()}, second: {"win": _win(away=30.0, home=70.0)}})
+    client = MarketServiceClient(service)
+    older: list[WinProbability | None] = []
+    caller = threading.Thread(target=lambda: older.append(client.win_probability(_game(), NOW)))
+    caller.start()
+    assert service.first_out.wait(5.0)  # the first request, for one game, is out
+    newer = client.win_probability(_game("2"), NOW)  # a game new to the client asks for both, and finishes first
+    service.release_first.set()  # then the older answer lands
+    caller.join(5.0)
+    assert newer == WinProbability(home=70.0, away=30.0) and older == [WinProbability(home=59.0, away=41.0)]
+    assert service.gets[1] == f"/v1/latest?games={second},{GAME_ID}"
+    later = NOW + timedelta(seconds=1)
+    assert client.win_probability(_game("2"), later) == newer  # the newer batch stands, both games in it
+    assert client.win_probability(_game(), later) == older[0]
+    assert len(service.gets) == 2  # so neither prompts another request
+
+
 # --- heartbeats ----------------------------------------------------------------------------------
 
 

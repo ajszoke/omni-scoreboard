@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
-from omni.core.clock import SystemClock
+from omni.core.clock import ClockReading, MonotonicTime, SystemClock
 from omni.app.football_feed import RETRY_AFTER_FAILURE, BackgroundFeed, FeedResult, GameFeed
 from omni.providers.nfl_teams import NflTeamRegistry
 from omni.providers.nflmeta import NFLMETA_SOURCE, NflMetaLiveProvider
@@ -35,7 +35,7 @@ class _StalledFeed(FakeFeed):
 class _BrokenFeed(GameFeed):
     """An ask that fails outright, not as a provider error (a bug, say)."""
 
-    def ask(self, now: datetime, *, arrived: Callable[[], datetime] | None = None) -> FeedResult:
+    def ask(self, at: ClockReading, *, arrived: Callable[[], ClockReading] | None = None) -> FeedResult:
         raise RuntimeError("parse bug")
 
 
@@ -46,7 +46,7 @@ def _provider(feed: FakeFeed) -> NflMetaLiveProvider:
 def _collect_within(feed: BackgroundFeed) -> list[FeedResult]:
     deadline = time.monotonic() + _SOON
     while time.monotonic() < deadline:
-        if results := feed.collect(SystemClock().now()):
+        if results := feed.collect(SystemClock().read()):
             return results
         time.sleep(0.001)
     return []
@@ -59,7 +59,7 @@ def test_a_slow_answer_never_holds_up_collecting() -> None:
     feed = BackgroundFeed(GameFeed(_provider(nflmeta), GAME), SystemClock(), check_every=_QUICK)
     feed.start()
     assert nflmeta.asked.wait(_SOON)
-    assert feed.collect(SystemClock().now()) == []  # the ask is stalled; collecting doesn't wait for it
+    assert feed.collect(SystemClock().read()) == []  # the ask is stalled; collecting doesn't wait for it
     nflmeta.release.set()
     results = _collect_within(feed)
     feed.stop(_SOON)
@@ -67,6 +67,7 @@ def test_a_slow_answer_never_holds_up_collecting() -> None:
     answer = results[0]
     assert answer.snapshot is not None and answer.error is None
     assert answer.received_at >= answer.asked_at  # dated by when it arrived, after the stall
+    assert answer.received_monotonic is not None  # on both clocks
 
 
 def test_an_ask_that_breaks_outright_is_reported_and_waits_before_asking_again() -> None:
@@ -78,6 +79,7 @@ def test_an_ask_that_breaks_outright_is_reported_and_waits_before_asking_again()
     assert [result.error for result in results] == ["RuntimeError: parse bug"]
     answer = results[0]
     assert answer.snapshot is None and answer.next_ask == answer.asked_at + RETRY_AFTER_FAILURE
+    assert answer.received_monotonic is not None
     assert not broken.due(answer.asked_at + RETRY_AFTER_FAILURE - timedelta(seconds=1))
 
 
@@ -86,6 +88,14 @@ def test_inline_answers_are_dated_when_asked() -> None:
     nflmeta.scores = [_scores(_synced("p1"))]
     nflmeta.plays = [_page(_change("p1", 1, "C.Brown up the middle for 4 yards.", yards_gained=4))]
     feed = GameFeed(_provider(nflmeta), GAME)
-    [answer] = feed.collect(T0)
-    assert answer.asked_at == answer.received_at == T0
-    assert feed.collect(T0) == []  # not due again until the scoreboard's next poll
+    at = ClockReading(T0, MonotonicTime(7.0))
+    [answer] = feed.collect(at)
+    assert answer.asked_at == answer.received_at == T0 and answer.received_monotonic == MonotonicTime(7.0)
+    assert feed.collect(at) == []  # not due again until the scoreboard's next poll
+    nflmeta.scores = [RuntimeError("down")]
+    later = ClockReading(T0 + timedelta(seconds=10), MonotonicTime(17.0))
+    [failed] = feed.collect(later, arrived=lambda: ClockReading(T0 + timedelta(seconds=12), MonotonicTime(19.0)))
+    assert failed.snapshot is None and (failed.received_at, failed.received_monotonic) == (
+        T0 + timedelta(seconds=12),
+        MonotonicTime(19.0),
+    )

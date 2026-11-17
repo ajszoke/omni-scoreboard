@@ -13,6 +13,13 @@ decides as it would at any finer pace. `replay()` samples what was on the panel 
 ``tick``; `replay_decisions()` lists every change, with its reason. Identical timeline +
 parameters always yield an identical trace, so a fixture timeline proves entry, fairness,
 delay, and removal without real time or network.
+
+A feed's answer arrives when the replay first reads its frame, which is the frame's own instant
+(the replay steps there), or the end of an outage since: the first answer after one is new,
+however old the state in it. The loop gets the whole clock reading, so its delays run on the
+replay's monotonic clock. A `Seek` jumps the replay's wall clock to another point in the
+timeline, as a clock correction would: monotonic time runs on, what was held keeps its release,
+and each frame read after the seek arrives then.
 """
 
 from __future__ import annotations
@@ -27,9 +34,9 @@ from omni.app.display import RecordingDisplaySink
 from omni.app.loop import Painted, Refresh
 from omni.app.runner import build_loop
 from omni.app.supervisor import BackoffPolicy, ProviderStatus
-from omni.core.clock import FakeClock
+from omni.core.clock import ClockReading, FakeClock
 from omni.core.enum import League, PanelProfile
-from omni.core.ids import SourceRef
+from omni.core.ids import LeagueScopedId, SourceRef
 from omni.core.time import DurationSeconds
 from omni.domain.contest import TeamGame
 from omni.cards.base import ScoreboardCard
@@ -44,7 +51,7 @@ from omni.replay.timeline import Timeline
 from omni.tower.board import BoardFrame, BoardPayload, BoardPolicy, FrameKind
 from omni.tower.lane import ChangeKind, LaneChange
 
-__all__ = ["TraceEntry", "ReplayProvider", "replay", "replay_decisions"]
+__all__ = ["TraceEntry", "ReplayProvider", "Seek", "replay", "replay_decisions"]
 
 _REPLAY_SOURCE = SourceRef("replay", "fixture://timeline")
 _NUDGE = timedelta(milliseconds=1)  # past a deadline, so spans measured in floating point have surely run
@@ -65,6 +72,14 @@ class TraceEntry:
     provider_status: ProviderStatus
     frame: FrameKind | None = None  # the explicit frame up, when no card is
     reason: SelectionReason | None = None  # why the shown card was chosen
+
+
+@dataclass(frozen=True, slots=True)
+class Seek:
+    """At ``at`` on the replay's wall clock, jump it to ``to``; monotonic time doesn't move."""
+
+    at: datetime
+    to: datetime
 
 
 class ReplayProvider:
@@ -135,13 +150,16 @@ def replay_decisions(
     broadcast_lag: DurationSeconds = DurationSeconds(0),
     favorites: frozenset[str] = frozenset(),
     policy: BoardPolicy = BoardPolicy(),
+    seek: Seek | None = None,
 ) -> list[str]:
     """Every change on the board across ``timeline``, one line each, timed in seconds from its start.
 
     ``up`` names a card that went up and why the queue chose it; ``down`` one that came down, why,
     and how long it was up; ``drop`` one that came down before it drew; ``frame`` an explicit frame
-    and why; ``stale`` a card on air whose data passed its age; ``unseen`` one that expired before it
-    ever aired; ``source`` a change in how far the board trusts its source.
+    and why; ``stale`` a card on air whose data passed its age; ``unseen`` one that left before it
+    ever aired, and why; ``final`` a final revealed, with when its game ended and what that rests on;
+    ``note`` something else the board decided; ``source`` a change in how far the board trusts its
+    source. With ``seek``, the replay's wall clock jumps once, and the times follow it.
     """
     lines: list[str] = []
     seen: dict[str, object] = {"source": None, "stale": None}
@@ -153,17 +171,21 @@ def replay_decisions(
             seen["source"] = source
             reason = f"  ({refresh.health.reason})" if refresh.health.reason else ""
             lines.append(f"{seconds}  source  {refresh.health.source.value}{reason}")
-        lines.extend(f"{seconds}  unseen  {card.raw}  (expired before it aired)" for card in refresh.unseen)
+        lines.extend(f"{seconds}  unseen  {missed.card.id.raw}  ({missed.reason.value})" for missed in refresh.unseen)
+        for card, ended in refresh.pipeline.ends:
+            since = (ended.at - timeline.start).total_seconds()
+            lines.append(f"{seconds}  final   {card.raw}  (ended {since:.1f}, {ended.basis.value})")
         chosen = painted.presented.reason if painted.presented is not None else None
         lines.extend(
             f"{seconds}  {line}" for line in map(lambda change: _describe(change, chosen), painted.changes) if line
         )
+        lines.extend(f"{seconds}  note    {note.value}" for note in painted.notes)
         stale = painted.shown.raw if painted.shown is not None and painted.stale else None
         if stale is not None and stale != seen["stale"]:
             lines.append(f"{seconds}  stale   {stale}")
         seen["stale"] = stale
 
-    _drive(timeline, profile, until, broadcast_lag, favorites, policy, observe, every=None, draw=False)
+    _drive(timeline, profile, until, broadcast_lag, favorites, policy, observe, every=None, draw=False, seek=seek)
     return lines
 
 
@@ -192,23 +214,29 @@ def _drive(
     *,
     every: timedelta | None,
     draw: bool,
+    seek: Seek | None = None,
 ) -> None:
     """Step the loop through ``timeline`` at every instant something can change, and every ``every``."""
     stop = until if until is not None else timeline.end
     if stop < timeline.start:
         raise ValueError("until cannot be before the timeline start")
 
+    clock = FakeClock(timeline.start)
+    arrivals: dict[tuple[LeagueScopedId, datetime], ClockReading] = {}  # when each frame's answer first arrived
+
     def fetch_feed(game: TeamGame, now: datetime) -> LiveBaseballFeed:
         frame = timeline.frame_at(game.id, now)
         if timeline.down_at(now):
+            arrivals.clear()  # the first answer after the outage is new, however old the state in it
             raise ProviderError("replay outage")
         if frame is None or frame.state is None:
             raise ProviderError(f"no replay state for {game.id.raw}")
-        # A feed's answer is dated by the frame it carries, or by the end of an outage since: the first answer
-        # after one is new, however old the state in it.
-        recovered = max((outage.end for outage in timeline.outages if outage.end <= now), default=frame.at)
         return LiveBaseballFeed(
-            state=frame.state, events=frame.events, decisions=frame.decisions, received_at=max(frame.at, recovered)
+            state=frame.state,
+            events=frame.events,
+            decisions=frame.decisions,
+            status=frame.game.status,  # the feed says what the frame says
+            received=arrivals.setdefault((game.id, frame.at), clock.read()),
         )
 
     loop = build_loop(
@@ -221,17 +249,21 @@ def _drive(
         policy=policy,
         registry=None if draw else _Undrawn(),
     )
-    clock = FakeClock(timeline.start)
     changes = [instant for instant in timeline.changes if instant > timeline.start]
     sample_at = timeline.start
     while clock.now() <= stop:
+        if seek is not None and clock.now() >= seek.at:
+            clock.set(seek.to)
+            arrivals.clear()  # whatever is read from here on arrives now
+            changes = [instant for instant in timeline.changes if instant > seek.to]
+            seek = None
         at = clock.read()
-        refresh = loop.refresh(at.utc)
+        refresh = loop.refresh(at)
         observe(at.utc, refresh, loop.paint(at))
 
         while changes and changes[0] <= at.utc:
             changes.pop(0)
-        candidates = changes[:1]
+        candidates = changes[:1] + ([seek.at] if seek is not None else [])
         deadline = loop.next_deadline(clock.read())
         if deadline is not None:
             candidates.append(at.utc + deadline.since(at.monotonic) + _NUDGE)

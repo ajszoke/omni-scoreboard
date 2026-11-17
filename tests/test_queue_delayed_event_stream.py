@@ -1,100 +1,107 @@
-"""Tests for DelayedEventStream: source-time-anchored, once-each discrete event release."""
+"""Tests for DelayedEventStream: once-each discrete event release, pinned on admission."""
 
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from omni.core.enum import League
-from omni.core.ids import LeagueScopedId, SourceRef
-from omni.core.observation import Observation
+from omni.core.clock import ClockReading, MonotonicTime
 from omni.core.time import DurationSeconds
-from omni.queue.delay_policy import DelayPolicy
+from omni.queue.delay_policy import Arrival, DelayPolicy, ReleaseGuard
 from omni.queue.delayed_event_stream import DelayedEventStream
 
 T0 = datetime(2026, 6, 17, 23, 0, 0, tzinfo=timezone.utc)
-SOURCE = SourceRef("mlb_statsapi", "https://statsapi.mlb.com")
-SUBJECT = LeagueScopedId(League.MLB, SOURCE, "g1")
 LAG = DurationSeconds(30)
+POLICY = DelayPolicy(broadcast_lag=LAG)
 
 
-def _policy() -> DelayPolicy:
-    return DelayPolicy(broadcast_lag=LAG)
+def _at(seconds: float, *, jumped: timedelta = timedelta(0)) -> ClockReading:
+    return ClockReading(T0 + timedelta(seconds=seconds) + jumped, MonotonicTime(seconds))
 
 
-def _obs(value: str, *, source_time: datetime, observed_at: datetime | None = None) -> Observation[str]:
-    return Observation(
-        subject_id=SUBJECT,
-        source=SOURCE,
-        observed_at=observed_at if observed_at is not None else source_time,
-        value=value,
-        source_time=source_time,
-    )
+def _stream() -> DelayedEventStream[str]:
+    return DelayedEventStream(ReleaseGuard(POLICY))
+
+
+def _push(stream: DelayedEventStream[str], value: str, *, happened: float, received: float | None = None) -> bool:
+    """An event that happened at ``happened`` seconds, received (and admitted) at ``received``, or then."""
+    receipt = _at(received if received is not None else happened)
+    arrival = Arrival(received=receipt, occurred=T0 + timedelta(seconds=happened))
+    return stream.push(value, arrival, receipt, key=value)
+
+
+def _values(stream: DelayedEventStream[str], at: ClockReading) -> list[str]:
+    return [held.value for held in stream.release(at)]
 
 
 def test_push_holds_a_new_event() -> None:
-    stream: DelayedEventStream[str] = DelayedEventStream(_policy())
-    assert stream.push(_obs("a", source_time=T0), key="a") is True
+    stream = _stream()
+    assert _push(stream, "a", happened=0) is True
     assert stream.pending() == 1
 
 
 def test_push_is_idempotent_on_key() -> None:
-    stream: DelayedEventStream[str] = DelayedEventStream(_policy())
-    stream.push(_obs("a", source_time=T0), key="a")
-    assert stream.push(_obs("a-again", source_time=T0), key="a") is False  # same key ignored
+    stream = _stream()
+    _push(stream, "a", happened=0)
+    assert _push(stream, "a", happened=1) is False  # same key ignored
     assert stream.pending() == 1
 
 
 def test_mark_seen_suppresses_a_later_push() -> None:
-    stream: DelayedEventStream[str] = DelayedEventStream(_policy())
+    stream = _stream()
     stream.mark_seen("a")  # backlog suppression — never hold this key
-    assert stream.push(_obs("a", source_time=T0), key="a") is False
+    assert _push(stream, "a", happened=0) is False
     assert stream.pending() == 0
 
 
 def test_release_waits_for_the_tv_delay() -> None:
-    stream: DelayedEventStream[str] = DelayedEventStream(_policy())
-    stream.push(_obs("hr", source_time=T0), key="hr")
-    assert stream.release(T0 + timedelta(seconds=29)) == []  # still inside the lag
-    released = stream.release(T0 + timedelta(seconds=30))  # source_time + lag reached
-    assert [o.value for o in released] == ["hr"]
+    stream = _stream()
+    _push(stream, "hr", happened=0)
+    assert stream.next_eligible() == MonotonicTime(30)
+    assert stream.release(_at(29)) == []  # still inside the lag
+    assert _values(stream, _at(30)) == ["hr"]  # occurrence + lag reached
+    assert stream.next_eligible() is None
 
 
 def test_release_yields_each_event_once() -> None:
-    stream: DelayedEventStream[str] = DelayedEventStream(_policy())
-    stream.push(_obs("hr", source_time=T0), key="hr")
-    after = T0 + timedelta(seconds=60)
-    assert [o.value for o in stream.release(after)] == ["hr"]
-    assert stream.release(after) == []  # not replayed
+    stream = _stream()
+    _push(stream, "hr", happened=0)
+    assert _values(stream, _at(60)) == ["hr"]
+    assert stream.release(_at(60)) == []  # not replayed
     assert stream.pending() == 0
 
 
 def test_release_holds_not_yet_eligible_events_for_later() -> None:
-    stream: DelayedEventStream[str] = DelayedEventStream(_policy())
-    stream.push(_obs("early", source_time=T0), key="early")
-    stream.push(_obs("late", source_time=T0 + timedelta(seconds=20)), key="late")
-    # At T0+35: early (elig T0+30) is safe, late (elig T0+50) is not yet.
-    assert [o.value for o in stream.release(T0 + timedelta(seconds=35))] == ["early"]
+    stream = _stream()
+    _push(stream, "early", happened=0)
+    _push(stream, "late", happened=20)
+    # At +35: early (elig +30) is safe, late (elig +50) is not yet.
+    assert _values(stream, _at(35)) == ["early"]
     assert stream.pending() == 1
-    assert [o.value for o in stream.release(T0 + timedelta(seconds=50))] == ["late"]
+    assert _values(stream, _at(50)) == ["late"]
 
 
 def test_release_preserves_insertion_order() -> None:
-    stream: DelayedEventStream[str] = DelayedEventStream(_policy())
-    stream.push(_obs("first", source_time=T0), key="1")
-    stream.push(_obs("second", source_time=T0), key="2")
-    assert [o.value for o in stream.release(T0 + timedelta(seconds=30))] == ["first", "second"]
+    stream = _stream()
+    _push(stream, "first", happened=0)
+    _push(stream, "second", happened=0)
+    assert _values(stream, _at(30)) == ["first", "second"]
 
 
 def test_late_received_old_play_is_eligible_at_receipt_not_before() -> None:
-    # A play that happened at T0 but we only fetched at T0+100: the delay is clamped to
-    # receipt (we can't reveal before we had it), but it never waits a second lag again.
-    stream: DelayedEventStream[str] = DelayedEventStream(_policy())
-    received = T0 + timedelta(seconds=100)
-    stream.push(_obs("late-fetch", source_time=T0, observed_at=received), key="x")
-    assert stream.release(received - timedelta(seconds=1)) == []
-    assert [o.value for o in stream.release(received)] == ["late-fetch"]
+    # A play that happened at 0 but was only fetched at +100: it can't surface before the board had it, but it
+    # never waits a second delay either.
+    stream = _stream()
+    _push(stream, "late-fetch", happened=0, received=100)
+    assert stream.release(_at(99)) == []
+    assert _values(stream, _at(100)) == ["late-fetch"]
+
+
+def test_a_wall_jump_while_holding_moves_no_release() -> None:
+    stream = _stream()
+    _push(stream, "hr", happened=0)
+    assert stream.release(_at(5, jumped=timedelta(minutes=10))) == []  # ten minutes ahead on the wall: held
+    assert _values(stream, _at(30, jumped=timedelta(minutes=-10))) == ["hr"]  # ten back: released on time
 
 
 def test_policy_is_exposed() -> None:
-    policy = _policy()
-    assert DelayedEventStream[str](policy).policy is policy
+    assert _stream().policy is POLICY

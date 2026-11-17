@@ -70,6 +70,19 @@ def test_fake_time_passing_moves_both_readings_and_a_wall_jump_moves_one() -> No
     assert clock.monotonic() == MonotonicTime(1.5)
 
 
+def test_a_wall_jump_either_way_leaves_monotonic_time_alone() -> None:
+    clock = FakeClock(T)
+    clock.advance(timedelta(seconds=10))
+    clock.jump(timedelta(minutes=-5))
+    assert clock.read() == ClockReading(T + timedelta(seconds=10) - timedelta(minutes=5), MonotonicTime(10))
+
+
+def test_a_reading_puts_a_monotonic_instant_on_its_own_wall_clock() -> None:
+    reading = ClockReading(T, MonotonicTime(100.0))
+    assert reading.project(MonotonicTime(145.0)) == T + timedelta(seconds=45)
+    assert reading.project(MonotonicTime(40.0)) == T - timedelta(minutes=1)
+
+
 def test_fake_time_cannot_pass_backward() -> None:
     with pytest.raises(ValueError, match="can't pass backward"):
         FakeClock(T).advance(timedelta(seconds=-1))

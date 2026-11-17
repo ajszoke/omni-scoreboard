@@ -263,6 +263,7 @@ milestones:
         notes:
           - "Done 2026-11-15: FootballGameState, the live card on all three profiles (with kickoff and final states), NFL team registry, palette and logo tiles, and a play summarizer (omni/events/football.py). Remaining: pregame and big-play cards; check the summarizer against the legacy banner spec."
           - "Round 4: a minimal pregame card (teams, kickoff, records or odds when known) before mixed-league operation; the big-play card after revision-aware selection works, with small-panel goldens. Use the legacy summaries as a text corpus for terse banners and corner cases."
+          - "The user's spec for the NFL pregame card (2026-11-16), modeled on MLB's: each club's record, with its standing as a detail line beside the top-line record (e.g. '1st, NFC South'); full-season statlines for each starting QB, where MLB's card has its probable pitchers; and betting lines. Until it exists, the single-game runner draws nothing before kickoff (seen on the MNF board, 2026-11-16). Design loop with goldens when it's built."
           - "Round 4: kickoff spot, halftime receiver and possession stay provisional until checked against real kickoff-enforcement text (a re-kick, a kick after a score or safety, an unknown team or spot). Playoff overtime needs rule fixtures before the postseason; until then its pips are hidden and no kickoff or halftime is invented."
       - id: M6-003
         title: "NFL red-zone/scoring/turnover priority"

@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from omni.app.football_feed import FeedResult
+from omni.core.clock import ClockReading, MonotonicTime
 from omni.core.enum import GameStatus, HomeAway, League, PanelProfile
 from omni.core.ids import LeagueScopedId
 from omni.core.time import DurationSeconds
@@ -187,13 +188,20 @@ def test_only_a_football_trace_with_offsets_on_its_instants_loads() -> None:
         load_trace([json.dumps(header)])
 
 
+def _reading(at: timedelta) -> ClockReading:
+    """The replay clock's reading ``at`` into the trace: its monotonic clock counts from the start."""
+    return ClockReading(START + at, MonotonicTime(at.total_seconds()))
+
+
 def test_the_replay_feed_hands_over_answers_as_they_arrive() -> None:
     answers = [_answer(10 * S, _state()), _answer(20 * S, _state()), _answer(20 * S, _state(clock_seconds=880))]
     feed = ReplayFeed(answers)
-    assert feed.collect(START + 9 * S) == []
-    assert feed.collect(START + 10 * S) == answers[:1]
-    assert feed.collect(START + 25 * S) == answers[1:]
-    assert feed.collect(START + 60 * S) == []
+    assert feed.collect(_reading(9 * S)) == []
+    assert [answer.snapshot for answer in feed.collect(_reading(10 * S))] == [answers[0].snapshot]
+    later = feed.collect(_reading(25 * S))
+    assert [answer.snapshot for answer in later] == [answers[1].snapshot, answers[2].snapshot]
+    assert [answer.received_monotonic for answer in later] == [MonotonicTime(20.0)] * 2  # when each arrived
+    assert feed.collect(_reading(60 * S)) == []
 
 
 def test_a_replay_lists_each_change_of_strip_and_field_and_each_drop() -> None:

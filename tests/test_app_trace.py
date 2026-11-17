@@ -7,26 +7,26 @@ from datetime import datetime, timedelta, timezone
 
 from omni.app.loop import Painted, Presentation, Refresh
 from omni.app.trace import DecisionTracer
-from omni.cards.base import CardId
+from omni.cards.base import CardId, EndBasis, GameEnd
 from omni.core.clock import ClockReading, MonotonicTime
 from omni.core.ids import SourceRef
-from omni.queue.scheduler import SelectionReason
-from omni.tower.board import BoardFrame, BoardHealth, BoardPayload, FrameKind, SourceHealth
+from omni.queue.scheduler import Missed, MissReason, SelectionReason
+from omni.tower.board import BoardFrame, BoardHealth, BoardNote, BoardPayload, FrameKind, SourceHealth
 from omni.tower.lane import ChangeKind, EndReason, LaneChange
 from omni.tower.segment import Dwell, Provenance, Segment, SegmentKey, Surface
-from tests.test_app_loop import T, _at, _build
+from tests.test_app_loop import T, _at, _build, _game
 
 LATER = T + timedelta(seconds=12)
 
 
 def _refresh() -> Refresh:
     loop, _, _ = _build(lag=0)
-    return loop.refresh(T)
+    return loop.refresh(_at(T))
 
 
 def _first_paint() -> Painted:
     loop, _, _ = _build(lag=0)
-    loop.refresh(T)
+    loop.refresh(_at(T))
     return loop.paint(_at(T))
 
 
@@ -63,14 +63,66 @@ def test_a_refresh_that_drops_a_game_or_a_play_is_always_written() -> None:
     assert lines[1:] == [lines[0], "  dropped: g2: feed down", "  dropped: g1: odd play"]
 
 
-def test_a_card_that_expired_before_it_aired_is_written() -> None:
+def test_a_card_that_left_before_it_aired_is_written_with_why() -> None:
+    lines: list[str] = []
+    tracer = DecisionTracer(lines.append, timezone=timezone.utc)
+    loop, _, _ = _build(lag=0)
+    refresh = loop.refresh(_at(T))
+    card = loop._queue.card("g1:live")
+    assert card is not None
+    tracer.refreshed(refresh, took=timedelta(0), next_at=LATER)
+    unseen = (Missed(card, MissReason.TOO_LATE), Missed(card, MissReason.EXPIRED), Missed(card, MissReason.UNDRAWN))
+    tracer.refreshed(dataclasses.replace(refresh, unseen=unseen), took=timedelta(0), next_at=LATER)
+    assert lines[1:] == [
+        lines[0],
+        "  unseen: g1:live (too late to start)",
+        "  unseen: g1:live (expired before it aired)",
+        "  unseen: g1:live (failed to draw)",
+    ]
+
+
+def test_a_final_revealed_is_written_with_when_its_game_ended_and_on_what_basis() -> None:
     lines: list[str] = []
     tracer = DecisionTracer(lines.append, timezone=timezone.utc)
     refresh = _refresh()
     tracer.refreshed(refresh, took=timedelta(0), next_at=LATER)
-    unseen = (CardId("g1:bigplay:g1:ab:3"),)
-    tracer.refreshed(dataclasses.replace(refresh, unseen=unseen), took=timedelta(0), next_at=LATER)
-    assert lines[1:] == [lines[0], "  unseen: g1:bigplay:g1:ab:3 (expired before it aired)"]
+    ends = (
+        (CardId("g1:final"), GameEnd(T - timedelta(seconds=40), EndBasis.DECISIVE_PLAY)),
+        (CardId("g2:final"), GameEnd(T, EndBasis.FIRST_SEEN)),
+    )
+    pipeline = dataclasses.replace(refresh.pipeline, ends=ends)
+    tracer.refreshed(dataclasses.replace(refresh, pipeline=pipeline), took=timedelta(0), next_at=LATER)
+    assert lines[1:] == [
+        lines[0],
+        "  final: g1:final ended 22:59:20 (its decisive play)",
+        "  final: g2:final ended 23:00:00 (first seen final)",
+    ]
+
+
+def test_a_corrected_final_and_a_final_its_feed_hasnt_confirmed_are_written() -> None:
+    lines: list[str] = []
+    tracer = DecisionTracer(lines.append, timezone=timezone.utc)
+    refresh = _refresh()
+    tracer.refreshed(refresh, took=timedelta(0), next_at=LATER)
+    waiting = dataclasses.replace(refresh.pipeline, unconfirmed=(_game("g2").id,))
+    tracer.refreshed(dataclasses.replace(refresh, pipeline=waiting), took=timedelta(0), next_at=LATER)
+    tracer.refreshed(dataclasses.replace(refresh, pipeline=waiting), took=timedelta(0), next_at=LATER)  # no change
+    corrected = dataclasses.replace(refresh.pipeline, corrections=(CardId("g1:final"),))
+    tracer.refreshed(dataclasses.replace(refresh, pipeline=corrected), took=timedelta(0), next_at=LATER)
+    assert lines[1:] == [
+        lines[0],
+        "  unconfirmed: g2 (final on the schedule; its feed hasn't said so)",
+        lines[0],
+        "  corrected: g1:final",
+    ]
+
+
+def test_a_board_note_is_written_when_the_paint_made_it() -> None:
+    lines: list[str] = []
+    DecisionTracer(lines.append, timezone=timezone.utc).painted(
+        Painted(at=LATER, shown=CardId("g1:bigplay:g1:ab:3"), notes=(BoardNote.NO_BASE_CARD,))
+    )
+    assert lines == ["note 23:00:12: no base card for the recovery turn"]
 
 
 def test_a_card_going_up_names_why_and_how_its_teams_were_drawn() -> None:

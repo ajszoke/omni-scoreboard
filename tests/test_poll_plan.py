@@ -6,7 +6,7 @@ from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
-from omni.core.clock import FakeClock
+from omni.core.clock import FakeClock, MonotonicTime
 from omni.app.poll_plan import PollKey, PollPlan, PollPolicy, PollPriority, PollSource
 
 T0 = datetime(2026, 6, 17, 23, 0, tzinfo=timezone.utc)
@@ -131,10 +131,10 @@ def test_an_answer_can_be_read_as_of_an_earlier_receipt() -> None:
         plan.take_due(clock.read())
         plan.answered(key, value, clock.read())
         clock.advance(15 * S)
-    before_second = T0 + 20 * S
+    before_second = MonotonicTime(20)  # 20 s after the first, on the monotonic clock
     answer = plan.latest_by(key, before_second, clock.read())
     assert answer is not None and answer.value == "second"
-    assert plan.latest_by(key, T0 - S, clock.read()) is None  # nothing that old
+    assert plan.latest_by(key, MonotonicTime(-1), clock.read()) is None  # nothing that old
     clock.advance(80 * S)
     assert plan.latest_by(key, before_second, clock.read()) is None  # it has expired since
 
@@ -153,7 +153,7 @@ def test_a_key_nobody_wants_is_forgotten_even_in_flight() -> None:
     plan.answered(dropped, "late", clock.read())  # its answer lands after it was forgotten
     plan.failed(dropped, "late failure", clock.read())
     assert plan.latest(dropped, clock.read()) is None and plan.last_error(dropped) is None
-    assert plan.latest_by(dropped, T0 + 60 * S, clock.read()) is None
+    assert plan.latest_by(dropped, MonotonicTime(60), clock.read()) is None
 
 
 def test_the_next_deadline_is_the_earliest_idle_due_time() -> None:
@@ -184,7 +184,7 @@ def test_an_ask_with_no_answer_in_time_is_given_up_on_and_its_late_answer_ignore
     assert plan.last_error(key) == "no answer within 30s"
     clock.advance(2 * S)
     [retry] = plan.take_due(clock.read())
-    assert retry.number == hung.number + 2
+    assert retry.number > hung.number
     plan.answered(key, "late", clock.read(), ask=hung.number)  # the hung request finally returns
     plan.failed(key, "late failure", clock.read(), ask=hung.number)
     assert plan.latest(key, clock.read()) is None and plan.last_error(key) == "no answer within 30s"
@@ -200,5 +200,84 @@ def test_a_poll_policy_needs_positive_spans_and_a_usable_quota() -> None:
         PollPolicy(every=timedelta(0), keep_for=S)
     with pytest.raises(ValueError, match="positive"):
         PollPolicy(every=S, keep_for=S, retries=(timedelta(0),))
-    with pytest.raises(ValueError, match="at least one"):
+    with pytest.raises(ValueError, match="at least one ask"):
         PollPolicy(every=S, keep_for=S, per_minute=0)
+    with pytest.raises(ValueError, match="at least one worker"):
+        PollPolicy(every=S, keep_for=S, at_once=0)
+
+
+def test_ask_numbers_are_never_reused_when_a_key_is_dropped_and_wanted_again() -> None:
+    plan, clock = _plan(forget_after=60 * S)
+    key = _key(1)
+    _want(plan, clock, key)
+    [dropped] = plan.take_due(clock.read())
+    clock.advance(61 * S)
+    plan.take_due(clock.read())  # nobody wanted it for a minute: forgotten, its ask still out
+    assert not plan.begin(dropped, clock.read())  # a worker reaching it now makes no request
+    _want(plan, clock, key)  # wanted again
+    [fresh] = plan.take_due(clock.read())
+    assert fresh.number != dropped.number
+    plan.answered(key, "late", clock.read(), ask=dropped.number)  # the dropped ask's answer lands
+    assert plan.latest(key, clock.read()) is None and not plan.begin(dropped, clock.read())
+    assert plan.begin(fresh, clock.read())
+    plan.answered(key, "fresh", clock.read(), ask=fresh.number)
+    answer = plan.latest(key, clock.read())
+    assert answer is not None and answer.value == "fresh"
+
+
+def test_a_due_ask_waits_for_a_free_worker_of_its_own_source() -> None:
+    slate: PollKey[str] = PollKey(PollSource.SLATE, date(2026, 6, 17))
+    plan = PollPlan({FEED: PollPolicy(every=15 * S, keep_for=90 * S, at_once=2), PollSource.SLATE: _POLICY})
+    clock = FakeClock(T0)
+    assert plan.capacity() == {FEED: 2, PollSource.SLATE: 1}
+    feeds = [_key(day) for day in (1, 2, 3)]
+    for key in feeds:
+        _want(plan, clock, key)
+    _want(plan, clock, slate)
+    room = {FEED: 1, PollSource.SLATE: 1}
+    assert [ask.key for ask in plan.take_due(clock.read(), room=room)] == [feeds[0], slate]
+    assert plan.take_due(clock.read(), room={FEED: 0}) == []  # no worker free: the rest stay due
+    assert [ask.key for ask in plan.take_due(clock.read(), room={FEED: 2})] == feeds[1:]
+
+
+def test_a_started_ask_has_its_whole_lease_from_when_it_started() -> None:
+    plan, clock = _plan()
+    key = _key(1)
+    _want(plan, clock, key)
+    [ask] = plan.take_due(clock.read())
+    clock.advance(20 * S)
+    assert plan.begin(ask, clock.read())  # a worker starts it 20 s after it was handed out
+    clock.advance(29 * S)
+    assert plan.take_due(clock.read()) == [] and plan.last_error(key) is None  # 29 s into its request
+    clock.advance(S)
+    plan.take_due(clock.read())
+    assert plan.last_error(key) == "no answer within 30s"
+    assert not plan.begin(ask, clock.read())  # given up on: a worker would make no request
+
+
+def test_an_ask_not_started_within_its_lease_is_given_up_when_a_worker_reaches_it() -> None:
+    plan, clock = _plan()
+    key = _key(1)
+    _want(plan, clock, key)
+    [ask] = plan.take_due(clock.read())
+    clock.advance(30 * S)
+    assert not plan.begin(ask, clock.read())
+    assert plan.last_error(key) == "no answer within 30s"
+    clock.advance(2 * S)
+    assert _keys(plan, clock) == [key]  # retried on the short schedule
+
+
+def test_answers_are_kept_while_they_stand_however_many_arrive() -> None:
+    plan, clock = _plan()
+    key = _key(1)
+    _want(plan, clock, key)
+    for value in range(9):  # an answer every 10 s: 80 s of them, all still standing
+        plan.take_due(clock.read())
+        plan.answered(key, f"answer {value}", clock.read())
+        clock.advance(10 * S)
+        _want(plan, clock, key)
+    oldest = plan.latest_by(key, MonotonicTime(0), clock.read())
+    assert oldest is not None and oldest.value == "answer 0"
+    clock.advance(11 * S)  # the first is 101 s old: it no longer stands
+    plan.answered(key, "newest", clock.read())
+    assert plan.latest_by(key, MonotonicTime(0), clock.read()) is None

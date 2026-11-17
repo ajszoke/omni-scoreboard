@@ -84,11 +84,19 @@ def _card(
 def _board(*cards: ScoreboardCard[LiveBaseballCardPayload], policy: BoardPolicy = BoardPolicy()) -> BoardSession:
     queue = InterleavedCardQueue()
     queue.ingest_all(cards)
-    return BoardSession(queue, QUAD, policy=policy)
+    board = BoardSession(queue, QUAD, policy=policy)
+    _refreshed(board)
+    return board
+
+
+def _refreshed(board: BoardSession) -> None:
+    """A refresh is done: the queue's cards, with the health as it stands, become the board's."""
+    board.publish(board.health)
 
 
 def _air(board: BoardSession, seconds: float) -> BoardCue:
-    """Cue the board at ``seconds`` and commit what it cued, as a display that drew it would."""
+    """After a refresh, cue the board at ``seconds`` and commit what it cued, as a display that drew it would."""
+    _refreshed(board)
     cue = board.cue(_at(seconds))
     board.committed(cue, _at(seconds))
     return cue
@@ -184,9 +192,11 @@ def test_a_card_cued_but_gone_before_it_drew_is_dropped_unbooked() -> None:
     queue = InterleavedCardQueue()
     queue.ingest_all((_card("g1"), _card("g2")))
     board = BoardSession(queue, QUAD)
+    _refreshed(board)
     card = board.cue(_at(0)).payload
     assert not isinstance(card, BoardFrame)
     queue.remove(card.dedupe_key.raw)
+    _refreshed(board)
     board.cue(_at(1))
     dropped = board.changes()
     assert [change.kind for change in dropped] == [ChangeKind.DROPPED] and dropped[0].aired is None
@@ -196,6 +206,7 @@ def test_a_card_the_display_cant_draw_is_set_aside_and_the_next_one_airs() -> No
     queue = InterleavedCardQueue()
     queue.ingest_all((_card("g1"), _card("g2")))
     board = BoardSession(queue, QUAD)
+    _refreshed(board)
     bad = board.cue(_at(0))
     board.failed(bad, _at(0))
     [dropped] = board.changes()
@@ -281,21 +292,21 @@ def test_a_rotation_card_cut_short_does_not_restart_the_takeover_run() -> None:
 def test_with_nothing_to_show_the_board_says_why() -> None:
     board = _board()
     assert board.cue(_at(0)).payload == BoardFrame(FrameKind.IDLE, "nothing eligible")
-    board.health = BoardHealth(held=2)
+    board.publish(BoardHealth(held=2))
     waiting_since = T0 + timedelta(seconds=1)  # no end known yet: its bar shows an empty track
     assert board.cue(_at(1)).payload == BoardFrame(FrameKind.HELD, "2 games in the TV delay", waiting_since)
-    board.health = BoardHealth(held=1)
+    board.publish(BoardHealth(held=1))
     assert board.cue(_at(2)).payload == BoardFrame(FrameKind.HELD, "a game in the TV delay", waiting_since)
-    board.health = BoardHealth(source=SourceHealth.OFFLINE, reason="no schedule yet: down")
+    board.publish(BoardHealth(source=SourceHealth.OFFLINE, reason="no schedule yet: down"))
     assert board.cue(_at(3)).payload == BoardFrame(FrameKind.OFFLINE, "no schedule yet: down")
     assert board.health.source is SourceHealth.OFFLINE
 
 
 def test_a_frame_with_a_new_reason_is_revised_in_place() -> None:
     board = _board()
-    board.health = BoardHealth(held=1)
+    board.publish(BoardHealth(held=1))
     first = _air(board, 0)
-    board.health = BoardHealth(held=2, held_until=T0 + timedelta(seconds=45))
+    board.publish(BoardHealth(held=2, held_until=T0 + timedelta(seconds=45)))
     revised = board.cue(_at(1))
     assert revised.occurrence == first.occurrence and revised.segment.revision == 1
     assert [change.kind for change in board.changes()] == [ChangeKind.UP]
@@ -318,15 +329,15 @@ def test_offline_clears_the_card_and_the_frame_before_it() -> None:
     queue.ingest(_card("g1"))
     board = BoardSession(queue, QUAD)
     _air(board, 0)
-    board.health = BoardHealth(source=SourceHealth.OFFLINE, reason="no schedule for over 10m: down")
+    board.publish(BoardHealth(source=SourceHealth.OFFLINE, reason="no schedule for over 10m: down"))
     offline = _air(board, 1)
     assert isinstance(offline.payload, BoardFrame) and offline.payload.kind is FrameKind.OFFLINE
-    board.health = BoardHealth()
+    board.publish(BoardHealth())
     queue.remove("g1:live")
     _air(board, 2)  # idle: the offline frame comes down for it
     downs = [change.reason for change in board.changes() if change.kind is ChangeKind.DOWN]
     assert downs == [EndReason.CLEARED, EndReason.NEXT_WAITING]
-    board.health = BoardHealth(source=SourceHealth.OFFLINE, reason="again")
+    board.publish(BoardHealth(source=SourceHealth.OFFLINE, reason="again"))
     _air(board, 3)
     assert [change.reason for change in board.changes() if change.kind is ChangeKind.DOWN] == [EndReason.CLEARED]
 
@@ -336,9 +347,9 @@ def test_a_card_is_marked_stale_when_its_source_or_its_own_data_is() -> None:
     queue.ingest(_card("g1"))
     board = BoardSession(queue, QUAD)
     assert not _air(board, 0).stale
-    board.health = BoardHealth(source=SourceHealth.STALE, reason="no schedule for over 2m: down")
+    board.publish(BoardHealth(source=SourceHealth.STALE, reason="no schedule for over 2m: down"))
     assert _air(board, 1).stale
-    board.health = BoardHealth()
+    board.publish(BoardHealth())
     queue.ingest(dataclasses.replace(_card("g1"), stale_since=T0))
     assert _air(board, 2).stale
 

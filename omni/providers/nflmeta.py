@@ -2,17 +2,24 @@
 
 NFLMeta re-publishes each game's scoreboard about every ten seconds and says so in its response, so the
 provider is polled at that pace. Each poll is one request against a monthly quota, which is what the
-halftime hold is for: the first time a game reaches halftime, the provider marks the moment and makes no
-request for `HALFTIME_HOLD`, answering with what it last saw.
+halftime hold is for: the first time a game reaches halftime, the provider marks the moment, and once the
+half's plays are in it makes no request until `HALFTIME_HOLD` after it, answering with what it last saw.
 
 The scoreboard moves first. The play behind it lands in the play-change feed about ten seconds later,
 and the scoreboard says when by matching that play (`PlaySyncStatus.MATCHED`), which is when the feed is
 read (or on every poll, with `PlayFeedPace.EVERY_POLL`, for a plan whose quota allows it). A matched
 scoreboard that changes with no new play behind it (a review moving the ball back, the try after a
-touchdown) means a correction is on its way, so the feed is watched for a short while. Breaks drain the
-feed too: halftime until the half's last play is in, the final for `FINAL_DRAIN`. The feed carries no
+touchdown) means a correction is on its way, so the feed is watched for a short while. A matched play
+that a complete read doesn't have yet is read for again, for up to `MISMATCH_RETRY`. The feed carries no
 timeouts and no win probability; timeouts and challenges come from the play text (`PlayLedger`), and the
 meter from elsewhere.
+
+Breaks drain the feed too:
+- **Halftime**, until the half's last play is in, for up to `HALFTIME_GRACE`. A board that starts
+  mid-break drains too, when its first read of the game didn't finish. The hold runs from the break's
+  onset (when the half ended, as near as the provider can tell), not from when the drain finished.
+- **The final**, for `FINAL_DRAIN`, ending with one last read at or after its end. If that last read
+  doesn't finish, the gap is noted (`FeedNoteKind.FINAL_INCOMPLETE`), and the game settles anyway.
 
 A read of the feed keeps what it got: each page that arrives is kept, the place in the feed moves only
 past what was kept, and a read that fails partway carries on from there at the next poll. Only plays
@@ -53,6 +60,7 @@ __all__ = [
     "HALFTIME_GRACE",
     "HALFTIME_HOLD",
     "INJURY_NEWS",
+    "MISMATCH_RETRY",
     "NFLMETA_SOURCE",
     "FeedNote",
     "FeedNoteKind",
@@ -67,10 +75,11 @@ __all__ = [
 ]
 
 NFLMETA_SOURCE = SourceRef("nflmeta")
-HALFTIME_HOLD = timedelta(minutes=15)  # no requests for this long after a game first reaches halftime
+HALFTIME_HOLD = timedelta(minutes=13)  # no requests until this long after a game's halftime began
 HALFTIME_GRACE = timedelta(seconds=30)  # the hold waits up to this long for the half's last play to land
 FINAL_DRAIN = timedelta(minutes=2)  # after the final, the feed is still read this long for its last plays and fixes
 CORRECTION_WATCH = timedelta(seconds=45)  # how long to keep reading the play feed for an expected correction
+MISMATCH_RETRY = timedelta(seconds=30)  # how long to re-read for a matched play the feed doesn't have yet
 SCORE_BACKSTOP = timedelta(minutes=2)  # a score no play accounts for is shown from the scoreboard after this
 INJURY_NEWS = timedelta(minutes=10)  # a board starting up still announces an injury this recent
 DEFAULT_POLL = DurationSeconds(10)  # NFLMeta's own recommended pace, used until a response says otherwise
@@ -126,6 +135,8 @@ class FeedNoteKind(StrEnumMixin, str, Enum):
     PLAY_READ_FAILED = "play read failed"  # kept what arrived; the rest is read next poll
     CURSOR_RESET = "cursor reset"  # the feed refused our place in it: re-read from its start, quietly
     LATE_PLAY = "late play"  # first seen after a later play: counted in the stats, not shown
+    PLAY_MISSING = "matched play missing"  # the scoreboard names a play a complete read doesn't have
+    FINAL_INCOMPLETE = "final plays incomplete"  # the final's last read didn't finish: parked without the rest
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,13 +218,16 @@ class _TrackedGame:
     ledger: PlayLedger | None = None
     latest: NflLiveSnapshot | None = None
     halftime_seen: datetime | None = None  # when this game was first seen at halftime
-    halftime_at: datetime | None = None  # when its halftime hold began
-    break_timed: bool = True  # whether the hold's start is known well enough to count the break down
+    joined_at_half: bool = False  # the provider's first look at it was at halftime
+    halftime_at: datetime | None = None  # the break's onset, set once the half's plays are in: the hold runs from it
+    break_timed: bool = True  # whether the onset is known well enough to count the break down
     final_at: datetime | None = None  # when this game was first seen final
+    settled: bool = False  # the final's drain has had its last read: nothing is left to ask
     cursor: str | None = None
     play_ids: set[str] = field(default_factory=set)  # every play the change feed has delivered and we kept
     written_at: dict[int, datetime] = field(default_factory=dict)  # when the feed first wrote each play
     read_for: str | None = None  # the matched play the feed was last read through for, so it's read once
+    missing: tuple[str, datetime] | None = None  # a matched play a complete read lacked, and since when
     draining: bool = False  # the last read stopped short of the feed's end; the next poll reads on
     matched_board: tuple[Any, ...] | None = None  # the scoreboard as of the last matched play
     watch_until: datetime | None = None  # reading the feed every poll until then, for a correction
@@ -299,30 +313,24 @@ class NflMetaLiveProvider:
         if phase is NflPhase.POST and tracked.final_at is None:
             tracked.final_at = now
         at_half = state is not None and state.interval is FootballInterval.HALFTIME
-        # A break drains the feed: halftime until its hold begins, the final for a while after.
-        draining = (at_half and tracked.halftime_at is None) or (
-            tracked.final_at is not None and now - tracked.final_at < FINAL_DRAIN
-        )
+        # A break drains the feed: halftime until its hold begins, the final until a read at its drain's end.
+        final_read = tracked.final_at is not None and not tracked.settled
+        draining = (at_half and tracked.halftime_at is None) or final_read
         ledger = tracked.ledger if tracked.ledger is not None else PlayLedger(game.away, game.home)
         notes: list[FeedNote] = []
         plays = self._follow_plays(game_id, tracked, ledger, row, now, drain=draining, notes=notes)
         tracked.ledger = ledger
+        if final_read and tracked.final_at is not None and now - tracked.final_at >= FINAL_DRAIN:
+            tracked.settled = True  # that was the drain's last read
+            if tracked.draining:
+                notes.append(FeedNote(FeedNoteKind.FINAL_INCOMPLETE, "the last read after the final didn't finish"))
         scored = _unexplained_points(game, tracked, ledger, state, now) if state is not None else []
         events = scored + plays + _injury_events(tracked, row, now)
         if state is not None:
             state = _with_plays(state, ledger, postseason=_postseason(row), known=tracked.caught_up_plays)
         caught_up = _caught_up(row, phase, tracked, ledger)
         if at_half and tracked.halftime_at is None:
-            if first_look:
-                # Starting mid-break: it began when the feed wrote the half's last play, if that's known.
-                began = tracked.written_at.get(ledger.latest)
-                tracked.halftime_at = min(began, now) if began is not None else now
-                tracked.break_timed = began is not None
-            else:
-                # The hold waits for the half's last play to land, so a board can show it before the break.
-                tracked.halftime_seen = tracked.halftime_seen or now
-                if caught_up or now - tracked.halftime_seen >= HALFTIME_GRACE:
-                    tracked.halftime_at = now
+            _drain_half(tracked, ledger, now, first_look=first_look, caught_up=caught_up)
         timed = at_half and tracked.halftime_at is not None and tracked.break_timed
         tracked.latest = NflLiveSnapshot(
             game=game,
@@ -333,7 +341,7 @@ class NflMetaLiveProvider:
             break_ends_at=tracked.halftime_at + self._hold if timed and tracked.halftime_at else None,
             observed_at=_instant(row.get("observed_at")),
             poll_every=_poll_every(body),
-            settled=tracked.final_at is not None and now - tracked.final_at >= FINAL_DRAIN,
+            settled=tracked.settled,
             notes=tuple(notes),
         )
         return tracked.latest
@@ -350,6 +358,8 @@ class NflMetaLiveProvider:
         notes: list[FeedNote],
     ) -> list[FootballEvent]:
         """Read the play feed when there's something new in it, and keep what the read brings."""
+        if tracked.settled:
+            return []  # the final has had its drain, finished or not: nothing more is read
         status, play_id = _sync(row)
         board = _board_key(row)
         read = drain or not tracked.caught_up_plays or tracked.draining or self._play_feed is PlayFeedPace.EVERY_POLL
@@ -378,7 +388,7 @@ class NflMetaLiveProvider:
         if batch.complete:
             tracked.caught_up_plays = True
             if status is PlaySyncStatus.MATCHED:
-                tracked.read_for = play_id
+                _read_through(tracked, play_id, now, notes)
         if any(event.kind in _CORRECTIONS for event in events):
             tracked.watch_until = None
         notes += batch.notes
@@ -438,6 +448,37 @@ class NflMetaLiveProvider:
             return self._fetch(path, query)
         except Exception as exc:
             raise ProviderError(f"NFLMeta fetch failed for {path}: {exc}") from exc
+
+
+def _read_through(tracked: _TrackedGame, play_id: str | None, now: datetime, notes: list[FeedNote]) -> None:
+    """A complete read for a matched scoreboard. Its play is read for once it's in; while it isn't, the
+    feed is read for it again each poll, until `MISMATCH_RETRY` has passed since the first read lacked it."""
+    if play_id is None or play_id in tracked.play_ids:
+        tracked.read_for, tracked.missing = play_id, None
+    elif tracked.missing is None or tracked.missing[0] != play_id:
+        tracked.missing = (play_id, now)
+        notes.append(FeedNote(FeedNoteKind.PLAY_MISSING, "not in the feed yet: reading again next poll"))
+    elif now - tracked.missing[1] >= MISMATCH_RETRY:
+        tracked.read_for, tracked.missing = play_id, None
+        notes.append(FeedNote(FeedNoteKind.PLAY_MISSING, "still not in the feed: waiting for the next play"))
+
+
+def _drain_half(tracked: _TrackedGame, ledger: PlayLedger, now: datetime, *, first_look: bool, caught_up: bool) -> None:
+    """Halftime, before its hold: the hold begins once the half's plays are in, or after `HALFTIME_GRACE`.
+
+    Seen live, the half's last play is in once the scoreboard's play has landed, and the break began
+    when halftime was first seen. Joined mid-break, the game so far has to be read through first; the
+    break began when the feed wrote the half's last play, when that read finished and says so.
+    """
+    if tracked.halftime_seen is None:
+        tracked.halftime_seen, tracked.joined_at_half = now, first_look
+    seen = tracked.halftime_seen
+    read_all = tracked.caught_up_plays and not tracked.draining
+    if not (read_all if tracked.joined_at_half else caught_up) and now - seen < HALFTIME_GRACE:
+        return
+    began = tracked.written_at.get(ledger.latest) if tracked.joined_at_half and read_all else None
+    tracked.halftime_at = min(began, seen) if began is not None else seen
+    tracked.break_timed = began is not None or not tracked.joined_at_half
 
 
 def _sync(row: Mapping[str, Any]) -> tuple[PlaySyncStatus, str | None]:

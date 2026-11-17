@@ -23,6 +23,7 @@ from omni.cards.base import (
     CardPriority,
     DedupeKey,
     DisplayTiming,
+    GameEnd,
     LayoutSupport,
     ScoreboardCard,
 )
@@ -210,13 +211,16 @@ class CardFactory:
         now: datetime,
         priority: CardPriority | None = None,
         after: tuple[DedupeKey, ...] = (),
+        replaces: DedupeKey | None = None,
+        ended: GameEnd | None = None,
     ) -> ScoreboardCard[FinalCardPayload]:
         """Build a final MLB card from a completed game's state and pitching decisions.
 
         The winner is derived from the score by the payload; `decisions` (winner/loser/save,
         None on a tie or an undecided feed) rides along for the W/L/S line. The card lingers
         for a finite postgame window (``final_postgame_window``), then expires from rotation.
-        `after` names the cards that air before it, such as the game's walk-off.
+        `after` names the cards that air before it, such as the game's walk-off; `replaces`, the
+        game's live card it takes over from; `ended`, when the game ended, which orders the finals.
         """
         payload = FinalCardPayload(
             away_score=state.away_score,
@@ -242,6 +246,8 @@ class CardFactory:
             dedupe_key=DedupeKey(key),
             payload=payload,
             after=after,
+            replaces=replaces,
+            ended=ended,
         )
 
     def big_play(

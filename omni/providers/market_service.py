@@ -8,6 +8,10 @@ A reading carries the time the service took it, and that is what makes a stopped
 newest reading simply stops getting newer. So a reading older than a minute, by the service's own
 clock, counts as none. The pipeline then holds the last reading for a while and falls back to MLB's
 model, which is also what happens when the service can't be reached at all. A board never needs it.
+
+The client may be asked from several threads. Its state sits behind a lock, the request runs outside
+it, and each request is numbered when it starts: a response only replaces what a later-started one
+has already filed if it is newer, so a slow, older answer can never overwrite a newer batch.
 """
 
 from __future__ import annotations
@@ -79,31 +83,29 @@ class MarketServiceClient:
         self._transport = transport
         self._refresh_every = refresh_every
         self._max_age = max_age
+        self._lock = threading.Lock()
         self._asked: dict[str, datetime] = {}  # game id -> when it was last asked about
-        self._readings: dict[str, WinProbability | None] = {}  # what the last answer said, per game asked
+        self._readings: dict[str, WinProbability | None] = {}  # what the newest answer said, per game asked
         self._next_fetch: datetime | None = None
+        self._started = 0  # requests started so far: the newest one's number
+        self._filed = 0  # the number of the request whose outcome the state above reflects
 
     def win_probability(self, game: TeamGame, now: datetime) -> WinProbability | None:
         """The service's current read on ``game``, or None if it has no fresh one.
 
-        Raises `ProviderError` when a due fetch fails. What was known is dropped first, so a failure
-        never leaves an old price looking current, and the next try waits a while.
+        Raises `ProviderError` when a due fetch fails. What was known is dropped, so a failure never
+        leaves an old price looking current, and the next try waits a while.
         """
         game_id = str(game.id)
-        self._asked[game_id] = now
-        due = self._next_fetch is None or now >= self._next_fetch
-        if due or game_id not in self._readings and not self._backing_off:
-            self._fetch(now)
-        return self._readings.get(game_id)
-
-    @property
-    def _backing_off(self) -> bool:
-        return self._next_fetch is not None and not self._readings
-
-    def _fetch(self, now: datetime) -> None:
-        self._asked = {game: at for game, at in self._asked.items() if now - at < _FORGET_AFTER}
-        games = sorted(self._asked)
-        self._readings = {}
+        with self._lock:
+            self._asked[game_id] = now
+            due = self._next_fetch is None or now >= self._next_fetch
+            if not due and (game_id in self._readings or self._backing_off):
+                return self._readings.get(game_id)
+            self._asked = {game: at for game, at in self._asked.items() if now - at < _FORGET_AFTER}
+            games = sorted(self._asked)
+            self._started += 1
+            number = self._started
         try:
             answer = self._transport.get(
                 f"/v1/latest?games={quote(','.join(games), safe=',:')}", timeout_s=_REQUEST_TIMEOUT_S
@@ -112,10 +114,21 @@ class MarketServiceClient:
             listed = answer["games"]
             readings = {game: self._fresh_reading(listed.get(game), server_time) for game in games}
         except Exception as exc:
-            self._next_fetch = now + _RETRY_AFTER
+            with self._lock:
+                self._file(number, {}, now + _RETRY_AFTER)
             raise ProviderError(f"market service fetch failed: {type(exc).__name__}: {exc}") from exc
-        self._readings = readings
-        self._next_fetch = now + self._refresh_every
+        with self._lock:
+            self._file(number, readings, now + self._refresh_every)
+            return self._readings.get(game_id)
+
+    @property
+    def _backing_off(self) -> bool:
+        return self._next_fetch is not None and not self._readings
+
+    def _file(self, number: int, readings: dict[str, WinProbability | None], next_fetch: datetime) -> None:
+        """Keep a request's outcome, unless one started after it has already filed its own (under the lock)."""
+        if number > self._filed:
+            self._filed, self._readings, self._next_fetch = number, readings, next_fetch
 
     def _fresh_reading(self, entry: Any, server_time: datetime) -> WinProbability | None:
         """A game's reading, unless it's missing, too old to trust, or has no percentages to show."""

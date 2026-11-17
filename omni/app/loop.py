@@ -2,24 +2,28 @@
 
 The board refreshes and paints on separate cadences:
 
-- **`refresh(now)`**, the decision pass, wires the spine end to end:
+- **`refresh(at)`**, the decision pass, wires the spine end to end:
   1. poll the provider (`ProviderSupervisor`, last-known-good on failure);
   2. reconcile the contest set (`ContestStore`);
-  3. run the live-card pipeline (`LiveBaseballPipeline`, delay-safe, no spoilers), which keeps the card
-     queue current;
-  4. tell the board how far its source can be trusted, and how many games have nothing to show because
-     they wait out the TV delay or their feed has stopped answering.
+  3. run the live-card pipeline (`LiveBaseballPipeline`, delay-safe, no spoilers), which stages the
+     card queue's changes, and drop what can no longer air. The pipeline gets the whole clock reading:
+     its holds are pinned, and released, on the monotonic clock, so a wall-clock jump can't release one
+     early;
+  4. publish the staged cards to the board together with how far their source can be trusted, and how
+     many games have nothing to show because they wait out the TV delay or their feed has stopped
+     answering: one numbered input, so a paint on the frame thread sees all of a refresh or none of it.
 - **`paint(at)`** asks the board (`BoardSession`) what should be up: a card, chosen by the queue and
   held by its dwell, or an explicit frame (idle, held, offline). It draws that through the
   `RendererRegistry`, a stale card dimmed, and commits it to the `DisplaySink`. The commit starts a
   card's dwell, books its turn in the queue and starts its lines scrolling (each line's start is kept
   by the card's time on the board and its lane), so a card that never reached the panel spends none of
-  its turn. Painting runs at a frame rate, so scrolling lines, countdowns and blinks move, and never
-  fetches.
+  its turn. All three count from when the display took the frame: given the clock, the paint reads it
+  again once the commit returns, so a slow draw or swap doesn't eat into the card's time. Painting runs
+  at a frame rate, so scrolling lines, countdowns and blinks move, and never fetches.
 - **`run_once(at)`** is one refresh, then one paint: the single deterministic pass replay drives.
 - **`refresh_deadline(at)`** says when a refresh next has something to do by itself (a play clearing
-  the delay, the source going stale); **`next_deadline(at)`** adds the board's own (a card's minimum,
-  its turn, its expiry).
+  the delay, the source going stale, a card running out of time to air); **`next_deadline(at)`** adds
+  the board's own (a card's minimum, its turn, its expiry).
 
 Both passes are deterministic for a given clock reading and collaborators, so the real-time runner is a
 thin wrapper and a `FakeClock` with a fixture timeline yields stable traces. Render and display failures
@@ -31,6 +35,7 @@ Each card that reaches the panel is traced at its first committed frame, with ho
 
 from __future__ import annotations
 
+from collections.abc import Hashable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, tzinfo
 from typing import Any
@@ -47,19 +52,20 @@ from omni.app.pipeline import (
 )
 from omni.app.supervisor import ProviderStatus, ProviderSupervisor, SupervisedSnapshot
 from omni.cards.base import CardId, ScoreboardCard
-from omni.core.clock import ClockReading, MonotonicTime
+from omni.core.clock import Clock, ClockReading, MonotonicTime
 from omni.domain.contest import TeamGame
-from omni.queue.scheduler import InterleavedCardQueue, SelectionReason
+from omni.queue.scheduler import InterleavedCardQueue, Missed, SelectionReason
 from omni.renderers.board_frame import BoardFrameRenderer
 from omni.renderers.canvas import DimmedCanvas
 from omni.renderers.context import RenderContext
 from omni.renderers.image import LogoStore
 from omni.renderers.registry import RendererRegistry
-from omni.renderers.text_lane import DEFAULT_MARQUEE, LaneClock, Marquee, MarqueeStyle
+from omni.renderers.text_lane import DEFAULT_MARQUEE, LaneClock, LaneFrame, Marquee, MarqueeStyle, TextLane
 from omni.renderers.visual_treatment import MatchupVisualTreatment, VisualContrastPolicy, resolve_matchup_treatment
 from omni.tower.board import (
     BoardFrame,
     BoardHealth,
+    BoardNote,
     BoardPayload,
     BoardPolicy,
     BoardSession,
@@ -84,7 +90,7 @@ class Refresh:
     health: BoardHealth  # what the board was told: its source's health, and games held in the TV delay
     reconciliation: Reconciliation | None  # None when no snapshot was available to apply
     pipeline: PipelineResult
-    unseen: tuple[CardId, ...] = ()  # cards that expired before they ever aired
+    unseen: tuple[Missed, ...] = ()  # cards that left before they ever aired, and why
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -110,6 +116,7 @@ class Painted:
     render_error: str | None = None  # an isolated render or display failure, if any
     presented: Presentation | None = None  # set on a card's first committed frame
     changes: tuple[LaneChange[BoardPayload], ...] = ()  # what the board did since the last paint
+    notes: tuple[BoardNote, ...] = ()  # what the board noted since the last paint
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -167,24 +174,25 @@ class AppLoop:
         self._frames = BoardFrameRenderer()
         self._health_changes_at: datetime | None = None  # when the source's health next changes by itself
 
-    def refresh(self, now: datetime) -> Refresh:
-        """One refresh as of ``now``: bring the cards up to date, and tell the board how its source stands."""
+    def refresh(self, at: ClockReading) -> Refresh:
+        """One refresh as of ``at``: bring the cards up to date, and tell the board how its source stands."""
+        now = at.utc
         snapshot = self._supervisor.poll(now)
         reconciliation = self._store.apply(snapshot.update) if snapshot.update is not None else None
 
         team_games = [contest for contest in self._store.contests if isinstance(contest, TeamGame)]
         pipeline_result = self._pipeline.refresh(
             team_games,
-            now=now,
+            at=at,
             fetch_feed=self._fetch_feed,
             fetch_win_probability=self._fetch_win_probability,
             fetch_fallback_win_probability=self._fetch_fallback_win_probability,
             fetch_pregame_details=self._fetch_pregame_details,
             fetch_game_lines=self._fetch_game_lines,
         )
-        unseen = tuple(card.id for card in self._queue.prune(now))
+        unseen = tuple(self._queue.prune(now))
         health = self._health(snapshot, pipeline_result)
-        self._board.health = health
+        self._board.publish(health)
         return Refresh(
             at=now,
             provider_status=snapshot.status,
@@ -194,11 +202,16 @@ class AppLoop:
             unseen=unseen,
         )
 
-    def paint(self, at: ClockReading) -> Painted:
-        """Draw what the board says should be up at ``at``, and commit it."""
+    def paint(self, at: ClockReading, *, clock: Clock | None = None) -> Painted:
+        """Draw what the board says should be up at ``at``, and commit it.
+
+        The frame counts from when the display took it: ``clock``, when given, is read again once the commit
+        returns, and that reading starts a card's dwell, books it and starts its lines. Without one (a replay,
+        a test), no time passes between the two.
+        """
         cue = self._board.cue(at)
         payload = cue.payload
-        lanes = self._lanes.frame((Surface.BOARD, cue.occurrence), at.monotonic)
+        lanes = _ShownLines(self._lanes, (Surface.BOARD, cue.occurrence), at.monotonic)
         context = RenderContext(
             profile=self._sink.profile,
             now=at.utc,
@@ -225,31 +238,43 @@ class AppLoop:
             self._sink.commit(frame)
         except Exception as exc:
             return self._failed(at, exc)
-        lanes.commit()
-        self._board.committed(cue, at)
-        changes = tuple(self._board.changes())
+        shown = at
+        if clock is None:
+            lanes.commit()
+        else:
+            shown = clock.read()
+            lanes.shown(shown.monotonic)
+        self._board.committed(cue, shown)
+        changes, notes = tuple(self._board.changes()), tuple(self._board.notes())
         if isinstance(payload, BoardFrame):
-            return Painted(at=at.utc, shown=None, frame=payload.kind, changes=changes)
+            return Painted(at=shown.utc, shown=None, frame=payload.kind, changes=changes, notes=notes)
         presented = None
         if cue.reason is not None and any(change.kind is ChangeKind.UP for change in changes):
             presented = Presentation(
-                at=at.utc,
+                at=shown.utc,
                 card=payload.id,
                 reason=cue.reason,
                 treatment=_treatment(payload, context),
                 contrast=context.contrast,
             )
         return Painted(
-            at=at.utc, shown=payload.id, reason=cue.reason, stale=cue.stale, presented=presented, changes=changes
+            at=shown.utc,
+            shown=payload.id,
+            reason=cue.reason,
+            stale=cue.stale,
+            presented=presented,
+            changes=changes,
+            notes=notes,
         )
 
     def _failed(self, at: ClockReading, exc: Exception) -> Painted:
-        changes = tuple(self._board.changes())
-        return Painted(at=at.utc, shown=None, render_error=f"{type(exc).__name__}: {exc}", changes=changes)
+        changes, notes = tuple(self._board.changes()), tuple(self._board.notes())
+        error = f"{type(exc).__name__}: {exc}"
+        return Painted(at=at.utc, shown=None, render_error=error, changes=changes, notes=notes)
 
     def run_once(self, at: ClockReading) -> TickResult:
         """One refresh, then one paint, at ``at``."""
-        refresh = self.refresh(at.utc)
+        refresh = self.refresh(at)
         painted = self.paint(at)
         return TickResult(
             provider_status=refresh.provider_status,
@@ -261,10 +286,13 @@ class AppLoop:
         )
 
     def refresh_deadline(self, at: ClockReading) -> MonotonicTime | None:
-        """When a refresh would next find something changed by itself, as of ``at``: a state or play clearing
-        the delay, a final's reveal, a stale game's cards coming down, the source going stale or offline."""
-        instants = [self._pipeline.next_deadline(at.utc), self._health_changes_at]
-        return earliest(at.monotonic + (instant - at.utc) for instant in instants if instant is not None)
+        """When a refresh would next find something changed by itself, as of ``at``: a state, play or result
+        clearing the delay, a live card going stale or a stale game's cards coming down, the source going stale
+        or offline, or a card that hasn't aired running out of time to (it's dropped then, and traced as
+        missed)."""
+        instants = [self._health_changes_at, self._queue.next_miss(at.utc)]
+        projected = (at.monotonic + (instant - at.utc) for instant in instants if instant is not None)
+        return earliest((self._pipeline.next_deadline(at), *projected))
 
     def next_deadline(self, at: ClockReading) -> MonotonicTime | None:
         """When either pass next has something to do by itself, as of ``at``."""
@@ -303,6 +331,37 @@ class AppLoop:
             return BoardHealth(source=SourceHealth.STALE, reason=reason, held=held, held_until=held_until, unfed=unfed)
         self._health_changes_at = update.observed_at + max_age + second
         return BoardHealth(source=SourceHealth.FRESH, held=held, held_until=held_until, unfed=unfed)
+
+
+class _ShownLines(LaneFrame):
+    """A frame's view of the board's lane clock that remembers the lines drawn through it, so a line new in the
+    frame starts when the display took the frame rather than when it was drawn.
+
+    It draws through an ordinary view as of the frame's moment. Once the frame is shown, the same lines are
+    asked again through a view as of that moment, and that view's starts are the ones kept.
+    """
+
+    def __init__(self, lanes: LaneClock, presentation: Hashable, at: MonotonicTime) -> None:
+        super().__init__(lanes, presentation, at, {})
+        self._lanes = lanes
+        self._of = presentation
+        self._drawn = lanes.frame(presentation, at)
+        self._asked: list[tuple[TextLane, str, bool]] = []
+
+    def elapsed(self, lane: TextLane, text: str, *, overflows: bool) -> float | None:
+        self._asked.append((lane, text, overflows))
+        return self._drawn.elapsed(lane, text, overflows=overflows)
+
+    def commit(self) -> None:
+        """The display took this frame the moment it was drawn: its lines' starts stand as drawn."""
+        self._drawn.commit()
+
+    def shown(self, at: MonotonicTime) -> None:
+        """The display took this frame at ``at``: its lines' starts stand, a new one's counted from then."""
+        view = self._lanes.frame(self._of, at)
+        for lane, text, overflows in self._asked:
+            view.elapsed(lane, text, overflows=overflows)
+        view.commit()
 
 
 def _span(span: timedelta) -> str:

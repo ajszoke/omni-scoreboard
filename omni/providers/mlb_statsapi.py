@@ -221,7 +221,8 @@ class MlbStatsApiProvider:
         which live games are worth a per-game request. The single fetch yields both the
         current `BaseballGameState` and the typed play-by-play `events`; events are
         stamped `observed_at=now` and scoped to ``game`` so each carries stable lineage.
-        Raises `ProviderError` if the fetch fails or the feed has no live state.
+        The feed's own status (the only word that its state is final) and its timestamp
+        ride along. Raises `ProviderError` if the fetch fails or the feed has no live state.
         """
         try:
             raw = self._fetch_game(game.id.raw)
@@ -229,7 +230,14 @@ class MlbStatsApiProvider:
             raise ProviderError(f"MLB game fetch failed for {game.id.raw}: {exc}") from exc
         state = _parse_game_state(raw)
         events, warnings = _parse_game_events(raw, contest=game, source=self.source, observed_at=now)
-        return LiveBaseballFeed(state=state, events=events, decisions=_parse_decisions(raw), warnings=warnings)
+        return LiveBaseballFeed(
+            state=state,
+            events=events,
+            decisions=_parse_decisions(raw),
+            warnings=warnings,
+            status=_feed_status(raw),
+            as_of=_feed_as_of(raw),
+        )
 
     def fetch_pregame_details(self, game: TeamGame) -> PregameDetails:
         """Fetch one upcoming game's records and probable starters.
@@ -467,6 +475,23 @@ def _parse_game_state(raw: dict[str, Any]) -> BaseballGameState:
         # AttributeError covers a null nested object (e.g. `"teams": null` -> None.get(...)),
         # so a malformed linescore becomes a typed error, never a raw escape.
         raise ProviderError(f"could not parse game state: {exc}") from exc
+
+
+def _feed_status(raw: dict[str, Any]) -> GameStatus | None:
+    """The game's status as the feed gives it (``gameData.status.detailedState``), or None when it says none."""
+    detailed = ((raw.get("gameData") or {}).get("status") or {}).get("detailedState")
+    return map_game_status(detailed) if isinstance(detailed, str) and detailed else None
+
+
+def _feed_as_of(raw: dict[str, Any]) -> datetime | None:
+    """When the feed says its answer stood (``metaData.timeStamp``, UTC as ``20260617_233012``), or None."""
+    stamp = (raw.get("metaData") or {}).get("timeStamp")
+    if not isinstance(stamp, str):
+        return None
+    try:
+        return datetime.strptime(stamp, "%Y%m%d_%H%M%S").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
 
 
 def _parse_iso(raw: Any) -> datetime | None:
@@ -806,7 +831,8 @@ _GAME_FIELDS = (
     "players,stats,pitching,battingOrder,atBats,homeRuns,strikeOuts,numberOfPitches,inningsPitched,"  # batter/pitcher lines
     "seasonStats,wins,losses,saves,"  # season totals for the final card's decisions
     "plays,allPlays,currentPlay,result,eventType,description,rbi,awayScore,homeScore,about,inning,halfInning,atBatIndex,"
-    "endTime,startTime,count,playEvents,isPitch,pitchData,startSpeed,details,type,code,decisions,winner,loser,save,fullName"
+    "endTime,startTime,count,playEvents,isPitch,pitchData,startSpeed,details,type,code,decisions,winner,loser,save,fullName,"
+    "gameData,status,detailedState,metaData,timeStamp"  # the feed's own status and timestamp
 )
 
 

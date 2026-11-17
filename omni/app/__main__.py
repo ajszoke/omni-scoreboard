@@ -8,11 +8,13 @@ deterministic `AppLoop`; everything testable lives in `runner.py` / `loop.py`.
 Each card stays up for its turn (``--slot``, held within the card's own minimum and maximum)
 unless a bigger moment takes over, and frames draw ``--fps`` times a second, so scrolling lines
 and countdowns move. Each change on the board is traced. The network is read by a poller on its
-own threads, on the cadences in `omni.app.planned_mlb.MLB_POLICIES`; a refresh reads its latest
-answers whenever one lands.
+own threads, on the cadences in `omni.app.planned_mlb.MLB_POLICIES`, pregame details and odds
+included; a refresh reads its latest answers whenever one lands, and never waits on a request.
 
-With ``OMNI_CLOUD_URL`` and ``OMNI_CLOUD_TOKEN`` in the environment or a git-ignored ``.env``, the
-win meter reads Omni's market service (``cloud/``); without them it reads Polymarket's public quotes.
+The live win meter is off unless ``--meter`` is given. With it, and with ``OMNI_CLOUD_URL`` and
+``OMNI_CLOUD_TOKEN`` in the environment or a git-ignored ``.env``, the meter reads Omni's market
+service (``cloud/``); without them it reads Polymarket's public quotes. Either way MLB's model takes
+over when the market has nothing.
 """
 
 from __future__ import annotations
@@ -26,7 +28,8 @@ from typing import Sequence, cast
 
 from omni.core.clock import SystemClock
 from omni.app.display import MatrixDevice, MatrixDisplaySink
-from omni.app.runner import build_loop, run_forever
+from omni.app.planned_mlb import MarketReader
+from omni.app.runner import build_planned_loop, run_forever
 from omni.core.enum import PanelProfile
 from omni.core.env import read_env_file
 from omni.core.time import DurationSeconds
@@ -66,6 +69,11 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         help="IANA zone for the schedule day and board clocks, e.g. America/Denver (default America/New_York)",
     )
     parser.add_argument("--no-odds", action="store_true", help="leave sportsbook odds off the pregame card")
+    parser.add_argument(
+        "--meter",
+        action="store_true",
+        help="show the live win meter (the market, then MLB's model); off by default",
+    )
     parser.add_argument(
         "--scroll-speed",
         choices=["slow", "medium", "fast"],
@@ -111,24 +119,32 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
     provider = MlbStatsApiProvider(MlbTeamRegistry.from_color_file(), schedule_timezone=zone)
     odds = None if args.no_odds else BovadaOddsProvider()
 
-    # The shared market service when this board has a token for it; the public quotes otherwise.
-    cloud = MarketServiceConfig.from_env({**read_env_file(_REPO_ROOT / ".env"), **os.environ})
-    if cloud is not None:
-        transport = UrllibTransport(cloud)
-        HeartbeatSender(transport, version=_app_version()).start()
-        fetch_market_win_probability = MarketServiceClient(transport).win_probability
-        meter = "market service"
-    else:
-        fetch_market_win_probability = PolymarketUsProvider().win_probability
-        meter = "Polymarket public quotes"
+    # With the meter on, the shared market service when this board has a token for it, else the public quotes.
+    market: MarketReader | None = None
+    meter = "off"
+    if args.meter:
+        cloud = MarketServiceConfig.from_env({**read_env_file(_REPO_ROOT / ".env"), **os.environ})
+        if cloud is not None:
+            transport = UrllibTransport(cloud)
+            HeartbeatSender(transport, version=_app_version()).start()
+            market, meter = MarketServiceClient(transport).win_probability, "market service"
+        else:
+            market, meter = PolymarketUsProvider().win_probability, "Polymarket public quotes"
 
-    from omni.app.planned_mlb import MLB_POLICIES, NO_BACKOFF, PlannedMlb
+    from omni.app.planned_mlb import MLB_POLICIES, PlannedMlb
     from omni.app.poll_plan import PollPlan
     from omni.app.poller import Poller
 
     clock = SystemClock()
     plan = PollPlan(MLB_POLICIES)
-    planned = PlannedMlb(plan, clock, provider, market=fetch_market_win_probability, favorites=frozenset(args.favorite))
+    planned = PlannedMlb(
+        plan,
+        clock,
+        provider,
+        market=market,
+        odds=odds.lines_for if odds is not None else None,
+        favorites=frozenset(args.favorite),
+    )
 
     from RGBMatrixEmulator import RGBMatrix, RGBMatrixOptions
 
@@ -143,17 +159,12 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
     # the emulator's own canvas type and extra args — broader than our minimal MatrixDevice
     # protocol. Assert the boundary match precisely instead of blanket-ignoring the whole call.
     sink = MatrixDisplaySink(cast(MatrixDevice, matrix), profile)
-    loop = build_loop(
-        planned,  # the slate, from the plan
-        planned.fetch_feed,
+    loop = build_planned_loop(
+        planned,
         sink,
+        meter=args.meter,
         favorites=frozenset(args.favorite),
         broadcast_lag=DurationSeconds(args.delay),
-        backoff=NO_BACKOFF,  # the plan does the retrying
-        fetch_win_probability=planned.fetch_win_probability,  # per-team meter, delayed with the score
-        fetch_fallback_win_probability=planned.fetch_fallback_win_probability,  # when the market goes quiet
-        fetch_pregame_details=provider.fetch_pregame_details,
-        fetch_game_lines=odds.lines_for if odds is not None else None,
         logos=LogoStore(),  # resolve committed team tiles from assets/ (lazy, cached)
         display_timezone=zone,
         marquee=DEFAULT_MARQUEE.at(ScrollSpeed(args.scroll_speed)),

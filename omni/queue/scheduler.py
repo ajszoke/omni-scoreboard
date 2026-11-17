@@ -1,16 +1,19 @@
 """InterleavedCardQueue: fair, two-level rotation across contests and their cards.
 
-The board's selection policy. Cards (already scored and TV-delayed) are ingested and deduped by
-`DedupeKey`; `peek(at, profile)` says what should air next, and `book` records that it did. The
-board (`omni.tower.board`) books a card when its first frame is committed, not when it is chosen, so
-a card that never reached the panel spends none of its turn, its rotation or its reminder.
+The board's selection policy. Cards (already scored and TV-delayed) are staged by the decision thread,
+deduped by `DedupeKey`, and once a refresh is done `publish` makes them the board's as one numbered
+`CardView`. The board selects against the latest view, never against half a refresh: `peek(at, profile)`
+says what should air next, and `book` records that it did. The board books a card when its first frame
+is committed, not when it is chosen, so a card that never reached the panel spends none of its turn,
+its rotation or its reminder; and only if the latest view still holds the card as it was drawn, so a
+card that changed or left while it was drawn books nothing.
 
 Selection filters first, then chooses:
 1. **Eligible:** available, not expired, and supported on the profile.
-2. **In order:** a card waits for the cards it must follow (`ScoreboardCard.after`, a game's decisive
-   play before its final). Finals that haven't aired go in the order their games ended: only the
-   earliest is eligible.
-3. **A usable window:** a card about to expire, with less time left than its minimum, is passed over.
+2. **A usable window:** a card about to expire, with less time left than its minimum, is passed over.
+3. **In order:** a card waits for the cards it must follow while they can still air
+   (`ScoreboardCard.after`, a game's decisive play before its final). Finals that haven't aired go in
+   the order their games ended (`ScoreboardCard.ended`): only the earliest is eligible.
 
 Then it chooses, two-level, so nothing starves:
 1. **Group:** the most-overdue *rotation group* (a contest), weighted by its highest-priority card, so
@@ -19,23 +22,29 @@ Then it chooses, two-level, so nothing starves:
    (LIVE, BIG_PLAY, FINAL, ...) share airtime fairly.
 
 Attention is **bounded and separate from priority**. A `BURST` card takes over once, ahead of
-rotation, the first time it airs; after that it rotates like any other. The board bounds how much
-takeover airtime runs back to back. A `RECURRING` card (an active no-hitter) resurfaces on its
-`cooldown` beat, counted on the monotonic clock from when it last aired, ahead of rotation and capped
-by `max_repeats`; in between it is held back, so it reminds periodically rather than constantly.
-Display priority alone never grants a permanent takeover.
+rotation, the first time it airs; after that it rotates beside the other cards, but never alone. The
+board bounds how much takeover airtime runs back to back, and then asks for a *base* card (one that is
+neither a takeover nor a reminder) to get a turn of its own. A `RECURRING` card (an active no-hitter)
+resurfaces on its `cooldown` beat, counted on the monotonic clock from when it last aired, ahead of
+rotation and capped by `max_repeats`; in between it is held back, so it reminds periodically rather
+than constantly. Display priority alone never grants a permanent takeover.
 
-The queue is thread-safe: the pipeline ingests on the decision thread while the board reads it on the
-frame thread.
+A refresh drops what can no longer air (`prune`): a card past its expiry, and one that never aired and
+has less time left than its minimum. Each that never aired is reported with why it missed (`Missed`).
+
+The queue is thread-safe: the pipeline stages and publishes on the decision thread while the board
+reads views and books on the frame thread.
 """
 
 from __future__ import annotations
 
 import threading
 from collections import defaultdict
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
+from types import MappingProxyType
 from typing import Any, Iterable
 
 from omni.cards.attention import AttentionMode
@@ -44,7 +53,7 @@ from omni.core.clock import ClockReading, MonotonicTime
 from omni.core.enum import DisplayPriority, PanelProfile, StrEnumMixin
 from omni.core.ids import LeagueScopedId
 
-__all__ = ["InterleavedCardQueue", "Pick", "SelectionReason"]
+__all__ = ["CardView", "InterleavedCardQueue", "MissReason", "Missed", "Pick", "SelectionReason"]
 
 # How much more airtime each band earns (multiplies time-since-last-shown).
 _BAND_WEIGHT: dict[DisplayPriority, int] = {
@@ -73,12 +82,51 @@ class SelectionReason(StrEnumMixin, str, Enum):
 _RANK = {SelectionReason.TAKEOVER: 2, SelectionReason.REMINDER: 1, SelectionReason.ROTATION: 0}
 
 
+class MissReason(StrEnumMixin, str, Enum):
+    """Why a card left the queue without ever airing."""
+
+    TOO_LATE = "too late to start"  # it had less time left than its minimum
+    EXPIRED = "expired before it aired"  # its expiry passed
+    UNDRAWN = "failed to draw"  # the display couldn't draw it
+
+
+@dataclass(frozen=True, slots=True)
+class Missed:
+    """A card that left without ever airing, and why."""
+
+    card: ScoreboardCard[Any]
+    reason: MissReason
+
+
 @dataclass(frozen=True, slots=True)
 class Pick:
     """The queue's choice, and why."""
 
     card: ScoreboardCard[Any]
     reason: SelectionReason
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class CardView:
+    """The cards one refresh published, numbered: what the board selects from until the next one."""
+
+    generation: int
+    cards: Mapping[str, ScoreboardCard[Any]]  # DedupeKey.raw -> card; read-only
+
+    def card(self, dedupe_key: str) -> ScoreboardCard[Any] | None:
+        """The card under ``dedupe_key`` in this view, or None if it isn't in it."""
+        return self.cards.get(dedupe_key)
+
+    def successor(self, dedupe_key: str) -> ScoreboardCard[Any] | None:
+        """The card in this view that takes the place of ``dedupe_key`` on the board (a final, its game's live
+        card), if there is one."""
+        replacing = (
+            card for card in self.cards.values() if card.replaces is not None and card.replaces.raw == dedupe_key
+        )
+        return next(replacing, None)
+
+
+_EMPTY = CardView(0, MappingProxyType({}))
 
 
 class InterleavedCardQueue:
@@ -90,17 +138,22 @@ class InterleavedCardQueue:
 
     def __init__(self) -> None:
         self._lock = threading.RLock()
-        self._cards: dict[str, ScoreboardCard[Any]] = {}  # DedupeKey.raw -> card
+        self._cards: dict[str, ScoreboardCard[Any]] = {}  # staged: DedupeKey.raw -> card, until published
+        self._published = _EMPTY
         self._tick = 0
         self._group_last_shown: dict[LeagueScopedId, int] = {}  # contest id -> tick
         self._card_last_shown: dict[str, int] = {}  # DedupeKey.raw -> tick; a key here has aired
         self._reminded_at: dict[str, MonotonicTime] = {}  # DedupeKey.raw -> when a RECURRING card last aired
         self._recurring_count: dict[str, int] = {}  # DedupeKey.raw -> times a RECURRING card has aired
+        self._undrawn: set[str] = set()  # DedupeKey.raw of cards the display couldn't draw
+
+    # --- the decision thread: staging, then publishing -----------------------------------
 
     def ingest(self, card: ScoreboardCard[Any]) -> None:
-        """Add a card, or replace the one sharing its `DedupeKey` (a fresh update)."""
+        """Stage a card, or replace the one sharing its `DedupeKey` (a fresh update)."""
         with self._lock:
             self._cards[card.dedupe_key.raw] = card
+            self._undrawn.discard(card.dedupe_key.raw)  # a new version gets a fresh chance to draw
 
     def ingest_all(self, cards: Iterable[ScoreboardCard[Any]]) -> None:
         for card in cards:
@@ -109,97 +162,152 @@ class InterleavedCardQueue:
     def remove(self, dedupe_key: str) -> None:
         with self._lock:
             self._cards.pop(dedupe_key, None)
-            self._forget_orphans()
 
-    def prune(self, now: datetime) -> list[ScoreboardCard[Any]]:
-        """Drop cards whose `expires_at` has passed; returns those that expired without ever airing."""
+    def prune(self, now: datetime) -> list[Missed]:
+        """Unstage what can no longer air: cards past their expiry, and cards that never aired with less time
+        left than their minimum. Returns those that never aired, with why each missed."""
         with self._lock:
-            expired = [
-                key
-                for key, card in self._cards.items()
-                if card.timing.expires_at is not None and now >= card.timing.expires_at
-            ]
-            unseen = [self._cards[key] for key in expired if key not in self._card_last_shown]
-            for key in expired:
+            missed: list[Missed] = []
+            for key, card in list(self._cards.items()):
+                expires = card.timing.expires_at
+                if expires is None:
+                    continue
+                aired = key in self._card_last_shown
+                expired = now >= expires
+                if not expired and (aired or expires - now >= card.timing.min_display.as_timedelta()):
+                    continue  # it can still start, or it has aired and stays until its expiry
                 del self._cards[key]
-            if expired:
-                self._forget_orphans()
-            return unseen
+                if not aired:
+                    why = MissReason.EXPIRED if expired else MissReason.TOO_LATE
+                    missed.append(Missed(card, MissReason.UNDRAWN if key in self._undrawn else why))
+            return missed
+
+    def next_miss(self, now: datetime) -> datetime | None:
+        """When a staged card that hasn't aired next runs out of time to air, after ``now``; None if none will."""
+        with self._lock:
+            instants = [
+                card.timing.expires_at - card.timing.min_display.as_timedelta()
+                for key, card in self._cards.items()
+                if card.timing.expires_at is not None and key not in self._card_last_shown
+            ]
+        return min((instant for instant in instants if instant > now), default=None)
+
+    def publish(self) -> CardView:
+        """Make the staged cards the board's, as one new numbered view. What's remembered of cards no longer
+        in it is forgotten."""
+        with self._lock:
+            self._published = CardView(self._published.generation + 1, MappingProxyType(dict(self._cards)))
+            self._forget_orphans()
+            return self._published
 
     def __len__(self) -> int:
         with self._lock:
             return len(self._cards)
 
     def card(self, dedupe_key: str) -> ScoreboardCard[Any] | None:
-        """The newest version of a card, or None once it has left the queue."""
+        """The newest staged version of a card, or None once it has left the queue."""
         with self._lock:
             return self._cards.get(dedupe_key)
 
     def contests(self) -> frozenset[LeagueScopedId]:
-        """The contests with a card in the queue."""
+        """The contests with a staged card."""
         with self._lock:
             return frozenset(card.contest.id for card in self._cards.values())
 
-    def aired(self, dedupe_key: str) -> bool:
-        """Whether a card still in the queue has aired."""
-        with self._lock:
-            return dedupe_key in self._card_last_shown
-
     def eligible(self, now: datetime, profile: PanelProfile) -> list[ScoreboardCard[Any]]:
-        """Cards that may show right now on `profile` (available, in-window, supported)."""
+        """Staged cards that may show right now on `profile` (available, in-window, supported)."""
         with self._lock:
             return [card for card in self._cards.values() if self._showable(card, now, profile)]
 
-    def peek(
-        self, at: ClockReading, profile: PanelProfile, *, takeovers: bool = True, skip: frozenset[str] = frozenset()
-    ) -> Pick | None:
-        """What should air next, with the reason; None if nothing is eligible. Records nothing.
+    # --- the frame thread: selecting against a view, and booking ------------------------
 
-        With ``takeovers`` off the board wants a turn of its own: BURST cards, aired or not, wait for
-        another card to air first, unless nothing else is eligible. Cards whose dedupe keys are in
-        ``skip`` (ones the display can't draw) are passed over, and hold up nothing ordered behind them.
+    @property
+    def published(self) -> CardView:
+        """The latest view published."""
+        with self._lock:
+            return self._published
+
+    def aired(self, dedupe_key: str) -> bool:
+        """Whether a card has aired (and is still in the latest view)."""
+        with self._lock:
+            return dedupe_key in self._card_last_shown
+
+    def peek(
+        self,
+        at: ClockReading,
+        profile: PanelProfile,
+        *,
+        view: CardView | None = None,
+        recovery: bool = False,
+        prefer: str | None = None,
+        skip: frozenset[str] = frozenset(),
+    ) -> Pick | None:
+        """What should air next from ``view`` (the latest published, by default), with the reason; None if
+        nothing is eligible. Records nothing.
+
+        With ``recovery`` the board owes a base card a turn of its own: while one can air, takeovers and
+        reminders wait. ``prefer`` names a card that takes its rotation turn ahead of the others if it can
+        air (a final, in its live card's place). Cards whose dedupe keys are in ``skip`` (ones the display
+        can't draw) are passed over, and hold up nothing ordered behind them.
         """
         with self._lock:
-            eligible = [card for card in self.eligible(at.utc, profile) if card.dedupe_key.raw not in skip]
-            pool = self._usable(self._in_order(eligible), at.utc)
-            if not takeovers:
-                pool = [card for card in pool if card.attention.mode is not AttentionMode.BURST] or pool
-            if not pool:
-                return None
-            bursting = [card for card in pool if takeovers and self._is_bursting(card)]
+            cards = (view if view is not None else self._published).cards.values()
+            eligible = [
+                card for card in cards if self._showable(card, at.utc, profile) and card.dedupe_key.raw not in skip
+            ]
+            pool = self._in_order(self._usable(eligible, at.utc))
+            if recovery:
+                pool = [card for card in pool if _is_base(card)] or pool
+            bursting = [card for card in pool if self._is_bursting(card)]
             due_recurring = [card for card in pool if self._is_recurring_due(card, at.monotonic)]
             if bursting:
                 return Pick(max(bursting, key=self._card_rank), SelectionReason.TAKEOVER)
             if due_recurring:
                 return Pick(max(due_recurring, key=self._card_rank), SelectionReason.REMINDER)
-            # Two-level rotation, with not-yet-due RECURRING cards held back.
+            # Two-level rotation, with not-yet-due RECURRING cards held back, and spent takeovers only beside
+            # a base card: alone, a takeover that has had its turn leaves the board.
             rotating = [card for card in pool if card.attention.mode is not AttentionMode.RECURRING]
-            if not rotating:
-                return None  # only RECURRING cards remain and none is due yet: nothing to show
+            if not any(_is_base(card) for card in rotating):
+                return None
+            preferred = [card for card in rotating if card.dedupe_key.raw == prefer]
+            if preferred:
+                return Pick(preferred[0], SelectionReason.ROTATION)
             groups: dict[LeagueScopedId, list[ScoreboardCard[Any]]] = defaultdict(list)
             for card in rotating:
                 groups[card.contest.id].append(card)
             chosen_group = max(groups, key=lambda gid: self._group_rank(gid, groups[gid]))
             return Pick(max(groups[chosen_group], key=self._card_rank), SelectionReason.ROTATION)
 
-    def book(self, pick: Pick, at: ClockReading) -> None:
-        """Record that ``pick`` aired at ``at``: its turn in rotation, and a reminder's cooldown and count."""
+    def book(self, pick: Pick, at: ClockReading) -> bool:
+        """Record that ``pick`` aired at ``at``: its turn in rotation, and a reminder's cooldown and count.
+
+        Only if the latest view still holds the very card picked: one that changed or left while it went up
+        books nothing, since what aired isn't what the board now holds. Returns whether it was booked.
+        """
         card = pick.card
         key = card.dedupe_key.raw
         with self._lock:
-            if key not in self._cards:
-                return  # it left the queue while it went up; there's nothing to remember it by
+            if self._published.card(key) is not card:
+                return False
             self._tick += 1
             self._group_last_shown[card.contest.id] = self._tick
             self._card_last_shown[key] = self._tick
             if card.attention.mode is AttentionMode.RECURRING:
                 self._reminded_at[key] = at.monotonic
                 self._recurring_count[key] = self._recurring_count.get(key, 0) + 1
+            return True
+
+    def undrawn(self, card: ScoreboardCard[Any]) -> None:
+        """The display couldn't draw ``card``: if it never airs, that's why it missed."""
+        with self._lock:
+            self._undrawn.add(card.dedupe_key.raw)
 
     def pick(self, at: ClockReading, profile: PanelProfile) -> Pick | None:
-        """Prune what has expired, then choose and book the next card at once (as if it aired at ``at``)."""
+        """Prune and publish what's staged, then choose and book the next card at once (as if it aired at
+        ``at``)."""
         with self._lock:
             self.prune(at.utc)
+            self.publish()
             pick = self.peek(at, profile)
             if pick is not None:
                 self.book(pick, at)
@@ -210,12 +318,15 @@ class InterleavedCardQueue:
         pick = self.pick(at, profile)
         return pick.card if pick is not None else None
 
-    def next_deadline(self, at: ClockReading, profile: PanelProfile) -> MonotonicTime | None:
-        """When eligibility next changes by itself, as of ``at``: a card becomes available or expires, its
-        window grows too short to use, or a reminder comes due. None if no card will change on its own."""
+    def next_deadline(
+        self, at: ClockReading, profile: PanelProfile, *, view: CardView | None = None
+    ) -> MonotonicTime | None:
+        """When eligibility in ``view`` (the latest published, by default) next changes by itself, as of ``at``:
+        a card becomes available or expires, its window grows too short to use, or a reminder comes due. None
+        if no card will change on its own."""
         deadlines: list[MonotonicTime] = []
         with self._lock:
-            for key, card in self._cards.items():
+            for key, card in (view if view is not None else self._published).cards.items():
                 if not card.layout_support.supports(profile):
                     continue
                 timing = card.timing
@@ -234,12 +345,12 @@ class InterleavedCardQueue:
         return card.timing.is_available(now) and card.layout_support.supports(profile)
 
     def _in_order(self, pool: list[ScoreboardCard[Any]]) -> list[ScoreboardCard[Any]]:
-        """The cards whose turn it is: none waiting on an eligible card that hasn't aired, and of the finals
+        """The cards whose turn it is: none waiting on a card in the pool that hasn't aired, and of the finals
         that haven't aired, only the one whose game ended first."""
         waiting = {card.dedupe_key for card in pool if card.dedupe_key.raw not in self._card_last_shown}
         finals = sorted(
             (card for card in pool if card.kind is CardKind.FINAL and card.dedupe_key in waiting),
-            key=lambda card: (card.timing.available_at, card.dedupe_key.raw),
+            key=lambda card: (_ended(card), card.dedupe_key.raw),
         )
         next_final = finals[0].dedupe_key if finals else None
         return [
@@ -288,10 +399,21 @@ class InterleavedCardQueue:
         return (staleness * weight, int(card.priority.band), card.priority.score, card.id.raw)
 
     def _forget_orphans(self) -> None:
-        # Drop recency bookkeeping for cards/groups that no longer exist (no slow leak).
-        live_keys = set(self._cards)
-        live_groups = {card.contest.id for card in self._cards.values()}
-        self._card_last_shown = {key: tick for key, tick in self._card_last_shown.items() if key in live_keys}
+        # Drop what's remembered of cards and groups no longer in the published view (no slow leak).
+        cards = self._published.cards
+        live_groups = {card.contest.id for card in cards.values()}
+        self._card_last_shown = {key: tick for key, tick in self._card_last_shown.items() if key in cards}
         self._group_last_shown = {gid: tick for gid, tick in self._group_last_shown.items() if gid in live_groups}
-        self._reminded_at = {key: at for key, at in self._reminded_at.items() if key in live_keys}
-        self._recurring_count = {key: c for key, c in self._recurring_count.items() if key in live_keys}
+        self._reminded_at = {key: at for key, at in self._reminded_at.items() if key in cards}
+        self._recurring_count = {key: c for key, c in self._recurring_count.items() if key in cards}
+        self._undrawn &= set(cards) | set(self._cards)
+
+
+def _is_base(card: ScoreboardCard[Any]) -> bool:
+    """A card in the board's own rotation: neither a takeover nor a reminder."""
+    return card.attention.mode not in (AttentionMode.BURST, AttentionMode.RECURRING)
+
+
+def _ended(card: ScoreboardCard[Any]) -> datetime:
+    """When a final's game ended, for its order; one that doesn't say goes by when it became available."""
+    return card.ended.at if card.ended is not None else card.timing.available_at

@@ -2,8 +2,10 @@
 """Show frames read from stdin on the LED matrix: the display end of `omni.app.frame_stream`.
 
 Runs on the board, as root, under the system Python that has the rgbmatrix bindings, so it stays
-compatible with Python 3.9. Each frame is ``OMNF``, the width and height as little-endian 16-bit integers,
-then width x height RGB pixels. The panel blanks when the stream ends.
+compatible with Python 3.9. Each frame is ``OMN2``, the frame's id as a little-endian 32-bit integer, the
+width and height as little-endian 16-bit integers, then width x height RGB pixels. Once the matrix is up
+it says ``OMN2 READY`` on stdout, and once each frame is on the panel, ``ACK <id>``. An older app sends
+``OMNF`` frames (no id), which are shown and not acknowledged. The panel blanks when the stream ends.
 
     python -m omni.app.football ... --sink-command "ssh omni-board sudo python3 omni/board_frame_sink.py"
 
@@ -17,7 +19,9 @@ import sys
 from PIL import Image
 from rgbmatrix import RGBMatrix, RGBMatrixOptions
 
-MAGIC = b"OMNF"
+MAGIC = b"OMN2"  # then the id, width and height: "<IHH"
+LEGACY_MAGIC = b"OMNF"  # then the width and height: "<HH"
+READY = b"OMN2 READY\n"
 
 
 def read_exact(stream, size):
@@ -31,6 +35,29 @@ def read_exact(stream, size):
         chunks.append(chunk)
         left -= len(chunk)
     return b"".join(chunks)
+
+
+def read_header(stream):
+    """The next frame's (id, width, height), id None for an ``OMNF`` frame; None at the end or out of sync."""
+    magic = read_exact(stream, 4)
+    if magic == MAGIC:
+        rest = read_exact(stream, 8)
+        return struct.unpack("<IHH", rest) if rest is not None else None
+    if magic == LEGACY_MAGIC:
+        rest = read_exact(stream, 4)
+        return (None,) + struct.unpack("<HH", rest) if rest is not None else None
+    if magic is not None:
+        sys.stderr.write("board_frame_sink: lost frame sync, stopping\n")
+    return None
+
+
+def reply(stream, line):
+    """Tell the app something. An app that isn't listening (an older one) doesn't stop the panel."""
+    try:
+        stream.write(line)
+        stream.flush()
+    except OSError:
+        pass
 
 
 def matrix_options(args):
@@ -65,20 +92,21 @@ def main():
     matrix = RGBMatrix(options=matrix_options(args))
     canvas = matrix.CreateFrameCanvas()
     stream = sys.stdin.buffer
+    replies = sys.stdout.buffer
+    reply(replies, READY)
     try:
         while True:
-            header = read_exact(stream, 8)
+            header = read_header(stream)
             if header is None:
                 break
-            if header[:4] != MAGIC:
-                sys.stderr.write("board_frame_sink: lost frame sync, stopping\n")
-                break
-            width, height = struct.unpack("<HH", header[4:])
+            frame_id, width, height = header
             pixels = read_exact(stream, width * height * 3)
             if pixels is None:
                 break
             canvas.SetImage(Image.frombytes("RGB", (width, height), pixels))
             canvas = matrix.SwapOnVSync(canvas)
+            if frame_id is not None:
+                reply(replies, b"ACK %d\n" % frame_id)
     except KeyboardInterrupt:
         pass
     finally:
