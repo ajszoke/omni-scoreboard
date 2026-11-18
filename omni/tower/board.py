@@ -59,6 +59,7 @@ from omni.cards.base import ScoreboardCard
 from omni.core.clock import ClockReading, MonotonicTime
 from omni.core.enum import PanelProfile, StrEnumMixin
 from omni.core.ids import SourceRef
+from omni.policy.view import EMPTY_POLICY_VIEW, PolicyView
 from omni.queue.scheduler import CardView, InterleavedCardQueue, Pick, SelectionReason
 from omni.tower.lane import ChangeKind, EndReason, LaneChange, earliest
 from omni.tower.segment import Dwell, Provenance, Segment, SegmentKey, Surface
@@ -138,6 +139,7 @@ class BoardInput:
 
     cards: CardView
     health: BoardHealth
+    policy: PolicyView = EMPTY_POLICY_VIEW  # what the policy reads about each game, from the same refresh
 
 
 class BoardNote(StrEnumMixin, str, Enum):
@@ -206,10 +208,10 @@ class BoardSession:
         """The source's health, as last published."""
         return self._input.health
 
-    def publish(self, health: BoardHealth) -> None:
-        """A refresh is done: the queue's staged cards and the source's ``health`` become the board's input
-        together, as one numbered view."""
-        self._input = BoardInput(self._queue.publish(), health)
+    def publish(self, health: BoardHealth, policy: PolicyView = EMPTY_POLICY_VIEW) -> None:
+        """A refresh is done: the queue's staged cards, the source's ``health`` and what the ``policy`` reads
+        about each game become the board's input together, as one numbered view."""
+        self._input = BoardInput(self._queue.publish(), health, policy)
 
     def cue(self, at: ClockReading) -> BoardCue:
         """What should be on the board at ``at``, once the rules have run: the card up, the next card, or

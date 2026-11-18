@@ -56,6 +56,9 @@ class PolicyName(StrEnumMixin, str, Enum):
     """A board policy a run can decide with, by its published name."""
 
     BOARD_V1 = "omni-board-policy/1"  # the shared board's scheduler bands (`omni.queue.scheduler`)
+    BOARD_V2 = (
+        "omni-board-policy/2"  # `BOARD_POLICY.md`: leverage, ranked favorites, debt and interrupts (`omni.policy`)
+    )
     NFL_SOLO_V1 = "omni-nfl-solo/1"  # the NFL single-game runner's own focus (`omni.app.football_board`)
 
 
