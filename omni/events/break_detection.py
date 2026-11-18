@@ -1,6 +1,6 @@
 """What the league break detectors share: action evidence, the onset rule, and the capability matrix.
 
-Each league's detector (`omni.events.mlb_breaks`) reads one answer about one game and gives two things:
+Each league's detector (`omni.events.mlb_breaks`, `omni.events.nfl_breaks`) reads one answer about one game and gives two things:
 - **break evidence** (`omni.domain.breaks.BreakEvidence`): the game has stopped, what kind of stop, which one,
   and when it began if the feed says so credibly;
 - **action evidence** (`ActionEvidence`): the newest action the feed shows. A lease lent from a break ends
@@ -85,7 +85,7 @@ class BreakCapability:
 
 
 _EXPLICIT = BreakConfidence.EXPLICIT
-_NO_NFL = "no NFL detector yet"
+_WRITTEN = "when the feed wrote the row (changed_at)"
 _NO_NBA = "no NBA detector yet: NBA isn't on the shared board"
 
 _CAPABILITIES = (
@@ -125,14 +125,51 @@ _CAPABILITIES = (
         confidence=_EXPLICIT,
         signal="gameData.status.detailedState Delayed or Suspended (a status card, not a lease)",
     ),
-    BreakCapability(kind=BreakKind.NFL_TV_TIMEOUT, confidence=None, signal=_NO_NFL),
-    BreakCapability(kind=BreakKind.NFL_OFFICIAL_TIMEOUT, confidence=None, signal=_NO_NFL),
-    BreakCapability(kind=BreakKind.NFL_TEAM_TIMEOUT, confidence=None, signal=_NO_NFL),
-    BreakCapability(kind=BreakKind.NFL_TWO_MINUTE_WARNING, confidence=None, signal=_NO_NFL),
-    BreakCapability(kind=BreakKind.NFL_QUARTER_BREAK, confidence=None, signal=_NO_NFL),
-    BreakCapability(kind=BreakKind.NFL_HALFTIME, confidence=None, signal=_NO_NFL),
-    BreakCapability(kind=BreakKind.NFL_INJURY_TIMEOUT, confidence=None, signal=_NO_NFL),
-    BreakCapability(kind=BreakKind.NFL_REVIEW, confidence=None, signal=_NO_NFL),
+    BreakCapability(
+        kind=BreakKind.NFL_TV_TIMEOUT,
+        confidence=None,
+        signal="no feed signal identifies a commercial; an official timeout, its reason unknown, is never taken for one",
+    ),
+    BreakCapability(
+        kind=BreakKind.NFL_OFFICIAL_TIMEOUT,
+        confidence=_EXPLICIT,
+        signal="a play-feed row of play_type official_timeout, with no newer snap in the same look",
+        onset=_WRITTEN,
+    ),
+    BreakCapability(
+        kind=BreakKind.NFL_TEAM_TIMEOUT,
+        confidence=_EXPLICIT,
+        signal='a play-feed row of play_type timeout ("Timeout #2 by CIN"), with no newer snap in the same look',
+        onset=_WRITTEN,
+    ),
+    BreakCapability(
+        kind=BreakKind.NFL_TWO_MINUTE_WARNING,
+        confidence=_EXPLICIT,
+        signal="a play-feed row of play_type two_minute_warning, with no newer snap in the same look",
+        onset=_WRITTEN,
+    ),
+    BreakCapability(
+        kind=BreakKind.NFL_QUARTER_BREAK,
+        confidence=_EXPLICIT,
+        signal='the scoreboard\'s status_detail "End of 1st" or "End of 3rd" (or of regulation, before overtime)',
+    ),
+    BreakCapability(
+        kind=BreakKind.NFL_HALFTIME,
+        confidence=_EXPLICIT,
+        signal="the scoreboard's status_detail \"Halftime\"; its length is the provider's polling hold (break_ends_at)",
+        onset="when the provider's hold counts the break from: break_ends_at less the hold",
+    ),
+    BreakCapability(
+        kind=BreakKind.NFL_INJURY_TIMEOUT,
+        confidence=None,
+        signal="the scoreboard's injuries can't tell an injury that stopped play now from one reported after play "
+        "resumed, and the typed injury entry carries no time",
+    ),
+    BreakCapability(
+        kind=BreakKind.NFL_REVIEW,
+        confidence=None,
+        signal="nothing marks a review in progress: the feed writes only the ruling, into the reviewed play's row",
+    ),
     BreakCapability(kind=BreakKind.NBA_TEAM_TIMEOUT, confidence=None, signal=_NO_NBA),
     BreakCapability(kind=BreakKind.NBA_TV_TIMEOUT, confidence=None, signal=_NO_NBA),
     BreakCapability(kind=BreakKind.NBA_QUARTER_BREAK, confidence=None, signal=_NO_NBA),
