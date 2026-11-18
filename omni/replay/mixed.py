@@ -14,7 +14,7 @@ A `MixedTimeline` is the world one board watches over a day, in its viewer's tim
 - **Faults**, typed:
   - `SourceOutage`: every request to one league's source fails for a span: its slates, and its games' feeds;
   - `PartialSlate`: a date's slate skips a row it can't read, with a warning;
-  - `ClockStep`: the board's wall clock jumps back or ahead;
+  - `ClockStep`: the board's wall clock jumps back or ahead; one at the start is the wrong clock it booted with;
   - `Correction`: a final's score corrected by a later answer;
   - `Wake`: the board's host sleeps: the world runs on while the board does nothing and its monotonic clock stands
     still, as a suspended host's does; on waking its wall clock has jumped ahead by the sleep. It has no other
@@ -475,6 +475,9 @@ def run_mixed(
         favorites=favorites,
     )
     poller = Poller(plan, clock)
+    steps = timeline.clock_steps()
+    while steps and steps[0].at <= timeline.start:  # a step at the start is the clock the board booted with
+        clock.jump(steps.pop(0).by)
     warm_up(loop, poller, clock)
 
     lines: list[str] = []
@@ -483,7 +486,6 @@ def run_mixed(
     lags = {League.MLB: broadcast_lag.as_timedelta(), League.NFL: nfl_lag.as_timedelta()}
     end = _ticks_from(world.monotonic(timeline.end))
     changes = sorted({_ticks_from(world.monotonic(instant)) for instant in timeline.changes})
-    steps = timeline.clock_steps()
     wakes = timeline.wakes()
     tick = 0
     while tick <= end:

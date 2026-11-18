@@ -28,7 +28,9 @@ credited with its confirmed time when it ends or is cut short; nothing accrues d
 **Promotions** reach the broker as the view offers them. The broker says when one may start (the bars, the 24 s
 hold, lifetimes, the 60 s cooldown); the director adds what the broker leaves to the board: protected minimums,
 drawability, the non-base cap. A start counts only at the card's first committed frame, so a cue that never lands
-spends nothing. A non-base card waiting on its promotion airs by no other route meanwhile.
+spends nothing. A non-base card waiting on its promotion airs by no other route meanwhile, but for a favorite's own big
+play, which leads its game's next turn. A no-hit bid's reminders are the director's to pace (§6): when new, then once
+60 open seconds have passed since the last one showed, three at most, each offered as a candidate of its own.
 
 **Leases** open on the view's released break evidence and close on newer released action. The evidence's release
 is taken as the first decision that read a view holding it (the facts don't carry the instant); the lease is
@@ -212,6 +214,16 @@ class Air:
         return SelectionReason.REMINDER if candidate.kind is PromotionKind.REMINDER else SelectionReason.TAKEOVER
 
 
+@dataclass(slots=True)
+class _Bid:
+    """A no-hit bid's reminders: how many have shown, the open time since the last one did (None before the first),
+    and which attempt the next is (one whose lifetime ran out unshown is offered again as the next)."""
+
+    shown: int = 0
+    since: OpenTime | None = None
+    attempt: int = 1
+
+
 @dataclass(frozen=True, slots=True)
 class _Scene:
     """What one decision reads: the cards that may air now, the live pool, and the favorites' moment."""
@@ -282,6 +294,7 @@ class PolicyDirector:
         self._open: dict[str, OpenTime] = {}  # each status card's open time since it last showed
         self._base_turns: int | None = None  # base turns started since the last pregame; None until one shows
         self._captions: dict[LeagueScopedId, PlaySummary] = {}  # each game's caption that has aired
+        self._bids: dict[LeagueScopedId, _Bid] = {}  # each standing no-hit bid's reminders
         self._waits: dict[PromotionKey, tuple[int, PromotionRefusal | OfferSkip]] = {}  # last reason written
         self._refused: dict[str, LeaseRefusal | None] = {}  # each card's last guest verdict written
         self._capped = False  # the cap's binding is written
@@ -328,7 +341,10 @@ class PolicyDirector:
         self._games = set(view.games)
         if self._settings.promotions:
             for candidate in view.offers:
-                self._offer(candidate, cards, at)
+                if candidate.kind is PromotionKind.REMINDER:
+                    self._remind(candidate, cards, at)
+                else:
+                    self._offer(candidate, cards, at)
         self._prune(cards, view)
 
     def choose(self, view: CardView, at: ClockReading, *, skip: frozenset[str]) -> Air | None:
@@ -354,6 +370,10 @@ class PolicyDirector:
                 self._note(UnspentNote(at=at, card=air.card.id, key=turn.candidate.key, reason=verdict.refusal))
                 return False
             self._promotion_noted(air, scene, at, hold.deadline if hold is not None else None)
+            if turn.candidate.kind is PromotionKind.REMINDER:
+                bid = self._bids.setdefault(turn.contest, _Bid())
+                bid.shown, bid.attempt = bid.shown + 1, bid.attempt + 1
+                bid.since = OpenTime.mark(open_now=scene.moment.context is not BarContext.ACTION, at=now)
         air.since = now
         if air.role is CardRole.PLAY_IN_TURN:
             self._broker.aired(air.card.dedupe_key)  # shown in its game's turn: no promotion waits for it now
@@ -454,9 +474,12 @@ class PolicyDirector:
         return earliest(instant for instant in instants if instant is not None and instant > at.monotonic)
 
     def next_deadline(self, at: ClockReading) -> MonotonicTime | None:
-        """When the policy's own state next changes by itself: the broker's hold, cooldown or a lifetime, or a lease
-        running out."""
-        return earliest((self._broker.next_deadline(at.monotonic), self._leases.next_deadline(at.monotonic)))
+        """When the policy's own state next changes by itself: the broker's hold, cooldown or a lifetime, a lease
+        running out, or a bid's next reminder falling due."""
+        now = at.monotonic
+        dues = (self._reminder_due(bid, now) for bid in self._bids.values())
+        reminders = [due for due in dues if due is not None and due > now]  # one due now is offered, or waits to be
+        return earliest((self._broker.next_deadline(now), self._leases.next_deadline(now), *reminders))
 
     def decisions(self) -> list[PolicyDecision]:
         """What the policy decided since the last ask, oldest first."""
@@ -511,6 +534,9 @@ class PolicyDirector:
         )
         moment = PromotionMoment(tuple(self._leases.favorite(e.contest, now) for e in live_favorites))
         self._context = moment.context
+        for bid in self._bids.values():
+            if bid.since is not None:
+                bid.since = bid.since.update(open_now=moment.context is not BarContext.ACTION, at=now)
         hosts: tuple[LeagueScopedId, ...] = ()
         if moment.context is not BarContext.ACTION:
             hosts = tuple(e.contest for e in live_favorites if self._leases.in_break(e.contest, now))
@@ -642,6 +668,9 @@ class PolicyDirector:
         decision = self._broker.decide(scene.moment, scene.now)
         for retired in decision.retired:  # its lifetime ran out: it may still air as an ordinary card
             self._waited(retired.key, retired.revision, PromotionRefusal.RETIRED, scene.at)
+            bid = self._bids.get(retired.key.contest) if retired.kind is PromotionKind.REMINDER else None
+            if bid is not None:
+                bid.attempt += 1  # unshown: the reminder is still due, offered again as the next attempt
         for refusal in decision.refusals:
             self._waited(refusal.key, refusal.revision, refusal.reason, scene.at, decision.bar, decision.context)
         start = decision.start
@@ -690,7 +719,9 @@ class PolicyDirector:
         if any(key in scene.reserved for key in before):
             return None  # the play that decided it is waiting on its promotion
         card = scene.usable[before[0]] if before else final
-        said = "the play that decided it" if before else "final"
+        # A decisive play that can't air (its card expired or never staged) no longer holds its final back: said so.
+        gone = any(key.raw not in scene.usable and not self._aired(key.raw) for key in final.after)
+        said = "the play that decided it" if before else "final; the play that decided it is gone" if gone else "final"
         why = f"{self._subject(card.contest)}: {said}"
         return self._ordinary(scene, card, CardRole.RESULT, Rung.INITIAL_RESULT, self._policy.timing.final, why)
 
@@ -875,8 +906,11 @@ class PolicyDirector:
                 del memory[key]
         for contest in [contest for contest in self._captions if contest not in view.games]:
             del self._captions[contest]
+        bidding = {offer.key.contest for offer in view.offers if offer.kind is PromotionKind.REMINDER}
+        self._bids = {contest: bid for contest, bid in self._bids.items() if contest in bidding}
         self._lapsed = {id for id in self._lapsed if id.contest in view.games}
         waiting = {candidate.key for candidate in self._broker.pending()} | {offer.key for offer in view.offers}
+        waiting |= {_reminder_key(contest, bid) for contest, bid in self._bids.items()}
         for stale in [promotion for promotion in self._waits if promotion not in waiting]:
             del self._waits[stale]
 
@@ -890,6 +924,34 @@ class PolicyDirector:
             if lease is not None and lease.closure is not None:
                 closures.append(lease.closure.at)
         return min(closures, default=None)
+
+    def _remind(self, candidate: PromotionCandidate[DedupeKey], cards: CardView, at: ClockReading) -> None:
+        """A no-hit bid's reminder (`BOARD_POLICY.md` §6): when new, then once 60 open seconds have passed since the
+        last one showed, three at most, and never offered while a favorite acts. The pipeline offers the bid for as
+        long as it stands; each reminder due goes to the broker as a candidate of its own, eligible from when the
+        board offers it."""
+        contest = candidate.key.contest
+        bid = self._bids.setdefault(contest, _Bid())
+        now = at.monotonic
+        open_now = self._context is not BarContext.ACTION
+        if bid.since is not None:
+            bid.since = bid.since.update(open_now=open_now, at=now)
+        if not open_now or self._reminder_due(bid, now) != now:
+            return
+        self._offer(replace(candidate, key=_reminder_key(contest, bid), eligible=now), cards, at)
+
+    def _reminder_due(self, bid: _Bid, now: MonotonicTime) -> MonotonicTime | None:
+        """When a bid's next reminder falls due: now when it's due already, the instant its open time since the last
+        one reaches the interval while the board is open, or None (its reminders are spent, or no open time runs)."""
+        timing = self._policy.timing
+        if bid.shown >= timing.bid_reminders:
+            return None
+        if bid.since is None:
+            return now
+        left = timing.bid_every - bid.since.total(now)
+        if left <= _ZERO:
+            return now
+        return now + left if bid.since.since is not None else None
 
     def _offer(self, candidate: PromotionCandidate[DedupeKey], cards: CardView, at: ClockReading) -> None:
         card = cards.card(candidate.card.raw)
@@ -1104,6 +1166,11 @@ _ROLE_WORDS = MappingProxyType(
         CardRole.NEUTRAL: "no live game to weigh",
     }
 )
+
+
+def _reminder_key(contest: LeagueScopedId, bid: _Bid) -> PromotionKey:
+    """The promotion a bid's next reminder is: one per attempt, so a shown or retired one is never offered again."""
+    return PromotionKey(contest, f"bid reminder {bid.attempt}")
 
 
 def _neutral(card: ScoreboardCard[Any], aired: bool) -> CardRole | None:

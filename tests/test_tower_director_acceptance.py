@@ -1,14 +1,17 @@
 """What the v2 acceptance replays found in the board's policy director, each pinned at `BoardSession`, in the synthetic
 time loop of `tests.board_policy`: a favorite's own play that never aired, a lone card written every turn, a final
-shown back to back, two games in one break starving each other, and a favorite's final held behind another."""
+shown back to back, two games in one break starving each other, a favorite's final held behind another, and a no-hit
+bid reminded once however long it stood."""
 
 from __future__ import annotations
 
 from omni.core.enum import League
 from omni.domain.breaks import BreakKind
 from omni.preferences.favorites import Favorites
-from omni.tower.decisions import CardNote, CardRole, ClampNote, PromotionNote
-from tests.board_policy import Run, big_play, evidence, facts, final, games, live, major
+from omni.domain.contest import TeamGame
+from omni.policy.promotion import PromotionRefusal
+from omni.tower.decisions import CardNote, CardRole, ClampNote, PromotionNote, WaitNote
+from tests.board_policy import Run, big_play, evidence, facts, final, games, live, major, reminder
 
 ATL_COL = Favorites({League.MLB: ["ATL", "COL"]})
 NO_FAVORITES = Favorites()
@@ -97,3 +100,48 @@ def test_a_favorite_s_own_final_isn_t_held_behind_an_unrelated_final_waiting_for
     run.run(0, 60)
     assert run.keys()[0] == ours.dedupe_key.raw  # at once: it's a favorite's own result
     assert theirs.dedupe_key.raw not in run.keys()  # the Rockies are in action: it waits for a break
+
+
+def _leave(run: Run, game: TeamGame) -> None:
+    del run.facts[game.id]
+
+
+def _republish(run: Run, until: float, every: float = 5.0) -> None:
+    """Publish the input again every ``every`` seconds, as the loop does at each refresh."""
+    for at in range(0, int(until) + 1, int(every)):
+        run.on(at, run.publish)
+
+
+def test_a_bid_s_open_time_pauses_while_a_favorite_acts_and_its_next_reminder_waits_for_60_open_seconds() -> None:
+    slate = games(3)
+    braves, bid = slate[0], slate[1]
+    nohitter = big_play(bid, "nohitter", window=1000)
+    run = Run(favorites=ATL_COL)
+    run.stage(live(braves), live(bid), nohitter)
+    run.describe(facts(bid, 0.4))
+    run.offers.append(reminder(nohitter))
+    run.on(10, lambda: run.describe(facts(braves, 0.5)))  # the Braves take the field: open time pauses
+    run.on(200, lambda: _leave(run, braves))  # and leave it
+    _republish(run, 400)
+    run.run(0, 400)
+    starts = [at for at, _ in run.promotions()]
+    # Open time counts from what the board's decisions see: at most 20 s before its turn at 20 found the Braves
+    # acting, so at least 40 s more after they left at 200, and no more than a turn later.
+    assert starts[0] == 0.0 and 240.0 <= starts[1] < 262.0
+    assert len(starts) == 3 and starts[2] - starts[1] >= 60.0
+
+
+def test_a_reminder_whose_lifetime_ran_out_unshown_is_offered_again_as_the_next_attempt() -> None:
+    slate = games(3)
+    bid = slate[1]
+    nohitter = big_play(bid, "nohitter", available=100, window=1000)  # its card can't air before 100
+    run = Run(favorites=NO_FAVORITES)
+    run.stage(live(bid), live(slate[2]), nohitter)
+    run.describe(facts(bid, 0.4), facts(slate[2], 0.4))
+    run.offers.append(reminder(nohitter))
+    _republish(run, 200)
+    run.run(0, 200)
+    assert [note.key.play for note in run.of(PromotionNote)][:1] == ["bid reminder 2"]
+    assert any(
+        note.key.play == "bid reminder 1" and note.reason is PromotionRefusal.RETIRED for note in run.of(WaitNote)
+    )
