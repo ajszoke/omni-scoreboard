@@ -478,8 +478,8 @@ def test_once_free_is_spent_mid_afternoon_nfl_s_reads_are_refused_with_the_reaso
     assert len(board.nflmeta.requests) == asked  # nothing is fetched once it's spent
     [league] = refresh.leagues
     assert league.source is SourceHealth.STALE
-    assert league.reason == "no schedule for over 2m: quota: NFLMeta requests exhausted"
-    assert board.planned.held_back(_scope(SUNDAY)) == "quota: NFLMeta requests exhausted"
+    assert league.reason == "no schedule for over 2m: quota: NFLMeta Free spent for 2026-11: switch to Builder"
+    assert board.planned.held_back(_scope(SUNDAY)) == "quota: NFLMeta Free spent for 2026-11: switch to Builder"
 
 
 def test_a_spent_nflmeta_month_leaves_mlb_s_reads_on_the_same_plan_untouched() -> None:
@@ -503,7 +503,9 @@ def test_a_spent_nflmeta_month_leaves_mlb_s_reads_on_the_same_plan_untouched() -
         clock.advance(15 * S)
     assert nflmeta.requests == []  # NFL asks nothing
     assert [asked for day, asked in statsapi.asked if day == TODAY] == [AFTER_MIDNIGHT + n * 15 * S for n in range(3)]
-    assert planned_nfl.held_back(_scope(date(2026, 6, 18))) == "quota: NFLMeta requests exhausted"
+    assert (
+        planned_nfl.held_back(_scope(date(2026, 6, 18))) == "quota: NFLMeta Free spent for 2026-06: switch to Builder"
+    )
     assert planned_mlb.held_back(PollScope(_FakeMlb.source, League.MLB, LocalDate(TODAY))) is None
 
 
