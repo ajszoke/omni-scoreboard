@@ -7,11 +7,12 @@ The board refreshes and paints on separate cadences:
      each one it asked last answered, or why it failed;
   2. take each answer into its scope and reconcile the board's contests across scopes (`ContestStore`), so a
      scope that fails keeps what it had and another league's scopes carry on regardless;
-  3. run the live-card pipeline (`LiveBaseballPipeline`, delay-safe, no spoilers) over the baseball games, which
-     stages the card queue's changes, and drop what can no longer air. Another league's games stay members, and
-     count toward its health, but have no cards until a pipeline of their own joins the board. The pipeline gets
-     the whole clock reading: its holds are pinned, and released, on the monotonic clock, so a wall-clock jump
-     can't release one early;
+  3. run each league's card pipeline (delay-safe, no spoilers) over its own games, both staging into the one card
+     queue, and drop what can no longer air: `LiveBaseballPipeline` over the baseball games, and, when the board
+     has NFL, `LiveFootballPipeline` over the NFL games. No game reaches a pipeline that can't draw it: another
+     league's games stay members, and count toward its health, but have no cards until a pipeline of their own
+     joins the board. Each pipeline gets the whole clock reading: its holds are pinned, and released, on the
+     monotonic clock, so a wall-clock jump can't release one early. What they did is reported as one result;
   4. publish the staged cards to the board together with how far their source can be trusted, and how
      many games have nothing to show because they wait out the TV delay or their feed has stopped
      answering: one numbered input, so a paint on the frame thread sees all of a refresh or none of it.
@@ -48,6 +49,7 @@ from typing import Any
 
 from omni.app.contest_store import ContestStore, ProviderStatus, Reconciliation, ScopeHealth
 from omni.app.display import DisplaySink
+from omni.app.nfl_pipeline import LiveFootballPipeline
 from omni.app.pipeline import (
     FeedFetcher,
     GameLinesFetcher,
@@ -122,7 +124,7 @@ class Refresh:
     provider_status: ProviderStatus  # the status of the league whose health the board was told
     health: BoardHealth  # what the board was told: its source's health, and games held in the TV delay
     reconciliation: Reconciliation  # what changed in the board's contests
-    pipeline: PipelineResult
+    pipeline: PipelineResult  # what every league's pipeline did, together
     unseen: tuple[Missed, ...] = ()  # cards that left before they ever aired, and why
     leagues: tuple[LeagueHealth, ...] = ()  # each covered league's health, in the order first covered
 
@@ -188,12 +190,14 @@ class AppLoop:
         policy: BoardPolicy = BoardPolicy(),
         offline_after: timedelta = OFFLINE_AFTER,
         quota: QuotaNote | None = None,
+        football: LiveFootballPipeline | None = None,
     ) -> None:
         if not schedules:
             raise ValueError("a board needs at least one schedule source")
         self._schedules = tuple(schedules)
         self._store = store
         self._pipeline = pipeline
+        self._football = football  # NFL's cards, staged into the same queue; None: NFL's games have no cards
         self._queue = queue
         self._registry = registry
         self._sink = sink
@@ -220,13 +224,9 @@ class AppLoop:
             self._store.take(schedule.observe(at, held))
         reconciliation = self._store.reconcile(at.monotonic)
 
-        baseball = [
-            contest
-            for contest in self._store.contests
-            if isinstance(contest, TeamGame) and contest.sport is Sport.BASEBALL
-        ]
+        games = [contest for contest in self._store.contests if isinstance(contest, TeamGame)]
         pipeline_result = self._pipeline.refresh(
-            baseball,
+            [game for game in games if game.sport is Sport.BASEBALL],
             at=at,
             fetch_feed=self._fetch_feed,
             fetch_win_probability=self._fetch_win_probability,
@@ -234,6 +234,9 @@ class AppLoop:
             fetch_pregame_details=self._fetch_pregame_details,
             fetch_game_lines=self._fetch_game_lines,
         )
+        if self._football is not None:
+            football = self._football.refresh([game for game in games if game.league is League.NFL], at=at)
+            pipeline_result = _together(pipeline_result, football)
         unseen = tuple(self._queue.prune(at))
         leagues = tuple(self._judge(league) for league in self._store.league_healths(at.monotonic))
         health, status = self._health(leagues, pipeline_result)
@@ -332,12 +335,13 @@ class AppLoop:
         )
 
     def refresh_deadline(self, at: ClockReading) -> MonotonicTime | None:
-        """When a refresh would next find something changed by itself, as of ``at``: a state, play or result
-        clearing the delay, a live card going stale or a stale game's cards coming down, the source going stale
-        or offline, or a card that hasn't aired running out of time to (it's dropped then, and traced as
-        missed)."""
+        """When a refresh would next find something changed by itself, as of ``at``, in either league: a state,
+        play or result clearing the delay, a caption's time running out, a live card going stale or a stale game's
+        cards coming down, the source going stale or offline, or a card that hasn't aired running out of time to
+        (it's dropped then, and traced as missed)."""
         missed = self._queue.next_miss(at)
-        return earliest((self._pipeline.next_deadline(at), self._health_changes_at, missed))
+        football = self._football.next_deadline(at) if self._football is not None else None
+        return earliest((self._pipeline.next_deadline(at), football, self._health_changes_at, missed))
 
     def next_deadline(self, at: ClockReading) -> MonotonicTime | None:
         """When either pass next has something to do by itself, as of ``at``."""
@@ -418,6 +422,28 @@ class _ShownLines(LaneFrame):
         for lane, text, overflows in self._asked:
             view.elapsed(lane, text, overflows=overflows)
         view.commit()
+
+
+def _together(first: PipelineResult, second: PipelineResult) -> PipelineResult:
+    """Two pipelines' passes as one: each kind of card, hold and final from both, ids sorted where a pass sorts
+    them."""
+    return PipelineResult(
+        pregames=first.pregames + second.pregames,
+        statuses=first.statuses + second.statuses,
+        ingested=first.ingested + second.ingested,
+        big_plays=first.big_plays + second.big_plays,
+        no_hitters=first.no_hitters + second.no_hitters,
+        finals=first.finals + second.finals,
+        held=tuple(sorted(first.held + second.held, key=str)),
+        removed=tuple(sorted(first.removed + second.removed, key=str)),
+        skipped=first.skipped + second.skipped,
+        warnings=first.warnings + second.warnings,
+        stale=tuple(sorted(first.stale + second.stale, key=str)),
+        releases=tuple(sorted(first.releases + second.releases, key=lambda release: str(release[0]))),
+        ends=first.ends + second.ends,
+        unconfirmed=tuple(sorted(first.unconfirmed + second.unconfirmed, key=str)),
+        corrections=first.corrections + second.corrections,
+    )
 
 
 def _span(span: timedelta) -> str:

@@ -9,6 +9,8 @@ hands the board its scopes itself.
 `PlannedMlb`, which hands the board its slate date by date, so a refresh never waits on the network,
 and the live win meter off unless asked for. The plan does the retrying: nothing backs off on top of it,
 and while its quota ledger holds a date's slate back, the league's health says why.
+Either builder takes NFL too (`NflSource`): its slate beside MLB's, and its games carded from the answers its
+feeds hold, held back for NFL's own TV delay. Without one, the board is MLB's alone.
 `run_forever` is the thin real-time wrapper: refreshes on a thread of their own, and frames on
 this one at a steady rate, so a slow fetch never freezes the panel. Each frame (`paint_frame`)
 counts from when the display took it, so a slow draw or swap doesn't eat into a card's time. A
@@ -21,12 +23,15 @@ and then leaves the fetching to the poller's workers.
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import timedelta, tzinfo
 
 from omni.app.background import Waking
 from omni.app.contest_store import ContestStore
 from omni.app.display import DisplaySink
 from omni.app.loop import AppLoop, Painted, QuotaNote
+from omni.app.nfl_feeds import NflFeeds
+from omni.app.nfl_pipeline import LiveFootballPipeline
 from omni.app.planned_mlb import PlannedMlb
 from omni.app.poller import Poller
 from omni.app.pipeline import (
@@ -43,7 +48,7 @@ from omni.cards.factory import CardFactory
 from omni.core.clock import Clock, MonotonicTime, Pacer
 from omni.core.time import DurationSeconds
 from omni.preferences.favorites import Favorites
-from omni.providers.base import Provider, ScopeSource
+from omni.providers.base import PollScope, Provider, ScopeSource
 from omni.queue.delay_policy import DelayPolicy
 from omni.queue.priority import PriorityScorer
 from omni.queue.scheduler import InterleavedCardQueue
@@ -52,10 +57,22 @@ from omni.renderers.registry import RendererRegistry, default_registry
 from omni.renderers.text_lane import DEFAULT_MARQUEE, MarqueeStyle
 from omni.tower.board import BoardPolicy
 
-__all__ = ["build_loop", "build_planned_loop", "paint_frame", "run_forever", "warm_up"]
+__all__ = ["NflSource", "build_loop", "build_planned_loop", "paint_frame", "run_forever", "warm_up"]
 
 _WARM_UP_PASSES = 3  # the slate, then its games' feeds, then a pass that can show them
 _REFRESH_AT_LEAST_EVERY = timedelta(seconds=5)  # for what changes with nothing to wake it (an answer expiring)
+
+
+@dataclass(frozen=True, slots=True)
+class NflSource:
+    """NFL on the board: the scope source that hands it NFL's slate, and the feeds that hold its games' answers.
+
+    ``held_back``, when given, says why a quota is holding one of NFL's scopes back, for the league's health.
+    """
+
+    schedule: ScopeSource
+    feeds: NflFeeds
+    held_back: QuotaNote | None = None
 
 
 def build_loop(
@@ -77,6 +94,8 @@ def build_loop(
     policy: BoardPolicy = BoardPolicy(),
     registry: RendererRegistry | None = None,
     quota: QuotaNote | None = None,
+    nfl: NflSource | None = None,
+    nfl_delay: DurationSeconds = DurationSeconds(0),
 ) -> AppLoop:
     """Wire the standard spine into an `AppLoop` (deterministic; no I/O performed here).
 
@@ -94,6 +113,8 @@ def build_loop(
     `policy` sets how the board shares its airtime: a rotation card's turn, and the cap on
     takeovers back to back. `registry` replaces today's renderers (a replay that only lists decisions).
     `quota` says why a quota holds a scope back, for its league's health.
+    `nfl`, when given, puts NFL on the board: its slate beside ``schedule``, and its games carded through the same
+    queue, held back for `nfl_delay` (`broadcast_lag` is baseball's). Its favorites are ``favorites``' NFL clubs.
     """
     queue = InterleavedCardQueue()
     pipeline = LiveBaseballPipeline(
@@ -104,8 +125,16 @@ def build_loop(
     )
     if isinstance(schedule, Provider):
         schedule = ProviderSupervisor(schedule, max_age=max_age, backoff=backoff)
+    schedules: tuple[ScopeSource, ...] = (schedule,)
+    football = None
+    if nfl is not None:
+        schedules += (nfl.schedule,)
+        football = LiveFootballPipeline(
+            feeds=nfl.feeds, delay_policy=DelayPolicy(broadcast_lag=nfl_delay), queue=queue, favorites=favorites
+        )
+        quota = _first_note(quota, nfl.held_back)
     return AppLoop(
-        schedules=(schedule,),
+        schedules=schedules,
         store=ContestStore(),
         pipeline=pipeline,
         queue=queue,
@@ -121,7 +150,18 @@ def build_loop(
         marquee=marquee,
         policy=policy,
         quota=quota,
+        football=football,
     )
+
+
+def _first_note(*notes: QuotaNote | None) -> QuotaNote:
+    """One quota note asking each given in turn: the first to say a scope is held back says why."""
+    asked = [note for note in notes if note is not None]
+
+    def note(scope: PollScope) -> str | None:
+        return next((said for said in (each(scope) for each in asked) if said is not None), None)
+
+    return note
 
 
 def build_planned_loop(
@@ -136,11 +176,14 @@ def build_planned_loop(
     marquee: MarqueeStyle = DEFAULT_MARQUEE,
     policy: BoardPolicy = BoardPolicy(),
     registry: RendererRegistry | None = None,
+    nfl: NflSource | None = None,
+    nfl_delay: DurationSeconds = DurationSeconds(0),
 ) -> AppLoop:
     """The running MLB board: the slate, feeds, pregame details and odds all read from ``planned``'s plan.
 
     The live win meter (the market, then MLB's model) is on only with ``meter``. Each reading stands
-    beside a score only if it arrived no later than that score's feed answer.
+    beside a score only if it arrived no later than that score's feed answer. ``nfl``, when given, puts NFL
+    on the board beside it, held back for ``nfl_delay``.
     """
     return build_loop(
         planned,  # the slate, date by date, from the plan
@@ -158,6 +201,8 @@ def build_planned_loop(
         policy=policy,
         registry=registry,
         quota=planned.held_back,
+        nfl=nfl,
+        nfl_delay=nfl_delay,
     )
 
 

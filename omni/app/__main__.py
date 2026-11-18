@@ -77,6 +77,12 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     )
     parser.add_argument("--delay", type=int, default=45, help="TV broadcast delay in seconds (default 45)")
     parser.add_argument(
+        "--nfl-delay",
+        type=int,
+        default=0,
+        help="TV broadcast delay for NFL games in seconds (default 0, as the NFL runner's --delay)",
+    )
+    parser.add_argument(
         "--slot",
         "--tick",
         dest="slot",
@@ -241,6 +247,7 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
         meter=args.meter,
         favorites=args.favorites,
         broadcast_lag=DurationSeconds(args.delay),
+        nfl_delay=DurationSeconds(args.nfl_delay),
         logos=LogoStore(),  # resolve committed team tiles from assets/ (lazy, cached)
         display_timezone=zone,
         marquee=DEFAULT_MARQUEE.at(ScrollSpeed(args.scroll_speed)),

@@ -99,14 +99,14 @@ def test_build_loop_threads_logos_through_to_the_rendered_frame() -> None:
     assert frame.images()  # tiles blitted — the store reached the renderer end to end
 
 
-def test_build_loop_without_logos_falls_back_to_colour_bars() -> None:
-    # No store wired (a test/replay) → the renderer draws colour bars, never a tile blit.
+def test_build_loop_without_logos_falls_back_to_color_bars() -> None:
+    # No store wired (a test/replay) → the renderer draws color bars, never a tile blit.
     sink = RecordingDisplaySink(PanelProfile.QUAD_128X64)
     loop = build_loop(_Provider(), _fetch_feed, sink, broadcast_lag=DurationSeconds(0))
     loop.run_once(_at(T))
     frame = sink.frames[-1]
     assert isinstance(frame, RecordingCanvas)
-    assert not frame.images()  # colour-bar fallback, no blits
+    assert not frame.images()  # color-bar fallback, no blits
 
 
 def test_build_loop_threads_the_win_probability_fetcher() -> None:
@@ -210,8 +210,14 @@ def test_parse_args_defaults() -> None:
     assert ns.profile == "quad_128x64"
     assert ns.emulated is True
     assert ns.favorite == [] and ns.favorites == Favorites() and ns.delay == 45 and ns.slot == 12
+    assert ns.nfl_delay == 0  # as the NFL runner's --delay
     assert ns.timezone == "America/New_York"
     assert ns.meter is False and ns.no_odds is False  # the live meter is opt-in; pregame odds are on
+
+
+def test_nfl_s_tv_delay_is_a_flag_of_its_own() -> None:
+    ns = _parse_args(["--profile", "quad_128x64", "--delay", "45", "--nfl-delay", "30"])
+    assert (ns.delay, ns.nfl_delay) == (45, 30)
 
 
 def test_the_live_meter_is_asked_for_by_flag() -> None:
