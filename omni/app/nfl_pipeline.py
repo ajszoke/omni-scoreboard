@@ -36,6 +36,17 @@ until the break the answer names is over and that long again. A live game with n
 Once not current, the card is marked stale (drawn dimmed), and `stale_for` after it, it comes down until a newer
 state clears the delay. It is measured on the monotonic clock.
 
+**The policy's view.** Each pass ends with what the board's policy may read (`omni.policy.view.PolicyView`), from
+released state only (`omni.app.policy_facts`):
+- **each game carded live:** its leverage (the labeled proxy) from the newest state to have cleared the delay, whether
+  its card is current, and the break and action evidence the detectors (`omni.events.nfl_breaks`) found in each
+  answer, held through the delay with that answer's state. A stoppage row shows on one look only, so it's remembered
+  until a later snap supersedes it. NFL has no records source yet: its records are unknown.
+- **offers:** a released play whose class scores (`classify_football_event`, on the released states either side of
+  it) offers the game's live card, whose caption carries it, once the state after it has cleared the delay too. Its
+  moment is the play it's about: a review's ruling is that play's next revision, and a try merges into its touchdown.
+  The first look's plays are set aside, and what an outage's catch-up brings is offered flagged so (`CandidateOrigin`).
+
 **Priority** is the scheduler's bands: a favorite's game (`Favorites`, for NFL's own clubs) is in the favorite band;
 the others are normal.
 
@@ -47,11 +58,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
+from types import MappingProxyType
 from typing import Iterable
 
 from omni.app.football_board import MAJOR_HARD_END, MAJOR_START_WITHIN, ROUTINE_HARD_END, ROUTINE_START_WITHIN
 from omni.app.nfl_feeds import NflFeeds, NflReading
 from omni.app.pipeline import CONFIRM_WITHIN, STALE_FOR, PipelineResult
+from omni.app.policy_facts import (
+    AwaitingSuccessor,
+    PlayContext,
+    ReleasedBreaks,
+    StandingOffers,
+    interrupt_stakes,
+    major_offer,
+)
 from omni.cards.base import (
     CardId,
     CardKind,
@@ -70,7 +90,12 @@ from omni.core.ids import LeagueScopedId
 from omni.core.time import DurationSeconds
 from omni.domain.contest import TeamGame
 from omni.domain.football import FootballGameState, PlaySummary
-from omni.events.football import FootballEvent
+from omni.events.football import FootballEvent, FootballEventKind
+from omni.events.nfl_breaks import nfl_break_evidence, nfl_latest_action
+from omni.policy.interrupts import classify_football_event
+from omni.policy.leverage import football_proxy
+from omni.policy.promotion import CandidateOrigin, PromotionKey
+from omni.policy.view import GameFacts, PolicyView
 from omni.preferences.favorites import Favorites
 from omni.providers.nflmeta import NflPhase
 from omni.queue.delay_policy import Arrival, DelayPolicy, Held, ReleaseGuard
@@ -121,12 +146,24 @@ class _Field:
 
 @dataclass(frozen=True, slots=True)
 class _Play:
-    """A play held in the delay: its place in the feed, and the answer that brought it."""
+    """A play held in the delay: its place in the feed, the answer that brought it, and the moment it is."""
 
     order: int
     event: FootballEvent
     answer: MonotonicTime  # that answer's receipt
     field: tuple[object, ...] | None  # the field that answer showed: where the play left the game
+    context: PlayContext[FootballGameState]  # the released states either side of it, once they clear
+    moment: PromotionKey  # the play it's about: a review's ruling and a try share their play's
+    revision: int  # how many rulings that play has had by this entry
+
+
+@dataclass(frozen=True, slots=True)
+class _ReleasedPlay:
+    """A play that has cleared the delay: its game, the play, and when it cleared."""
+
+    game: TeamGame
+    play: _Play
+    eligible: MonotonicTime
 
 
 @dataclass(slots=True)
@@ -142,9 +179,13 @@ class _Caption:
 class _Live:
     """What the pipeline keeps of one NFL game while it cards the game live."""
 
+    game: TeamGame  # as the slate last listed it
     states: DelayedFeed[_Field]
     plays: DelayedEventStream[_Play]
+    breaks: ReleasedBreaks  # its break and action evidence, held with the states
     primed: bool = False  # its first answer's plays were set aside as from before the board tuned in
+    last: FootballGameState | None = None  # the newest answer's state: the one before the next answer's plays
+    rulings: dict[str, int] = field(default_factory=dict)  # each play's rulings so far, by the play it's about
     offered: int = 0  # plays offered so far: each one's place in the feed
     shown: Held[_Field] | None = None  # the newest state to have cleared the delay
     caption: _Caption | None = None
@@ -200,6 +241,8 @@ class LiveFootballPipeline:
         self._unconfirmed: dict[LeagueScopedId, MonotonicTime] = {}  # final by the schedule, not yet the feed: since
         self._stale: dict[LeagueScopedId, MonotonicTime] = {}  # when a game's live card stopped being current
         self._current_until: dict[LeagueScopedId, MonotonicTime] = {}  # when a game's newest answer stops being
+        self._awaiting: AwaitingSuccessor[_ReleasedPlay] = AwaitingSuccessor()  # released plays: the state after?
+        self._offers = StandingOffers()
 
     def refresh(self, games: Iterable[TeamGame], *, at: ClockReading) -> PipelineResult:
         """Take each live or final game's new answers as of ``at``, surface its phase's card into the queue, and drop
@@ -230,6 +273,7 @@ class LiveFootballPipeline:
             ends=tuple(out.ends),
             unconfirmed=tuple(sorted(self._unconfirmed, key=str)),
             corrections=tuple(out.corrections),
+            policy=self._policy_view(at),
         )
 
     def next_deadline(self, at: ClockReading) -> MonotonicTime | None:
@@ -264,9 +308,15 @@ class LiveFootballPipeline:
             out.over.add(game.id)
             self._correct_final(final, readings, at, out)
             return
-        live = self._live.setdefault(game.id, _Live(DelayedFeed(self._guard), DelayedEventStream(self._guard)))
+        live = self._live.get(game.id)
+        if live is None:
+            live = _Live(game, DelayedFeed(self._guard), DelayedEventStream(self._guard), ReleasedBreaks(self._guard))
+            self._live[game.id] = live
+        live.game = game
+        # Answers taken while its card is stale end an outage: what they bring is a catch-up.
+        origin = CandidateOrigin.CATCH_UP if game.id in self._stale else CandidateOrigin.LIVE
         for reading in readings:
-            self._admit(game, live, reading, at, out)
+            self._admit(game, live, reading, at, out, origin)
         final = self._finals.get(game.id)
         if final is not None or game.status is GameStatus.FINAL:
             out.over.add(game.id)
@@ -283,30 +333,42 @@ class LiveFootballPipeline:
         if final is None or final.key is None:
             out.carding.add(game.id)
 
-    def _admit(self, game: TeamGame, live: _Live, reading: NflReading, at: ClockReading, out: _Pass) -> None:
-        """One answer: its plays into the delay, and its state as the field or, once the game is over, the result."""
+    def _admit(
+        self, game: TeamGame, live: _Live, reading: NflReading, at: ClockReading, out: _Pass, origin: CandidateOrigin
+    ) -> None:
+        """One answer: its plays into the delay, and its state as the field or, once the game is over, the result. A
+        live state's break and action evidence is held with it. ``origin`` is where the answer came from."""
         snapshot = reading.snapshot
         out.warnings.extend(f"{game.id}: {note.kind.value}: {note.detail}" for note in snapshot.notes)
         arrival = Arrival(received=reading.arrived, as_of=snapshot.observed_at)
         state = snapshot.state
-        self._offer_plays(live, snapshot.events, _field_of(state) if state is not None else None, arrival, at)
+        context = PlayContext(live.last, state, self._guard.pin(arrival, at), origin)
+        self._offer_plays(
+            game, live, snapshot.events, _field_of(state) if state is not None else None, arrival, at, context
+        )
         if state is None:
             return  # before kickoff: nothing to show
+        live.last = state
         if snapshot.phase is NflPhase.POST:
             self._confirm_final(game, state, arrival, at)
         elif game.id not in self._finals:
             live.states.push(_Field(state, snapshot.break_ends_at), arrival, at)
+            evidence = nfl_break_evidence(snapshot, reading.arrived)
+            live.breaks.push(evidence, nfl_latest_action(snapshot, reading.arrived), arrival, at)
 
     @staticmethod
     def _offer_plays(
+        game: TeamGame,
         live: _Live,
         events: tuple[FootballEvent, ...],
         field: tuple[object, ...] | None,
         arrival: Arrival,
         at: ClockReading,
+        context: PlayContext[FootballGameState],
     ) -> None:
         """Hold an answer's plays in the delay, each from its own write time when that's credible; the first
-        answer's plays are from before the board tuned in, so they're set aside. ``field`` is the answer's."""
+        answer's plays are from before the board tuned in, so they're set aside. ``field`` is the answer's, and
+        ``context`` its place in the game. A review's ruling is a new revision of the play it rules on."""
         if not live.primed:
             live.primed = True
             for event in events:
@@ -314,16 +376,23 @@ class LiveFootballPipeline:
             return
         for event in events:
             live.offered += 1
-            play = _Play(live.offered, event, arrival.received.monotonic, field)
-            live.plays.push(play, replace(arrival, occurred=event.written_at), at, key=event.key)
+            about = str(event.play) if event.play is not None else event.key
+            ruled = event.kind is FootballEventKind.REVIEW
+            revision = live.rulings.get(about, 0) + (1 if ruled else 0)
+            play = _Play(
+                live.offered, event, arrival.received.monotonic, field, context, PromotionKey(game.id, about), revision
+            )
+            if live.plays.push(play, replace(arrival, occurred=event.written_at), at, key=event.key) and ruled:
+                live.rulings[about] = revision
 
-    @staticmethod
-    def _release_plays(live: _Live, at: ClockReading) -> None:
-        """The newest play to clear the delay becomes the caption; an older one never takes a newer one's place."""
+    def _release_plays(self, live: _Live, at: ClockReading) -> None:
+        """The newest play to clear the delay becomes the caption; an older one never takes a newer one's place.
+        Each waits for the state after it to clear too, to be offered for promotion."""
         for held in live.plays.release(at):
             if held.value.order > live.captioned:
                 live.captioned = held.value.order
                 live.caption = _Caption(held.value, held.release)
+            self._awaiting.add(held.value.context.settled, _ReleasedPlay(live.game, held.value, held.release))
 
     def _surface_live(self, game: TeamGame, live: _Live, at: ClockReading, out: _Pass) -> None:
         """Card the newest state to have cleared the delay, with its caption; report the game held while a newer
@@ -522,7 +591,51 @@ class LiveFootballPipeline:
             del self._stale[game_id]
         for game_id in set(self._current_until) - out.carding:
             del self._current_until[game_id]
+        self._awaiting.forget(lambda released: released.game.id in self._live)
         return tuple(sorted(removed, key=str))
+
+    # --- what the board's policy reads --------------------------------------------------------------------------
+
+    def _policy_view(self, at: ClockReading) -> PolicyView:
+        """What the board's policy may read after this pass: each game carded live, from its newest released state,
+        and the offers whose cards are staged."""
+        for live in self._live.values():
+            live.breaks.release(at)
+        for released in self._awaiting.ready(at.monotonic):
+            self._offer_play(released)
+        games: dict[LeagueScopedId, GameFacts] = {}
+        for game_id, live in self._live.items():
+            if live.card is None:
+                continue
+            assert live.shown is not None  # a staged card shows the newest released state
+            games[game_id] = GameFacts(
+                game=live.game,
+                leverage=football_proxy(live.shown.value.state),
+                fresh=game_id not in self._stale,
+                breaks=live.breaks.breaks,
+                action=live.breaks.action,
+            )
+        offers = self._offers.current(at.monotonic, lambda card: self._queue.card(card.raw) is not None)
+        return PolicyView(MappingProxyType(games), offers)
+
+    def _offer_play(self, released: _ReleasedPlay) -> None:
+        """A released play whose class scores offers its game's live card, whose caption carries it, valued on the
+        released state before it."""
+        play, game = released.play, released.game
+        context = play.context
+        classification = classify_football_event(play.event, before=context.before, after=context.after)
+        offer = major_offer(
+            classification.event_class,
+            key=play.moment,
+            card=DedupeKey(f"{game.id}:live"),
+            eligible=released.eligible,
+            predecessor=football_proxy(context.before) if context.before is not None else None,
+            stakes=interrupt_stakes(game, None),  # NFL has no records source yet
+            revision=play.revision,
+            origin=context.origin,
+        )
+        if offer is not None:
+            self._offers.add(offer)
 
     # --- cards ------------------------------------------------------------------------------------------------
 

@@ -13,9 +13,11 @@ The board refreshes and paints on separate cadences:
      league's games stay members, and count toward its health, but have no cards until a pipeline of their own
      joins the board. Each pipeline gets the whole clock reading: its holds are pinned, and released, on the
      monotonic clock, so a wall-clock jump can't release one early. What they did is reported as one result;
-  4. publish the staged cards to the board together with how far their source can be trusted, and how
+  4. publish the staged cards to the board together with how far their source can be trusted, how
      many games have nothing to show because they wait out the TV delay or their feed has stopped
-     answering: one numbered input, so a paint on the frame thread sees all of a refresh or none of it.
+     answering, and what the board's policy reads (`omni.policy.view.PolicyView`: both leagues' games
+     carded live and their offers, from released state only, each offer naming a card still staged): one
+     numbered input, so a paint on the frame thread sees all of a refresh or none of it.
      Each league's health is its current scope's, judged on the monotonic clock. The board's is its
      healthiest league's, so one league going offline doesn't take another's cards down; with one league
      it is that league's. While a quota holds a league's current scope back, its reason says so.
@@ -45,6 +47,7 @@ from __future__ import annotations
 from collections.abc import Callable, Hashable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, tzinfo
+from types import MappingProxyType
 from typing import Any
 
 from omni.app.contest_store import ContestStore, ProviderStatus, Reconciliation, ScopeHealth
@@ -62,6 +65,7 @@ from omni.cards.base import CardId, ScoreboardCard
 from omni.core.clock import Clock, ClockReading, MonotonicTime
 from omni.core.enum import League, Sport
 from omni.domain.contest import TeamGame
+from omni.policy.view import EMPTY_POLICY_VIEW, PolicyView
 from omni.providers.base import PollScope, ScopeSource
 from omni.queue.scheduler import InterleavedCardQueue, Missed, SelectionReason
 from omni.renderers.board_frame import BoardFrameRenderer
@@ -127,6 +131,7 @@ class Refresh:
     pipeline: PipelineResult  # what every league's pipeline did, together
     unseen: tuple[Missed, ...] = ()  # cards that left before they ever aired, and why
     leagues: tuple[LeagueHealth, ...] = ()  # each covered league's health, in the order first covered
+    policy: PolicyView = EMPTY_POLICY_VIEW  # what the board's policy was told: both leagues', its offers' cards staged
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -240,7 +245,10 @@ class AppLoop:
         unseen = tuple(self._queue.prune(at))
         leagues = tuple(self._judge(league) for league in self._store.league_healths(at.monotonic))
         health, status = self._health(leagues, pipeline_result)
-        self._board.publish(health)
+        view = pipeline_result.policy
+        offers = tuple(offer for offer in view.offers if self._queue.card(offer.card.raw) is not None)
+        policy = PolicyView(view.games, offers)  # an offer whose card the prune just took has nothing to promote
+        self._board.publish(health, policy=policy)
         return Refresh(
             at=now,
             provider_status=status,
@@ -249,6 +257,7 @@ class AppLoop:
             pipeline=pipeline_result,
             unseen=unseen,
             leagues=leagues,
+            policy=policy,
         )
 
     def paint(self, at: ClockReading, *, clock: Clock | None = None) -> Painted:
@@ -443,6 +452,9 @@ def _together(first: PipelineResult, second: PipelineResult) -> PipelineResult:
         ends=first.ends + second.ends,
         unconfirmed=tuple(sorted(first.unconfirmed + second.unconfirmed, key=str)),
         corrections=first.corrections + second.corrections,
+        policy=PolicyView(
+            MappingProxyType({**first.policy.games, **second.policy.games}), first.policy.offers + second.policy.offers
+        ),
     )
 
 
