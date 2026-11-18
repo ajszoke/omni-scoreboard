@@ -9,9 +9,9 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from types import MappingProxyType
 
-from omni.app.versions import PolicyName
 from omni.core.enum import League
 from omni.domain.contest import TeamGame
+from omni.policy.names import PolicyName
 
 __all__ = ["BOARD_POLICIES", "Mutes", "PolicySettings"]
 

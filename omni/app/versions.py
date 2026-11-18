@@ -32,6 +32,7 @@ from enum import Enum
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from omni.policy.names import PolicyName
 from omni.core.enum import PanelProfile, StrEnumMixin
 from omni.domain.rules import RulesVersion
 from omni.preferences.favorites import AppliedMigration, Favorites
@@ -50,16 +51,6 @@ __all__ = [
 ]
 
 _DIGEST_LENGTH = 12  # hex characters of the sha256: plenty to tell a few configurations apart
-
-
-class PolicyName(StrEnumMixin, str, Enum):
-    """A board policy a run can decide with, by its published name."""
-
-    BOARD_V1 = "omni-board-policy/1"  # the shared board's scheduler bands (`omni.queue.scheduler`)
-    BOARD_V2 = (
-        "omni-board-policy/2"  # `BOARD_POLICY.md`: leverage, ranked favorites, debt and interrupts (`omni.policy`)
-    )
-    NFL_SOLO_V1 = "omni-nfl-solo/1"  # the NFL single-game runner's own focus (`omni.app.football_board`)
 
 
 class ConfigSchema(StrEnumMixin, str, Enum):
