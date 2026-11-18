@@ -53,7 +53,9 @@ the clock, and a way to fetch a game's live feed; the pipeline cards each game f
 clock, by the board's `ReleaseGuard`: never before its receipt; for a play whose time is credible, at
 receipt + the delay less the play's age, told on the source's own clock (its time against its answer's);
 and otherwise at receipt + the full delay. A wall-clock jump after that changes nothing already held,
-and while the guard finds the wall clock suspect, everything waits its full delay from receipt.
+and while the guard finds the wall clock suspect, everything waits its full delay from receipt. The queue
+pins each card's window to the monotonic clock as it takes the card in, so a final's post-game window and
+a big play's run their whole length whatever the wall clock does after.
 
 **Staleness.** A live card is current while its feed's newest answer is: for that answer's
 `current_for` from its receipt when the source says how long that is, and otherwise until a read
@@ -323,13 +325,13 @@ class LiveBaseballPipeline:
         for game in upcoming:
             details, detail_warnings = self._pregame_details_for(game, fetch_pregame_details)
             lines, line_warnings = self._game_lines_for(game, fetch_game_lines, now=now)
-            out.warnings.extend(f"{game.id.raw}: {warning}" for warning in (*detail_warnings, *line_warnings))
-            out.pregames.append(self._surface_pregame(game, details, lines, now=now))
+            out.warnings.extend(f"{game.id}: {warning}" for warning in (*detail_warnings, *line_warnings))
+            out.pregames.append(self._surface_pregame(game, details, lines, at=at))
 
         # Paused (delayed/suspended) games also card without a fetch — the banner reveals no score,
         # so a long rain delay never hammers the per-game feed.
         for game in irregular:
-            out.statuses.append(self._surface_status(game, now=now))
+            out.statuses.append(self._surface_status(game, at=at))
 
         meters = (fetch_win_probability, fetch_fallback_win_probability)
         ended: set[LeagueScopedId] = set()  # live by the schedule, but final by their own feed
@@ -388,10 +390,10 @@ class LiveBaseballPipeline:
             feed = fetch_feed(game, at.utc)
         except ProviderError as exc:
             if report:
-                out.skipped.append(f"{game.id.raw}: {exc}")
+                out.skipped.append(f"{game.id}: {exc}")
             return None
         if report:
-            out.warnings.extend(f"{game.id.raw}: {warning}" for warning in feed.warnings)
+            out.warnings.extend(f"{game.id}: {warning}" for warning in feed.warnings)
         return feed
 
     def _final_game(
@@ -479,7 +481,7 @@ class LiveBaseballPipeline:
             replaces=DedupeKey(live) if live is not None else None,
             ended=ended,
         )
-        self._queue.ingest(card)
+        self._queue.ingest(card, at)
         final.key = card.dedupe_key.raw
         # By the reveal, any walk-off has cleared the same delay and fired, so the stream is drained.
         self._event_streams.pop(game.id, None)
@@ -504,7 +506,7 @@ class LiveBaseballPipeline:
         result = newest.value
         rebuilt = self._factory.final(game, result.state, decisions=result.decisions, now=card.timing.available_at)
         if rebuilt.payload != card.payload:
-            self._queue.ingest(replace(card, payload=rebuilt.payload))
+            self._queue.ingest(replace(card, payload=rebuilt.payload), at)
             out.corrections.append(card.id)
 
     @staticmethod
@@ -532,22 +534,22 @@ class LiveBaseballPipeline:
             return None, [f"odds fetch failed: {exc}"]
 
     def _surface_pregame(
-        self, game: TeamGame, details: PregameDetails | None, lines: GameLines | None, *, now: datetime
+        self, game: TeamGame, details: PregameDetails | None, lines: GameLines | None, *, at: ClockReading
     ) -> CardId:
         """Surface (or refresh) the pregame card for an upcoming game, with whatever details are known."""
         away, home = (details.away, details.home) if details is not None else (None, None)
         if lines is not None:
             away = replace(away or PregameSide(), line=lines.away)
             home = replace(home or PregameSide(), line=lines.home)
-        card = self._factory.pregame(game, now=now, away=away, home=home)
-        self._queue.ingest(card)
+        card = self._factory.pregame(game, now=at.utc, away=away, home=home)
+        self._queue.ingest(card, at)
         self._pregame_keys[game.id] = card.dedupe_key.raw
         return card.id
 
-    def _surface_status(self, game: TeamGame, *, now: datetime) -> CardId:
+    def _surface_status(self, game: TeamGame, *, at: ClockReading) -> CardId:
         """Surface (or refresh) the status card for a paused (delayed/suspended) game."""
-        card = self._factory.status(game, status=game.status, now=now)
-        self._queue.ingest(card)
+        card = self._factory.status(game, status=game.status, now=at.utc)
+        self._queue.ingest(card, at)
         self._status_keys[game.id] = card.dedupe_key.raw
         return card.id
 
@@ -578,15 +580,15 @@ class LiveBaseballPipeline:
             return  # its cards are down for staleness: nothing goes back up until its feed is current again
         # The meter takes the newest reading that arrived no later than the state now on the card.
         win_prob, wp_warnings = self._safe_win_probability(game, *meters, visible=safe.arrival.received, at=at)
-        out.warnings.extend(f"{game.id.raw}: {warning}" for warning in wp_warnings)
+        out.warnings.extend(f"{game.id}: {warning}" for warning in wp_warnings)
         priority = self._scorer.score_live_baseball(game, safe.value)
         card = self._factory.live_baseball(game, safe.value, now=at.utc, priority=priority, win_probability=win_prob)
-        self._queue.ingest(card)
+        self._queue.ingest(card, at)
         self._card_keys[game.id] = card.dedupe_key.raw
         out.ingested.append(card.id)
         if no_hitter:
             # No-hitter rides the same delay-safe state, so it is revealed/broken only as aired.
-            no_hit = self._surface_no_hitter(game, safe.value, now=at.utc)
+            no_hit = self._surface_no_hitter(game, safe.value, at=at)
             if no_hit is not None:
                 out.no_hitters.append(no_hit)
 
@@ -643,11 +645,11 @@ class LiveBaseballPipeline:
         surfaced: list[CardId] = []
         for held in stream.release(at):
             card = self._factory.big_play(game, held.value, now=at.utc)
-            self._queue.ingest(card)
+            self._queue.ingest(card, at)
             surfaced.append(card.id)
         return surfaced
 
-    def _surface_no_hitter(self, game: TeamGame, state: BaseballGameState, *, now: datetime) -> CardId | None:
+    def _surface_no_hitter(self, game: TeamGame, state: BaseballGameState, *, at: ClockReading) -> CardId | None:
         """Surface (or refresh) an active no-hitter / perfect-game card, or remove it once broken.
 
         The depth shown is the pitching side's *finished* innings (not the raw current inning),
@@ -662,9 +664,9 @@ class LiveBaseballPipeline:
                 self._queue.remove(stale)
             return None
         card = self._factory.no_hitter(
-            game, pitching_side=feat.side, through_inning=feat.completed_innings, perfect=feat.perfect, now=now
+            game, pitching_side=feat.side, through_inning=feat.completed_innings, perfect=feat.perfect, now=at.utc
         )
-        self._queue.ingest(card)
+        self._queue.ingest(card, at)
         self._no_hitter_keys[game.id] = card.dedupe_key.raw
         return card.id
 
@@ -700,7 +702,7 @@ class LiveBaseballPipeline:
         self._stale[game_id] = point
         if since is None and why:
             last = f" (its last ask: {feed.failing})" if feed is not None and feed.failing is not None else ""
-            out.warnings.append(f"{game_id.raw}: stale: {why}{last}")
+            out.warnings.append(f"{game_id}: stale: {why}{last}")
 
     def _enforce_staleness(self, game_id: LeagueScopedId, at: ClockReading) -> None:
         """A game whose live card isn't current: its cards are marked stale, and come down `STALE_FOR` after."""
@@ -717,7 +719,7 @@ class LiveBaseballPipeline:
         for key in keys:
             card = self._queue.card(key)
             if card is not None and card.stale_since is None:
-                self._queue.ingest(replace(card, stale_since=at.project(since)))
+                self._queue.ingest(replace(card, stale_since=at.project(since)), at)
 
     def _drop_stale_pregame(self, upcoming_ids: set[LeagueScopedId]) -> None:
         """Drop the pregame card for any game no longer upcoming — it went live, ended, or left the slate."""

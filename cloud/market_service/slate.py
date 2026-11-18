@@ -80,11 +80,11 @@ def mlb_slate(provider: MlbStatsApiProvider) -> Slate:
         earlier = now - _LATE_GAME_SPAN
         if local_date(earlier, SCHEDULE_ZONE) != local_date(now, SCHEDULE_ZONE):
             moments.append(earlier)
-        games: dict[str, TeamGame] = {}
+        games: dict[LeagueScopedId, TeamGame] = {}
         for moment in moments:
             for contest in provider.refresh(moment).contests:
                 if isinstance(contest, TeamGame):
-                    games[contest.id.raw] = contest
+                    games[contest.id] = contest
         return tuple(games.values())
 
     return slate

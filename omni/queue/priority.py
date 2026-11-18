@@ -14,6 +14,7 @@ from omni.cards.base import CardPriority
 from omni.core.enum import DisplayPriority
 from omni.domain.baseball import BaseballGameState
 from omni.domain.contest import TeamGame
+from omni.preferences.favorites import Favorites
 
 __all__ = ["PriorityScorer"]
 
@@ -34,23 +35,23 @@ _CLOSE_RUN_DIFF = 1  # within one run is "close"
 class PriorityScorer:
     """Scores live games into a `CardPriority`.
 
-    `favorites` are team abbreviations (e.g. ``frozenset({"COL", "LAD"})``); a
-    typed favorite that also scopes by league can replace this once a second
-    league exists.
+    A game with a favorite in it, of either rank, gets the favorite band once, even when two favorites
+    meet; its reason names the better-ranked one.
     """
 
-    favorites: frozenset[str] = frozenset()
+    favorites: Favorites = Favorites()
 
     def score_live_baseball(self, game: TeamGame, state: BaseballGameState) -> CardPriority:
         band = DisplayPriority.NORMAL
         score = 0.0
         reasons: list[str] = []
 
-        favorite_abbrs = [t.abbreviation for t in (game.away, game.home) if t.abbreviation in self.favorites]
-        if favorite_abbrs:
+        rank = self.favorites.of(game)
+        if rank is not None:
+            leader = game.away if self.favorites.rank(game.away) == rank else game.home
             score += _W_FAVORITE
             band = max(band, DisplayPriority.FAVORITE)
-            reasons.append(f"favorite team {'/'.join(favorite_abbrs)}")
+            reasons.append(f"favorite #{rank} {leader.abbreviation}")
 
         late = state.inning >= _LATE_INNING
         close = abs(state.away_score - state.home_score) <= _CLOSE_RUN_DIFF

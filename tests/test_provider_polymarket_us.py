@@ -14,7 +14,8 @@ from omni.domain.baseball import WinProbability
 from omni.domain.contest import TeamGame
 from omni.providers.base import ProviderError
 from omni.providers.mlb_teams import MlbTeamRegistry
-from omni.providers.polymarket_us import PolymarketUsProvider, _open_quote, _reading_from
+from omni.providers.nfl_teams import NflTeamRegistry
+from omni.providers.polymarket_us import MarketLink, PolymarketUsProvider, _open_quote, _reading_from
 
 REG = MlbTeamRegistry.from_color_file()
 SOURCE = SourceRef("mlb_statsapi")
@@ -28,22 +29,24 @@ def _parse_quote(raw: Any, *, away_is_long: bool) -> WinProbability | None:
     return _reading_from(quote, away_is_long=away_is_long) if quote is not None else None
 
 
-def _game(raw: str = "g1") -> TeamGame:
+def _game(raw: str = "g1", *, start: datetime = START) -> TeamGame:
     return TeamGame(
         id=LeagueScopedId(League.MLB, SOURCE, raw),
         league=League.MLB,
         status=GameStatus.LIVE,
-        scheduled_start=START,
+        scheduled_start=start,
         away=REG.resolve(115),  # Rockies
         home=REG.resolve(119),  # Dodgers
     )
 
 
-def _market(*, long_team: str = "col", start: str = "2026-09-17T01:40:00Z") -> dict[str, Any]:
-    other = "lad" if long_team == "col" else "col"
+def _market(
+    *, long_team: str = "col", start: str = "2026-09-17T01:40:00Z", slug: str = SLUG, short_team: str | None = None
+) -> dict[str, Any]:
+    other = short_team if short_team is not None else ("lad" if long_team == "col" else "col")
     return {
         "market": {
-            "slug": SLUG,
+            "slug": slug,
             "gameStartTime": start,
             "marketSides": [
                 {"long": True, "team": {"abbreviation": long_team}},
@@ -135,12 +138,68 @@ def test_a_failed_refresh_raises_clears_the_reading_and_waits_out_the_interval()
     assert len(api.calls) == asked
 
 
+class _Exchange:
+    """A fake API with several markets, each answering by its slug, and counting what it was asked."""
+
+    def __init__(self, markets: dict[str, tuple[dict[str, Any], dict[str, Any]]]) -> None:
+        self.markets = markets  # slug -> (its market, its quote)
+        self.calls: list[str] = []
+
+    def __call__(self, path: str) -> Any:
+        self.calls.append(path)
+        slug = path.removeprefix("/v1/market/slug/").removeprefix("/v1/markets/").removesuffix("/bbo")
+        market, quote = self.markets.get(slug, (None, None))
+        return market if path.startswith("/v1/market/slug/") else quote
+
+
+def test_an_mlb_and_an_nfl_game_with_the_same_raw_id_each_read_their_own_market() -> None:
+    clubs = NflTeamRegistry.default()
+    nfl = TeamGame(
+        id=LeagueScopedId(League.NFL, SourceRef("nflmeta"), "g1"),  # the MLB game's raw id too
+        league=League.NFL,
+        status=GameStatus.LIVE,
+        scheduled_start=START,
+        away=clubs.resolve("PIT"),
+        home=clubs.resolve("CIN"),
+    )
+    nfl_slug = "aec-nfl-pit-cin-2026-09-16"
+    nfl_market = _market(long_team="pit", short_team="cin", slug=nfl_slug)
+    api = _Exchange({SLUG: (_market(), _quote()), nfl_slug: (nfl_market, _quote(bid="0.80", ask="0.82"))})
+    provider = PolymarketUsProvider(fetch=api)
+    baseball = provider.sample(_game("g1"), NOW)
+    football = provider.sample(nfl, NOW)
+    assert baseball is not None and football is not None
+    assert (baseball.slug, football.slug) == (SLUG, nfl_slug)
+    assert baseball.probability is not None and baseball.probability.away == pytest.approx(31.0)
+    assert football.probability is not None and football.probability.away == pytest.approx(81.0)
+    assert set(provider._games) == {_game("g1").id, nfl.id}  # one cache entry each
+    assert [tracked.link for tracked in provider._games.values()] == [
+        MarketLink(contest=_game("g1").id, slug=SLUG, away_is_long=True),
+        MarketLink(contest=nfl.id, slug=nfl_slug, away_is_long=True),
+    ]
+
+
+def test_a_doubleheader_s_two_games_never_share_a_market() -> None:
+    # Both games are COL at LAD on Sep 16, so both look for the same market name. The market is the night
+    # game's: the day game, five and a half hours earlier, finds it and refuses it, and keeps no link.
+    day = _game("g1", start=START - timedelta(hours=5, minutes=30))
+    night = _game("g2")
+    api = _Api()
+    provider = PolymarketUsProvider(fetch=api)
+    assert provider.sample(day, NOW) is None
+    assert provider.sample(night, NOW) is not None
+    assert provider.sample(day, NOW + timedelta(seconds=30)) is None  # asked again, still refused
+    assert api.calls.count(f"/v1/market/slug/{SLUG}") == 3  # the night game's link never stood in for the day's
+    assert provider._games[day.id].link is None
+    assert provider._games[night.id].link == MarketLink(contest=night.id, slug=SLUG, away_is_long=True)
+
+
 def test_old_games_are_forgotten() -> None:
     api = _Api()
     provider = PolymarketUsProvider(fetch=api)
     provider.win_probability(_game("old"), NOW)
     provider.win_probability(_game("new"), NOW + timedelta(hours=13))
-    assert set(provider._games) == {"new"}
+    assert set(provider._games) == {_game("new").id}
 
 
 @pytest.mark.parametrize(

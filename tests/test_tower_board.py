@@ -83,7 +83,7 @@ def _card(
 
 def _board(*cards: ScoreboardCard[LiveBaseballCardPayload], policy: BoardPolicy = BoardPolicy()) -> BoardSession:
     queue = InterleavedCardQueue()
-    queue.ingest_all(cards)
+    queue.ingest_all(cards, _at(0))
     board = BoardSession(queue, QUAD, policy=policy)
     _refreshed(board)
     return board
@@ -150,10 +150,10 @@ def test_dwell_runs_from_the_first_committed_frame() -> None:
 
 def test_a_takeover_waits_for_the_minimum_then_takes_the_board() -> None:
     queue = InterleavedCardQueue()
-    queue.ingest(_card("g1"))
+    queue.ingest(_card("g1"), _at(0))
     board = BoardSession(queue, QUAD)
     _air(board, 0)
-    queue.ingest(_card("bang", attention=_BURST, band=DisplayPriority.ALERT))
+    queue.ingest(_card("bang", attention=_BURST, band=DisplayPriority.ALERT), _at(0))
     assert _name(_air(board, 5)) == "g1"  # ordinary priority never cuts a visible minimum
     takeover = _air(board, 8)
     assert _name(takeover) == "bang" and takeover.reason is SelectionReason.TAKEOVER
@@ -164,12 +164,12 @@ def test_a_takeover_waits_for_the_minimum_then_takes_the_board() -> None:
 
 def test_a_reminder_takes_the_board_from_rotation_and_yields_to_nothing_once_its_turn_is_over() -> None:
     queue = InterleavedCardQueue()
-    queue.ingest(_card("g1"))
+    queue.ingest(_card("g1"), _at(0))
     board = BoardSession(queue, QUAD)
     _air(board, 0)
-    queue.ingest(_card("nono", attention=_REMINDER, band=DisplayPriority.ALERT))
+    queue.ingest(_card("nono", attention=_REMINDER, band=DisplayPriority.ALERT), _at(0))
     assert _name(_air(board, 8)) == "nono"  # due on first sight: after the live card's minimum
-    queue.remove("g1:live")
+    queue.remove("mlb:mlb_statsapi:g1:live")
     assert _name(_air(board, 19.9)) == "nono"
     idle = _air(board, 20)  # its beat has passed, and nothing else is eligible
     assert isinstance(idle.payload, BoardFrame) and idle.payload == BoardFrame(FrameKind.IDLE, "nothing eligible")
@@ -177,20 +177,49 @@ def test_a_reminder_takes_the_board_from_rotation_and_yields_to_nothing_once_its
 
 def test_a_card_that_leaves_the_queue_or_expires_comes_down_at_once() -> None:
     queue = InterleavedCardQueue()
-    queue.ingest(_card("g1"))
+    queue.ingest(_card("g1"), _at(0))
     board = BoardSession(queue, QUAD)
     _air(board, 0)
-    queue.ingest(_card("g2", expires=40))
-    queue.remove("g1:live")
+    queue.ingest(_card("g2", expires=40), _at(0))
+    queue.remove("mlb:mlb_statsapi:g1:live")
     assert _name(_air(board, 1)) == "g2"  # factual invalidation doesn't wait for a minimum
     assert _name(_air(board, 40)) == "idle"  # expired, and nothing else
     reasons = [change.reason for change in board.changes() if change.kind is ChangeKind.DOWN]
     assert reasons == [EndReason.INVALIDATED, EndReason.EXPIRED]
 
 
+def test_a_card_on_air_expires_when_its_pinned_window_ends_though_the_wall_clock_steps_past_it() -> None:
+    board = _board(_card("g1", expires=40))
+    first = _air(board, 0)
+    ahead = ClockReading(T0 + timedelta(minutes=10, seconds=20), MonotonicTime(20))  # ten minutes past its expiry
+    assert board.cue(ahead).occurrence == first.occurrence
+    assert board.next_deadline(ahead) == MonotonicTime(32.0)  # when too little is left to start it again
+    ended = ClockReading(T0 + timedelta(minutes=10, seconds=40), MonotonicTime(40))
+    assert board.cue(ended).payload == BoardFrame(FrameKind.IDLE, "nothing eligible")
+    [up, down] = board.changes()
+    assert up.kind is ChangeKind.UP
+    assert (down.kind, down.reason, down.aired) == (ChangeKind.DOWN, EndReason.EXPIRED, timedelta(seconds=40))
+
+
+def test_a_newer_version_of_the_card_up_with_a_longer_window_stays_up_through_its_old_expiry() -> None:
+    queue = InterleavedCardQueue()
+    card = _card("g1", expires=40)
+    queue.ingest(card, _at(0))
+    board = BoardSession(queue, QUAD)
+    first = _air(board, 0)
+    ahead = ClockReading(T0 + timedelta(minutes=10, seconds=10), MonotonicTime(10))  # the wall clock stepped ahead
+    timing = dataclasses.replace(card.timing, expires_at=ahead.utc + timedelta(seconds=50))
+    longer = dataclasses.replace(card, timing=timing)
+    queue.ingest(longer, ahead)  # its new window is pinned as of then: it ends at 60 s
+    _refreshed(board)
+    assert board.cue(ahead).payload is longer
+    past = ClockReading(T0 + timedelta(minutes=10, seconds=45), MonotonicTime(45))
+    assert board.cue(past).occurrence == first.occurrence and board.changes()[1:] == []
+
+
 def test_a_card_cued_but_gone_before_it_drew_is_dropped_unbooked() -> None:
     queue = InterleavedCardQueue()
-    queue.ingest_all((_card("g1"), _card("g2")))
+    queue.ingest_all((_card("g1"), _card("g2")), _at(0))
     board = BoardSession(queue, QUAD)
     _refreshed(board)
     card = board.cue(_at(0)).payload
@@ -204,7 +233,7 @@ def test_a_card_cued_but_gone_before_it_drew_is_dropped_unbooked() -> None:
 
 def test_a_card_the_display_cant_draw_is_set_aside_and_the_next_one_airs() -> None:
     queue = InterleavedCardQueue()
-    queue.ingest_all((_card("g1"), _card("g2")))
+    queue.ingest_all((_card("g1"), _card("g2")), _at(0))
     board = BoardSession(queue, QUAD)
     _refreshed(board)
     bad = board.cue(_at(0))
@@ -220,7 +249,7 @@ def test_a_card_the_display_cant_draw_is_set_aside_and_the_next_one_airs() -> No
 
 def test_a_card_up_that_stops_drawing_comes_down_and_a_changed_one_is_tried_again() -> None:
     queue = InterleavedCardQueue()
-    queue.ingest_all((_card("g1"), _card("g2")))
+    queue.ingest_all((_card("g1"), _card("g2")), _at(0))
     board = BoardSession(queue, QUAD)
     first = _air(board, 0)
     board.failed(first, _at(3))
@@ -232,7 +261,7 @@ def test_a_card_up_that_stops_drawing_comes_down_and_a_changed_one_is_tried_agai
     assert not isinstance(card, BoardFrame)
     second = _air(board, 3)
     assert _name(second) != _name(first)
-    queue.ingest(dataclasses.replace(card, priority=CardPriority(band=DisplayPriority.NORMAL, score=1.0)))
+    queue.ingest(dataclasses.replace(card, priority=CardPriority(band=DisplayPriority.NORMAL, score=1.0)), _at(3))
     assert _name(_air(board, 15)) == _name(first)  # a new version gets its chance at once
 
 
@@ -245,13 +274,13 @@ def test_a_frame_that_fails_to_draw_is_tried_again() -> None:
 
 def test_a_newer_version_of_the_card_up_swaps_in_and_keeps_its_dwell() -> None:
     queue = InterleavedCardQueue()
-    queue.ingest_all((_card("g1"), _card("g2")))
+    queue.ingest_all((_card("g1"), _card("g2")), _at(0))
     board = BoardSession(queue, QUAD)
     first = _air(board, 0)
     card = first.payload
     assert not isinstance(card, BoardFrame)
     newer = dataclasses.replace(card, priority=CardPriority(band=DisplayPriority.NORMAL, score=9.0))
-    queue.ingest(newer)
+    queue.ingest(newer, _at(0))
     edited = _air(board, 5)
     assert edited.occurrence == first.occurrence and edited.payload is newer and edited.segment.revision == 1
     assert _air(board, 12).occurrence != first.occurrence  # its turn still ends 12 s after it first drew
@@ -259,10 +288,10 @@ def test_a_newer_version_of_the_card_up_swaps_in_and_keeps_its_dwell() -> None:
 
 def test_takeovers_back_to_back_stop_at_the_cap_for_a_full_rotation_turn() -> None:
     queue = InterleavedCardQueue()
-    queue.ingest(_card("g1"))
+    queue.ingest(_card("g1"), _at(0))
     board = BoardSession(queue, QUAD, policy=BoardPolicy(takeover_cap=timedelta(seconds=20)))
     _air(board, 0)
-    queue.ingest_all(_card(f"b{n}", attention=_BURST, band=DisplayPriority.ALERT) for n in range(3))
+    queue.ingest_all((_card(f"b{n}", attention=_BURST, band=DisplayPriority.ALERT) for n in range(3)), _at(0))
     assert _air(board, 8).reason is SelectionReason.TAKEOVER  # 12 s
     assert _air(board, 20).reason is SelectionReason.TAKEOVER  # 24 s: past the cap
     base = _air(board, 32)
@@ -274,10 +303,10 @@ def test_takeovers_back_to_back_stop_at_the_cap_for_a_full_rotation_turn() -> No
 
 def test_a_rotation_card_cut_short_does_not_restart_the_takeover_run() -> None:
     queue = InterleavedCardQueue()
-    queue.ingest_all((_card("g1"), _card("g2")))
+    queue.ingest_all((_card("g1"), _card("g2")), _at(0))
     board = BoardSession(queue, QUAD, policy=BoardPolicy(takeover_cap=timedelta(seconds=20)))
     _air(board, 0)
-    queue.ingest_all(_card(f"b{n}", attention=_BURST, band=DisplayPriority.ALERT) for n in range(3))
+    queue.ingest_all((_card(f"b{n}", attention=_BURST, band=DisplayPriority.ALERT) for n in range(3)), _at(0))
     _air(board, 8)
     _air(board, 20)  # two takeovers: 24 s, past the cap
     base = _air(board, 32)
@@ -318,7 +347,7 @@ def test_a_frame_gives_way_to_a_card_at_once() -> None:
     queue = InterleavedCardQueue()
     board = BoardSession(queue, QUAD)
     _air(board, 0)
-    queue.ingest(_card("g1"))
+    queue.ingest(_card("g1"), _at(0))
     assert _name(_air(board, 0.1)) == "g1"
     down = [change for change in board.changes() if change.kind is ChangeKind.DOWN]
     assert down[0].reason is EndReason.NEXT_WAITING
@@ -326,14 +355,14 @@ def test_a_frame_gives_way_to_a_card_at_once() -> None:
 
 def test_offline_clears_the_card_and_the_frame_before_it() -> None:
     queue = InterleavedCardQueue()
-    queue.ingest(_card("g1"))
+    queue.ingest(_card("g1"), _at(0))
     board = BoardSession(queue, QUAD)
     _air(board, 0)
     board.publish(BoardHealth(source=SourceHealth.OFFLINE, reason="no schedule for over 10m: down"))
     offline = _air(board, 1)
     assert isinstance(offline.payload, BoardFrame) and offline.payload.kind is FrameKind.OFFLINE
     board.publish(BoardHealth())
-    queue.remove("g1:live")
+    queue.remove("mlb:mlb_statsapi:g1:live")
     _air(board, 2)  # idle: the offline frame comes down for it
     downs = [change.reason for change in board.changes() if change.kind is ChangeKind.DOWN]
     assert downs == [EndReason.CLEARED, EndReason.NEXT_WAITING]
@@ -344,19 +373,19 @@ def test_offline_clears_the_card_and_the_frame_before_it() -> None:
 
 def test_a_card_is_marked_stale_when_its_source_or_its_own_data_is() -> None:
     queue = InterleavedCardQueue()
-    queue.ingest(_card("g1"))
+    queue.ingest(_card("g1"), _at(0))
     board = BoardSession(queue, QUAD)
     assert not _air(board, 0).stale
     board.publish(BoardHealth(source=SourceHealth.STALE, reason="no schedule for over 2m: down"))
     assert _air(board, 1).stale
     board.publish(BoardHealth())
-    queue.ingest(dataclasses.replace(_card("g1"), stale_since=T0))
+    queue.ingest(dataclasses.replace(_card("g1"), stale_since=T0), _at(1))
     assert _air(board, 2).stale
 
 
 def test_the_next_deadline_is_the_soonest_of_minimum_turn_expiry_and_the_queue() -> None:
     queue = InterleavedCardQueue()
-    queue.ingest_all((_card("g1", expires=20), _card("g2", expires=20)))
+    queue.ingest_all((_card("g1", expires=20), _card("g2", expires=20)), _at(0))
     board = BoardSession(queue, QUAD)
     assert board.next_deadline(_at(0)) == MonotonicTime(0.0)  # nothing cued yet
     _air(board, 0)

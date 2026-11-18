@@ -28,6 +28,7 @@ __all__ = [
     "League",
     "PanelProfile",
     "GameStatus",
+    "SeasonStage",
     "HomeAway",
     "DisplayPriority",
     "UpdateUrgency",
@@ -155,6 +156,17 @@ class GameStatus(StrEnumMixin, str, Enum):
     FINAL = "final"
     POSTPONED = "postponed"
     CANCELED = "canceled"
+    UNKNOWN = "unknown"
+
+
+class SeasonStage(StrEnumMixin, str, Enum):
+    """The part of a league's year its schedule files a game under; UNKNOWN when the source doesn't say."""
+
+    PRESEASON = "preseason"
+    REGULAR = "regular"
+    POSTSEASON = "postseason"
+    ALL_STAR = "all_star"
+    EXHIBITION = "exhibition"
     UNKNOWN = "unknown"
 
 

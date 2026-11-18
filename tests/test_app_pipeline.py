@@ -569,7 +569,7 @@ def test_surfaces_per_play_warnings_without_dropping_the_game() -> None:
     fetch.set("g1", _state(away=1, home=2))
     fetch.warnings["g1"] = ("play 4: ValueError: bad rbi",)
     res = pipe.refresh([_game("g1")], at=_at(T), fetch_feed=fetch)
-    assert res.warnings == ("g1: play 4: ValueError: bad rbi",)
+    assert res.warnings == ("mlb:mlb_statsapi:g1: play 4: ValueError: bad rbi",)
     assert len(res.ingested) == 1 and len(queue) == 1  # the game still shows
     assert res.skipped == ()  # not a dropped-game failure
 
@@ -581,7 +581,7 @@ def test_surfaces_per_play_warnings_for_a_final_game() -> None:
     fetch.set("g1", _state(away=2, home=1))
     fetch.warnings["g1"] = ("play 7: AttributeError: null about",)
     res = pipe.refresh([_game("g1", GameStatus.FINAL)], at=_at(T), fetch_feed=fetch)
-    assert res.warnings == ("g1: play 7: AttributeError: null about",)
+    assert res.warnings == ("mlb:mlb_statsapi:g1: play 7: AttributeError: null about",)
 
 
 def test_live_card_is_swapped_for_the_final_when_the_game_ends() -> None:
@@ -592,7 +592,7 @@ def test_live_card_is_swapped_for_the_final_when_the_game_ends() -> None:
     assert len(queue) == 1  # the live card
     res = pipe.refresh([_game("g1", GameStatus.FINAL)], at=_at(T + timedelta(seconds=10)), fetch_feed=fetch)
     assert res.removed == (_id("g1"),)  # the live card is gone...
-    assert [c.raw for c in res.finals] == ["g1:final"]  # ...replaced by the final card
+    assert [c.raw for c in res.finals] == ["mlb:mlb_statsapi:g1:final"]  # ...replaced by the final card
     assert len(queue) == 1
 
 
@@ -625,7 +625,7 @@ def test_drops_feed_when_a_game_leaves_before_ever_surfacing() -> None:
 def test_upcoming_game_surfaces_a_pregame_card() -> None:
     pipe, queue = _setup()
     res = pipe.refresh([_game("g1", GameStatus.SCHEDULED)], at=_at(T), fetch_feed=_Fetch())
-    assert [c.raw for c in res.pregames] == ["g1:pregame"]
+    assert [c.raw for c in res.pregames] == ["mlb:mlb_statsapi:g1:pregame"]
     assert res.ingested == () and len(queue) == 1
 
 
@@ -634,7 +634,7 @@ def test_both_scheduled_and_pregame_statuses_card() -> None:
     res = pipe.refresh(
         [_game("g1", GameStatus.SCHEDULED), _game("g2", GameStatus.PREGAME)], at=_at(T), fetch_feed=_Fetch()
     )
-    assert sorted(c.raw for c in res.pregames) == ["g1:pregame", "g2:pregame"]
+    assert sorted(c.raw for c in res.pregames) == ["mlb:mlb_statsapi:g1:pregame", "mlb:mlb_statsapi:g2:pregame"]
     assert len(queue) == 2
 
 
@@ -644,7 +644,7 @@ def test_pregame_needs_no_feed_fetch() -> None:
     fetch = _Fetch()
     fetch.fail.add("g1")  # would raise if the pipeline tried to fetch
     res = pipe.refresh([_game("g1", GameStatus.PREGAME)], at=_at(T), fetch_feed=fetch)
-    assert [c.raw for c in res.pregames] == ["g1:pregame"]
+    assert [c.raw for c in res.pregames] == ["mlb:mlb_statsapi:g1:pregame"]
     assert res.skipped == ()  # never attempted a fetch
 
 
@@ -656,7 +656,7 @@ def test_pregame_card_yields_when_the_game_goes_live() -> None:
     fetch.set("g1", _state())
     res = pipe.refresh([_game("g1", GameStatus.LIVE)], at=_at(T + timedelta(seconds=10)), fetch_feed=fetch)
     assert _id("g1") not in pipe._pregame_keys  # pregame card dropped...
-    assert [c.raw for c in res.ingested] == ["g1:live"]  # ...replaced by the live card
+    assert [c.raw for c in res.ingested] == ["mlb:mlb_statsapi:g1:live"]  # ...replaced by the live card
     assert len(queue) == 1  # one card for the game, not two
 
 
@@ -751,7 +751,7 @@ def test_no_hitter_card_surfaces_when_a_side_is_hitless() -> None:
     fetch = _Fetch()
     fetch.set("g1", _state(inning=7, away_hits=0, home_hits=4))  # away hitless -> home's no-no
     res = pipe.refresh([_game("g1")], at=_at(T), fetch_feed=fetch)
-    assert [c.raw for c in res.no_hitters] == ["g1:nohitter"]
+    assert [c.raw for c in res.no_hitters] == ["mlb:mlb_statsapi:g1:nohitter"]
     assert len(queue) == 2  # the live card + the no-hitter card
 
 
@@ -789,9 +789,9 @@ def test_perfect_game_surfaces_with_the_perfect_flag_and_finished_innings() -> N
     # Away hitless in the top of the 7th (home has finished six) with a confirmed clean sheet.
     fetch.set("g1", _state(inning=7, phase=InningPhase.TOP, away_hits=0, away_reached_base=False))
     res = pipe.refresh([_game("g1")], at=_at(T), fetch_feed=fetch)
-    assert [c.raw for c in res.no_hitters] == ["g1:nohitter"]
+    assert [c.raw for c in res.no_hitters] == ["mlb:mlb_statsapi:g1:nohitter"]
     card = queue.next_card(_at(T), QUAD)
-    assert card is not None and card.dedupe_key.raw == "g1:nohitter"
+    assert card is not None and card.dedupe_key.raw == "mlb:mlb_statsapi:g1:nohitter"
     assert card.payload.perfect is True and card.payload.through_inning == 6  # finished innings, not current
 
 
@@ -803,7 +803,8 @@ def test_no_hitter_card_dropped_when_its_game_leaves() -> None:
     assert _id("g1") in pipe._no_hitter_keys
     res = pipe.refresh([_game("g1", GameStatus.FINAL)], at=_at(T + timedelta(seconds=10)), fetch_feed=fetch)
     assert _id("g1") not in pipe._no_hitter_keys  # the no-hitter card is cleaned up with the live set...
-    assert [c.raw for c in res.finals] == ["g1:final"] and len(queue) == 1  # ...and replaced by the final
+    assert [c.raw for c in res.finals] == ["mlb:mlb_statsapi:g1:final"]  # ...and replaced by the final
+    assert len(queue) == 1
 
 
 # --- status (delay / suspension) path ---------------------------------------------
@@ -812,14 +813,14 @@ def test_no_hitter_card_dropped_when_its_game_leaves() -> None:
 def test_status_card_surfaces_for_a_delayed_game() -> None:
     pipe, queue = _setup(lag=0)
     res = pipe.refresh([_game("g1", GameStatus.DELAYED)], at=_at(T), fetch_feed=_Fetch())
-    assert [c.raw for c in res.statuses] == ["g1:status"]
+    assert [c.raw for c in res.statuses] == ["mlb:mlb_statsapi:g1:status"]
     assert len(queue) == 1
 
 
 def test_status_card_surfaces_for_a_suspended_game() -> None:
     pipe, queue = _setup(lag=0)
     res = pipe.refresh([_game("g1", GameStatus.SUSPENDED)], at=_at(T), fetch_feed=_Fetch())
-    assert [c.raw for c in res.statuses] == ["g1:status"]
+    assert [c.raw for c in res.statuses] == ["mlb:mlb_statsapi:g1:status"]
 
 
 def test_status_card_needs_no_feed_fetch() -> None:
@@ -829,7 +830,7 @@ def test_status_card_needs_no_feed_fetch() -> None:
     fetch = _Fetch()
     fetch.fail.add("g1")  # any fetch would raise -> a skip; there must be none
     res = pipe.refresh([_game("g1", GameStatus.DELAYED)], at=_at(T), fetch_feed=fetch)
-    assert [c.raw for c in res.statuses] == ["g1:status"] and res.skipped == ()
+    assert [c.raw for c in res.statuses] == ["mlb:mlb_statsapi:g1:status"] and res.skipped == ()
 
 
 def test_live_game_pausing_swaps_the_live_card_for_a_status_card() -> None:
@@ -839,7 +840,7 @@ def test_live_game_pausing_swaps_the_live_card_for_a_status_card() -> None:
     pipe.refresh([_game("g1")], at=_at(T), fetch_feed=fetch)  # live
     assert _id("g1") in pipe._card_keys and len(queue) == 1
     res = pipe.refresh([_game("g1", GameStatus.DELAYED)], at=_at(T + timedelta(seconds=5)), fetch_feed=fetch)
-    assert [c.raw for c in res.statuses] == ["g1:status"]
+    assert [c.raw for c in res.statuses] == ["mlb:mlb_statsapi:g1:status"]
     assert _id("g1") in res.removed  # the live card was pulled...
     assert _id("g1") not in pipe._card_keys and _id("g1") not in pipe._feeds  # ...and its live state torn down
     assert len(queue) == 1  # just the status card now
@@ -853,7 +854,7 @@ def test_paused_game_resuming_swaps_back_to_the_live_card() -> None:
     fetch.set("g1", _state(inning=4))
     res = pipe.refresh([_game("g1")], at=_at(T + timedelta(seconds=5)), fetch_feed=fetch)  # resumes live
     assert res.statuses == () and _id("g1") not in pipe._status_keys  # status card gone
-    assert [c.raw for c in res.ingested] == ["g1:live"] and len(queue) == 1  # live card back
+    assert [c.raw for c in res.ingested] == ["mlb:mlb_statsapi:g1:live"] and len(queue) == 1  # live card back
 
 
 def test_status_card_dropped_when_the_game_ends() -> None:
@@ -864,7 +865,7 @@ def test_status_card_dropped_when_the_game_ends() -> None:
     fetch.set("g1", _state(inning=9))
     res = pipe.refresh([_game("g1", GameStatus.FINAL)], at=_at(T + timedelta(seconds=5)), fetch_feed=fetch)
     assert _id("g1") not in pipe._status_keys  # status card cleaned up...
-    assert [c.raw for c in res.finals] == ["g1:final"] and len(queue) == 1  # ...replaced by the final
+    assert [c.raw for c in res.finals] == ["mlb:mlb_statsapi:g1:final"] and len(queue) == 1  # ...replaced by the final
 
 
 # --- final path -------------------------------------------------------------------
@@ -887,7 +888,7 @@ def test_final_reveals_once_the_delay_elapses() -> None:
     fetch.set("g1", _state(away=2, home=5))
     pipe.refresh([_game("g1", GameStatus.FINAL)], at=_at(T), fetch_feed=fetch)  # first seen final here
     res = pipe.refresh([_game("g1", GameStatus.FINAL)], at=_at(T + timedelta(seconds=30)), fetch_feed=fetch)
-    assert [c.raw for c in res.finals] == ["g1:final"] and len(queue) == 1
+    assert [c.raw for c in res.finals] == ["mlb:mlb_statsapi:g1:final"] and len(queue) == 1
     card = queue.next_card(_at(T + timedelta(seconds=30)), QUAD)
     assert card is not None and card.payload.away_score == 2 and card.payload.home_score == 5
 
@@ -902,7 +903,7 @@ def test_final_is_anchored_to_first_sight_not_to_a_late_poll() -> None:
     res = pipe.refresh([_game("g1", GameStatus.FINAL)], at=_at(late), fetch_feed=fetch)
     assert res.finals == () and res.held == (_id("g1"),)  # still embargoed: the clock starts at first sight
     res2 = pipe.refresh([_game("g1", GameStatus.FINAL)], at=_at(late + timedelta(seconds=30)), fetch_feed=fetch)
-    assert [c.raw for c in res2.finals] == ["g1:final"]
+    assert [c.raw for c in res2.finals] == ["mlb:mlb_statsapi:g1:final"]
 
 
 def test_final_card_is_built_exactly_once() -> None:
@@ -911,7 +912,7 @@ def test_final_card_is_built_exactly_once() -> None:
     fetch.set("g1", _state(away=2, home=5))
     r1 = pipe.refresh([_game("g1", GameStatus.FINAL)], at=_at(T), fetch_feed=fetch)
     r2 = pipe.refresh([_game("g1", GameStatus.FINAL)], at=_at(T + timedelta(seconds=10)), fetch_feed=fetch)
-    assert [c.raw for c in r1.finals] == ["g1:final"]
+    assert [c.raw for c in r1.finals] == ["mlb:mlb_statsapi:g1:final"]
     assert r2.finals == ()  # already revealed — not rebuilt every tick
     assert len(queue) == 1
 
@@ -944,7 +945,7 @@ def test_final_card_carries_the_pitching_decisions() -> None:
     fetch.set("g1", _state(away=2, home=5))
     fetch.decisions["g1"] = PitchingDecisions(winner="Clayton Kershaw", loser="German Marquez", save="Tanner Scott")
     res = pipe.refresh([_game("g1", GameStatus.FINAL)], at=_at(T), fetch_feed=fetch)
-    assert [c.raw for c in res.finals] == ["g1:final"]
+    assert [c.raw for c in res.finals] == ["mlb:mlb_statsapi:g1:final"]
     card = queue.next_card(_at(T), QUAD)
     assert card is not None and card.payload.decisions == fetch.decisions["g1"]
 
@@ -967,18 +968,18 @@ def test_last_live_frame_is_held_across_the_final_embargo() -> None:
     fetch.set("g1", _state(away=2, home=5, inning=9))
     pipe.refresh([_game("g1")], at=_at(T), fetch_feed=fetch)  # live tick 1: observed, still inside the delay
     live = pipe.refresh([_game("g1")], at=_at(T + timedelta(seconds=30)), fetch_feed=fetch)  # delay elapsed
-    assert [c.raw for c in live.ingested] == ["g1:live"]  # the last delay-safe frame is on screen
+    assert [c.raw for c in live.ingested] == ["mlb:mlb_statsapi:g1:live"]  # the last delay-safe frame is on screen
 
     # The game ends; the final is embargoed (first sight + 30s), but the live frame is held.
     held = pipe.refresh([_game("g1", GameStatus.FINAL)], at=_at(T + timedelta(seconds=35)), fetch_feed=fetch)
     assert held.finals == () and _id("g1") in held.held
     assert _id("g1") in pipe._card_keys and _id("g1") not in held.removed  # live card not torn down
     card = queue.next_card(_at(T + timedelta(seconds=35)), QUAD)
-    assert card is not None and card.dedupe_key.raw == "g1:live"  # the last live frame, not blank
+    assert card is not None and card.dedupe_key.raw == "mlb:mlb_statsapi:g1:live"  # the last live frame, not blank
 
     # Once the embargo elapses, the final reveals and the held frame is dropped in the same pass.
     reveal = pipe.refresh([_game("g1", GameStatus.FINAL)], at=_at(T + timedelta(seconds=65)), fetch_feed=fetch)
-    assert [c.raw for c in reveal.finals] == ["g1:final"] and _id("g1") in reveal.removed
+    assert [c.raw for c in reveal.finals] == ["mlb:mlb_statsapi:g1:final"] and _id("g1") in reveal.removed
     assert _id("g1") not in pipe._card_keys and len(queue) == 1  # the final replaced the held frame
 
 
@@ -1010,7 +1011,7 @@ def test_walk_off_flashes_then_the_final_reveals() -> None:
     # First-final-sight (T+3) + 30 = T+33; the walk-off (play at T+1) cleared at T+31.
     res = pipe.refresh([_game("g1", GameStatus.FINAL)], at=_at(T + timedelta(seconds=33)), fetch_feed=fetch)
     assert len(res.big_plays) == 1  # the walk-off flashes...
-    assert [c.raw for c in res.finals] == ["g1:final"]  # ...and the final confirms it
+    assert [c.raw for c in res.finals] == ["mlb:mlb_statsapi:g1:final"]  # ...and the final confirms it
     assert _id("g1") not in pipe._event_streams  # stream drained and dropped at the reveal
 
 
@@ -1049,13 +1050,13 @@ def test_a_final_waits_for_its_plays_and_airs_after_its_walk_off() -> None:
     assert held.releases == ((_id("g1"), T + timedelta(seconds=40)),)  # then the walk-off clears
     assert pipe.next_deadline(_at(T + timedelta(seconds=33))) == _at(T + timedelta(seconds=40)).monotonic
     res = pipe.refresh([_game("g1", GameStatus.FINAL)], at=_at(T + timedelta(seconds=40)), fetch_feed=fetch)
-    assert len(res.big_plays) == 1 and [card.raw for card in res.finals] == ["g1:final"]
-    final = queue.card("g1:final")
+    assert len(res.big_plays) == 1 and [card.raw for card in res.finals] == ["mlb:mlb_statsapi:g1:final"]
+    final = queue.card("mlb:mlb_statsapi:g1:final")
     assert final is not None and final.after == (CardFactory.big_play_key(_game("g1"), walk_off),)
     assert final.timing.available_at == T + timedelta(seconds=33)  # available from when its result could show
     # A walk-off stamped after the game was first seen final isn't a credible end: first sight orders it.
     ended = GameEnd(T + timedelta(seconds=3), EndBasis.FIRST_SEEN)
-    assert final.ended == ended and res.ends == ((CardId("g1:final"), ended),)
+    assert final.ended == ended and res.ends == ((CardId("mlb:mlb_statsapi:g1:final"), ended),)
 
 
 def test_a_final_is_ordered_by_its_walk_off_and_replaces_its_game_s_live_card() -> None:
@@ -1066,10 +1067,11 @@ def test_a_final_is_ordered_by_its_walk_off_and_replaces_its_game_s_live_card() 
     walk_off = _walk_off("g1:ab:99", source_time=T + timedelta(seconds=2))
     fetch.set_events("g1", (walk_off,))
     res = pipe.refresh([_game("g1", GameStatus.FINAL)], at=_at(T + timedelta(seconds=5)), fetch_feed=fetch)
-    final = queue.card("g1:final")
+    final = queue.card("mlb:mlb_statsapi:g1:final")
     ended = GameEnd(T + timedelta(seconds=2), EndBasis.DECISIVE_PLAY)  # the play that ended it
-    assert final is not None and final.ended == ended and res.ends == ((CardId("g1:final"), ended),)
-    assert final.replaces == DedupeKey("g1:live") and queue.card("g1:live") is None  # it takes the live card's place
+    assert final is not None and final.ended == ended and res.ends == ((CardId("mlb:mlb_statsapi:g1:final"), ended),)
+    # It takes the live card's place:
+    assert final.replaces == DedupeKey("mlb:mlb_statsapi:g1:live") and queue.card("mlb:mlb_statsapi:g1:live") is None
 
 
 def test_a_final_with_no_live_card_up_replaces_nothing() -> None:
@@ -1077,9 +1079,9 @@ def test_a_final_with_no_live_card_up_replaces_nothing() -> None:
     fetch = _Fetch()
     fetch.set("g1", _state(away=2, home=3))
     res = pipe.refresh([_game("g1", GameStatus.FINAL)], at=_at(T), fetch_feed=fetch)  # first seen already final
-    final = queue.card("g1:final")
+    final = queue.card("mlb:mlb_statsapi:g1:final")
     assert final is not None and final.replaces is None
-    assert res.ends == ((CardId("g1:final"), GameEnd(T, EndBasis.FIRST_SEEN)),)
+    assert res.ends == ((CardId("mlb:mlb_statsapi:g1:final"), GameEnd(T, EndBasis.FIRST_SEEN)),)
 
 
 def test_a_game_s_end_must_be_timezone_aware() -> None:
@@ -1092,19 +1094,25 @@ def test_a_game_whose_feed_stops_answering_goes_stale_then_comes_down() -> None:
     fetch = _Fetch()
     fetch.set("g1", _state(away_hits=0, inning=8, phase=InningPhase.BOTTOM))  # a no-hit bid: two cards
     pipe.refresh([_game("g1")], at=_at(T), fetch_feed=fetch)
-    assert {card.dedupe_key.raw for card in queue.eligible(T, QUAD)} == {"g1:live", "g1:nohitter"}
+    assert {card.dedupe_key.raw for card in queue.eligible(_at(T), QUAD)} == {
+        "mlb:mlb_statsapi:g1:live",
+        "mlb:mlb_statsapi:g1:nohitter",
+    }
     fetch.fail.add("g1")
     res = pipe.refresh([_game("g1")], at=_at(T + timedelta(seconds=10)), fetch_feed=fetch)
     assert res.stale == (_id("g1"),)
-    marked = {card.dedupe_key.raw: card.stale_since for card in queue.eligible(T, QUAD)}
-    assert marked == {"g1:live": T + timedelta(seconds=10), "g1:nohitter": T + timedelta(seconds=10)}
+    marked = {card.dedupe_key.raw: card.stale_since for card in queue.eligible(_at(T), QUAD)}
+    assert marked == {
+        "mlb:mlb_statsapi:g1:live": T + timedelta(seconds=10),
+        "mlb:mlb_statsapi:g1:nohitter": T + timedelta(seconds=10),
+    }
     pipe.refresh([_game("g1")], at=_at(T + timedelta(seconds=60)), fetch_feed=fetch)  # still stale: marked once
     assert pipe.next_deadline(_at(T + timedelta(seconds=60))) == _at(T + timedelta(seconds=130)).monotonic
     pipe.refresh([_game("g1")], at=_at(T + timedelta(seconds=130)), fetch_feed=fetch)
     assert len(queue) == 0  # two minutes on, the last good comes down
     fetch.fail.clear()
     back = pipe.refresh([_game("g1")], at=_at(T + timedelta(seconds=140)), fetch_feed=fetch)
-    live = queue.card("g1:live")
+    live = queue.card("mlb:mlb_statsapi:g1:live")
     assert back.stale == () and live is not None and live.stale_since is None
 
 
@@ -1133,7 +1141,7 @@ def _seconds(seconds: float) -> ClockReading:
 
 
 def _final_score(queue: InterleavedCardQueue) -> tuple[int, int] | None:
-    card = queue.card("g1:final")
+    card = queue.card("mlb:mlb_statsapi:g1:final")
     return (card.payload.away_score, card.payload.home_score) if card is not None else None
 
 
@@ -1150,8 +1158,10 @@ def test_a_schedule_final_whose_feed_still_answers_live_shows_no_result_and_keep
     assert res.finals == () and _final_score(queue) is None and res.unconfirmed == (_id("g1"),)
     fetch.set("g1", _state(away=2, home=3))  # the feed's live answers still move the live card
     res = pipe.refresh([_game("g1", GameStatus.FINAL)], at=_seconds(10), fetch_feed=fetch)
-    live = queue.card("g1:live")
-    assert live is not None and live.payload.home_line.runs == 3 and res.ingested == (CardId("g1:live"),)
+    live = queue.card("mlb:mlb_statsapi:g1:live")
+    assert (
+        live is not None and live.payload.home_line.runs == 3 and res.ingested == (CardId("mlb:mlb_statsapi:g1:live"),)
+    )
     assert pipe.next_deadline(_seconds(10)) == _seconds(35).monotonic  # when it goes stale, unconfirmed
     del fetch.statuses["g1"]  # now the feed says final
     res = pipe.refresh([_game("g1", GameStatus.FINAL)], at=_seconds(20), fetch_feed=fetch)
@@ -1166,14 +1176,14 @@ def test_a_game_whose_feed_says_final_before_its_schedule_does_gets_its_result_f
     pipe.refresh([_game("g1")], at=_seconds(30), fetch_feed=fetch)  # the live card is up
     fetch.statuses["g1"] = GameStatus.FINAL  # the feed says final; the schedule (a stale answer) still says live
     held = pipe.refresh([_game("g1")], at=_seconds(40), fetch_feed=fetch)
-    assert held.held == (_id("g1"),) and held.removed == () and queue.card("g1:live") is not None
+    assert held.held == (_id("g1"),) and held.removed == () and queue.card("mlb:mlb_statsapi:g1:live") is not None
     res = pipe.refresh([_game("g1")], at=_seconds(70), fetch_feed=fetch)
-    assert [card.raw for card in res.finals] == ["g1:final"] and res.removed == (_id("g1"),)
+    assert [card.raw for card in res.finals] == ["mlb:mlb_statsapi:g1:final"] and res.removed == (_id("g1"),)
     assert _final_score(queue) == (2, 3)
-    queue.prune(T + timedelta(seconds=130))  # its post-game window ends
+    queue.prune(_seconds(130))  # its post-game window ends
     fetch.set("g1", _state(away=2, home=4))
     gone = pipe.refresh([_game("g1")], at=_seconds(131), fetch_feed=fetch)
-    assert gone.corrections == () and gone.ingested == () and queue.card("g1:final") is None
+    assert gone.corrections == () and gone.ingested == () and queue.card("mlb:mlb_statsapi:g1:final") is None
 
 
 def test_a_final_the_feed_confirmed_reveals_on_time_though_its_reads_then_fail() -> None:
@@ -1185,7 +1195,7 @@ def test_a_final_the_feed_confirmed_reveals_on_time_though_its_reads_then_fail()
     held = pipe.refresh([_game("g1", GameStatus.FINAL)], at=_seconds(10), fetch_feed=fetch)
     assert held.held == (_id("g1"),) and held.stale == ()  # its feed has already said final
     res = pipe.refresh([_game("g1", GameStatus.FINAL)], at=_seconds(30), fetch_feed=fetch)
-    assert [card.raw for card in res.finals] == ["g1:final"] and _final_score(queue) == (2, 5)
+    assert [card.raw for card in res.finals] == ["mlb:mlb_statsapi:g1:final"] and _final_score(queue) == (2, 5)
 
 
 def test_a_live_answer_after_the_feed_said_final_changes_nothing() -> None:
@@ -1207,7 +1217,7 @@ def test_a_later_final_answer_with_a_new_score_corrects_the_final_once_it_clears
     fetch.set("g1", _state(away=2, home=5))
     pipe.refresh([_game("g1", GameStatus.FINAL)], at=_seconds(0), fetch_feed=fetch)
     pipe.refresh([_game("g1", GameStatus.FINAL)], at=_seconds(30), fetch_feed=fetch)
-    revealed = queue.card("g1:final")
+    revealed = queue.card("mlb:mlb_statsapi:g1:final")
     assert revealed is not None and _final_score(queue) == (2, 5)
     same = pipe.refresh([_game("g1", GameStatus.FINAL)], at=_seconds(35), fetch_feed=fetch)
     assert same.corrections == ()  # the same result read again changes nothing
@@ -1216,8 +1226,8 @@ def test_a_later_final_answer_with_a_new_score_corrects_the_final_once_it_clears
     early = pipe.refresh([_game("g1", GameStatus.FINAL)], at=_seconds(69), fetch_feed=fetch)
     assert early.corrections == () and _final_score(queue) == (2, 5)  # a new observation: it waits the delay
     res = pipe.refresh([_game("g1", GameStatus.FINAL)], at=_seconds(70), fetch_feed=fetch)
-    corrected = queue.card("g1:final")
-    assert res.corrections == (CardId("g1:final"),) and _final_score(queue) == (2, 6)
+    corrected = queue.card("mlb:mlb_statsapi:g1:final")
+    assert res.corrections == (CardId("mlb:mlb_statsapi:g1:final"),) and _final_score(queue) == (2, 6)
     assert corrected is not None and corrected.timing == revealed.timing  # in place, within its own window
     fetch.fail.add("g1")
     assert pipe.refresh([_game("g1", GameStatus.FINAL)], at=_seconds(80), fetch_feed=fetch).skipped == ()
@@ -1228,7 +1238,7 @@ def test_a_correction_to_a_final_whose_window_is_over_doesnt_bring_it_back() -> 
     fetch = _Fetch()
     fetch.set("g1", _state(away=2, home=5))
     pipe.refresh([_game("g1", GameStatus.FINAL)], at=_seconds(0), fetch_feed=fetch)
-    queue.prune(T + timedelta(seconds=60))  # its post-game window ends
+    queue.prune(_seconds(60))  # its post-game window ends
     fetch.set("g1", _state(away=2, home=6))
     asked: list[datetime] = []
 
@@ -1237,7 +1247,8 @@ def test_a_correction_to_a_final_whose_window_is_over_doesnt_bring_it_back() -> 
         return fetch(game, now)
 
     res = pipe.refresh([_game("g1", GameStatus.FINAL)], at=_seconds(61), fetch_feed=counted)
-    assert res.corrections == () and queue.card("g1:final") is None and asked == []  # its feed isn't even read
+    # Its feed isn't even read:
+    assert res.corrections == () and queue.card("mlb:mlb_statsapi:g1:final") is None and asked == []
 
 
 def test_a_game_that_leaves_the_slate_unconfirmed_or_current_is_forgotten() -> None:
@@ -1263,11 +1274,11 @@ def test_a_state_that_clears_the_delay_after_its_cards_came_down_for_staleness_s
     fetch.fail.add("g1")
     pipe.refresh([_game("g1")], at=_seconds(1), fetch_feed=fetch)  # stale from here
     pipe.refresh([_game("g1")], at=_seconds(121), fetch_feed=fetch)
-    assert queue.card("g1:live") is None  # two minutes on, it came down
+    assert queue.card("mlb:mlb_statsapi:g1:live") is None  # two minutes on, it came down
 
     def stale_answer(game: TeamGame, now: datetime) -> LiveBaseballFeed:
         # An answer read now that arrived long ago and is no longer current, with a state the board hasn't shown.
         return LiveBaseballFeed(state=_state(away=9), received=_seconds(0.5), current_for=timedelta(seconds=1))
 
     res = pipe.refresh([_game("g1")], at=_seconds(122), fetch_feed=stale_answer)
-    assert res.ingested == () and queue.card("g1:live") is None and res.stale == (_id("g1"),)
+    assert res.ingested == () and queue.card("mlb:mlb_statsapi:g1:live") is None and res.stale == (_id("g1"),)

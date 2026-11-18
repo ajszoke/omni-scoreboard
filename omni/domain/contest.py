@@ -7,9 +7,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 
-from omni.core.enum import GameStatus, League, Sport
+from omni.core.enum import GameStatus, League, SeasonStage, Sport
 from omni.core.ids import LeagueScopedId
 from omni.domain.base import Competitor
 from omni.domain.teams import Team
@@ -17,9 +17,17 @@ from omni.domain.teams import Team
 __all__ = ["Contest", "TeamGame", "GolfTournament"]
 
 
+_DOUBLEHEADER_GAMES = (1, 2)
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Contest:
-    """Any scheduled competition, team-based or individual."""
+    """Any scheduled competition, team-based or individual.
+
+    Past its identity and start, it carries the schedule's facts about it. Each defaults to "not known", so a
+    source that can't say leaves it there. Identity is the `id` alone: a doubleheader's two games share their
+    clubs and date and are still two contests, told apart by `game_number`.
+    """
 
     id: LeagueScopedId
     league: League
@@ -27,11 +35,20 @@ class Contest:
     scheduled_start: datetime
     competitors: tuple[Competitor, ...] = ()
     venue_name: str | None = None
+    stage: SeasonStage = SeasonStage.UNKNOWN
+    game_number: int | None = None  # 1 or 2 in a doubleheader; None when the game isn't one
+    start_tbd: bool = False  # `scheduled_start` is a placeholder until the start time is set
+    provider_date: date | None = None  # the date the source files the game under, apart from any viewer's own date
+    neutral_site: bool | None = None  # None when the source doesn't say
+    national_broadcast: bool | None = None  # carried by a US national TV network; None when the source doesn't say
+    resumed_from: date | None = None  # for a suspended game resumed on a later day, the day it began
 
     def __post_init__(self) -> None:
         # `league` is also carried by `id`; they must never disagree.
         if self.league != self.id.league:
             raise ValueError(f"contest league {self.league} disagrees with id.league {self.id.league}")
+        if self.game_number is not None and self.game_number not in _DOUBLEHEADER_GAMES:
+            raise ValueError("a doubleheader's games are numbered 1 and 2")
 
     @property
     def sport(self) -> Sport:

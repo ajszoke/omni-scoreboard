@@ -19,6 +19,7 @@ from omni.core.time import DurationSeconds
 from omni.domain.baseball import BaseballBaseState, BaseballCount, BaseballGameState, InningPhase, WinProbability
 from omni.domain.contest import TeamGame
 from omni.events.baseball import LiveBaseballFeed
+from omni.preferences.favorites import Favorites
 from omni.providers.base import ProviderUpdate
 from omni.providers.mlb_teams import MlbTeamRegistry
 from omni.queue.scheduler import Pick
@@ -208,7 +209,7 @@ def test_parse_args_defaults() -> None:
     ns = _parse_args(["--profile", "quad_128x64", "--emulated"])
     assert ns.profile == "quad_128x64"
     assert ns.emulated is True
-    assert ns.favorite == [] and ns.delay == 45 and ns.slot == 12
+    assert ns.favorite == [] and ns.favorites == Favorites() and ns.delay == 45 and ns.slot == 12
     assert ns.timezone == "America/New_York"
     assert ns.meter is False and ns.no_odds is False  # the live meter is opt-in; pregame odds are on
 
@@ -217,7 +218,7 @@ def test_the_live_meter_is_asked_for_by_flag() -> None:
     assert _parse_args(["--profile", "quad_128x64", "--meter"]).meter is True
 
 
-def test_parse_args_collects_favorites_and_overrides() -> None:
+def test_parse_args_collects_favorites_and_overrides(capsys: pytest.CaptureFixture[str]) -> None:
     ns = _parse_args(
         [
             "--profile",
@@ -235,6 +236,34 @@ def test_parse_args_collects_favorites_and_overrides() -> None:
         ]
     )
     assert ns.favorite == ["COL", "LAD"]
+    assert ns.favorites == Favorites({League.MLB: ("COL", "LAD")})  # the flag's older, bare form: MLB, in order
+    assert capsys.readouterr().out.splitlines() == [
+        "omni.app: --favorite COL read as mlb:COL (a team without a league is MLB's)",
+        "omni.app: --favorite LAD read as mlb:LAD (a team without a league is MLB's)",
+    ]
     assert ns.delay == 30 and ns.slot == 8
     assert _parse_args(["--profile", "quad_128x64", "--tick", "9"]).slot == 9  # the flag's old name still works
     assert ns.timezone == "America/Denver"
+
+
+def test_favorites_on_the_command_line_are_ranked_per_league_in_the_order_given(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    flags = ["--favorite", "mlb:ATL", "--favorite", "nfl:CAR", "--favorite", "mlb:COL", "--favorite", "nba:CHA"]
+    ns = _parse_args(["--profile", "quad_128x64", *flags])
+    assert ns.favorites == Favorites({League.MLB: ("ATL", "COL"), League.NFL: ("CAR",), League.NBA: ("CHA",)})
+    assert str(ns.favorites) == "mlb 1 ATL, 2 COL; nfl 1 CAR; nba 1 CHA"
+    assert capsys.readouterr().out == ""  # nothing to say about a team given with its league
+
+
+@pytest.mark.parametrize(
+    ("entry", "message"),
+    [("xfl:DAL", "unknown league 'xfl'"), ("nfl:XYZ", "no NFL team 'XYZ'"), ("ARI", "no MLB team 'ARI'")],
+)
+def test_an_unknown_favorite_stops_the_app_with_a_usage_error_naming_it(
+    entry: str, message: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as exit_:
+        _parse_args(["--profile", "quad_128x64", "--favorite", entry])
+    assert exit_.value.code == 2
+    assert f"error: --favorite {entry}: {message}" in capsys.readouterr().err

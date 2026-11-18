@@ -51,11 +51,19 @@ from enum import Enum
 from typing import Any
 
 from omni.core.clock import ClockReading, MonotonicTime
-from omni.core.enum import GameStatus, HomeAway, League, StrEnumMixin
+from omni.core.enum import GameStatus, HomeAway, League, SeasonStage, StrEnumMixin
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.core.time import DurationSeconds
 from omni.domain.contest import TeamGame
-from omni.domain.football import FootballGameState, FootballInterval, PlaySummary, PlayTone, SetPiece
+from omni.domain.coverage import CoverageMap, FieldCoverage
+from omni.domain.football import (
+    FootballField,
+    FootballGameState,
+    FootballInterval,
+    PlaySummary,
+    PlayTone,
+    SetPiece,
+)
 from omni.events.football import (
     ConversionResult,
     FieldGoalResult,
@@ -194,6 +202,8 @@ _REGULATION_PERIODS = 4
 _HALFTIME_PERIOD = 2
 _FIELD = 100  # goal line to goal line
 _GAME_STATUS = {NflPhase.PRE: GameStatus.PREGAME, NflPhase.IN: GameStatus.LIVE, NflPhase.POST: GameStatus.FINAL}
+_NEXT_SNAP = (FootballField.POSSESSION, FootballField.DOWN_DISTANCE, FootballField.SPOT)
+_COUNTS = (FootballField.TIMEOUTS, FootballField.CHALLENGES)  # what each side has left, which only the plays tell
 _CORRECTIONS = frozenset({FootballEventKind.REVIEW, FootballEventKind.CONVERSION})
 
 
@@ -327,7 +337,8 @@ class NflMetaLiveProvider:
         except (KeyError, TypeError, ValueError) as exc:
             raise ProviderError(f"NFLMeta sent an unreadable game {game_id}: {exc}") from exc
         if state is not None and _stale_situation(tracked, row, state):
-            state = dataclasses.replace(state, possession=None, down=None, distance=None, yards_to_goal=None)
+            left_behind = {field: FieldCoverage.UNAVAILABLE for field in _NEXT_SNAP if state.known(field)}
+            state = _marked(state, left_behind, possession=None, down=None, distance=None, yards_to_goal=None)
         if phase is NflPhase.POST and tracked.final_at is None:
             tracked.final_at = at.monotonic
         at_half = state is not None and state.interval is FootballInterval.HALFTIME
@@ -347,7 +358,8 @@ class NflMetaLiveProvider:
             scored = _unexplained_points(game, tracked, ledger, state, at.monotonic, last=last_read)
         events = scored + plays + _injury_events(tracked, row, at.utc)
         if state is not None:
-            state = _with_plays(state, ledger, postseason=_postseason(row), known=tracked.caught_up_plays)
+            postseason = game.stage is SeasonStage.POSTSEASON
+            state = _with_plays(state, ledger, postseason=postseason, known=tracked.caught_up_plays)
         caught_up = _caught_up(row, phase, tracked, ledger)
         if last_read and not caught_up:  # parked short of the game's end: say why
             short = "the last read after the final didn't finish" if tracked.draining else "no end of game in the feed"
@@ -466,6 +478,7 @@ class NflMetaLiveProvider:
             scheduled_start=kickoff,
             away=self._registry.resolve(row["away_team"]["abbr"]),
             home=self._registry.resolve(row["home_team"]["abbr"]),
+            stage=_stage(row),
         )
 
     def _get(self, path: str, query: Mapping[str, str | int]) -> Any:
@@ -609,10 +622,31 @@ def _caught_up(row: Mapping[str, Any], phase: NflPhase, tracked: _TrackedGame, l
     return phase is NflPhase.POST and ledger.ended
 
 
-def _postseason(row: Mapping[str, Any]) -> bool:
-    """Whether a game is in the postseason, by its week (the regular season's are numbered first)."""
+def _stage(row: Mapping[str, Any]) -> SeasonStage:
+    """The game's part of the season, by its week: the regular season's are numbered first, and a later week is
+    the postseason. A row without a week is UNKNOWN. Whether a preseason week is numbered apart is unverified until
+    one is seen."""
     week = row.get("week")
-    return isinstance(week, int) and week > _REGULAR_SEASON_WEEKS
+    if type(week) is not int or week < 1:
+        return SeasonStage.UNKNOWN
+    return SeasonStage.POSTSEASON if week > _REGULAR_SEASON_WEEKS else SeasonStage.REGULAR
+
+
+def _marked(
+    state: FootballGameState, coverage: Mapping[FootballField, FieldCoverage], **changes: Any
+) -> FootballGameState:
+    """``state`` with ``changes`` made, and ``coverage`` saying what the changed fields now rest on."""
+    return dataclasses.replace(state, coverage=state.coverage.updated(coverage), **changes)
+
+
+def _from_feed(value: object) -> FieldCoverage:
+    """A field the scoreboard row gives (REPORTED), or leaves None (UNAVAILABLE)."""
+    return FieldCoverage.UNAVAILABLE if value is None else FieldCoverage.REPORTED
+
+
+def _from_plays(value: object) -> FieldCoverage:
+    """A field the plays work out (INFERRED), or can't (UNAVAILABLE)."""
+    return FieldCoverage.UNAVAILABLE if value is None else FieldCoverage.INFERRED
 
 
 def _with_plays(
@@ -627,28 +661,53 @@ def _with_plays(
     regulation's end overtime has its own toss, so no one has the ball yet; after the final, nothing
     is left to spend. In overtime every review is the booth's, so no challenges show, and postseason
     overtime's timeouts (three for each of its halves) aren't counted yet, so none show there either.
+
+    The coverage says which of those a None is: a count the plays can't give yet is UNAVAILABLE, one
+    with nothing to count is NOT_APPLICABLE, and whatever the plays do give is INFERRED.
     """
     if not known:
-        return dataclasses.replace(state, timeouts=None, challenges=None)
+        return _marked(state, dict.fromkeys(_COUNTS, FieldCoverage.UNAVAILABLE), timeouts=None, challenges=None)
     overtime = state.period > _REGULATION_PERIODS
     challenges = None if overtime else ledger.challenges()
     timeouts = None if overtime and postseason else ledger.timeouts(state.period)
+    counted = {
+        FootballField.TIMEOUTS: _from_plays(timeouts),
+        FootballField.CHALLENGES: FieldCoverage.NOT_APPLICABLE if overtime else FieldCoverage.INFERRED,
+    }
+    spent = dict.fromkeys(_COUNTS, FieldCoverage.NOT_APPLICABLE)
     interval = state.interval
     if interval is FootballInterval.FINAL:
-        return dataclasses.replace(state, timeouts=None, challenges=None)
+        return _marked(state, spent, timeouts=None, challenges=None)
     if interval is FootballInterval.HALFTIME:
-        return dataclasses.replace(
-            state, possession=ledger.second_half_receiver(), timeouts=None, challenges=challenges
-        )
+        receiver = ledger.second_half_receiver()
+        coverage = {
+            **counted,
+            FootballField.POSSESSION: _from_plays(receiver),
+            FootballField.TIMEOUTS: FieldCoverage.NOT_APPLICABLE,  # they start over for the second half
+        }
+        return _marked(state, coverage, possession=receiver, timeouts=None, challenges=challenges)
     if interval is FootballInterval.END_OF_QUARTER and state.period == _REGULATION_PERIODS:
-        return dataclasses.replace(
-            state, possession=None, down=None, distance=None, yards_to_goal=None, timeouts=None, challenges=None
+        to_overtime = {**spent, **dict.fromkeys(_NEXT_SNAP, FieldCoverage.NOT_APPLICABLE)}
+        return _marked(
+            state,
+            to_overtime,
+            possession=None,
+            down=None,
+            distance=None,
+            yards_to_goal=None,
+            timeouts=None,
+            challenges=None,
         )
-    state = dataclasses.replace(state, timeouts=timeouts, challenges=challenges)
+    state = _marked(state, counted, timeouts=timeouts, challenges=challenges)
     if interval is None and state.down is None and (kickoff := ledger.next_kickoff(state.period)) is not None:
         kicker, kicked_from = kickoff  # the kicking side has the ball, at its own yard line
         to_goal = _FIELD - kicked_from if kicked_from is not None else None
-        state = dataclasses.replace(state, set_piece=SetPiece.KICKOFF, possession=kicker, yards_to_goal=to_goal)
+        coverage = {
+            FootballField.POSSESSION: _from_plays(kicker),
+            FootballField.SPOT: _from_plays(to_goal),
+            FootballField.DOWN_DISTANCE: FieldCoverage.NOT_APPLICABLE,  # a kickoff has no down
+        }
+        state = _marked(state, coverage, set_piece=SetPiece.KICKOFF, possession=kicker, yards_to_goal=to_goal)
     return state
 
 
@@ -764,8 +823,16 @@ def _interval(status_detail: str) -> FootballInterval | None:
 
 
 def _state(row: Mapping[str, Any], game: TeamGame) -> FootballGameState:
+    """The scoreboard row as a football state, with what each field rests on.
+
+    The row has no timeouts or challenges; only the plays can give those (`_with_plays`). A part the row leaves
+    out shows a stand-in where the board needs one: the 1st period, a 0:00 clock, play on. The next snap's
+    possession, down and spot are None when the row doesn't place them. After the final they mean nothing, and
+    over halftime only possession does: who receives the second half's kickoff, which the plays may tell.
+    """
     final = row["phase"] == NflPhase.POST
-    interval = FootballInterval.FINAL if final else _interval(str(row.get("status_detail") or ""))
+    detail = row.get("status_detail")
+    interval = FootballInterval.FINAL if final else _interval(str(detail or ""))
     if interval is FootballInterval.HALFTIME and int(row["period"]) > _HALFTIME_PERIOD:
         interval = FootballInterval.END_OF_QUARTER  # "End of 2nd" in overtime: its second period, no halftime
     # Between quarters the situation is the next snap's, by the same team; over halftime it's stale.
@@ -782,9 +849,29 @@ def _state(row: Mapping[str, Any], game: TeamGame) -> FootballGameState:
             yards_to_goal = raw_yards
             if isinstance(raw_down, int) and 1 <= raw_down <= 4 and isinstance(raw_distance, int):
                 down, distance = raw_down, max(raw_distance, 0)
+    period, clock = int(row["period"]), row.get("clock")
+    coverage = {
+        FootballField.PERIOD: FieldCoverage.REPORTED if period >= 1 else FieldCoverage.DEFAULTED,
+        FootballField.CLOCK: FieldCoverage.REPORTED if clock else FieldCoverage.DEFAULTED,
+        FootballField.INTERVAL: FieldCoverage.REPORTED if final or detail else FieldCoverage.DEFAULTED,
+        FootballField.TIMEOUTS: FieldCoverage.UNAVAILABLE,
+        FootballField.CHALLENGES: FieldCoverage.UNAVAILABLE,
+    }
+    if live:
+        coverage.update(
+            {
+                FootballField.POSSESSION: _from_feed(possession),
+                FootballField.DOWN_DISTANCE: _from_feed(down),
+                FootballField.SPOT: _from_feed(yards_to_goal),
+            }
+        )
+    else:
+        coverage.update(dict.fromkeys(_NEXT_SNAP, FieldCoverage.NOT_APPLICABLE))
+        if not final:
+            coverage[FootballField.POSSESSION] = FieldCoverage.UNAVAILABLE  # halftime's receiver, until the plays say
     return FootballGameState(
-        period=max(int(row["period"]), 1),
-        clock_seconds=_clock_seconds(str(row.get("clock") or "0:00")),
+        period=max(period, 1),
+        clock_seconds=_clock_seconds(str(clock or "0:00")),
         away_score=int(row["away_team"]["score"]),
         home_score=int(row["home_team"]["score"]),
         possession=possession,
@@ -792,4 +879,5 @@ def _state(row: Mapping[str, Any], game: TeamGame) -> FootballGameState:
         distance=distance,
         yards_to_goal=yards_to_goal,
         interval=interval,
+        coverage=CoverageMap.of(coverage),
     )

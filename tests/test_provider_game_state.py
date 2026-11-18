@@ -12,6 +12,10 @@ import pytest
 from omni.core.enum import GameStatus, HomeAway, League
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.domain.baseball import (
+    BaseballBaseState,
+    BaseballCount,
+    BaseballField,
+    BaseballGameState,
     BatterGameLine,
     DueUp,
     InningPhase,
@@ -27,6 +31,7 @@ from omni.domain.baseball import (
     pitching_feat_progress,
 )
 from omni.domain.contest import TeamGame
+from omni.domain.coverage import CoverageMap, FieldCoverage
 from omni.providers.base import ProviderError
 from omni.providers.mlb_statsapi import (
     _GAME_FIELDS,
@@ -736,3 +741,100 @@ def test_null_nested_object_raises_provider_error() -> None:
         _parse_game_state({"liveData": {"linescore": None}})
     with pytest.raises(ProviderError):
         _parse_game_state({"liveData": {"linescore": {"currentInning": 7, "teams": None}}})
+
+
+# --- what each field of the state rests on ---------------------------------------------------------
+
+
+def _read(feed: dict[str, Any]) -> BaseballGameState:
+    """The state the provider reads from ``feed``, the way the board reads every live game."""
+    provider = MlbStatsApiProvider(_REG, fetch_game=lambda game_pk: feed)
+    return provider.fetch_live_feed(_game(), now=NOW).state
+
+
+def _without(*keys: str) -> dict[str, Any]:
+    """The fixture feed, the top of the 7th, with ``keys`` taken out of its linescore."""
+    feed = _feed()
+    for key in keys:
+        del feed["liveData"]["linescore"][key]
+    return feed
+
+
+def test_a_full_linescore_is_reported_in_every_field() -> None:
+    state = _read(_feed())
+    assert state.coverage == CoverageMap()
+    assert all(state.known(field) for field in BaseballField)
+
+
+def test_a_linescore_without_its_outs_still_shows_none_out_but_says_that_is_a_stand_in() -> None:
+    state = _read(_without("outs"))
+    assert state.count == BaseballCount(balls=2, strikes=1, outs=0)
+    assert state.coverage == CoverageMap.of({BaseballField.OUTS: FieldCoverage.DEFAULTED})
+    assert not state.known(BaseballField.OUTS) and state.known(BaseballField.COUNT)
+
+
+@pytest.mark.parametrize("missing", [("balls",), ("strikes",), ("balls", "strikes")])
+def test_a_linescore_without_its_count_shows_0_for_what_it_left_out_as_a_stand_in(missing: tuple[str, ...]) -> None:
+    state = _read(_without(*missing))
+    shown = {"balls": 2, "strikes": 1, **{key: 0 for key in missing}}
+    assert state.count == BaseballCount(outs=2, **shown)
+    assert state.coverage == CoverageMap.of({BaseballField.COUNT: FieldCoverage.DEFAULTED})
+
+
+def test_a_linescore_without_its_offense_shows_empty_bases_as_a_stand_in() -> None:
+    state = _read(_without("offense"))
+    assert state.bases == BaseballBaseState()
+    assert state.coverage == CoverageMap.of({BaseballField.BASES: FieldCoverage.DEFAULTED})
+    assert not state.known(BaseballField.BASES)
+
+
+def test_an_offense_that_names_no_runner_reports_empty_bases() -> None:
+    feed = _feed()
+    feed["liveData"]["linescore"]["offense"] = {"batter": {"id": 1}}
+    state = _read(feed)
+    assert state.bases == BaseballBaseState()
+    assert state.coverage == CoverageMap() and state.known(BaseballField.BASES)
+
+
+@pytest.mark.parametrize("inning_state", ["Mid", None])
+def test_an_inning_state_it_doesnt_know_shows_the_top_as_a_stand_in(inning_state: str | None) -> None:
+    feed = _without("inningState")
+    if inning_state is not None:
+        feed["liveData"]["linescore"]["inningState"] = inning_state
+    state = _read(feed)
+    assert state.phase is InningPhase.TOP
+    assert state.coverage == CoverageMap.of({BaseballField.HALF: FieldCoverage.DEFAULTED})
+    assert not state.known(BaseballField.HALF)
+
+
+def test_a_sides_missing_errors_show_as_0_marked_as_a_stand_in() -> None:
+    state = _read(_linescore(7, "Top", away=_SIDE, home={"runs": 1, "hits": 2}))
+    assert state.home_errors == 0
+    assert state.coverage[BaseballField.ERRORS] is FieldCoverage.DEFAULTED and not state.known(BaseballField.ERRORS)
+    assert state.known(BaseballField.SCORE) and state.known(BaseballField.HITS)
+
+
+@pytest.mark.parametrize("inning_state", ["Top", "Middle"])
+def test_a_side_yet_to_bat_has_a_true_0_inferred_from_the_half(inning_state: str) -> None:
+    state = _read(_linescore(1, inning_state, away=_SIDE, home={}))
+    assert (state.home_score, state.home_hits) == (0, 0)
+    assert state.coverage[BaseballField.SCORE] is FieldCoverage.INFERRED
+    assert state.coverage[BaseballField.HITS] is FieldCoverage.INFERRED
+    assert state.known(BaseballField.SCORE) and state.known(BaseballField.HITS)
+
+
+def test_no_stand_in_is_known_however_many_the_feed_needs() -> None:
+    """A bare linescore in the 1st with a half it doesn't know: the home side's runs, hits and errors, the count,
+    the outs and the bases are all left out, and the half that would vouch for the home side's zeros is a stand-in
+    too."""
+    state = _read(_linescore(1, "Mid", away=_SIDE, home={}))
+    assert (state.phase, state.count, state.bases) == (
+        InningPhase.TOP,
+        BaseballCount(balls=0, strikes=0, outs=0),
+        BaseballBaseState(),
+    )
+    assert (state.home_score, state.home_hits, state.home_errors) == (0, 0, 0)
+    defaulted = {field for field in BaseballField if state.coverage[field] is FieldCoverage.DEFAULTED}
+    assert defaulted == set(BaseballField) - {BaseballField.INNING}
+    assert not any(state.known(field) for field in defaulted)
+    assert state.known(BaseballField.INNING)

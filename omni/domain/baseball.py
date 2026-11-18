@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from omni.core.enum import HomeAway, StrEnumMixin
+from omni.domain.coverage import CoverageMap
 
 __all__ = [
     "InningPhase",
@@ -32,6 +33,7 @@ __all__ = [
     "BatterGameLine",
     "PitcherGameLine",
     "DueUp",
+    "BaseballField",
     "BaseballGameState",
     "PitchingFeatKind",
     "PitchingFeatProgress",
@@ -478,6 +480,19 @@ class DueUp:
             raise ValueError("due up names one to three batters")
 
 
+class BaseballField(StrEnumMixin, str, Enum):
+    """A part of a `BaseballGameState` whose coverage is kept; a two-sided one covers both sides."""
+
+    SCORE = "score"  # each side's runs
+    HITS = "hits"
+    ERRORS = "errors"
+    INNING = "inning"
+    HALF = "half"  # the inning's phase: top, bottom, or a break between
+    COUNT = "count"  # balls and strikes
+    OUTS = "outs"
+    BASES = "bases"
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class BaseballGameState:
     """A live baseball game's observed state: score/inning/phase/count/bases.
@@ -516,6 +531,9 @@ class BaseballGameState:
     last_pitch: PitchSnapshot | None = None
     # Who bats next, during a break between halves; None mid-half or when the feed names no one.
     due_up: DueUp | None = None
+    # What each field above rests on. A field the feed left out still shows a stand-in (0 outs, empty bases, the
+    # top of the inning); its coverage is what says so.
+    coverage: CoverageMap[BaseballField] = CoverageMap()
 
     def __post_init__(self) -> None:
         if self.away_score < 0 or self.home_score < 0:
@@ -526,6 +544,10 @@ class BaseballGameState:
             raise ValueError("errors cannot be negative")
         if self.inning < 1:
             raise ValueError("inning must be >= 1")
+
+    def known(self, field: BaseballField) -> bool:
+        """Whether ``field`` holds a value to reason from, not a stand-in for one the feed left out."""
+        return self.coverage[field].known
 
 
 class PitchingFeatKind(StrEnumMixin, str, Enum):

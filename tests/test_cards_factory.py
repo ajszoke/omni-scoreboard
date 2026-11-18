@@ -5,10 +5,12 @@ from __future__ import annotations
 import dataclasses
 
 from datetime import datetime, timezone
+from typing import Any
 
-from omni.cards.base import CardKind, CardPriority
+from omni.cards.base import CardKind, CardPriority, ScoreboardCard
 from omni.cards.factory import CardFactory
-from omni.core.enum import DisplayPriority, GameStatus, League, PanelProfile
+from omni.core.clock import ClockReading, MonotonicTime
+from omni.core.enum import DisplayPriority, GameStatus, HomeAway, League, PanelProfile
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.core.time import DurationSeconds
 from omni.domain.baseball import (
@@ -24,6 +26,9 @@ from omni.domain.baseball import (
 )
 from omni.domain.contest import TeamGame
 from omni.providers.mlb_teams import MlbTeamRegistry
+from omni.providers.nfl_teams import NflTeamRegistry
+from omni.queue.scheduler import InterleavedCardQueue
+from tests.test_renderer_big_play import _event
 
 NOW = datetime(2026, 6, 17, 23, 30, tzinfo=timezone.utc)
 T = datetime(2026, 6, 17, 23, 10, tzinfo=timezone.utc)
@@ -66,8 +71,8 @@ def test_live_baseball_card_carries_state_and_metadata() -> None:
     assert card.kind is CardKind.LIVE_GAME
     assert card.league is League.MLB
     assert card.contest is not None and card.contest.id.raw == "700001"
-    assert card.id.raw == "700001:live"
-    assert card.dedupe_key.raw == "700001:live"
+    assert card.id.raw == "mlb:mlb_statsapi:700001:live"
+    assert card.dedupe_key.raw == "mlb:mlb_statsapi:700001:live"
 
     p = card.payload
     assert (p.away_line.runs, p.home_line.runs) == (3, 5)  # runs flow from the state's scores
@@ -126,3 +131,40 @@ def test_display_durations_are_configurable() -> None:
     card = factory.live_baseball(_game(), _state(), now=NOW)
     assert card.timing.min_display == DurationSeconds(3)
     assert card.timing.max_display == DurationSeconds(12)
+
+
+def test_an_mlb_and_an_nfl_game_with_the_same_raw_id_never_share_a_card_or_a_key() -> None:
+    mlb = _game()
+    clubs = NflTeamRegistry.default()
+    nfl = TeamGame(
+        id=LeagueScopedId(League.NFL, SourceRef("nflmeta"), mlb.id.raw),  # the same raw id: 700001
+        league=League.NFL,
+        status=GameStatus.LIVE,
+        scheduled_start=T,
+        away=clubs.resolve("PIT"),
+        home=clubs.resolve("CIN"),
+    )
+    play = _event(eid="700001:ab:1")
+    factory = CardFactory()
+
+    def cards(game: TeamGame) -> list[ScoreboardCard[Any]]:
+        return [
+            factory.live_baseball(game, _state(), now=NOW),
+            factory.pregame(game, now=NOW),
+            factory.final(game, _state(), now=NOW),
+            factory.big_play(game, play, now=NOW),
+            factory.no_hitter(game, pitching_side=HomeAway.HOME, through_inning=6, now=NOW),
+            factory.status(game, status=GameStatus.DELAYED, now=NOW),
+        ]
+
+    for game, scope in ((mlb, "mlb:mlb_statsapi:700001"), (nfl, "nfl:nflmeta:700001")):
+        built = cards(game)
+        expected = [
+            f"{scope}:{kind}" for kind in ("live", "pregame", "final", "bigplay:700001:ab:1", "nohitter", "status")
+        ]
+        assert [card.id.raw for card in built] == expected
+        assert [card.dedupe_key.raw for card in built] == expected
+        assert CardFactory.big_play_key(game, play).raw == f"{scope}:bigplay:700001:ab:1"
+    queue = InterleavedCardQueue()
+    queue.ingest_all([*cards(mlb), *cards(nfl)], ClockReading(NOW, MonotonicTime(0.0)))
+    assert len(queue) == 12  # no card of one game replaced the other's

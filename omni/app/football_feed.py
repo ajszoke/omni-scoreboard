@@ -1,7 +1,10 @@
 """The network side of a football board: when to ask NFLMeta and the market about one game, and asking.
 
 `GameFeed` keeps the asking cadence. It asks the provider when its last answer says to, retries 30
-seconds after a failure, and stops once the final has settled. While the final drains it asks at the
+seconds after a failure, and stops once the final has settled. Given a `QuotaLedger`, it asks only what
+the ledger admits on NFLMeta's account, as focus: the one game the board follows keeps its cadence until
+the month is exhausted. A refused ask makes no request; it comes back as a failed answer that says why,
+and is tried again once the minute has room, or after the failure retry. While the final drains it asks at the
 live pace whatever the answer says, and once more on the drain's boundary, so the drain gets its reads.
 Its due times run on the monotonic clock, so a wall-clock step neither stops the asks nor hurries them.
 It also reads the market with each answer, when there is a market. Each answer comes back as a
@@ -24,6 +27,8 @@ from datetime import datetime, timedelta
 from typing import Protocol
 
 from omni.app.background import Repeating
+from omni.app.poll_plan import Demand, PollPriority
+from omni.app.quota import Admission, ProviderAccount, QuotaLedger, tallying
 from omni.core.clock import Clock, ClockReading, MonotonicTime
 from omni.domain.baseball import WinProbability
 from omni.domain.contest import TeamGame
@@ -69,6 +74,7 @@ class FeedResult:
     holding: bool = False  # after this answer, the provider is holding off the feed (halftime)
     quote: MarketQuote | None = None  # None without a market, or when the answer was held
     received_monotonic: MonotonicTime | None = None  # its arrival on the monotonic clock; None from a trace
+    refused: Admission | None = None  # the quota held the ask back: no request was made
 
 
 class FeedSource(Protocol):
@@ -88,10 +94,13 @@ class GameFeed:
         game_id: int,
         *,
         win_probability: WinProbabilityFetcher | None = None,
+        ledger: QuotaLedger | None = None,
     ) -> None:
         self._provider = provider
         self._game_id = game_id
         self._win_probability = win_probability
+        self._ledger = ledger
+        self._rows = 1  # what the next poll is expected to bill: the last poll's rows, once one said
         self._next_ask: MonotonicTime | None = None
 
     def due(self, at: ClockReading) -> bool:
@@ -107,8 +116,16 @@ class GameFeed:
         """Ask the provider (and the market) as of ``at``; ``arrived`` reads the clock when the answer came."""
         now = at.utc
         held = self._provider.holding(self._game_id, at)  # a held poll repeats the last answer, unasked
+        if not held and self._ledger is not None:
+            admission = self._ledger.admit(ProviderAccount.NFLMETA, Demand(PollPriority.FOCUS, self._rows), at)
+            if not admission.admitted:
+                return self._refused(admission, at, arrived)
         try:
-            snapshot = self._provider.poll(self._game_id, at)
+            with tallying() as billed:
+                try:
+                    snapshot = self._provider.poll(self._game_id, at)
+                finally:
+                    self._rows = billed.rows if billed.rows is not None else self._rows
         except ProviderError as exc:
             retry = self.back_off(at)
             received = arrived() if arrived is not None else at
@@ -142,6 +159,24 @@ class GameFeed:
 
     def collect(self, at: ClockReading, *, arrived: Callable[[], ClockReading] | None = None) -> list[FeedResult]:
         return [self.ask(at, arrived=arrived)] if self.due(at) else []
+
+    def _refused(
+        self, admission: Admission, at: ClockReading, arrived: Callable[[], ClockReading] | None
+    ) -> FeedResult:
+        """An ask the quota held back: no request. It's due again once the minute has room, or after the
+        failure retry when it's the month that's spent."""
+        wait = admission.retry_at.since(at.monotonic) if admission.retry_at is not None else RETRY_AFTER_FAILURE
+        self._next_ask = at.monotonic + wait
+        received = arrived() if arrived is not None else at
+        return FeedResult(
+            asked_at=at.utc,
+            received_at=received.utc,
+            received_monotonic=received.monotonic,
+            next_ask=at.utc + wait,
+            snapshot=None,
+            error=admission.reason,
+            refused=admission,
+        )
 
 
 class BackgroundFeed:

@@ -12,7 +12,7 @@ from omni.core.enum import League
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.domain.base import LogoAsset
 from omni.domain.teams import BaseballTeam
-from omni.providers.mlb_teams import MlbTeamRegistry
+from omni.providers.mlb_teams import MLB_ABBREVIATIONS, MlbTeamRegistry, canonical_abbreviation
 
 # Concrete values from colors/teams.example.json (home -> primary, accent -> secondary).
 LAD_PRIMARY = RGBColor(0, 47, 108)
@@ -25,6 +25,13 @@ def test_from_color_file_loads_all_thirty_clubs() -> None:
     assert len(registry) == 30
     assert 119 in registry
     assert 99999 not in registry
+
+
+def test_a_club_s_abbreviation_reads_in_any_case_and_an_unknown_one_is_refused() -> None:
+    assert len(MLB_ABBREVIATIONS) == 30 and "AZ" in MLB_ABBREVIATIONS
+    assert canonical_abbreviation(" col ") == "COL"
+    with pytest.raises(KeyError):
+        canonical_abbreviation("ARI")  # StatsAPI calls the D-backs AZ
 
 
 def test_resolve_returns_typed_team_with_colors() -> None:

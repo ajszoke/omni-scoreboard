@@ -41,7 +41,22 @@ Odds and win probability (measured 2026-11-01):
   - Play text names clubs by the league's play-by-play codes. Five differ from the board's abbreviations: BLT (BAL), CLV (CLE), ARZ (ARI), HST (HOU) and LA (LAR). The board reads them through `omni/events/football_clubs.py` (seen as "TIMEOUT BLT" on LAC @ BAL, 2026-11-16).
   - Once no game is live, `recommended_poll_seconds` runs long: after LAC @ BAL's final (2026-11-16) the next recommended poll came about 15 minutes later.
   - Cost: about 490 requests an hour at the recommended pace, so roughly 1,500 for a game.
-  - **Free can't carry a Sunday slate:** `live-scores` bills a row per game, so nine games read every 10 s for a three-hour window is 9,720 rows, against Free's 25,000 a month (review round 6). A shared board needs a budgeted background cadence, or Builder.
+  - **Billing, from our own counts on PIT@CIN** (the two headers we kept, no content):
+    - `live-scores` billed one row per game listed **plus one per injury entry listed**. Filtered to one game, that was 1 to 3 rows over the night.
+    - Unfiltered, late that Sunday, it listed the day's whole window: 14 games, 13 of them final. That billed 68–70 rows, 54–56 of them injury entries.
+    - `play-changes` billed one row per change returned. A read with nothing new billed no rows but still cost a request. One game's whole history, read from no cursor at the end, was 277 rows.
+    - `X-Monthly-Quota-Remaining` fell by one per request on both endpoints, so it counts requests.
+    - Each restart of the board re-read its game's plays from the start, because the cursor lives only in the process. That night's 19 restarts were most of the 4,737 play rows billed.
+  - **The docs** (https://nflmeta.org/api-docs/core-endpoints and `openapi.yaml`, read 2026-11-17):
+    - `live-scores` takes `phase` (`pre`, `in`, `post`; `in` includes halftime and excludes finals), `game_id`, and `game_ids` (up to 100). There's no way to leave injuries out.
+    - The docs say a game listed bills one row; the injury rows above are measured.
+    - Responses carry `X-NFLMeta-Response-Rows`, `X-Monthly-Quota-Remaining` and, on a plan with a row ceiling, `X-Monthly-Row-Remaining`, all for the current UTC month.
+    - A 429 covers the minute and both monthly limits; a per-minute 429 doesn't use monthly quota. `play-changes` takes `limit` up to 1000 and `start=latest`. `/api/v1/usage` costs a request and no rows.
+  - **The budget replay** (`tools/nflmeta_budget.py`; its report is `tests/fixtures/replay/nflmeta-budget.md`): a synthetic November (72 games, five Sundays) through the board's quota ledger.
+    - **Free carries no strategy for a whole month,** not even today's solo favorite at 10 s (about 1,350 requests a Sunday, so the month's 5,000 run out on the fourth Sunday).
+    - **The cheapest shared-board strategy** is one `phase=in` read every 45 s for the other live games, the favorite read by id at 10 s with its plays, and one read for each other final. That's about 13,300 requests and 58,000 rows for the month: 17% and 23% of Builder.
+    - **An unfiltered slate read is the costly one.** It bills every game of the day, finals and their injuries included, so reading it every 30 s comes to about 290,000 rows a month, more than Builder carries.
+    - **Builder ($12) is the user's call.**
   - **Stoppages, PIT@CIN (minimized trace, arrival to the next play's arrival, 10 s polls):** an official timeout (its reason unknown; most look like commercial breaks) 171 s median (p90 181 s); a team timeout 81 s; the two-minute warning 141 s; after a score, through the try and kickoff, 201 s; an injury or a review 111 s; an ordinary snap 40 s.
   - Kickoff rows list the receiving team in `posteam_abbr`, and punt rows the punting team.
   - Club timeouts appear only in play text ("Timeout #2 by CIN at 01:52."). So does one charged for a lost challenge ("...was Upheld. ... (Timeout #1.)").

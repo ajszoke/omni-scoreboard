@@ -1,8 +1,9 @@
 """MLB provider backed by the MLB StatsAPI `schedule` endpoint.
 
 Two calls, both confined to this module's raw dict shape: `refresh(now)` is one
-cheap `statsapi.schedule(...)` call parsed into typed `TeamGame` contests
-(matchup + status + start + venue); `fetch_live_feed(game, now=...)` pulls one
+cheap `schedule` call parsed into typed `TeamGame` contests (matchup, status,
+start, venue, and the schedule's facts: stage, doubleheader game, national TV
+and the like); `fetch_live_feed(game, now=...)` pulls one
 game's richer per-game feed into a typed `LiveBaseballFeed` — the current
 `BaseballGameState` (score, inning, count, bases) *and* the typed
 `BaseballGameEvent`s parsed from the same payload's play-by-play. One fetch yields
@@ -13,15 +14,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 from zoneinfo import ZoneInfo
 
-from omni.core.enum import DisplayPriority, GameStatus, HomeAway, League, UpdateUrgency, try_coerce_enum
+from omni.core.enum import DisplayPriority, GameStatus, HomeAway, League, SeasonStage, UpdateUrgency, try_coerce_enum
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.core.time import local_date
 from omni.domain.baseball import (
     BaseballBaseState,
     BaseballCount,
+    BaseballField,
     BaseballGameState,
     BaseballScoringImpact,
     BatterGameLine,
@@ -39,6 +41,7 @@ from omni.domain.baseball import (
     scoring_impact,
 )
 from omni.domain.contest import TeamGame
+from omni.domain.coverage import CoverageMap, FieldCoverage
 from omni.events.base import EventImportance
 from omni.events.baseball import (
     BaseballGameEvent,
@@ -51,7 +54,10 @@ from omni.providers.mlb_teams import MlbTeamRegistry
 
 __all__ = ["MlbStatsApiProvider", "ScheduleFetcher", "GameFetcher", "ContextMetricsFetcher", "map_game_status"]
 
-# (game_date, sport_ids) -> the list of flat schedule rows.
+# (game_date, sport_ids) -> the list of flat schedule rows. A row has `statsapi.schedule`'s keys for what the two
+# share (`game_id`, `game_datetime`, `game_date`, `game_type`, `status`, `away_id`, `away_name`, `home_id`,
+# `home_name`, `venue_name`, `doubleheader`, `game_num`), and three of its own: `start_time_tbd`,
+# `resumed_from_date` and `broadcasts` (`_schedule_rows`).
 ScheduleFetcher = Callable[[date, str], list[dict[str, Any]]]
 # game_pk -> the raw nested game feed (statsapi.get("game", ...)).
 GameFetcher = Callable[[Any], dict[str, Any]]
@@ -115,6 +121,22 @@ _BAND_URGENCY: dict[DisplayPriority, UpdateUrgency] = {
     DisplayPriority.ALERT: UpdateUrgency.LIVE_CRITICAL,
     DisplayPriority.HIGH_LEVERAGE: UpdateUrgency.HIGH,
 }
+
+# StatsAPI `gameType` -> the part of the year it files the game under: spring training, the regular season, the
+# four postseason rounds (wild card, division series, league championship, World Series), the All-Star Game, and
+# exhibitions. A code it doesn't list is UNKNOWN, so no game is called a postseason one without saying so.
+_GAME_TYPE_STAGE: dict[str, SeasonStage] = {
+    "S": SeasonStage.PRESEASON,
+    "R": SeasonStage.REGULAR,
+    "F": SeasonStage.POSTSEASON,
+    "D": SeasonStage.POSTSEASON,
+    "L": SeasonStage.POSTSEASON,
+    "W": SeasonStage.POSTSEASON,
+    "A": SeasonStage.ALL_STAR,
+    "E": SeasonStage.EXHIBITION,
+}
+# StatsAPI `doubleHeader`: `Y` a traditional doubleheader, `S` a split one (separate admissions), `N` neither.
+_DOUBLEHEADERS = frozenset({"Y", "S"})
 
 _SOURCE = SourceRef("mlb_statsapi", "https://statsapi.mlb.com")
 # MLB's league-office zone; a sensible default "baseball day" until a device sets its own.
@@ -267,6 +289,7 @@ class MlbStatsApiProvider:
         return _parse_win_probability(raw)
 
     def _parse_game(self, row: dict[str, Any]) -> TeamGame:
+        """One schedule row as a typed game. StatsAPI's schedule has no neutral-site flag, so that stays unknown."""
         try:
             game_pk = row["game_id"]
             away_id = int(row["away_id"])
@@ -288,7 +311,84 @@ class MlbStatsApiProvider:
             away=away,
             home=home,
             venue_name=row.get("venue_name") or None,
+            stage=_GAME_TYPE_STAGE.get(str(row.get("game_type")), SeasonStage.UNKNOWN),
+            game_number=_doubleheader_game(row),
+            start_tbd=row.get("start_time_tbd") is True,
+            provider_date=_schedule_date(row.get("game_date"), self._tz),
+            national_broadcast=_national_tv(row.get("broadcasts")),
+            resumed_from=_schedule_date(row.get("resumed_from_date"), self._tz),
         )
+
+
+def _doubleheader_game(row: dict[str, Any]) -> int | None:
+    """Which game of a doubleheader the row is, 1 or 2; None when it isn't one."""
+    kind, number = row.get("doubleheader"), row.get("game_num")
+    if isinstance(kind, str) and kind in _DOUBLEHEADERS and type(number) is int and number in (1, 2):
+        return number
+    return None
+
+
+def _schedule_date(raw: Any, zone: ZoneInfo) -> date | None:
+    """A date the schedule gives as ``2026-06-17``, or as an instant read on ``zone``'s calendar; None otherwise."""
+    if not isinstance(raw, str):
+        return None
+    try:
+        return date.fromisoformat(raw)
+    except ValueError:
+        instant = _parse_iso(raw)
+    return local_date(instant, zone) if instant is not None else None
+
+
+def _objects(value: Any) -> list[dict[str, Any]]:
+    """The JSON objects in ``value`` if it is a list, skipping anything else; empty if it isn't one."""
+    return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+
+
+def _national_tv(broadcasts: Any) -> bool | None:
+    """Whether a US national TV network carries the game; None when the schedule lists no broadcasts for it.
+
+    StatsAPI flags a US national network ``isNational``. Canada's Sportsnet and TVA Sports come as a Toronto home
+    broadcast, not a national one, so the flag alone picks out the US networks, in English or Spanish. Radio
+    (``AM``, ``FM``) never counts. Listed broadcasts with no national TV among them say False: a local game.
+    """
+    listed = _objects(broadcasts)
+    if not listed:
+        return None
+    return any(entry.get("isNational") is True and entry.get("type") == "TV" for entry in listed)
+
+
+def _schedule_rows(response: Any) -> list[dict[str, Any]]:
+    """A `schedule` response's games as flat rows, one a game, in the shape `_parse_game` reads (`ScheduleFetcher`).
+
+    A row leaves out what its game doesn't give, for the parse to judge: a game without its id or clubs is
+    skipped there with a warning, not dropped here. ``game_date`` is the league's own date for the game
+    (``officialDate``), else the date the response files it under. A resumed game's original date is
+    ``resumedFromDate``, or ``resumedFrom`` when only that is given.
+    """
+    rows: list[dict[str, Any]] = []
+    for day in _objects(_obj(response).get("dates")):
+        for game in _objects(day.get("games")):
+            status = _obj(game.get("status"))
+            away, home = (_obj(_obj(_obj(game.get("teams")).get(side)).get("team")) for side in ("away", "home"))
+            row = {
+                "game_id": game.get("gamePk"),
+                "game_datetime": game.get("gameDate"),
+                "game_date": game.get("officialDate") or day.get("date"),
+                "game_type": game.get("gameType"),
+                "status": status.get("detailedState"),
+                "away_id": away.get("id"),
+                "away_name": away.get("name"),
+                "home_id": home.get("id"),
+                "home_name": home.get("name"),
+                "venue_name": _obj(game.get("venue")).get("name"),
+                "doubleheader": game.get("doubleHeader"),
+                "game_num": game.get("gameNumber"),
+                "start_time_tbd": status.get("startTimeTBD"),
+                "resumed_from_date": game.get("resumedFromDate") or game.get("resumedFrom"),
+                "broadcasts": game.get("broadcasts"),
+            }
+            rows.append({key: value for key, value in row.items() if value is not None})
+    return rows
 
 
 def _parse_start(raw: Any, game_pk: Any) -> datetime:
@@ -545,6 +645,14 @@ def _runs_and_hits(team: dict[str, Any], side: HomeAway, *, batted: bool, final:
     return runs or 0, hits or 0
 
 
+def _coverage_of(
+    blocks: Iterable[dict[str, Any]], *keys: str, gap: FieldCoverage = FieldCoverage.DEFAULTED
+) -> FieldCoverage:
+    """REPORTED when every block gives every one of ``keys``; else ``gap``, for the 0 the parse shows in its place."""
+    given = all(block.get(key) is not None for block in blocks for key in keys)
+    return FieldCoverage.REPORTED if given else gap
+
+
 def _parse_game_state(raw: dict[str, Any]) -> BaseballGameState:
     """Parse a StatsAPI game feed's linescore into typed `BaseballGameState`.
 
@@ -554,6 +662,13 @@ def _parse_game_state(raw: dict[str, Any]) -> BaseballGameState:
     either side's runs in a final answer, raises `ProviderError`: a failed read,
     so the last good answer stands. A missing error count shows as 0, but no
     perfect game is claimed without it, nor without a complete play log (`_reach_ledger`).
+
+    Other gaps show a stand-in, and the state's coverage marks each DEFAULTED: no
+    ``outs`` (0), no ``balls`` or ``strikes`` (0), no ``offense`` object at all
+    (empty bases; an ``offense`` naming no runner is reported empty bases), an
+    ``inningState`` it doesn't know (the top), a side's missing errors (0). A side
+    yet to bat has a true 0 of runs and hits, INFERRED from the half, unless the
+    half is itself a stand-in.
     """
     try:
         line = raw["liveData"]["linescore"]
@@ -565,6 +680,24 @@ def _parse_game_state(raw: dict[str, Any]) -> BaseballGameState:
         away_team = teams.get("away", {})
         home_team = teams.get("home", {})
         phase = _phase_from_inning_state(str(line.get("inningState", "Top")))
+        inning_state = line.get("inningState")
+        known_half = isinstance(inning_state, str) and inning_state in _INNING_STATE_PHASE
+        half = FieldCoverage.REPORTED if known_half else FieldCoverage.DEFAULTED
+        sides = (away_team, home_team)
+        unbatted = FieldCoverage.INFERRED if half is FieldCoverage.REPORTED else FieldCoverage.DEFAULTED
+        coverage = CoverageMap.of(
+            {
+                BaseballField.SCORE: _coverage_of(sides, "runs", gap=unbatted),
+                BaseballField.HITS: _coverage_of(sides, "hits", gap=unbatted),
+                BaseballField.ERRORS: _coverage_of(sides, "errors"),
+                BaseballField.HALF: half,
+                BaseballField.COUNT: _coverage_of((line,), "balls", "strikes"),
+                BaseballField.OUTS: _coverage_of((line,), "outs"),
+                BaseballField.BASES: (
+                    FieldCoverage.REPORTED if isinstance(line.get("offense"), dict) else FieldCoverage.DEFAULTED
+                ),
+            }
+        )
         final = _feed_status(raw) is GameStatus.FINAL
         away_runs, away_hits = _runs_and_hits(
             away_team, HomeAway.AWAY, batted=_has_batted(HomeAway.AWAY, inning=inning, phase=phase), final=final
@@ -605,6 +738,7 @@ def _parse_game_state(raw: dict[str, Any]) -> BaseballGameState:
                 second="second" in offense,
                 third="third" in offense,
             ),
+            coverage=coverage,
         )
     except (KeyError, TypeError, ValueError, AttributeError) as exc:
         # AttributeError covers a null nested object (e.g. `"teams": null` -> None.get(...)),
@@ -953,10 +1087,17 @@ def _statsapi() -> Any:  # pragma: no cover - real network
     return statsapi
 
 
+# The schedule's one hydration: each game's TV and radio broadcasts, for its national-TV flag. Measured on a
+# full 15-game slate (2026-09-27), it takes the response from about 2.7 KB to 8.3 KB gzipped, or 20 KB to 79 KB
+# of JSON. `statsapi.schedule`, which this replaces, asked for more: it hydrates each game's broadcasts too, and
+# its decisions, probable pitchers, linescore, series status and media listings besides.
+_SCHEDULE_HYDRATE = "broadcasts"
+
+
 def _default_fetch_schedule(game_date: date, sport_ids: str) -> list[dict[str, Any]]:  # pragma: no cover - real network
     statsapi = _statsapi()
-    result: list[dict[str, Any]] = statsapi.schedule(date=game_date.strftime("%Y-%m-%d"), sportId=sport_ids)
-    return result
+    query = {"date": game_date.strftime("%Y-%m-%d"), "sportId": sport_ids, "hydrate": _SCHEDULE_HYDRATE}
+    return _schedule_rows(statsapi.get("schedule", query))
 
 
 # StatsAPI `fields` is a hierarchical key-name whitelist. The first group keeps the linescore

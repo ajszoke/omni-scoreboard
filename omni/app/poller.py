@@ -11,7 +11,8 @@ hangs ties up only its own workers.
 Right before a request, the worker checks with the plan that the ask is still wanted (`PollPlan.begin`),
 so an ask given up on, or for a key dropped meanwhile, never reaches the network. Each answer is
 stamped with the clock's two readings as it arrives; any exception from a fetch is filed as that ask's
-failure. Whoever reads the answers can `listen`, to hear when one is filed.
+failure, and either way with what the ask was billed, as its fetchers' meters tallied it
+(`omni.app.quota.tallying`). Whoever reads the answers can `listen`, to hear when one is filed.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 
 from omni.app.background import Repeating
+from omni.app.quota import tallying
 from omni.core.clock import Clock
 from omni.app.poll_plan import Ask, PollPlan, PollSource
 
@@ -90,11 +92,13 @@ class Poller:
         asked = self._clock.read()
         if not self._plan.begin(ask, asked):
             return  # given up on, or no longer wanted, before it started: no request
-        try:
-            value = ask.fetch(asked.utc)
-        except Exception as exc:  # any failure is this ask's, filed for the decision pass to see
-            self._plan.failed(ask.key, f"{type(exc).__name__}: {exc}", self._clock.read(), ask=ask.number)
-        else:
-            self._plan.answered(ask.key, value, self._clock.read(), ask=ask.number)
+        with tallying() as billed:
+            try:
+                value = ask.fetch(asked.utc)
+            except Exception as exc:  # any failure is this ask's, filed for the decision pass to see
+                error = f"{type(exc).__name__}: {exc}"
+                self._plan.failed(ask.key, error, self._clock.read(), ask=ask.number, rows=billed.rows)
+            else:
+                self._plan.answered(ask.key, value, self._clock.read(), ask=ask.number, rows=billed.rows)
         for listener in self._listeners:
             listener()

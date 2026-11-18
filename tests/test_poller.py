@@ -10,11 +10,19 @@ from datetime import date, datetime, timedelta, timezone
 from omni.core.clock import ClockReading, FakeClock, SystemClock
 from omni.app.poll_plan import Ask, PollKey, PollPlan, PollPolicy, PollPriority, PollSource
 from omni.app.poller import Poller
+from omni.core.enum import League
+from omni.core.ids import SourceRef
+from omni.providers.base import LocalDate, PollScope
 
 T0 = datetime(2026, 6, 17, 23, 0, tzinfo=timezone.utc)
 S = timedelta(seconds=1)
 _POLICY = PollPolicy(every=timedelta(seconds=15), keep_for=timedelta(seconds=90))
 _SOON = 5.0
+
+
+def _scope(day: int) -> PollScope:
+    """A subject to ask about: one test source's slate for a day in June."""
+    return PollScope(SourceRef("test"), League.MLB, LocalDate(date(2026, 6, day)))
 
 
 def _until(condition: Callable[[], bool], *, within: float = _SOON) -> bool:
@@ -44,8 +52,8 @@ class _Watched(PollPlan):
 
 def test_running_due_asks_inline_files_answers_and_failures() -> None:
     plan, clock = PollPlan({PollSource.GAME_FEED: _POLICY}), FakeClock(T0)
-    good: PollKey[str] = PollKey(PollSource.GAME_FEED, date(2026, 6, 1))
-    bad: PollKey[str] = PollKey(PollSource.GAME_FEED, date(2026, 6, 2))
+    good: PollKey[str] = PollKey(PollSource.GAME_FEED, _scope(1))
+    bad: PollKey[str] = PollKey(PollSource.GAME_FEED, _scope(2))
 
     def slow(asked: datetime) -> str:
         clock.advance(timedelta(milliseconds=300))  # the request takes a while
@@ -70,7 +78,7 @@ def test_running_due_asks_inline_files_answers_and_failures() -> None:
 def test_in_the_background_workers_answer_what_falls_due() -> None:
     plan = PollPlan({PollSource.GAME_FEED: _POLICY})
     clock = SystemClock()
-    key: PollKey[str] = PollKey(PollSource.GAME_FEED, date(2026, 6, 1))
+    key: PollKey[str] = PollKey(PollSource.GAME_FEED, _scope(1))
     asked = threading.Event()
 
     def fetch(at: datetime) -> str:
@@ -95,8 +103,8 @@ def test_stopping_a_poller_that_never_started_is_harmless() -> None:
 
 def test_an_ask_that_waits_past_its_lease_to_start_is_given_up_and_never_sent() -> None:
     plan, clock = PollPlan({PollSource.GAME_FEED: _POLICY}), FakeClock(T0)
-    slow_key: PollKey[str] = PollKey(PollSource.GAME_FEED, date(2026, 6, 1))
-    waiting_key: PollKey[str] = PollKey(PollSource.GAME_FEED, date(2026, 6, 2))
+    slow_key: PollKey[str] = PollKey(PollSource.GAME_FEED, _scope(1))
+    waiting_key: PollKey[str] = PollKey(PollSource.GAME_FEED, _scope(2))
     sent: list[str] = []
 
     def slow(asked: datetime) -> str:
@@ -135,10 +143,10 @@ def test_hung_game_feeds_leave_the_slate_its_own_worker_and_are_not_asked_again_
 
         return fetch
 
-    feeds: list[PollKey[str]] = [PollKey(PollSource.GAME_FEED, date(2026, 6, day)) for day in range(1, 6)]
+    feeds: list[PollKey[str]] = [PollKey(PollSource.GAME_FEED, _scope(day)) for day in range(1, 6)]
     for day, key in enumerate(feeds, start=1):
         plan.want(key, hangs(f"feed {day}"), priority=PollPriority.NORMAL, at=clock.read())
-    slate: PollKey[str] = PollKey(PollSource.SLATE, date(2026, 6, 17))
+    slate: PollKey[str] = PollKey(PollSource.SLATE, _scope(17))
     plan.want(slate, lambda asked: "the slate", priority=PollPriority.NORMAL, at=clock.read())
 
     def feeds_handed() -> int:
@@ -191,7 +199,7 @@ class _Stalling(_Watched):
 def test_on_the_workers_an_ask_that_waited_past_its_lease_makes_no_request() -> None:
     clock = FakeClock(T0)
     plan = _Stalling({PollSource.GAME_FEED: _POLICY}, clock)
-    key: PollKey[str] = PollKey(PollSource.GAME_FEED, date(2026, 6, 1))
+    key: PollKey[str] = PollKey(PollSource.GAME_FEED, _scope(1))
     sent: list[datetime] = []
 
     def fetch(asked: datetime) -> str:

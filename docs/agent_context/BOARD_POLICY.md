@@ -376,10 +376,18 @@ then reserve a full 12 s base turn. This is independent of the 60 s cooldown.
 A team mute excludes the contest even when the other team is a favorite. Everything else in this document
 is the versioned policy.
 
-**Applying config:**
-- Validated config applies atomically at a safe boundary.
-- A mute or blank acts at once.
-- A reload never resets the cooldown or debt.
+**Applying config** (designed in H5; there's no reload yet):
+- **The safe boundary:** on the decision thread, after one refresh returns and before the next starts.
+  Never during a paint.
+- **One swap:** the new config is built and validated whole, then replaces the old as one value. A config
+  that fails validation leaves the old one in force, and the trace says why.
+- **Carried over:** cooldowns, debt, the takeover total, break and halftime holds, on-air minimums, the
+  poll plan's due times and the quota ledger. None restarts at the reload. A shorter delay never releases
+  held state early: what's held keeps its release instant.
+- **At once:** a mute or blank. The muted contest's cards leave at the next paint, and a blank shows at once.
+- **The trace:** each run opens with a `versions` line (policy, config schema and digest, rules,
+  models, the code's commit) and a `config` line that renders the digested settings (`omni/app/versions.py`).
+  A reload will write both again, marked `reload <old digest>-><new digest>`.
 
 **The trace logs:**
 - the policy, config and model versions;

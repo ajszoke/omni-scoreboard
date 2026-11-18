@@ -9,9 +9,17 @@ from typing import Any
 import pytest
 
 from omni.core.clock import ClockReading, FakeClock, MonotonicTime
-from omni.core.enum import GameStatus, HomeAway
+from omni.core.enum import GameStatus, HomeAway, SeasonStage
 from omni.core.time import DurationSeconds
-from omni.domain.football import FootballInterval, SetPiece, TeamChallenges, TeamTimeouts
+from omni.domain.coverage import CoverageMap, FieldCoverage
+from omni.domain.football import (
+    FootballField,
+    FootballGameState,
+    FootballInterval,
+    SetPiece,
+    TeamChallenges,
+    TeamTimeouts,
+)
 from omni.events.football import FootballEventKind
 from omni.providers.base import ProviderError
 from omni.providers.nfl_teams import NflTeamRegistry
@@ -1056,3 +1064,167 @@ def test_a_board_starting_mid_break_whose_first_read_fails_drains_before_its_hol
     assert not failing.holding(GAME, _at(T0 + S20))
     late = failing.poll(GAME, _at(T0 + HALFTIME_GRACE))  # the grace is up: hold, with no countdown to show
     assert failing.holding(GAME, _at(T0 + HALFTIME_GRACE + S10)) and late.break_ends_at is None
+
+
+# --- what each field of the state rests on -------------------------------------------------------------
+
+_SNAP = (FootballField.POSSESSION, FootballField.DOWN_DISTANCE, FootballField.SPOT)
+_COUNTS = (FootballField.TIMEOUTS, FootballField.CHALLENGES)
+
+
+def _covered(state: FootballGameState | None, *fields: FootballField) -> tuple[FieldCoverage, ...]:
+    assert state is not None
+    return tuple(state.coverage[field] for field in fields)
+
+
+def _polled(*rows: dict[str, Any], plays: list[Any] | None = None) -> FootballGameState | None:
+    """The state the last of ``rows`` reads as, one poll a row, over the play feed ``plays``."""
+    feed = FakeFeed()
+    feed.scores = [_scores(row) for row in rows]
+    if plays is not None:
+        feed.plays = plays
+    provider = _provider(feed)
+    for _ in rows[:-1]:
+        provider.poll(GAME, _at(T0))
+    return provider.poll(GAME, _at(T0)).state
+
+
+def test_a_live_row_is_reported_and_the_counts_are_inferred_from_plays_read_to_their_end() -> None:
+    state = _polled(_row())
+    assert state is not None
+    assert state.coverage == CoverageMap.of(dict.fromkeys(_COUNTS, FieldCoverage.INFERRED))
+    assert all(state.known(field) for field in FootballField)
+
+
+def test_counts_withheld_until_the_plays_are_read_through_are_unavailable_then_inferred() -> None:
+    feed = FakeFeed()
+    feed.scores = [_scores(_synced("p1"))]
+    feed.plays = [
+        _page(_change("p0", 100, "A.Back up the middle for 4 yards."), more=True, cursor="c1"),
+        RuntimeError("connection reset"),
+        _page(_change("p1", 200, "B.Back right guard for 2 yards.", yards_gained=2)),
+    ]
+    provider = _provider(feed)
+    first = provider.poll(GAME, _at(T0)).state
+    assert first is not None and (first.timeouts, first.challenges) == (None, None)
+    assert _covered(first, *_COUNTS) == (FieldCoverage.UNAVAILABLE,) * 2
+    assert not first.known(FootballField.TIMEOUTS) and not first.known(FootballField.CHALLENGES)
+    second = provider.poll(GAME, _at(T0 + S10)).state
+    assert _covered(second, *_COUNTS) == (FieldCoverage.INFERRED,) * 2
+
+
+@pytest.mark.parametrize(
+    ("situation", "expected"),
+    [
+        (None, (FieldCoverage.UNAVAILABLE,) * 3),
+        (
+            {"possession_abbr": "PIT", "down": 2, "distance": 3, "yardline_100": 0},
+            (FieldCoverage.REPORTED, FieldCoverage.UNAVAILABLE, FieldCoverage.UNAVAILABLE),
+        ),
+        (
+            {"possession_abbr": "PIT", "down": None, "distance": None, "yardline_100": 65},
+            (FieldCoverage.REPORTED, FieldCoverage.UNAVAILABLE, FieldCoverage.REPORTED),
+        ),
+        ({"possession_abbr": "DAL", "down": 2, "distance": 3, "yardline_100": 40}, (FieldCoverage.UNAVAILABLE,) * 3),
+    ],
+)
+def test_a_next_snap_the_row_doesnt_place_is_unavailable(situation: Any, expected: tuple[FieldCoverage, ...]) -> None:
+    assert _covered(_polled(_row(situation=situation)), *_SNAP) == expected
+
+
+def test_a_row_missing_its_clock_period_or_status_shows_stand_ins_for_them() -> None:
+    state = _polled(_row(clock=None, period=0, status_detail=None))
+    assert state is not None and (state.clock_seconds, state.period, state.interval) == (0, 1, None)
+    fields = (FootballField.CLOCK, FootballField.PERIOD, FootballField.INTERVAL)
+    assert _covered(state, *fields) == (FieldCoverage.DEFAULTED,) * 3
+    assert not any(state.known(field) for field in fields)
+
+
+def test_after_the_final_there_is_nothing_left_to_count_or_snap() -> None:
+    state = _polled(_final_row())
+    assert _covered(state, *_SNAP, *_COUNTS) == (FieldCoverage.NOT_APPLICABLE,) * 5
+    assert _covered(state, FootballField.INTERVAL) == (FieldCoverage.REPORTED,)
+
+
+def test_a_finals_snap_means_nothing_even_when_the_feed_left_its_last_down_line_behind() -> None:
+    goal = {"possession_abbr": "CIN", "down": 1, "distance": 4, "text": "1st & Goal at PIT 4", "yardline_100": 4}
+    state = _polled(_row(situation=goal), _final_row(situation=goal, home_team={"abbr": "CIN", "score": 16}))
+    assert _covered(state, *_SNAP) == (FieldCoverage.NOT_APPLICABLE,) * 3
+
+
+def test_a_down_line_left_behind_by_a_score_is_unavailable_until_the_feed_writes_a_new_one() -> None:
+    goal = {"possession_abbr": "CIN", "down": 1, "distance": 4, "text": "1st & Goal at PIT 4", "yardline_100": 4}
+    scored = {"abbr": "CIN", "score": 16}
+    state = _polled(_row(situation=goal), _row(situation=goal, home_team=scored))
+    assert _covered(state, *_SNAP) == (FieldCoverage.UNAVAILABLE,) * 3
+    unplaced = {**goal, "possession_abbr": "DAL"}  # a line the row never placed stays unavailable, not reported
+    state = _polled(_row(situation=unplaced), _row(situation=unplaced, home_team=scored))
+    assert _covered(state, *_SNAP) == (FieldCoverage.UNAVAILABLE,) * 3
+
+
+def test_halftime_infers_who_receives_and_has_no_timeouts_or_snap_to_show() -> None:
+    opening = "K.Kicker kicks 60 yards from PIT 35 to CIN 5. R.Returner to CIN 24 for 19 yards."
+    plays = [_page(_change("p1", 1, opening, play_type="kickoff", quarter=1, posteam_abbr="CIN"))]
+    state = _polled(_synced("p1", status_detail="Halftime", clock="0:00"), plays=plays)
+    assert state is not None and state.possession is HomeAway.AWAY
+    assert _covered(state, *_SNAP, *_COUNTS) == (
+        FieldCoverage.INFERRED,
+        FieldCoverage.NOT_APPLICABLE,
+        FieldCoverage.NOT_APPLICABLE,
+        FieldCoverage.NOT_APPLICABLE,  # timeouts start over for the second half
+        FieldCoverage.INFERRED,
+    )
+    unseen = _polled(_row(status_detail="Halftime", clock="0:00"))  # no opening kickoff in the plays
+    assert unseen is not None and unseen.possession is None
+    assert _covered(unseen, FootballField.POSSESSION) == (FieldCoverage.UNAVAILABLE,)
+
+
+def test_regulations_end_has_no_snap_or_counts_until_overtime_starts() -> None:
+    state = _polled(_row(status_detail="End of 4th Quarter", period=4, clock="0:00"))
+    assert _covered(state, *_SNAP, *_COUNTS) == (FieldCoverage.NOT_APPLICABLE,) * 5
+
+
+def test_overtime_has_no_challenges_and_postseason_overtimes_timeouts_are_unavailable() -> None:
+    assert _covered(_overtime(5, week=11), *_COUNTS) == (FieldCoverage.INFERRED, FieldCoverage.NOT_APPLICABLE)
+    assert _covered(_overtime(5, week=19), *_COUNTS) == (FieldCoverage.UNAVAILABLE, FieldCoverage.NOT_APPLICABLE)
+
+
+def test_a_kickoff_infers_the_kicker_and_spot_and_has_no_down() -> None:
+    touchdown = "A.Passer pass short left to B.Catcher for 2 yards, TOUCHDOWN. C.Kicker extra point is GOOD."
+    scoring = _change(
+        "p1",
+        1,
+        touchdown,
+        play_type="passing_touchdown",
+        touchdown=True,
+        extra_point_result="good",
+        posteam_abbr="CIN",
+    )
+    state = _polled(_synced("p1", situation=None, period=2), plays=[_page(scoring)])
+    assert state is not None and state.set_piece is SetPiece.KICKOFF
+    assert _covered(state, *_SNAP) == (FieldCoverage.INFERRED, FieldCoverage.NOT_APPLICABLE, FieldCoverage.INFERRED)
+    toss = _overtime(5, week=11, situation=None, status_detail="15:00 - OT")  # the toss decides who kicks
+    assert toss is not None and toss.set_piece is SetPiece.KICKOFF and toss.possession is None
+    assert _covered(toss, *_SNAP) == (
+        FieldCoverage.UNAVAILABLE,
+        FieldCoverage.NOT_APPLICABLE,
+        FieldCoverage.UNAVAILABLE,
+    )
+
+
+@pytest.mark.parametrize(
+    ("changes", "stage"),
+    [
+        ({"week": 11}, SeasonStage.REGULAR),
+        ({"week": 18}, SeasonStage.REGULAR),
+        ({"week": 19}, SeasonStage.POSTSEASON),
+        ({}, SeasonStage.UNKNOWN),
+        ({"week": 0}, SeasonStage.UNKNOWN),
+    ],
+)
+def test_a_games_stage_comes_from_its_week(changes: dict[str, Any], stage: SeasonStage) -> None:
+    feed = FakeFeed()
+    feed.scores = [_scores(_row(**changes))]
+    game = _provider(feed).poll(GAME, _at(T0)).game
+    assert game.stage is stage
+    assert (game.game_number, game.provider_date, game.neutral_site, game.national_broadcast) == (None,) * 4

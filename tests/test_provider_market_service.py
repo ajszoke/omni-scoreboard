@@ -22,6 +22,7 @@ from omni.providers.market_service import (
     UrllibTransport,
 )
 from omni.providers.mlb_teams import MlbTeamRegistry
+from omni.providers.nfl_teams import NflTeamRegistry
 
 REG = MlbTeamRegistry.from_color_file()
 NOW = datetime(2026, 9, 17, 2, 0, tzinfo=timezone.utc)
@@ -137,6 +138,25 @@ def test_freshness_is_judged_on_the_services_clock_not_the_boards() -> None:
 )
 def test_anything_short_of_a_fresh_readable_reading_is_none(entry: Any) -> None:
     assert MarketServiceClient(_Service({GAME_ID: entry})).win_probability(_game(), NOW) is None
+
+
+def test_an_mlb_and_an_nfl_game_with_the_same_raw_id_are_asked_for_and_read_apart() -> None:
+    clubs = NflTeamRegistry.default()
+    nfl = TeamGame(
+        id=LeagueScopedId(League.NFL, SourceRef("nflmeta"), "745123"),  # the MLB game's raw id too
+        league=League.NFL,
+        status=GameStatus.LIVE,
+        scheduled_start=NOW - timedelta(hours=1),
+        away=clubs.resolve("PIT"),
+        home=clubs.resolve("CIN"),
+    )
+    nfl_id = "nfl:nflmeta:745123"
+    service = _Service({GAME_ID: {"win": _win()}, nfl_id: {"win": _win(away=70.0, home=30.0)}})
+    client = MarketServiceClient(service)
+    assert client.win_probability(_game(), NOW) == WinProbability(home=59.0, away=41.0)
+    assert client.win_probability(nfl, NOW) == WinProbability(home=30.0, away=70.0)
+    assert service.gets[-1] == f"/v1/latest?games={GAME_ID},{nfl_id}"
+    assert client.win_probability(_game(), NOW + timedelta(seconds=1)) == WinProbability(home=59.0, away=41.0)
 
 
 def test_a_game_the_answer_leaves_out_is_none() -> None:

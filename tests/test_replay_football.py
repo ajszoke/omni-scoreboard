@@ -33,6 +33,7 @@ from omni.replay.football import (
     ReplayFeed,
     _Cards,
     answer_record,
+    football_versions,
     header_record,
     load_trace,
     replay_board,
@@ -102,14 +103,30 @@ def test_the_board_decides_pit_cin_as_it_did() -> None:
     assert decisions == expected
 
 
+def test_a_football_replay_opens_with_what_made_its_decisions() -> None:
+    """The NFL runner's own policy, the replay's settings and the rule table; not the code's commit."""
+    decisions = replay_board(load_trace(PIT_CIN.read_text().splitlines()))
+    assert decisions[0] == football_versions(PanelProfile.QUAD_128X64).header()
+    assert decisions[0] == (
+        "versions: policy omni-nfl-solo/1 | config omni-config/1 76a93823d4d8 | rules omni-rules/2026.1"
+        " | models none"
+    )
+    assert football_versions(PanelProfile.QUAD_128X64).config.canonical() == (
+        "delay=0s;meter=off;meter_lag=15s;profile=quad_128x64;scroll_speed=slow"
+    )
+    delayed = football_versions(PanelProfile.QUAD_128X64, delay=timedelta(seconds=30))
+    assert delayed.config.digest != football_versions(PanelProfile.QUAD_128X64).config.digest
+
+
 def test_a_board_stepped_only_when_something_is_due_decides_as_one_stepped_every_frame() -> None:
     """Its deadlines miss nothing. On PIT@CIN through the first quarter's close-out, stepping at each
     arrival and each deadline gives what stepping every 10 ms gives, to within that frame."""
     trace = load_trace(PIT_CIN.read_text().splitlines())
     cut = trace.start + timedelta(seconds=2900)
     part = dataclasses.replace(trace, answers=tuple(a for a in trace.answers if a.received_at <= cut))
-    framed = replay_board(part, fps=100, tail=timedelta(seconds=60))
-    stepped = replay_board(part, fps=None, tail=timedelta(seconds=60))
+    framed_header, *framed = replay_board(part, fps=100, tail=timedelta(seconds=60))
+    stepped_header, *stepped = replay_board(part, fps=None, tail=timedelta(seconds=60))
+    assert stepped_header == framed_header  # the frame rate isn't a setting that changes a decision
     assert [line[9:] for line in stepped] == [line[9:] for line in framed]
     assert all(abs(_centiseconds(a) - _centiseconds(b)) <= 1 for a, b in zip(stepped, framed, strict=True))
     assert any(line.endswith("end_of_quarter") for line in stepped)
@@ -235,7 +252,7 @@ def test_a_replay_lists_each_change_of_strip_and_field_and_each_drop() -> None:
         ),
         tail=40 * S,
     )
-    assert lines == [
+    assert lines[1:] == [
         "     0.00  drop   PLAY a | detail a (unseen: during a break)",
         "     0.00  field  Q1 0-0 end_of_quarter",
         "     0.00  strip  -",
@@ -251,7 +268,8 @@ def test_a_replay_lists_each_change_of_strip_and_field_and_each_drop() -> None:
 
 def test_a_replay_of_no_answers_decides_nothing() -> None:
     empty = FootballTrace(start=START, game=GAME, answers=())
-    assert replay_board(empty, tail=S) == [] and replay_board(empty, fps=None) == []
+    header = football_versions(PanelProfile.QUAD_128X64).header()
+    assert replay_board(empty, tail=S) == [header] and replay_board(empty, fps=None) == [header]
 
 
 def test_the_stand_in_renderer_draws_for_its_profile() -> None:

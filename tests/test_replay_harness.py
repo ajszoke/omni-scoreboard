@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from omni.app.supervisor import ProviderStatus
+from omni.app.contest_store import ProviderStatus
 from omni.core.enum import GameStatus, League, PanelProfile
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.core.time import DurationSeconds
@@ -27,7 +27,7 @@ from omni.queue.scheduler import InterleavedCardQueue
 from omni.queue.scheduler import SelectionReason
 from omni.tower.board import FrameKind
 from omni.providers.mlb_teams import MlbTeamRegistry
-from omni.replay.harness import ReplayProvider, Seek, TraceEntry, replay, replay_decisions
+from omni.replay.harness import ReplayProvider, Seek, TraceEntry, replay, replay_decisions, replay_versions
 from omni.replay.timeline import GameFrame, Outage, Timeline
 from tests.test_app_pipeline import _event
 
@@ -80,7 +80,7 @@ def test_two_simultaneous_games_both_get_airtime() -> None:
     timeline = Timeline(frames=(_live(T0, "g1"), _live(T0, "g2")))
     trace = replay(timeline, profile=QUAD, tick=DurationSeconds(10), until=T0 + timedelta(seconds=120))
     shown = Counter(e.shown for e in trace)
-    assert shown["g1:live"] > 0 and shown["g2:live"] > 0  # neither contest starves
+    assert shown["mlb:mlb_statsapi:g1:live"] > 0 and shown["mlb:mlb_statsapi:g2:live"] > 0  # neither contest starves
     assert all(e.provider_status is ProviderStatus.FRESH for e in trace)  # provider stayed healthy
 
 
@@ -96,9 +96,10 @@ def test_lifecycle_transition_enters_and_removes_the_card() -> None:
         )
     )
     shown = _by_offset(replay(timeline, profile=QUAD, tick=DurationSeconds(10), until=T0 + timedelta(seconds=90)))
-    assert shown[0] == "g1:pregame" and shown[20] == "g1:pregame"  # pregame: matchup + countdown
-    assert shown[30] == "g1:live" and shown[50] == "g1:live"  # live: the live card takes over
-    assert shown[60] == "g1:final" and shown[80] == "g1:final"  # final: the result is revealed
+    g1 = "mlb:mlb_statsapi:g1"
+    assert shown[0] == shown[20] == f"{g1}:pregame"  # pregame: matchup + countdown
+    assert shown[30] == shown[50] == f"{g1}:live"  # live: the live card takes over
+    assert shown[60] == shown[80] == f"{g1}:final"  # final: the result is revealed
 
 
 def test_live_card_persists_through_inning_breaks() -> None:
@@ -125,7 +126,7 @@ def test_live_card_persists_through_inning_breaks() -> None:
     shown = _by_offset(
         replay(Timeline(frames=frames), profile=QUAD, tick=DurationSeconds(20), until=T0 + timedelta(seconds=60))
     )
-    assert set(shown.values()) == {"g1:live"}  # never drops across TOP/MIDDLE/BOTTOM/END
+    assert set(shown.values()) == {"mlb:mlb_statsapi:g1:live"}  # never drops across TOP/MIDDLE/BOTTOM/END
 
 
 def test_broadcast_delay_is_respected_end_to_end() -> None:
@@ -142,7 +143,7 @@ def test_broadcast_delay_is_respected_end_to_end() -> None:
         )
     )
     assert shown[0] is None and shown[10] is None and shown[20] is None  # inside the delay
-    assert shown[30] == "g1:live" and shown[40] == "g1:live"  # delayed state now eligible
+    assert shown[30] == shown[40] == "mlb:mlb_statsapi:g1:live"  # delayed state now eligible
 
 
 def test_replay_rejects_nonpositive_tick() -> None:
@@ -169,16 +170,17 @@ def test_replay_provider_serves_the_schedule_as_of_now() -> None:
 
 def test_decisions_list_each_change_on_the_board_with_its_reason() -> None:
     timeline = Timeline(frames=(_live(T0, "g1"), _live(T0, "g2")))
-    lines = replay_decisions(
+    header, *lines = replay_decisions(
         timeline, profile=QUAD, until=T0 + timedelta(seconds=60), broadcast_lag=DurationSeconds(30)
     )
+    assert header == replay_versions(QUAD, broadcast_lag=DurationSeconds(30)).header()
     assert lines[:6] == [
         "     0.0  source  fresh",
         "     0.0  frame   held  (2 games in the TV delay)",
-        "    30.0  up      g2:live  (rotation)",
-        "    42.0  down    g2:live  (ran its time, 12.0s)",
-        "    42.0  up      g1:live  (rotation)",
-        "    54.0  down    g1:live  (ran its time, 12.0s)",
+        "    30.0  up      mlb:mlb_statsapi:g2:live  (rotation)",
+        "    42.0  down    mlb:mlb_statsapi:g2:live  (ran its time, 12.0s)",
+        "    42.0  up      mlb:mlb_statsapi:g1:live  (rotation)",
+        "    54.0  down    mlb:mlb_statsapi:g1:live  (ran its time, 12.0s)",
     ]
 
 
@@ -190,17 +192,17 @@ def test_an_outage_dims_the_cards_then_takes_them_down_and_the_board_recovers() 
     provider = ReplayProvider(timeline)
     with pytest.raises(ProviderError, match="outage"):
         provider.refresh(T0 + timedelta(seconds=10))
-    lines = replay_decisions(timeline, profile=QUAD, until=T0 + timedelta(seconds=720))
+    _, *lines = replay_decisions(timeline, profile=QUAD, until=T0 + timedelta(seconds=720))
     assert lines == [
         "     0.0  source  fresh",
-        "     0.0  up      g1:live  (rotation)",
-        "    10.0  stale   g1:live",  # its feed stopped answering
+        "     0.0  up      mlb:mlb_statsapi:g1:live  (rotation)",
+        "    10.0  stale   mlb:mlb_statsapi:g1:live",  # its feed stopped answering
         "   129.0  source  stale  (no schedule for over 2m: ProviderError: replay outage)",
-        "   130.0  down    g1:live  (no longer current, 130.0s)",  # two minutes on, its last good comes down
+        "   130.0  down    mlb:mlb_statsapi:g1:live  (no longer current, 130.0s)",  # two minutes on, its last good comes down
         "   130.0  frame   offline  (no feed for a game)",
         "   609.0  source  offline  (no schedule for over 10m: ProviderError: replay outage)",
         "   700.0  source  fresh",
-        "   700.0  up      g1:live  (rotation)",
+        "   700.0  up      mlb:mlb_statsapi:g1:live  (rotation)",
     ]
 
 
@@ -213,14 +215,17 @@ def test_a_seek_moves_the_replay_s_wall_clock_and_what_was_held_still_clears_on_
     timeline = Timeline(frames=frames)
     lag = DurationSeconds(45)
     seek = Seek(at=T0 + timedelta(seconds=40), to=T0 + timedelta(seconds=640))
-    sought = replay_decisions(timeline, profile=QUAD, until=T0 + timedelta(seconds=700), broadcast_lag=lag, seek=seek)
-    plain = replay_decisions(timeline, profile=QUAD, until=T0 + timedelta(seconds=100), broadcast_lag=lag)
+    _, *sought = replay_decisions(
+        timeline, profile=QUAD, until=T0 + timedelta(seconds=700), broadcast_lag=lag, seek=seek
+    )
+    _, *plain = replay_decisions(timeline, profile=QUAD, until=T0 + timedelta(seconds=100), broadcast_lag=lag)
     assert sought[:3] == [
         "     0.0  source  fresh",
         "     0.0  frame   held  (a game in the TV delay)",
-        "   645.0  up      g1:live  (rotation)",  # its first state, received at 0, clears 45 s on
+        "   645.0  up      mlb:mlb_statsapi:g1:live  (rotation)",  # its first state, received at 0, clears 45 s on
     ]
-    assert sought[4] == "   675.0  up      g1:bigplay:g1:ab:1  (takeover)"  # 45 s after the play, not at the seek
+    # 45 s after the play, not at the seek:
+    assert sought[4] == "   675.0  up      mlb:mlb_statsapi:g1:bigplay:g1:ab:1  (takeover)"
     later = [line.replace(f"{float(line[:8]):8.1f}", f"{float(line[:8]) - 600:8.1f}", 1) for line in sought[2:]]
     assert later == plain[2 : 2 + len(later)]
 
@@ -233,17 +238,37 @@ def test_a_final_whose_feed_cant_be_read_shows_no_result_and_says_its_feed_is_mi
 
 @pytest.mark.parametrize("profile", list(PanelProfile))
 def test_the_slate_replays_to_its_recorded_decisions(profile: PanelProfile) -> None:
-    """The board decides alike on every profile; only the drawing differs."""
+    """The board decides alike on every profile; only the drawing differs. The profile is one of the
+    settings, so each profile's header carries its own digest."""
     from tests.mlb_slate import END, FAVORITES, LAG, slate
 
-    lines = replay_decisions(slate(), profile=profile, until=END, broadcast_lag=LAG, favorites=FAVORITES)
-    assert lines == SLATE_DECISIONS.read_text().splitlines()
+    header, *decided = replay_decisions(slate(), profile=profile, until=END, broadcast_lag=LAG, favorites=FAVORITES)
+    assert decided == SLATE_DECISIONS.read_text().splitlines()[1:]
+    assert header == replay_versions(profile, broadcast_lag=LAG, favorites=FAVORITES).header()
+
+
+def test_the_slate_s_recorded_decisions_open_with_what_made_them() -> None:
+    """The fixture was recorded on the quad board: today's policy, the slate's settings and the rule table."""
+    from tests.mlb_slate import FAVORITES, LAG
+
+    recorded = SLATE_DECISIONS.read_text().splitlines()[0]
+    assert recorded == replay_versions(QUAD, broadcast_lag=LAG, favorites=FAVORITES).header()
+    assert recorded == (
+        "versions: policy omni-board-policy/1 | config omni-config/1 c9cc6a61704f | rules omni-rules/2026.1"
+        " | models none"
+    )
+    assert replay_versions(QUAD, broadcast_lag=LAG, favorites=FAVORITES).config.canonical() == (
+        "delay=45s;favorites=mlb:ATL,mlb:COL;meter=off;odds=off;profile=quad_128x64;scroll_speed=slow;"
+        "takeover_cap=30s;turn=12s"
+    )
 
 
 def test_replay_samples_what_the_panel_showed_and_why() -> None:
     timeline = Timeline(frames=(_live(T0, "g1"),))
     trace = replay(timeline, profile=QUAD, tick=DurationSeconds(5), until=T0 + timedelta(seconds=10))
-    assert [(entry.shown, entry.reason) for entry in trace] == [("g1:live", SelectionReason.ROTATION)] * 3
+    assert [(entry.shown, entry.reason) for entry in trace] == [
+        ("mlb:mlb_statsapi:g1:live", SelectionReason.ROTATION)
+    ] * 3
 
 
 def test_a_card_that_never_drew_is_listed_as_dropped() -> None:
@@ -252,16 +277,16 @@ def test_a_card_that_never_drew_is_listed_as_dropped() -> None:
     from omni.tower.lane import ChangeKind, EndReason
 
     queue = InterleavedCardQueue()
-    queue.ingest(CardFactory().pregame(_game("g1", GameStatus.PREGAME), now=T0))
+    reading = ClockReading(T0, MonotonicTime(0.0))
+    queue.ingest(CardFactory().pregame(_game("g1", GameStatus.PREGAME), now=T0), reading)
     board = BoardSession(queue, QUAD, policy=BoardPolicy())
     board.publish(BoardHealth())
-    reading = ClockReading(T0, MonotonicTime(0.0))
     board.cue(reading)
-    queue.remove("g1:pregame")
+    queue.remove("mlb:mlb_statsapi:g1:pregame")
     board.publish(BoardHealth())
     board.cue(reading)
     (dropped,) = board.changes()
     assert dropped.kind is ChangeKind.DROPPED and dropped.reason is EndReason.INVALIDATED
-    assert _describe(dropped, None) == "drop    g1:pregame  (no longer current)"
+    assert _describe(dropped, None) == "drop    mlb:mlb_statsapi:g1:pregame  (no longer current)"
     up = dataclasses.replace(dropped, kind=ChangeKind.UP)
-    assert _describe(up, None) == "up      g1:pregame  (-)"
+    assert _describe(up, None) == "up      mlb:mlb_statsapi:g1:pregame  (-)"

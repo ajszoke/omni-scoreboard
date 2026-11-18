@@ -11,10 +11,12 @@ from dataclasses import dataclass
 from enum import Enum
 
 from omni.core.enum import HomeAway, StrEnumMixin
+from omni.domain.coverage import CoverageMap
 
 __all__ = [
     "CHALLENGES_PER_GAME",
     "FieldPosition",
+    "FootballField",
     "FootballGameState",
     "FootballInterval",
     "PlaySummary",
@@ -113,6 +115,20 @@ def other_side(side: HomeAway) -> HomeAway:
     return HomeAway.HOME if side is HomeAway.AWAY else HomeAway.AWAY
 
 
+class FootballField(StrEnumMixin, str, Enum):
+    """A part of a `FootballGameState` whose coverage is kept; a two-sided one covers both sides."""
+
+    SCORE = "score"
+    PERIOD = "period"
+    CLOCK = "clock"
+    INTERVAL = "interval"  # whether play is on, or which break the game is in
+    POSSESSION = "possession"
+    DOWN_DISTANCE = "down_distance"
+    SPOT = "spot"  # where the ball sits: its yards to the goal
+    TIMEOUTS = "timeouts"
+    CHALLENGES = "challenges"
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class FootballGameState:
     """One moment of a live football game.
@@ -135,6 +151,9 @@ class FootballGameState:
     challenges: TeamChallenges | None = None
     interval: FootballInterval | None = None
     set_piece: SetPiece | None = None
+    # What each field above rests on: whether a None is a gap in the feed or means there's nothing to show, and
+    # whether a value came from the scoreboard or was worked out from the plays.
+    coverage: CoverageMap[FootballField] = CoverageMap()
 
     def __post_init__(self) -> None:
         if self.period < 1:
@@ -149,6 +168,10 @@ class FootballGameState:
             raise ValueError("distance can't be negative")
         if self.yards_to_goal is not None and not 1 <= self.yards_to_goal <= 99:
             raise ValueError("yards to goal is 1..99")
+
+    def known(self, field: FootballField) -> bool:
+        """Whether ``field`` holds a value to reason from: reported, or worked out from plays that vouch for it."""
+        return self.coverage[field].known
 
     @property
     def is_overtime(self) -> bool:

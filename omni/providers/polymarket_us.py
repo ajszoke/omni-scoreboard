@@ -7,8 +7,11 @@ that only re-reads the same answer. With a key, a `QuoteStream` sharpens those r
 
 Each game has one moneyline market, named for its matchup and its date. The market's price is for one
 side of it, so which club that is gets read from the market itself rather than assumed from the name;
-getting it backward would show every game's meter leaning the wrong way. A doubleheader's markets are
-named some other way, so those games simply find no market here and the caller falls back.
+getting it backward would show every game's meter leaning the wrong way. A game is joined to a market
+(a `MarketLink`) only when the market also starts when the game does, and each join is kept under the
+game's full identity, so neither another league's game with the same raw id nor the other game of a
+doubleheader can read a market that isn't its own. A doubleheader's own markets are named some other
+way, so those games simply find no market here and the caller falls back.
 """
 
 from __future__ import annotations
@@ -21,6 +24,7 @@ from typing import Any, Protocol
 from urllib.error import HTTPError
 from zoneinfo import ZoneInfo
 
+from omni.core.ids import LeagueScopedId
 from omni.core.time import DurationSeconds
 from omni.domain.baseball import WinProbability
 from omni.domain.contest import TeamGame
@@ -28,6 +32,7 @@ from omni.providers.base import ProviderError
 
 __all__ = [
     "MarketFetcher",
+    "MarketLink",
     "MarketQuote",
     "MarketSample",
     "PolymarketUsProvider",
@@ -80,12 +85,21 @@ class QuoteStream(Protocol):
     def quote(self, slug: str) -> MarketQuote | None: ...
 
 
+@dataclass(frozen=True, slots=True)
+class MarketLink:
+    """A game joined to its market, as the market itself confirmed it: which game, which market, and
+    whether the market's price is for the away club (``away_is_long``) or the home one."""
+
+    contest: LeagueScopedId
+    slug: str
+    away_is_long: bool
+
+
 @dataclass(slots=True)
 class _TrackedGame:
-    """What is known of one game's market: its name once confirmed, and its latest quote while open."""
+    """What is known of one game's market: its link once confirmed, and its latest quote while open."""
 
-    slug: str | None = None
-    away_is_long: bool = True
+    link: MarketLink | None = None
     quote: MarketQuote | None = None
     read_at: datetime | None = None
 
@@ -103,7 +117,7 @@ class PolymarketUsProvider:
         self._fetch = fetch if fetch is not None else fetch_market_data
         self._stream = stream
         self._refresh_every = refresh_every.as_timedelta()
-        self._games: dict[str, _TrackedGame] = {}
+        self._games: dict[LeagueScopedId, _TrackedGame] = {}
 
     def win_probability(self, game: TeamGame, now: datetime) -> WinProbability | None:
         """The market's current read on ``game``, or None if it has no open, liquid market.
@@ -119,44 +133,46 @@ class PolymarketUsProvider:
         Raises `ProviderError` when a due refresh fails. The quote is cleared first, so a failure can
         never leave an old price looking current, and the next try waits out the full interval.
         """
-        tracked = self._games.get(game.id.raw)
+        tracked = self._games.get(game.id)
         if tracked is None:
             self._forget_old_games(now)
-            tracked = self._games[game.id.raw] = _TrackedGame()
+            tracked = self._games[game.id] = _TrackedGame()
         if tracked.read_at is None or now - tracked.read_at >= self._refresh_every:
             self._refresh(game, tracked, now)
-        if tracked.slug is None or tracked.quote is None:
+        if tracked.link is None or tracked.quote is None:
             return None
-        return self._sampled(tracked.slug, tracked.quote, away_is_long=tracked.away_is_long)
+        return self._sampled(tracked.link, tracked.quote)
 
     def _refresh(self, game: TeamGame, tracked: _TrackedGame, now: datetime) -> None:
         tracked.read_at, tracked.quote = now, None
         try:
-            if tracked.slug is None and not self._find_market(game, tracked):
+            if tracked.link is None:
+                tracked.link = self._find_market(game)
+            if tracked.link is None:
                 return
-            raw = self._fetch(f"/v1/markets/{tracked.slug}/bbo")
+            raw = self._fetch(f"/v1/markets/{tracked.link.slug}/bbo")
         except Exception as exc:
-            raise ProviderError(f"Polymarket US fetch failed for {game.id.raw}: {exc}") from exc
+            raise ProviderError(f"Polymarket US fetch failed for {game.id}: {exc}") from exc
         tracked.quote = _open_quote(raw)
 
-    def _sampled(self, slug: str, rest_quote: MarketQuote, *, away_is_long: bool) -> MarketSample:
+    def _sampled(self, link: MarketLink, rest_quote: MarketQuote) -> MarketSample:
         """A sample of a market REST calls open, on the stream's newer price if it has a usable one."""
         if self._stream is not None:
-            self._stream.watch(slug)
-            live = self._stream.quote(slug)
-            reading = _reading_from(live, away_is_long=away_is_long) if live is not None else None
+            self._stream.watch(link.slug)
+            live = self._stream.quote(link.slug)
+            reading = _reading_from(live, away_is_long=link.away_is_long) if live is not None else None
             if live is not None and reading is not None:
-                return MarketSample(slug=slug, quote=live, probability=reading, streamed=True)
-        reading = _reading_from(rest_quote, away_is_long=away_is_long)
-        return MarketSample(slug=slug, quote=rest_quote, probability=reading, streamed=False)
+                return MarketSample(slug=link.slug, quote=live, probability=reading, streamed=True)
+        reading = _reading_from(rest_quote, away_is_long=link.away_is_long)
+        return MarketSample(slug=link.slug, quote=rest_quote, probability=reading, streamed=False)
 
-    def _find_market(self, game: TeamGame, tracked: _TrackedGame) -> bool:
-        """Confirm this game's market and which club its price is for; False if it can't be confirmed."""
+    def _find_market(self, game: TeamGame) -> MarketLink | None:
+        """This game's market and which club its price is for, or None if the market can't confirm both."""
         slug = _market_slug(game)
         raw = self._fetch(f"/v1/market/slug/{slug}")
         market = (raw or {}).get("market") if isinstance(raw, dict) else None
         if not isinstance(market, dict) or not _starts_near(market, game):
-            return False
+            return None
         long_team = next(
             (
                 (side.get("team") or {}).get("abbreviation")
@@ -166,13 +182,10 @@ class PolymarketUsProvider:
             None,
         )
         if long_team == game.away.abbreviation.lower():
-            tracked.away_is_long = True
-        elif long_team == game.home.abbreviation.lower():
-            tracked.away_is_long = False
-        else:
-            return False
-        tracked.slug = slug
-        return True
+            return MarketLink(contest=game.id, slug=slug, away_is_long=True)
+        if long_team == game.home.abbreviation.lower():
+            return MarketLink(contest=game.id, slug=slug, away_is_long=False)
+        return None
 
     def _forget_old_games(self, now: datetime) -> None:
         self._games = {

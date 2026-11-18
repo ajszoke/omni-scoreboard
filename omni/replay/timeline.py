@@ -52,7 +52,7 @@ class GameFrame:
         if self.at.tzinfo is None:
             raise ValueError("frame `at` must be timezone-aware")
         if self.game.status is GameStatus.LIVE and self.state is None:
-            raise ValueError(f"LIVE frame for {self.game.id.raw} must carry game state")
+            raise ValueError(f"LIVE frame for {self.game.id} must carry game state")
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
