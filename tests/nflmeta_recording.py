@@ -36,7 +36,7 @@ def change(
 ) -> dict[str, Any]:
     """A play-feed change row."""
     return {
-        "change_id": change_id,
+        "change_id": str(change_id),  # the feed writes its change ids as strings of digits
         "change_type": PHRASE,
         "source_play_id": f"{PHRASE} {number}",
         "revision": revision,

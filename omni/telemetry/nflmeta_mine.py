@@ -275,8 +275,14 @@ def _page(body: Any) -> tuple[str | None, bool]:
 
 def _untyped(row: Mapping[str, Any]) -> tuple[int | None, datetime | None]:
     """What the provider doesn't type about a row: its change id (a play-feed row) and when the feed wrote it."""
-    change_id = row.get("change_id")
-    return (change_id if type(change_id) is int else None), _instant(row.get("changed_at"))
+    return _change_id(row.get("change_id")), _instant(row.get("changed_at"))
+
+
+def _change_id(raw: Any) -> int | None:
+    """A change id as a number: the feed writes it as a string of digits; a number is taken as it is."""
+    if type(raw) is int:
+        return raw
+    return int(raw) if isinstance(raw, str) and raw.isdigit() else None
 
 
 def _game_row(body: Any, game_id: int) -> Mapping[str, Any] | None:

@@ -494,3 +494,12 @@ def test_a_recording_the_provider_cant_read_cant_be_mined(tmp_path: Path) -> Non
     rec.scoreboard(0, game_row(phase="halfway"))
     with pytest.raises(ValueError, match="the provider read none of the recorded scoreboards"):
         mine(rec.folder)
+
+
+def test_a_change_id_is_read_as_the_feed_writes_it_a_string_of_digits() -> None:
+    from omni.telemetry.nflmeta_mine import _change_id
+
+    assert _change_id("40213") == 40213
+    assert _change_id(40213) == 40213
+    assert _change_id("c-7") is None
+    assert _change_id(None) is None
