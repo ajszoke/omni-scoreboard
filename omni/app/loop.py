@@ -21,6 +21,10 @@ The board refreshes and paints on separate cadences:
      Each league's health is its current scope's, judged on the monotonic clock. The board's is its
      healthiest league's, so one league going offline doesn't take another's cards down; with one league
      it is that league's. While a quota holds a league's current scope back, its reason says so.
+     A league is offline once `offline_after` has passed since a read of its scope was due. A scope's answer
+     counts as fresh for its `max_age`, which runs `FRESH_PAST_DUE` past when its next read falls due, so a
+     scope that is quiet by plan (NFL before kickoff, through a lone game's halftime hold, after the last final)
+     is never offline, and one that missed its due read goes offline `offline_after` later.
 - **`paint(at)`** asks the board (`BoardSession`) what should be up: a card, chosen by the queue and
   held by its dwell, or an explicit frame (idle, held, offline). It draws that through the
   `RendererRegistry`, a stale card dimmed, and commits it to the `DisplaySink`. The commit starts a
@@ -87,8 +91,10 @@ from omni.tower.board import (
 )
 from omni.tower.lane import ChangeKind, LaneChange, earliest
 from omni.tower.segment import Surface
+from omni.policy.settings import PolicySettings
 
 __all__ = [
+    "FRESH_PAST_DUE",
     "OFFLINE_AFTER",
     "AppLoop",
     "LeagueHealth",
@@ -99,8 +105,13 @@ __all__ = [
     "TickResult",
 ]
 
-# How long the schedule may go unanswered before the board takes its cards down and says it's offline.
+# How long past when a read of the schedule was due the board waits for an answer before it takes its cards down
+# and says it's offline.
 OFFLINE_AFTER = timedelta(minutes=10)
+
+# How long past when its next read falls due a scope's answer counts as fresh: every source's today (MLB's slate,
+# NFL's scopes, a supervised provider's). A scope's `max_age` is that much past its due read.
+FRESH_PAST_DUE = timedelta(minutes=2)
 
 # Why a quota is holding a scope's asks back, while it is: e.g. "quota: NFLMeta rows 8% left, background slowed".
 QuotaNote = Callable[[PollScope], str | None]
@@ -196,9 +207,14 @@ class AppLoop:
         offline_after: timedelta = OFFLINE_AFTER,
         quota: QuotaNote | None = None,
         football: LiveFootballPipeline | None = None,
+        settings: PolicySettings | None = None,
+        fresh_past_due: timedelta = FRESH_PAST_DUE,
     ) -> None:
         if not schedules:
             raise ValueError("a board needs at least one schedule source")
+        if settings is None:
+            settings = PolicySettings()
+        self._settings = settings  # what the user set about how the board shares its airtime
         self._schedules = tuple(schedules)
         self._store = store
         self._pipeline = pipeline
@@ -216,10 +232,16 @@ class AppLoop:
         self._lanes = LaneClock()  # when each line went up, by the card's time on the board
         self._display_timezone = display_timezone  # the zone board clocks read in; None -> the render clock's
         self._offline_after = offline_after
+        self._fresh_past_due = fresh_past_due
         self._quota = quota  # why a quota holds a scope back; None: no quota is consulted
         self._board = BoardSession(queue, sink.profile, policy=policy)
         self._frames = BoardFrameRenderer()
         self._health_changes_at: MonotonicTime | None = None  # when a league's health next changes by itself
+
+    @property
+    def settings(self) -> PolicySettings:
+        """The board policy's user settings this board runs with."""
+        return self._settings
 
     def refresh(self, at: ClockReading) -> Refresh:
         """One refresh as of ``at``: bring the cards up to date, and tell the board how its source stands."""
@@ -373,7 +395,8 @@ class AppLoop:
 
     def _judge(self, scope: ScopeHealth) -> LeagueHealth:
         """How far the board can trust a league's schedule, from its current scope's health. A quota holding
-        the scope back is the reason, fresh or not: it's why no newer answer came."""
+        the scope back is the reason, fresh or not: it's why no newer answer came. It's offline `offline_after`
+        past when a read of the scope was due."""
         league = scope.scope.league
         held = self._quota(scope.scope) if self._quota is not None else None
         error = held or scope.error or "no answer"
@@ -384,12 +407,13 @@ class AppLoop:
         # Ages are whole seconds, and a limit is passed only once a full second over it.
         second = timedelta(seconds=1)
         since = scope.fresh_from.monotonic
-        if scope.age > self._offline_after:
+        offline = max(scope.max_age - self._fresh_past_due, timedelta(0)) + self._offline_after
+        if scope.age > offline:
             reason = f"no schedule for over {_span(self._offline_after)}: {error}"
             return LeagueHealth(league=league, source=SourceHealth.OFFLINE, scope=scope, reason=reason)
         if scope.status is ProviderStatus.STALE:
             reason = f"no schedule for over {_span(scope.max_age)}: {error}"
-            changes_at = since + self._offline_after + second
+            changes_at = since + offline + second
             return LeagueHealth(
                 league=league, source=SourceHealth.STALE, scope=scope, reason=reason, changes_at=changes_at
             )

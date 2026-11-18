@@ -36,7 +36,9 @@ age, and its health goes stale naming the quota. MLB's asks spend their own acco
 
 **Feeds.** Each answer about a game is kept as its read returns, with when it arrived: `take` hands each over
 once, oldest first, and `latest` gives the newest. An answer the plan had given up on still counts, since the
-provider has already moved past the plays it brought.
+provider has already moved past the plays it brought. Each counts as current for two of its own read's cadence
+(`NflReading.current_for`): a favorite's game read every 10 s for 20 s, the others' read together every 45 s for
+90 s, so a card read at the others' pace isn't dimmed between its reads.
 """
 
 from __future__ import annotations
@@ -70,6 +72,7 @@ from omni.providers.nflmeta import (
 __all__ = ["LIVE_EVERY", "NFL_POLICIES", "NflSchedulePolicy", "PlannedNfl", "nfl_accounts"]
 
 LIVE_EVERY = timedelta(seconds=45)  # the other games' scores: each live score within 45 s
+_CURRENT_CADENCES = 2  # an answer counts as current for this many of its read's cadence
 _KEEP = 2048  # answers kept per game until taken: hours of a followed game's; a game nobody takes from keeps no more
 
 # The day list and a final's read are each made once; their cadence is only how often a failing one is asked
@@ -240,7 +243,9 @@ class PlannedNfl:
             not self._filed(today) and at.monotonic >= listing.listed.monotonic + self._policy.recheck_empty
         ):
             key = PollKey(PollSource.DAY_LIST, self._scope(today))
-            wants[key] = _Want(self._day_list(today), PollPriority.NORMAL, today)
+            wants[key] = _Want(
+                self._day_list(today, self._current_for(key, PollPriority.NORMAL)), PollPriority.NORMAL, today
+            )
         for day in (today, yesterday):
             playing: list[int] = []
             for game in self._filed(day):
@@ -249,16 +254,28 @@ class PlannedNfl:
                 if game.favorite:
                     if game.hold_ends is None or at.monotonic >= game.hold_ends:
                         key = PollKey(PollSource.FOLLOWED_GAME, game.contest.id)
-                        wants[key] = _Want(self._followed(game), PollPriority.FOCUS, day)
+                        wants[key] = _Want(
+                            self._followed(game, self._current_for(key, PollPriority.FOCUS)), PollPriority.FOCUS, day
+                        )
                 elif game.ended:
                     key = PollKey(PollSource.FINAL_SCORE, game.contest.id)
-                    wants[key] = _Want(self._final(game), PollPriority.BACKGROUND, day)
+                    wants[key] = _Want(
+                        self._final(game, self._current_for(key, PollPriority.BACKGROUND)), PollPriority.BACKGROUND, day
+                    )
                 else:
                     playing.append(int(game.contest.id.raw))
             if playing:
                 key = PollKey(PollSource.LIVE_SCORES, self._scope(day))
-                wants[key] = _Want(self._live(day, tuple(playing)), PollPriority.NORMAL, day)
+                wants[key] = _Want(
+                    self._live(day, tuple(playing), self._current_for(key, PollPriority.NORMAL)),
+                    PollPriority.NORMAL,
+                    day,
+                )
         return wants
+
+    def _current_for(self, key: PollKey[Any], priority: PollPriority) -> timedelta:
+        """How long an answer to ``key``, asked as ``priority``, counts as current: two of the cadence it's read at."""
+        return self._plan.policy(key.source).cadence(priority) * _CURRENT_CADENCES
 
     def _max_age(self, today: date, yesterday: date, at: ClockReading) -> timedelta:
         """How long today's answer counts as fresh: `NflSchedulePolicy.fresh_for` past when a read fell due, or
@@ -336,7 +353,7 @@ class PlannedNfl:
 
     # --- the reads, filed as they return -------------------------------------------------------------------
 
-    def _day_list(self, day: date) -> Callable[[datetime], NflSlate]:
+    def _day_list(self, day: date, current_for: timedelta) -> Callable[[datetime], NflSlate]:
         def fetch(asked: datetime) -> NflSlate:
             slate = self._provider.day_list()
             arrived = self._clock.read()
@@ -346,19 +363,19 @@ class PlannedNfl:
                 for snapshot in slate.snapshots:
                     filed = local_date(snapshot.game.scheduled_start, self._zone)
                     if filed in (day, day - timedelta(days=1)):  # another date's game is that date's to list
-                        self._file(snapshot, filed, arrived)
+                        self._file(snapshot, filed, arrived, current_for)
             return slate
 
         return fetch
 
-    def _live(self, day: date, game_ids: tuple[int, ...]) -> Callable[[datetime], NflSlate]:
+    def _live(self, day: date, game_ids: tuple[int, ...], current_for: timedelta) -> Callable[[datetime], NflSlate]:
         def fetch(asked: datetime) -> NflSlate:
             slate = self._provider.live_scores(game_ids)
             arrived = self._clock.read()
             unlisted = set(game_ids) - slate.listed
             with self._lock:
                 for snapshot in slate.snapshots:
-                    self._file(snapshot, day, arrived)
+                    self._file(snapshot, day, arrived, current_for)
                 for game in self._games.values():
                     if game.seen_in and int(game.contest.id.raw) in unlisted:
                         game.ended = True  # no longer in progress: its final is read next
@@ -366,19 +383,19 @@ class PlannedNfl:
 
         return fetch
 
-    def _final(self, game: _Game) -> Callable[[datetime], NflLiveSnapshot]:
+    def _final(self, game: _Game, current_for: timedelta) -> Callable[[datetime], NflLiveSnapshot]:
         game_id, day = int(game.contest.id.raw), game.day
 
         def fetch(asked: datetime) -> NflLiveSnapshot:
             snapshot = self._provider.scoreboard(game_id)
             arrived = self._clock.read()
             with self._lock:
-                self._file(snapshot, day, arrived)
+                self._file(snapshot, day, arrived, current_for)
             return snapshot
 
         return fetch
 
-    def _followed(self, game: _Game) -> Callable[[datetime], NflLiveSnapshot]:
+    def _followed(self, game: _Game, current_for: timedelta) -> Callable[[datetime], NflLiveSnapshot]:
         game_id, day = int(game.contest.id.raw), game.day
 
         def fetch(asked: datetime) -> NflLiveSnapshot:
@@ -387,14 +404,15 @@ class PlannedNfl:
                 hold_ends = self._provider.hold_ends(game_id)
             arrived = self._clock.read()
             with self._lock:
-                self._file(snapshot, day, arrived).hold_ends = hold_ends
+                self._file(snapshot, day, arrived, current_for).hold_ends = hold_ends
             return snapshot
 
         return fetch
 
-    def _file(self, snapshot: NflLiveSnapshot, day: date, arrived: ClockReading) -> _Game:
-        """Keep an answer about a game: its newest, one more to take, and where the game stands."""
-        reading = NflReading(snapshot, arrived)
+    def _file(self, snapshot: NflLiveSnapshot, day: date, arrived: ClockReading, current_for: timedelta) -> _Game:
+        """Keep an answer about a game, current for ``current_for``: its newest, one more to take, and where the game
+        stands."""
+        reading = NflReading(snapshot, arrived, current_for)
         game = self._games.get(snapshot.game.id)
         if game is None:
             favorite = self._favorites.of(snapshot.game) is not None

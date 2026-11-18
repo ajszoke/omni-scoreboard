@@ -431,6 +431,20 @@ def test_take_hands_over_each_answer_once_in_arrival_order_and_latest_the_newest
     assert board.planned.take(stranger) == [] and board.planned.latest(stranger) is None
 
 
+def test_an_answer_counts_as_current_for_two_of_its_own_read_s_cadence() -> None:
+    board = _board(_et(SUNDAY, 13))
+    _sunday(board, CAR_ATL, PIT_CIN)
+    _start(board, 101, 102)
+    board.run(_et(SUNDAY, 13, 0, 55))
+    pit, car = board.planned.take(_game(board, 102)), board.planned.take(_game(board, 101))
+    assert [reading.current_for for reading in pit] == [120 * S, 90 * S, 90 * S]  # the day's list, then the others'
+    assert {reading.current_for for reading in car[1:]} == {20 * S}  # the favorite's own read, every 10 s
+    _end(board, 102)
+    board.run(_et(SUNDAY, 13, 2, 0))
+    [*_, final] = board.planned.take(_game(board, 102))
+    assert final.current_for == 120 * S  # its final, read once, retried each minute
+
+
 # --- failures and the quota ----------------------------------------------------------------------------------
 
 

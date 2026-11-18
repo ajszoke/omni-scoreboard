@@ -7,10 +7,15 @@ from typing import Any
 
 import pytest
 
-from omni.app.__main__ import _parse_args
+from omni.app.__main__ import _leagues_on, _parse_args
 from omni.app.display import RecordingDisplaySink
 from omni.app.pipeline import MeterReading
-from omni.app.runner import build_loop, paint_frame
+from omni.app.planned_mlb import PlannedMlb, mlb_accounts
+from omni.app.poll_plan import PollSource
+from omni.app.poller import Poller
+from omni.app.quota import NflMetaPlan, ProviderAccount, QuotaLedger, account_limits
+from omni.app.runner import _no_baseball, board_plan, build_loop, build_planned_loop, paint_frame, planned_nfl_source
+from omni.app.versions import PolicyName
 from omni.cards.base import ScoreboardCard
 from omni.core.clock import ClockReading, FakeClock, MonotonicTime
 from omni.core.enum import GameStatus, League, PanelProfile
@@ -19,8 +24,10 @@ from omni.core.time import DurationSeconds
 from omni.domain.baseball import BaseballBaseState, BaseballCount, BaseballGameState, InningPhase, WinProbability
 from omni.domain.contest import TeamGame
 from omni.events.baseball import LiveBaseballFeed
+from omni.policy.settings import Mutes, PolicySettings
 from omni.preferences.favorites import Favorites
-from omni.providers.base import ProviderUpdate
+from omni.providers.base import ProviderError, ProviderUpdate
+from omni.providers.nflmeta import NFLMETA_SOURCE
 from omni.providers.mlb_teams import MlbTeamRegistry
 from omni.queue.scheduler import Pick
 from omni.renderers.canvas import Canvas, RecordingCanvas
@@ -29,6 +36,8 @@ from omni.renderers.image import LogoStore
 from omni.renderers.registry import RendererRegistry, default_registry
 from omni.renderers.text_lane import TextLane
 from omni.tower.lane import ChangeKind
+from tests.test_planned_mlb import _FakeMlb
+from tests.test_planned_nfl import SUNDAY, _et, _NflMeta, _row
 
 _REG = MlbTeamRegistry.from_color_file()
 SOURCE = SourceRef("mlb_statsapi", "https://statsapi.mlb.com")
@@ -273,3 +282,140 @@ def test_an_unknown_favorite_stops_the_app_with_a_usage_error_naming_it(
         _parse_args(["--profile", "quad_128x64", "--favorite", entry])
     assert exit_.value.code == 2
     assert f"error: --favorite {entry}: {message}" in capsys.readouterr().err
+
+
+# --- which leagues run, and the board policy's settings ------------------------------------------------------------
+
+
+def test_the_board_runs_mlb_and_nfl_unless_told_otherwise() -> None:
+    assert _parse_args(["--profile", "quad_128x64"]).leagues == {League.MLB, League.NFL}
+    assert _parse_args(["--profile", "quad_128x64", "--leagues", "mlb"]).leagues == {League.MLB}
+    assert _parse_args(["--profile", "quad_128x64", "--leagues", " NFL , mlb"]).leagues == {League.MLB, League.NFL}
+
+
+@pytest.mark.parametrize(
+    ("leagues", "message"),
+    [
+        ("mlb,nba", "--leagues mlb,nba: the board can't run nba yet (only mlb and nfl)"),
+        ("xfl", "--leagues xfl: unknown league 'xfl'"),
+        (",", "--leagues: name at least one league"),
+    ],
+)
+def test_a_league_the_board_can_t_run_stops_the_app_with_a_usage_error_naming_it(
+    leagues: str, message: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as exit_:
+        _parse_args(["--profile", "quad_128x64", "--leagues", leagues])
+    assert exit_.value.code == 2 and message in capsys.readouterr().err
+
+
+def test_without_an_nflmeta_key_nfl_is_off_said_once_and_mlb_runs_alone() -> None:
+    said: list[str] = []
+    both = _parse_args(["--profile", "quad_128x64"])
+    assert _leagues_on(both, None, said.append) == {League.MLB}
+    assert said == ["omni.app: NFL is off: set NFLMETA_API_KEY in the environment or .env to put NFL on the board"]
+    said.clear()
+    assert _leagues_on(both, "a-key", said.append) == {League.MLB, League.NFL} and said == []
+    assert _leagues_on(_parse_args(["--profile", "quad_128x64", "--leagues", "mlb"]), None, said.append) == {League.MLB}
+    assert said == []  # NFL wasn't asked for, so nothing's missing
+    with pytest.raises(SystemExit, match="it's the only league asked for"):
+        _leagues_on(_parse_args(["--profile", "quad_128x64", "--leagues", "nfl"]), None, said.append)
+
+
+def test_the_board_policy_s_settings_default_to_policy_two_with_promotions_and_nothing_muted_or_weighted() -> None:
+    assert _parse_args(["--profile", "quad_128x64"]).settings == PolicySettings()
+
+
+def test_the_board_policy_s_settings_come_from_their_flags() -> None:
+    flags = ["--board-policy", "1", "--mute", "nba", "--mute", "nfl:dal", "--mute", "mlb:COL", "--slot", "10"]
+    flags += ["--league-weight", "nfl=1.5", "--league-weight", "mlb=0.5", "--league-weight", "mlb=1", "--no-promotions"]
+    settings = _parse_args(["--profile", "quad_128x64", *flags]).settings
+    assert settings.policy is PolicyName.BOARD_V1 and not settings.promotions and settings.slot == timedelta(seconds=10)
+    assert settings.mutes == Mutes.of({League.NBA}, {League.NFL: ["DAL"], League.MLB: ["COL"]})
+    assert dict(settings.league_weights) == {League.NFL: 1.5}  # a weight of 1 is the default, and the last one stands
+
+
+@pytest.mark.parametrize(
+    ("flags", "message"),
+    [
+        (["--mute", "nfl:XYZ"], "--mute nfl:XYZ: no NFL team 'XYZ'"),
+        (["--mute", "xfl"], "--mute xfl: unknown league 'xfl'"),
+        (["--league-weight", "nfl=3"], "nfl's weight 3.0 is outside 0.5-2.0"),
+        (["--league-weight", "nfl"], "--league-weight nfl: give a weight, e.g. nfl=1.5"),
+        (["--league-weight", "nfl=lots"], "--league-weight nfl=lots: give a weight, e.g. nfl=1.5"),
+        (["--slot", "5"], "a turn of 5s is outside 8-30s"),
+        (["--board-policy", "3"], "--board-policy: invalid choice: '3'"),
+    ],
+)
+def test_a_board_policy_setting_out_of_bounds_stops_the_app_with_a_usage_error_naming_it(
+    flags: list[str], message: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as exit_:
+        _parse_args(["--profile", "quad_128x64", *flags])
+    assert exit_.value.code == 2 and message in capsys.readouterr().err
+
+
+# --- both leagues on one plan ---------------------------------------------------------------------------------------
+
+
+def test_the_app_s_board_asks_mlb_and_nfl_through_one_plan_each_ask_spending_its_own_account() -> None:
+    clock = FakeClock(_et(SUNDAY, 13, 5))
+    ledger = QuotaLedger(account_limits(NflMetaPlan.BUILDER))
+    plan = board_plan(ledger=ledger, mlb=mlb_accounts(_FakeMlb.source), nfl=True)
+    assert plan.accounts is not None
+    assert plan.accounts.account(PollSource.SLATE, _FakeMlb.source) is ProviderAccount.MLB_STATSAPI
+    assert plan.accounts.account(PollSource.LIVE_SCORES, NFLMETA_SOURCE) is ProviderAccount.NFLMETA
+    statsapi = _FakeMlb(clock)
+    baseball = TeamGame(
+        id=LeagueScopedId(League.MLB, _FakeMlb.source, "g1"),
+        league=League.MLB,
+        status=GameStatus.LIVE,
+        scheduled_start=_et(SUNDAY, 13),
+        away=_REG.resolve(115),
+        home=_REG.resolve(119),
+    )
+    statsapi.slates = {SUNDAY: (baseball,)}
+    nflmeta = _NflMeta(clock)
+    nflmeta.rows[101] = _row(101, "CAR", "ATL", _et(SUNDAY, 13), phase="in")
+    nflmeta.rows[102] = _row(102, "PIT", "CIN", _et(SUNDAY, 13), phase="in")
+    nfl = planned_nfl_source(plan, clock, nflmeta, ledger=ledger, favorites=Favorites({League.NFL: ["CAR"]}))
+    planned = PlannedMlb(plan, clock, statsapi, favorites=Favorites({League.MLB: ["ATL"]}))
+    loop = build_planned_loop(
+        planned, RecordingDisplaySink(PanelProfile.QUAD_128X64), nfl=nfl, broadcast_lag=DurationSeconds(0)
+    )
+    poller = Poller(plan, clock)
+    for _ in range(4):
+        loop.refresh(clock.read())
+        poller.run_due()
+        clock.advance(timedelta(seconds=5))
+    refresh = loop.refresh(clock.read())
+    assert set(refresh.policy.games) == {
+        baseball.id,
+        LeagueScopedId(League.NFL, NFLMETA_SOURCE, "101"),
+        LeagueScopedId(League.NFL, NFLMETA_SOURCE, "102"),
+    }
+    assert [league.league for league in refresh.leagues] == [League.MLB, League.NFL]
+    assert ledger.usage(ProviderAccount.NFLMETA, clock.read()).requests == len(nflmeta.requests) > 0
+    assert statsapi.asked  # MLB's reads went out on the same plan
+
+
+def test_a_board_without_mlb_runs_nfl_alone_and_never_reads_a_baseball_feed() -> None:
+    clock = FakeClock(_et(SUNDAY, 13, 5))
+    ledger = QuotaLedger(account_limits(NflMetaPlan.BUILDER))
+    plan = board_plan(ledger=ledger, mlb=None, nfl=True)
+    nflmeta = _NflMeta(clock)
+    nflmeta.rows[102] = _row(102, "PIT", "CIN", _et(SUNDAY, 13), phase="in")
+    nfl = planned_nfl_source(plan, clock, nflmeta, ledger=ledger)
+    loop = build_planned_loop(None, RecordingDisplaySink(PanelProfile.QUAD_128X64), nfl=nfl)
+    poller = Poller(plan, clock)
+    for _ in range(3):
+        loop.refresh(clock.read())
+        poller.run_due()
+        clock.advance(timedelta(seconds=5))
+    refresh = loop.refresh(clock.read())
+    assert set(refresh.policy.games) == {LeagueScopedId(League.NFL, NFLMETA_SOURCE, "102")}
+    assert [league.league for league in refresh.leagues] == [League.NFL]
+    with pytest.raises(ProviderError, match="MLB isn't on this board"):
+        _no_baseball(_game(), T)  # what its baseball pipeline would read, if a baseball game ever reached it
+    with pytest.raises(ValueError, match="at least one league"):
+        board_plan(ledger=ledger, mlb=None, nfl=False)

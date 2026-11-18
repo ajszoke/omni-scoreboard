@@ -18,26 +18,31 @@ header, which leaves out the code's commit (it changes every commit, and replay 
 the migrations (a replay is given its settings typed).
 
 The record lives with the running app because its settings are the app's: favorites, the scroll speed,
-the play feed's pace. Replays build on the app the same way.
+the play feed's pace, and the board policy's own (`omni.policy.settings`): which policy decides, the mutes, the
+league weights and whether promotions may cut in. Replays build on the app the same way.
 """
 
 from __future__ import annotations
 
 import hashlib
 import subprocess
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, fields
 from datetime import timedelta
 from enum import Enum
 from pathlib import Path
+from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
+from omni.core.enum import League, PanelProfile, StrEnumMixin
 from omni.policy.names import PolicyName
-from omni.core.enum import PanelProfile, StrEnumMixin
 from omni.domain.rules import RulesVersion
 from omni.preferences.favorites import AppliedMigration, Favorites
 from omni.providers.nflmeta import PlayFeedPace
 from omni.renderers.text_lane import ScrollSpeed
+
+if TYPE_CHECKING:  # the settings name their policies here, so only the type checker reads them back
+    from omni.policy.settings import Mutes
 
 __all__ = [
     "CONFIG_SCHEMA",
@@ -82,6 +87,11 @@ class DecisionConfig:
     halftime_hold: timedelta | None = None  # how long after halftime begins the feed isn't asked
     play_feed: PlayFeedPace | None = None
     meter_lag: timedelta | None = None  # how far the win meter trails the market
+    policy: PolicyName | None = None  # the board policy the settings choose
+    mutes: Mutes | None = None  # leagues and teams never shown
+    league_weights: Mapping[League, float] | None = None  # each league's weight the user set; the rest weigh 1
+    promotions: bool | None = None  # whether big moments elsewhere may cut in
+    nfl_delay: timedelta | None = None  # the broadcast delay NFL's games are held back by
 
     def canonical(self) -> str:
         """The settings in force, sorted by name, e.g. ``delay=45s;favorites=mlb:ATL,mlb:COL;meter=off;...``."""
@@ -156,7 +166,7 @@ def _git(command: Sequence[str]) -> str:  # pragma: no cover - runs git
     return subprocess.run(command, capture_output=True, text=True, timeout=5).stdout
 
 
-def _rendered(value: bool | timedelta | Favorites | ZoneInfo | Enum) -> str:
+def _rendered(value: bool | timedelta | Favorites | ZoneInfo | Enum | Mapping[League, float] | Mutes) -> str:
     """One setting as the canonical rendering writes it."""
     if isinstance(value, bool):
         return "on" if value else "off"
@@ -166,7 +176,13 @@ def _rendered(value: bool | timedelta | Favorites | ZoneInfo | Enum) -> str:
         return ",".join(f"{league}:{team}" for league, teams in value.ranked for team in teams) or "none"
     if isinstance(value, ZoneInfo):
         return value.key
-    return str(value.value)
+    if isinstance(value, Enum):
+        return str(value.value)
+    if isinstance(value, Mapping):  # league weights, in the leagues' order
+        return ",".join(f"{league}={value[league]:g}" for league in League if league in value) or "none"
+    muted = [league.value for league in League if league in value.leagues]
+    muted += [f"{league}:{team}" for league in League for team in sorted(value.teams.get(league, ()))]
+    return ",".join(muted) or "none"
 
 
 def _migration(applied: AppliedMigration) -> str:
