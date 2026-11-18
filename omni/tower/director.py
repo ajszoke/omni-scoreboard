@@ -1,0 +1,1120 @@
+"""PolicyDirector: how the shared board shares its airtime under `omni-board-policy/2` (`BOARD_POLICY.md` §3-§6).
+
+The board (`omni.tower.board.BoardSession`) keeps the card contract: dwell from the display's commit, a card that
+leaves or expires coming down, a card it can't draw set aside, the explicit frames. Under policy v2 it asks the
+director, from the input last published (the cards, their source's health, and the `PolicyView` of released
+facts), what should go up next and whether the card on air should give way. The director owns the policy's state
+for one board: the airtime ledger, the promotion broker, the lease book and the run of non-base cards.
+
+**The live pool.** A game is in it when the view's facts describe it (released and live), it isn't muted, and its
+base card (its live card, or the final that replaced it) is in the cards and drawable on the panel. A delay or a
+suspension is a status card, not a pool entry.
+
+**A legal decision** comes once the card on air has had its minimum. A base turn's protection runs from the first
+frame of its game's card, so a game that wins again keeps its frame without a new minimum, and the base card that
+follows an unpromoted big play within its turn inherits the turn's. At each:
+- a guest of a favorite's break that has closed gives the board back (`yield_after_break`);
+- an unpromoted big play, first in its game's turn, hands over to the game's base card at its own minimum;
+- a promotion may cut into a base turn, unless it's the reserved recovery;
+- once a turn has run its length, the ladder (`choose_rung`) picks what's next: an owed recovery, an overdue
+  rescue, a promotion, an initial final in end order, a due pregame, status or repeat, then the weighted base.
+  With nothing live to weigh, the cards on hand rotate at neutral weight, the longest unseen first.
+
+**Base turns** go by debt (`targets`, `AirtimeLedger.choose`), league first, then game; the same game winning again
+keeps its frame. When favorites are in breaks and none is in action, another game's card is their guest: it must
+fit what's left of each lease with the return margin, or the board goes back to the favorite. A base turn is
+credited with its confirmed time when it ends or is cut short; nothing accrues during other cards.
+
+**Promotions** reach the broker as the view offers them. The broker says when one may start (the bars, the 24 s
+hold, lifetimes, the 60 s cooldown); the director adds what the broker leaves to the board: protected minimums,
+drawability, the non-base cap. A start counts only at the card's first committed frame, so a cue that never lands
+spends nothing. A non-base card waiting on its promotion airs by no other route meanwhile.
+
+**Leases** open on the view's released break evidence and close on newer released action. The evidence's release
+is taken as the first decision that read a view holding it (the facts don't carry the instant); the lease is
+anchored there, less the age the break already had when its evidence arrived. On an outage the lease book and the
+ledger start over.
+
+**NFL's caption in rotation:** within a base turn, a live football card shows a caption once, for 10 s, only if the
+turn has 10 s of runway left for it; otherwise it's drawn as the field alone (its payload without ``last_play``).
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass, replace
+from datetime import timedelta
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Any
+
+from omni.cards.base import CardKind, DedupeKey, ScoreboardCard
+from omni.cards.baseball import StatusCardPayload
+from omni.cards.football import LiveFootballCardPayload
+from omni.core.clock import ClockReading, MonotonicTime
+from omni.core.enum import League, PanelProfile
+from omni.core.ids import LeagueScopedId
+from omni.domain.breaks import BreakId
+from omni.domain.contest import Contest, TeamGame
+from omni.domain.football import PlaySummary
+from omni.policy.allocation import AllocationPolicy, AllocationSettings, SetAsideReason, Targets, targets
+from omni.policy.interrupts import BarContext
+from omni.policy.ladder import (
+    CardTimingPolicy,
+    LadderPolicy,
+    LadderRefusal,
+    NonBaseRun,
+    OpenTime,
+    Rung,
+    Tenure,
+    choose_rung,
+    favorite_status_due,
+    final_repeat_due,
+    initial_final_permitted,
+    pregame_due,
+    pregame_permitted,
+    yield_after_break,
+)
+from omni.policy.leases import Lease, LeaseBook, LeasePolicy, LeaseRefusal, LeaseState
+from omni.policy.ledger import AirtimeLedger, ChoiceReason, Rescue
+from omni.policy.pool import PoolEntry
+from omni.policy.promotion import (
+    OfferOutcome,
+    PromotionBroker,
+    PromotionCandidate,
+    PromotionKey,
+    PromotionKind,
+    PromotionMoment,
+    PromotionPolicy,
+    PromotionRefusal,
+)
+from omni.policy.view import PolicyView
+from omni.preferences.favorites import Favorites
+from omni.queue.scheduler import CardView, SelectionReason
+from omni.tower.decisions import (
+    BREAK_WORDS,
+    BaseReason,
+    BaseTurnNote,
+    CapNote,
+    CardNote,
+    CardRole,
+    ClampNote,
+    GuestNote,
+    LeaseEvent,
+    LeaseNote,
+    OfferSkip,
+    PolicyDecision,
+    PromotionNote,
+    UnspentNote,
+    WaitNote,
+    YieldNote,
+    event_words,
+    rank_words,
+    status_words,
+)
+from omni.tower.board import muted
+from omni.tower.lane import EndReason, earliest
+
+if TYPE_CHECKING:  # the settings' module imports the app's versions, whose package imports the board
+    from omni.policy.settings import PolicySettings
+
+__all__ = ["Air", "DirectorPolicy", "PolicyDirector", "Turn"]
+
+_ZERO = timedelta(0)
+_BASE_RUNGS = (Rung.BASE_RECOVERY, Rung.RESCUE, Rung.BASE)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class DirectorPolicy:
+    """The policy objects the director runs, and what the board adds to them: the NFL caption's run in rotation, a
+    status card's turn, the poll interval that comes off a break whose onset is uncertain, and the leverage
+    weights the "why" sentence calls a close late game, or a lopsided one."""
+
+    allocation: AllocationPolicy = AllocationPolicy()
+    promotion: PromotionPolicy = PromotionPolicy()
+    leases: LeasePolicy = LeasePolicy()
+    ladder: LadderPolicy = LadderPolicy()
+    timing: CardTimingPolicy = CardTimingPolicy()
+    caption: timedelta = timedelta(seconds=10)
+    status: timedelta = timedelta(seconds=8)
+    # How often each league's live game feed is read: MLB's every 15 s, NFL's favorite every 10 s.
+    poll_intervals: tuple[tuple[League, timedelta], ...] = (
+        (League.MLB, timedelta(seconds=15)),
+        (League.NFL, timedelta(seconds=10)),
+        (League.NBA, timedelta(seconds=15)),
+    )
+    other_polls: timedelta = timedelta(seconds=15)  # a league not listed
+    close_late: float = 0.6  # G at or above this reads as a close late game
+    lopsided: float = 0.15  # G below this reads as a lopsided game
+
+    def __post_init__(self) -> None:
+        if self.caption <= _ZERO or self.status <= _ZERO:
+            raise ValueError("a caption's and a status card's runs must be positive")
+
+    def poll_interval(self, league: League) -> timedelta:
+        """How long one read of a league's live game feed can lag."""
+        return next((every for each, every in self.poll_intervals if each is league), self.other_polls)
+
+    def turn(self, card: ScoreboardCard[Any], slot: timedelta) -> timedelta:
+        """An ordinary card's nominal turn: 8 s for a final, a pregame or a status, otherwise the board's slot."""
+        return {
+            CardKind.FINAL: self.timing.final,
+            CardKind.PREGAME: self.timing.pregame,
+            CardKind.STATUS: self.status,
+        }.get(card.kind, slot)
+
+
+@dataclass(slots=True, kw_only=True)
+class Turn:
+    """One decision's hold on the board: a game's base turn (whichever of its cards is up), a promotion, or an
+    ordinary card. Its length counts from its first confirmed frame."""
+
+    role: CardRole
+    rung: Rung
+    length: timedelta
+    minimum: timedelta
+    tenure: Tenure
+    contest: LeagueScopedId
+    targets: Targets | None = None  # a base turn: the targets it was chosen by, which credit it
+    reason: BaseReason | None = None  # a base turn: why its game won
+    rescue: Rescue | None = None
+    hosts: tuple[LeagueScopedId, ...] = ()  # the favorites whose break it's a guest of
+    candidate: PromotionCandidate[DedupeKey] | None = None
+    why: str = ""
+    started: MonotonicTime | None = None
+    ended: bool = False
+    captioned: bool = False  # a caption has aired in it
+    yield_at: MonotonicTime | None = None  # a guest whose host's break closed: when it gives the board back
+
+    @property
+    def base(self) -> bool:
+        return self.rung in _BASE_RUNGS
+
+
+@dataclass(slots=True, kw_only=True)
+class Air:
+    """A card the director put up: as the view holds it (what the queue books), as drawn, and the turn it's in."""
+
+    card: ScoreboardCard[Any]
+    shown: ScoreboardCard[Any]
+    role: CardRole
+    minimum: timedelta  # its own, before it may hand over within its turn
+    turn: Turn
+    since: MonotonicTime | None = None  # its first confirmed frame
+    protected: MonotonicTime | None = None  # until when nothing ordinary may take its place
+    caption_until: MonotonicTime | None = None
+
+    @property
+    def reason(self) -> SelectionReason:
+        """The queue's word for why it's up, for the cue and the trace's up line."""
+        candidate = self.turn.candidate
+        if candidate is None:
+            return SelectionReason.ROTATION
+        return SelectionReason.REMINDER if candidate.kind is PromotionKind.REMINDER else SelectionReason.TAKEOVER
+
+
+@dataclass(frozen=True, slots=True)
+class _Scene:
+    """What one decision reads: the cards that may air now, the live pool, and the favorites' moment."""
+
+    at: ClockReading
+    view: CardView
+    usable: Mapping[str, ScoreboardCard[Any]]  # in their window with time for their minimum, drawable, not muted
+    base: Mapping[LeagueScopedId, ScoreboardCard[Any]]  # each pool game's base card
+    entries: tuple[PoolEntry, ...]
+    pool: Targets
+    moment: PromotionMoment
+    hosts: tuple[LeagueScopedId, ...]  # favorites in an open break while none is in action, best rank first
+    reserved: frozenset[str]  # non-base cards waiting on their promotion
+
+    @property
+    def now(self) -> MonotonicTime:
+        return self.at.monotonic
+
+    def entry(self, contest: LeagueScopedId) -> PoolEntry:
+        return next(entry for entry in self.entries if entry.contest == contest)
+
+
+@dataclass(frozen=True, slots=True)
+class _Option:
+    """A card the ladder could put up, at its rung."""
+
+    rung: Rung
+    air: Air
+
+
+class PolicyDirector:
+    """The policy's state for one board, and its answers at each decision."""
+
+    def __init__(
+        self,
+        profile: PanelProfile,
+        settings: PolicySettings,
+        *,
+        favorites: Favorites,
+        aired: Callable[[str], bool],
+        policy: DirectorPolicy = DirectorPolicy(),
+    ) -> None:
+        self._profile = profile
+        self._settings = settings
+        self._favorites = favorites
+        self._aired = aired  # whether the queue has booked a card
+        self._policy = policy
+        self._allocation = AllocationSettings(settings.league_weights, slot=settings.slot)
+        self._seasons = frozenset(league for league, _ in policy.allocation.season_games)
+        self._ledger = AirtimeLedger(policy=policy.allocation)
+        self._broker = PromotionBroker[DedupeKey](policy.promotion)
+        self._leases = LeaseBook(policy.leases)
+        self._run = NonBaseRun()
+        self._recovery_owed = False
+        self._cards: CardView | None = None
+        self._view = PolicyView()
+        self._offline = False
+        self._games: set[LeagueScopedId] = set()  # the games the facts last described
+        self._actions: dict[LeagueScopedId, str] = {}  # each game's newest action marker seen
+        self._lapsed: set[BreakId] = set()  # leases whose lapse is written
+        self._frozen: set[LeagueScopedId] = set()
+        self._accounts: set[LeagueScopedId] = set()  # games the ledger may hold an account for
+        self._next: Air | None = None  # the card to put up next, decided as the one before came down
+        self._current: Turn | None = None
+        self._context = BarContext.OPEN  # the favorites' context at the last decision
+        self._shown_at: dict[str, MonotonicTime] = {}  # when each card last went up
+        self._repeats: dict[str, int] = {}  # each final's repeats shown
+        self._open: dict[str, OpenTime] = {}  # each status card's open time since it last showed
+        self._base_turns: int | None = None  # base turns started since the last pregame; None until one shows
+        self._captions: dict[LeagueScopedId, PlaySummary] = {}  # each game's caption that has aired
+        self._waits: dict[PromotionKey, tuple[int, PromotionRefusal | OfferSkip]] = {}  # last reason written
+        self._refused: dict[str, LeaseRefusal | None] = {}  # each card's last guest verdict written
+        self._capped = False  # the cap's binding is written
+        self._notes: list[PolicyDecision] = []
+
+    @staticmethod
+    def decides(settings: PolicySettings) -> bool:
+        """Whether ``settings`` choose this policy: `omni-board-policy/2`."""
+        from omni.app.versions import PolicyName  # deferred: the versions' package imports the board
+
+        return settings.policy is PolicyName.BOARD_V2
+
+    # --- the board's questions ---------------------------------------------------------------------------------
+
+    def refresh(self, cards: CardView, view: PolicyView, *, offline: bool, at: ClockReading) -> None:
+        """Take in a published input, once: its break evidence and action into the lease book, its offers into the
+        broker. An outage starts the lease book and the ledger over."""
+        if offline and not self._offline:
+            self._restart()
+        self._offline = offline
+        if offline or (cards is self._cards and view is self._view):
+            return
+        self._cards, self._view = cards, view
+        now = at.monotonic
+        for contest in sorted(view.games, key=str):
+            facts = view.games[contest]
+            if facts.action is not None and self._actions.get(contest) != facts.action.marker:
+                self._actions[contest] = facts.action.marker
+                revoked = self._leases.action(contest, now)
+                if revoked is not None:
+                    self._note(LeaseNote(at=at, id=revoked.id, event=LeaseEvent.REVOKED))
+            for evidence in facts.breaks:
+                verdict = self._leases.observe(
+                    evidence,
+                    released=now,
+                    poll_interval=self._policy.poll_interval(contest.league),
+                    delay=max(now.since(evidence.received.monotonic), _ZERO),
+                    national=facts.game.national_broadcast is True,
+                )
+                self._lease_noted(evidence.id, verdict.lease, verdict.refusal, at)
+        for gone in sorted(self._games - set(view.games), key=str):
+            self._leases.forget(gone)
+            self._actions.pop(gone, None)
+        self._games = set(view.games)
+        if self._settings.promotions:
+            for candidate in view.offers:
+                self._offer(candidate, cards, at)
+        self._prune(cards, view)
+
+    def choose(self, view: CardView, at: ClockReading, *, skip: frozenset[str]) -> Air | None:
+        """What to put up with nothing on air: the card decided in this same cue as the last one came down, or the
+        ladder's choice now."""
+        queued, self._next = self._next, None
+        if queued is not None:
+            return queued
+        option = self._decide(self._scene(view, at, skip))
+        return option.air if option is not None else None
+
+    def started(self, air: Air, at: ClockReading) -> bool:
+        """The display committed ``air``'s first frame at ``at``. A promotion the broker rejects now (play resumed, a
+        correction, its time ran out) spends nothing: False says to take it down unseen."""
+        now = at.monotonic
+        turn = air.turn
+        if turn.candidate is not None and turn.started is None:
+            assert self._cards is not None  # a card is up only from an input taken in
+            scene = self._scene(self._cards, at, frozenset())
+            hold = self._broker.hold(now)  # the episode a confirmed start ends
+            verdict = self._broker.started(turn.candidate, scene.moment, now)
+            if verdict.refusal is not None:
+                self._note(UnspentNote(at=at, card=air.card.id, key=turn.candidate.key, reason=verdict.refusal))
+                return False
+            self._promotion_noted(air, scene, at, hold.deadline if hold is not None else None)
+        air.since = now
+        if turn.started is None:
+            air.protected = now + air.minimum
+            self._begin(turn, air, at, now)
+        else:  # the game's base card, after its big play: it keeps the turn's protection
+            air.protected = turn.started + turn.minimum
+            self._card_noted(turn, air, at)
+        key = air.card.dedupe_key.raw
+        self._shown_at[key] = now
+        if air.role is CardRole.STATUS:
+            self._open[key] = OpenTime.mark(open_now=self._context is not BarContext.ACTION, at=now)
+        if air.role is CardRole.REPEAT:
+            self._repeats[key] = self._repeats.get(key, 0) + 1
+        caption = _caption(air.shown)
+        if caption is not None and turn.base:
+            self._caption_from(air, caption, now)
+        elif caption is not None:  # a promoted card shows its caption whole: it has aired
+            self._captions[air.card.contest.id] = caption
+        return True
+
+    def review(self, air: Air, view: CardView, at: ClockReading, *, skip: frozenset[str]) -> EndReason | None:
+        """Whether the card on air gives way at ``at``, and why; None keeps it, its drawing brought up to date in
+        ``air.shown``."""
+        now = at.monotonic
+        turn = air.turn
+        assert air.since is not None and air.protected is not None and turn.started is not None
+        if air.caption_until is not None and now >= air.caption_until:
+            air.caption_until = None
+            air.shown = _without_caption(air.card)
+        if turn.tenure is Tenure.BREAK_GUEST:
+            closed = self._closed(turn.hosts)
+            if closed is not None:
+                minimum = max(air.protected.since(turn.started), _ZERO)
+                turn.yield_at = yield_after_break(
+                    tenure=turn.tenure, started=turn.started, minimum=minimum, turn=turn.length, closed=closed
+                )
+                if now >= turn.yield_at:
+                    self._note(YieldNote(at=at, card=air.card.id, hosts=turn.hosts, closed=closed))
+                    return EndReason.NEXT_WAITING
+        if air.role is CardRole.PLAY_IN_TURN and now >= air.since + air.minimum:
+            scene = self._scene(view, at, skip)
+            card = scene.base.get(turn.contest)
+            if card is not None and card.dedupe_key.raw in scene.usable:
+                self._next = self._air(card, CardRole.BASE, turn, now)
+            return EndReason.RAN_ITS_TIME
+        if now < air.protected:
+            return None
+        if turn.base and turn.reason is not BaseReason.RECOVERY and self._settings.promotions:
+            promotion = self._promotion(self._scene(view, at, skip))
+            if promotion is not None:
+                self._next = promotion.air
+                return EndReason.NEXT_WAITING
+        if now < turn.started + turn.length:
+            return None
+        self._end(turn, at)  # it ran its turn: credit it, then decide again
+        option = self._decide(self._scene(view, at, skip))
+        if option is None:
+            return EndReason.RAN_ITS_TIME
+        if option.air.card.dedupe_key != air.card.dedupe_key:
+            self._next = option.air
+            return EndReason.RAN_ITS_TIME
+        # The same card again (its game won again, or a lone card): its frame stays, and a new turn begins.
+        renewed = option.air.turn
+        air.turn = renewed
+        self._begin(renewed, air, at, turn.started + turn.length)
+        air.shown = self._present(air, air.card, now)
+        return None
+
+    def handoff(
+        self, air: Air, successor: ScoreboardCard[Any], view: CardView, at: ClockReading, *, skip: frozenset[str]
+    ) -> None:
+        """The card on air left, replaced by ``successor`` (a live card by its final). When the successor is now its
+        game's base card, the game's turn carries on with it; otherwise the ladder places it (an initial final)."""
+        turn = air.turn
+        scene = self._scene(view, at, skip)
+        if turn.base and scene.base.get(turn.contest) is successor and successor.dedupe_key.raw in scene.usable:
+            self._next = self._air(successor, CardRole.BASE, turn, at.monotonic)
+
+    def revised(self, air: Air, card: ScoreboardCard[Any], at: ClockReading) -> None:
+        """A newer version of the card on air arrived: it swaps in, drawn by the same rules."""
+        air.card = card
+        air.shown = self._present(air, card, at.monotonic)
+
+    def down(self, air: Air, at: ClockReading) -> None:
+        """``air`` came down at ``at``: its turn ends with it and is credited, unless the next card is the same
+        turn's."""
+        queued = self._next
+        if queued is None or queued.turn is not air.turn:
+            self._end(air.turn, at)
+
+    def deadline(self, air: Air, at: ClockReading) -> MonotonicTime | None:
+        """When the card on air next needs a decision by itself: its caption ending, its protection ending, its
+        handover within its turn, its turn's end, or a guest's yield."""
+        turn = air.turn
+        assert air.since is not None and turn.started is not None  # asked only once its first frame committed
+        handover = air.since + air.minimum if air.role is CardRole.PLAY_IN_TURN else None
+        instants = (air.caption_until, air.protected, handover, turn.started + turn.length, turn.yield_at)
+        return earliest(instant for instant in instants if instant is not None and instant > at.monotonic)
+
+    def next_deadline(self, at: ClockReading) -> MonotonicTime | None:
+        """When the policy's own state next changes by itself: the broker's hold, cooldown or a lifetime, or a lease
+        running out."""
+        return earliest((self._broker.next_deadline(at.monotonic), self._leases.next_deadline(at.monotonic)))
+
+    def decisions(self) -> list[PolicyDecision]:
+        """What the policy decided since the last ask, oldest first."""
+        notes, self._notes = self._notes, []
+        return notes
+
+    # --- the scene -------------------------------------------------------------------------------------------
+
+    def _muted(self, contest: Contest) -> bool:
+        return muted(self._settings.mutes, contest)
+
+    def _scene(self, view: CardView, at: ClockReading, skip: frozenset[str]) -> _Scene:
+        now = at.monotonic
+        usable: dict[str, ScoreboardCard[Any]] = {}
+        live: dict[LeagueScopedId, ScoreboardCard[Any]] = {}
+        replacing: dict[LeagueScopedId, ScoreboardCard[Any]] = {}
+        for key in sorted(view.cards):
+            card = view.cards[key]
+            if card.kind is CardKind.LIVE_GAME:
+                live.setdefault(card.contest.id, card)
+            elif card.kind is CardKind.FINAL and card.replaces is not None:
+                replacing.setdefault(card.contest.id, card)
+            window = view.windows[key]
+            drawable = card.layout_support.supports(self._profile) and key not in skip
+            if drawable and window.is_open(now) and window.is_usable(now) and not self._muted(card.contest):
+                usable[key] = card
+        base: dict[LeagueScopedId, ScoreboardCard[Any]] = {}
+        entries: list[PoolEntry] = []
+        for contest in sorted(self._view.games, key=str):
+            found = live.get(contest) or replacing.get(contest)
+            if found is None or contest.league not in self._seasons:
+                continue
+            facts = self._view.games[contest]
+            base[contest] = found
+            entries.append(
+                PoolEntry.of(
+                    facts.game,
+                    leverage=facts.leverage,
+                    favorites=self._favorites,
+                    in_break=self._leases.in_break(contest, now),
+                    muted=self._settings.mutes.mutes(facts.game),
+                    fresh=facts.fresh,
+                    drawable=found.dedupe_key.raw in usable,
+                    records=facts.records,
+                    cup_knockout=facts.cup_knockout,
+                )
+            )
+        pool = targets(entries, self._allocation, policy=self._policy.allocation)
+        live_favorites = sorted(
+            (e for e in entries if e.favorite_rank is not None and e.fresh and e.drawable and not e.muted),
+            key=lambda e: (e.favorite_rank, str(e.contest)),
+        )
+        moment = PromotionMoment(tuple(self._leases.favorite(e.contest, now) for e in live_favorites))
+        self._context = moment.context
+        hosts: tuple[LeagueScopedId, ...] = ()
+        if moment.context is not BarContext.ACTION:
+            hosts = tuple(e.contest for e in live_favorites if self._leases.in_break(e.contest, now))
+        base_keys = {card.dedupe_key.raw for card in base.values()}
+        reserved = frozenset(candidate.card.raw for candidate in self._broker.pending()) - base_keys
+        self._account(pool, entries, at)
+        return _Scene(
+            at=at,
+            view=view,
+            usable=MappingProxyType(usable),
+            base=MappingProxyType(base),
+            entries=tuple(entries),
+            pool=pool,
+            moment=moment,
+            hosts=hosts,
+            reserved=reserved,
+        )
+
+    def _account(self, pool: Targets, entries: Iterable[PoolEntry], at: ClockReading) -> None:
+        """Keep the ledger in step with the pool: freeze a game in a break and thaw it after, retire one that left
+        (once the turn on air, if it's that game's, is credited), and write a lease that ran out."""
+        now = at.monotonic
+        resting = {aside.contest for aside in pool.set_aside if aside.reason is SetAsideReason.FAVORITE_IN_BREAK}
+        staying = {game.contest for game in pool.games} | resting
+        if self._current is not None:
+            staying.add(self._current.contest)
+        for contest in sorted(self._accounts - staying, key=str):
+            self._ledger.retire(contest)
+            self._frozen.discard(contest)
+        self._accounts &= staying
+        for entry in entries:
+            lease = self._leases.lease(entry.contest)
+            if lease is not None and lease.state(now) is LeaseState.LAPSED and lease.id not in self._lapsed:
+                self._lapsed.add(lease.id)
+                self._note(LeaseNote(at=at, id=lease.id, event=LeaseEvent.LAPSED))
+            if entry.in_break and entry.contest not in self._frozen:
+                self._ledger.freeze(entry.contest)
+                self._frozen.add(entry.contest)
+            elif not entry.in_break and entry.contest in self._frozen:
+                self._ledger.thaw(entry.contest)
+                self._frozen.discard(entry.contest)
+
+    # --- deciding --------------------------------------------------------------------------------------------
+
+    def _decide(self, scene: _Scene) -> _Option | None:
+        """The ladder's choice at a legal decision."""
+        options: dict[Rung, _Option] = {}
+        for option in (self._base(scene), self._promotion(scene), self._result(scene), self._auxiliary(scene)):
+            if option is not None:
+                options[option.rung] = option
+        verdict = choose_rung(options, self._run, scene.now, self._policy.ladder)
+        if verdict.rung is None:
+            return None
+        capped = tuple(refusal.rung for refusal in verdict.refused if refusal.reason is LadderRefusal.NON_BASE_CAP)
+        if capped and not self._capped:
+            self._capped = True
+            self._note(CapNote(at=scene.at, refused=capped))
+        if not verdict.reserved:
+            return options[verdict.rung]
+        self._recovery_owed = True
+        option = next(options[rung] for rung in _BASE_RUNGS if rung in options)
+        turn = option.air.turn
+        turn.rung, turn.reason, turn.tenure = Rung.BASE_RECOVERY, BaseReason.RECOVERY, Tenure.FULL_TURN
+        turn.why = self._base_why(scene, turn)
+        return _Option(Rung.BASE_RECOVERY, option.air)
+
+    def _base(self, scene: _Scene) -> _Option | None:
+        """The weighted base turn: the ledger's choice, or the favorite's own turn back when its break can't host
+        the guest the ledger chose."""
+        choice = self._ledger.choose(scene.pool, at=scene.now)
+        if choice is None:
+            return None
+        contest, pool, reason = choice.contest, scene.pool, _BASE_REASONS[choice.reason]
+        card = scene.base[contest]
+        length = _clamped(self._settings.slot, card)
+        hosts = scene.hosts if scene.entry(contest).favorite_rank is None else ()
+        refusals = [(host, self._leases.guest_refusal(host, length, scene.now)) for host in hosts]
+        refused = [(host, why) for host, why in refusals if why is not None]
+        if refused:
+            host, why = refused[0]
+            self._guest_refused(card, hosts, why, scene.at)
+            returning = [replace(e, in_break=False) if e.contest == host else e for e in scene.entries]
+            pool = targets(returning, self._allocation, policy=self._policy.allocation)
+            contest, reason, hosts = host, BaseReason.RETURN, ()
+            card = scene.base[contest]
+            length = _clamped(self._settings.slot, card)
+        rung = Rung.RESCUE if reason is BaseReason.RESCUE else Rung.BASE
+        if self._recovery_owed:
+            rung, reason = Rung.BASE_RECOVERY, BaseReason.RECOVERY
+        turn = Turn(
+            role=CardRole.BASE,
+            rung=rung,
+            length=length,
+            minimum=card.timing.min_display.as_timedelta(),
+            tenure=Tenure.BREAK_GUEST if hosts and rung is not Rung.BASE_RECOVERY else Tenure.FULL_TURN,
+            contest=contest,
+            targets=pool,
+            reason=reason,
+            rescue=choice.rescue if reason is BaseReason.RESCUE else None,
+            hosts=hosts,
+        )
+        turn.why = self._base_why(scene, turn)
+        play = self._play_in_turn(scene, contest)
+        first = (play, CardRole.PLAY_IN_TURN) if play is not None else (card, CardRole.BASE)
+        return _Option(rung, self._air(first[0], first[1], turn, scene.now))
+
+    def _play_in_turn(self, scene: _Scene, contest: LeagueScopedId) -> ScoreboardCard[Any] | None:
+        """The game's oldest unaired big play still in its window, which no promotion is waiting for."""
+        plays = [
+            card
+            for key, card in scene.usable.items()
+            if card.kind is CardKind.BIG_PLAY
+            and card.contest.id == contest
+            and key not in scene.reserved
+            and not self._aired(key)
+        ]
+        return min(
+            plays, key=lambda c: (scene.view.windows[c.dedupe_key.raw].available, c.dedupe_key.raw), default=None
+        )
+
+    def _promotion(self, scene: _Scene) -> _Option | None:
+        """The promoted card the broker would start now, if it may air."""
+        if not self._settings.promotions:
+            return None
+        decision = self._broker.decide(scene.moment, scene.now)
+        for retired in decision.retired:  # its lifetime ran out: it may still air as an ordinary card
+            self._waited(retired.key, retired.revision, PromotionRefusal.RETIRED, scene.at)
+        for refusal in decision.refusals:
+            self._waited(refusal.key, refusal.revision, refusal.reason, scene.at, decision.bar, decision.context)
+        start = decision.start
+        if start is None:
+            return None
+        card = scene.usable.get(start.card.raw)
+        if card is None:
+            self._waited(start.key, start.revision, OfferSkip.SET_ASIDE, scene.at, decision.bar, decision.context)
+            return None
+        airtime = self._broker.policy.airtime(start.kind)
+        # Started in a favorite's break, it's the break's guest; one that may cut into action needn't yield to it.
+        qualifies = start.value is not None and self._broker.policy.bars.qualifies_action(start.value)
+        turn = Turn(
+            role=CardRole.PROMOTION,
+            rung=Rung.PROMOTION,
+            length=airtime.full,
+            minimum=airtime.minimum,
+            tenure=Tenure.BREAK_GUEST if scene.hosts and not qualifies else Tenure.FULL_TURN,
+            contest=card.contest.id,
+            hosts=scene.hosts,
+            candidate=start,
+        )
+        turn.why = self._promotion_why(scene, turn, card)
+        return _Option(
+            Rung.PROMOTION, Air(card=card, shown=card, role=CardRole.PROMOTION, minimum=airtime.minimum, turn=turn)
+        )
+
+    def _result(self, scene: _Scene) -> _Option | None:
+        """The first initial final in end order (or the unseen play that decided it), when it may play here."""
+        base_keys = {card.dedupe_key.raw for card in scene.base.values()}
+        finals = [
+            card
+            for key, card in scene.usable.items()
+            if card.kind is CardKind.FINAL
+            and key not in base_keys
+            and key not in scene.reserved
+            and not self._aired(key)
+        ]
+        if not finals:
+            return None
+        final = min(finals, key=lambda card: (_ended(card, scene), card.dedupe_key.raw))
+        related = self._related(final.contest)
+        if not initial_final_permitted(context=scene.moment.context, related=related):
+            return None
+        before = [key.raw for key in final.after if key.raw in scene.usable and not self._aired(key.raw)]
+        if any(key in scene.reserved for key in before):
+            return None  # the play that decided it is waiting on its promotion
+        card = scene.usable[before[0]] if before else final
+        said = "the play that decided it" if before else "final"
+        why = f"{self._subject(card.contest)}: {said}"
+        return self._ordinary(scene, card, CardRole.RESULT, Rung.INITIAL_RESULT, self._policy.timing.final, why)
+
+    def _auxiliary(self, scene: _Scene) -> _Option | None:
+        """A due pregame, status or repeat while games are live; with none live, the cards on hand at neutral weight,
+        the longest unseen first."""
+        live = bool(scene.pool.games)
+        base_keys = {card.dedupe_key.raw for card in scene.base.values()}
+        options: list[tuple[CardRole, ScoreboardCard[Any]]] = []
+        for key, card in scene.usable.items():
+            if key in scene.reserved or key in base_keys:
+                continue
+            role = self._role(scene, card) if live else _neutral(card, self._aired(key))
+            if role is not None:
+                options.append((role, card))
+        if not options:
+            return None
+        role, card = min(options, key=lambda option: self._unseen(option[1]))
+        nominal = self._policy.turn(card, self._settings.slot)
+        return self._ordinary(scene, card, role, Rung.AUXILIARY, nominal, self._ordinary_why(role, card))
+
+    def _role(self, scene: _Scene, card: ScoreboardCard[Any]) -> CardRole | None:
+        """What a card is due as while games are live, or None when it isn't due or may not play here."""
+        key = card.dedupe_key.raw
+        now, context = scene.now, scene.moment.context
+        shown = self._shown_at.get(key)
+        if card.kind is CardKind.PREGAME:
+            due = pregame_due(
+                until_start=card.contest.scheduled_start - scene.at.utc,
+                since_last=now.since(shown) if shown is not None else None,
+                policy=self._policy.timing,
+            )
+            permitted = pregame_permitted(
+                live_games=True, base_turns_since=self._base_turns, context=context, policy=self._policy.timing
+            )
+            return CardRole.PREGAME if due and permitted else None
+        if card.kind is CardKind.FINAL and self._aired(key):  # an unaired final waits for its turn in end order
+            due = final_repeat_due(
+                since_confirmed=now.since(scene.view.windows[key].available),
+                repeats_shown=self._repeats.get(key, 0),
+                policy=self._policy.timing,
+            )
+            permitted = initial_final_permitted(context=context, related=self._related(card.contest))
+            return CardRole.REPEAT if due and permitted else None
+        if card.kind is CardKind.STATUS:
+            opened = self._open.get(key)
+            if opened is None:  # a status not yet shown: once, off a favorite's action unless it's the favorite's
+                return CardRole.STATUS if self._related(card.contest) or context is not BarContext.ACTION else None
+            opened = self._open[key] = opened.update(open_now=context is not BarContext.ACTION, at=now)
+            due = favorite_status_due(open_since_last=opened.total(now), policy=self._policy.timing)
+            return CardRole.STATUS if due and self._related(card.contest) else None
+        return None
+
+    def _unseen(self, card: ScoreboardCard[Any]) -> tuple[float, str]:
+        """Never shown first, then the longest since it showed, then by key."""
+        shown = self._shown_at.get(card.dedupe_key.raw)
+        return (float("-inf") if shown is None else shown.seconds, card.dedupe_key.raw)
+
+    def _ordinary(
+        self, scene: _Scene, card: ScoreboardCard[Any], role: CardRole, rung: Rung, nominal: timedelta, why: str
+    ) -> _Option | None:
+        """An ordinary card's turn, if the favorites' break (when it's one) can host it."""
+        length = _clamped(nominal, card)
+        hosts = () if self._related(card.contest) else scene.hosts
+        for host in hosts:
+            refusal = self._leases.guest_refusal(host, length, scene.now)
+            if refusal is not None:
+                self._guest_refused(card, hosts, refusal, scene.at)
+                return None
+        turn = Turn(
+            role=role,
+            rung=rung,
+            length=length,
+            minimum=min(card.timing.min_display.as_timedelta(), length),
+            tenure=Tenure.BREAK_GUEST if hosts else Tenure.FULL_TURN,
+            contest=card.contest.id,
+            hosts=hosts,
+            why=why + self._breaks(hosts),
+        )
+        return _Option(rung, self._air(card, role, turn, scene.now))
+
+    def _related(self, contest: Contest) -> bool:
+        """Whether a card is a favorite's own."""
+        return isinstance(contest, TeamGame) and self._favorites.of(contest) is not None
+
+    def _air(self, card: ScoreboardCard[Any], role: CardRole, turn: Turn, now: MonotonicTime) -> Air:
+        minimum = card.timing.min_display.as_timedelta() if role is CardRole.PLAY_IN_TURN else turn.minimum
+        air = Air(card=card, shown=card, role=role, minimum=minimum, turn=turn)
+        air.shown = self._present(air, card, now)
+        return air
+
+    def _present(self, air: Air, card: ScoreboardCard[Any], now: MonotonicTime) -> ScoreboardCard[Any]:
+        """How a card is drawn in its turn: a live football card in a base turn shows a caption it hasn't shown, once
+        and only if the turn has room for all of it; otherwise the field alone."""
+        caption = _caption(card)
+        turn = air.turn
+        if caption is None or not turn.base or air.caption_until is not None:
+            return card  # no caption, or it isn't the game's base turn, or its caption is airing
+        started = turn.started if turn.started is not None else now
+        runway = (started + turn.length).since(now)
+        if turn.captioned or self._captions.get(card.contest.id) == caption or runway < self._policy.caption:
+            return _without_caption(card)
+        if air.since is not None:  # up already: the caption starts now
+            self._caption_from(air, caption, now)
+        return card
+
+    def _caption_from(self, air: Air, caption: PlaySummary, now: MonotonicTime) -> None:
+        air.caption_until = now + self._policy.caption
+        air.turn.captioned = True
+        self._captions[air.card.contest.id] = caption
+
+    def _begin(self, turn: Turn, air: Air, at: ClockReading, start: MonotonicTime) -> None:
+        """A turn's first frame (or its game's frame staying up for it): the run, its guests, the trace."""
+        turn.started = start
+        self._current = turn
+        self._run = self._run.after(turn.rung, start)
+        if turn.rung.base:
+            self._capped = False
+        for host in turn.hosts:
+            self._leases.hosted(host, start)
+        if turn.hosts:
+            self._refused[air.card.dedupe_key.raw] = None
+            self._note(GuestNote(at=at, card=air.card.id, hosts=turn.hosts))
+        if turn.base:
+            self._base_turns = None if self._base_turns is None else self._base_turns + 1
+            continues = air.since is not None and air.since < start
+            if not continues or turn.reason is not BaseReason.ONLY_CANDIDATE:
+                self._turn_noted(turn, air, at, continues=continues)
+        elif turn.candidate is None:
+            self._card_noted(turn, air, at)
+        if air.role is CardRole.PREGAME:
+            self._base_turns = 0
+
+    def _end(self, turn: Turn, at: ClockReading) -> None:
+        """A turn is over: a base turn is credited with its confirmed time, and a full one clears an owed
+        recovery."""
+        if turn.ended:
+            return
+        turn.ended = True
+        if self._current is turn:
+            self._current = None
+        if turn.started is None or turn.targets is None:
+            return
+        aired = at.monotonic.since(turn.started)
+        completed = aired >= turn.length
+        clamps = self._ledger.served(turn.targets, turn.contest, min(aired, turn.length), completed=completed)
+        self._accounts |= {game.contest for game in turn.targets.games}
+        if clamps:
+            self._note(ClampNote(at=at, clamps=clamps))
+        if completed:
+            self._recovery_owed = False
+
+    def _restart(self) -> None:
+        """An outage: old leases and every ledger account are void, and the turn on air isn't credited."""
+        self._leases = LeaseBook(self._policy.leases)
+        for contest in sorted(self._accounts, key=str):
+            self._ledger.retire(contest)
+        if self._current is not None:
+            self._current.ended = True
+        self._accounts.clear()
+        self._frozen.clear()
+        self._actions.clear()
+        self._games.clear()
+        self._cards = None
+        self._run, self._recovery_owed, self._next, self._current = NonBaseRun(), False, None, None
+
+    def _prune(self, cards: CardView, view: PolicyView) -> None:
+        """Forget what's remembered of cards, games and candidates no longer in the input, so nothing slowly leaks."""
+        for memory in (self._shown_at, self._repeats, self._open, self._refused):
+            for key in [key for key in memory if key not in cards.cards]:
+                del memory[key]
+        for contest in [contest for contest in self._captions if contest not in view.games]:
+            del self._captions[contest]
+        self._lapsed = {id for id in self._lapsed if id.contest in view.games}
+        waiting = {candidate.key for candidate in self._broker.pending()} | {offer.key for offer in view.offers}
+        for stale in [promotion for promotion in self._waits if promotion not in waiting]:
+            del self._waits[stale]
+
+    def _closed(self, hosts: Iterable[LeagueScopedId]) -> MonotonicTime | None:
+        """When the first of the hosts' breaks closed (play resumed, or the feed marked its end), if one has. A guest
+        fits its lease with the return margin, so it's never up when its lease runs out; a host whose game is over
+        has no lease left to close."""
+        closures: list[MonotonicTime] = []
+        for host in hosts:
+            lease = self._leases.lease(host)
+            if lease is not None and lease.closure is not None:
+                closures.append(lease.closure.at)
+        return min(closures, default=None)
+
+    def _offer(self, candidate: PromotionCandidate[DedupeKey], cards: CardView, at: ClockReading) -> None:
+        card = cards.card(candidate.card.raw)
+        skip: OfferSkip | None = None
+        if card is None:
+            skip = OfferSkip.NOT_IN_VIEW
+        elif not card.layout_support.supports(self._profile):
+            skip = OfferSkip.NOT_DRAWABLE
+        elif self._muted(card.contest):
+            skip = OfferSkip.MUTED
+        if skip is not None:
+            self._waited(candidate.key, candidate.revision, skip, at)
+            return
+        result = self._broker.offer(candidate, at.monotonic)
+        if result.outcome is OfferOutcome.REFUSED and result.refusal is not None:
+            self._waited(candidate.key, candidate.revision, result.refusal, at)
+
+    # --- notes -----------------------------------------------------------------------------------------------
+
+    def _note(self, note: PolicyDecision) -> None:
+        self._notes.append(note)
+
+    def _waited(
+        self,
+        key: PromotionKey,
+        revision: int,
+        reason: PromotionRefusal | OfferSkip,
+        at: ClockReading,
+        bar: float | None = None,
+        context: BarContext | None = None,
+    ) -> None:
+        if self._waits.get(key) == (revision, reason):
+            return
+        self._waits[key] = (revision, reason)
+        self._note(WaitNote(at=at, key=key, revision=revision, reason=reason, bar=bar, context=context))
+
+    def _lease_noted(self, id: BreakId, lease: Lease | None, refusal: LeaseRefusal | None, at: ClockReading) -> None:
+        if refusal is LeaseRefusal.DUPLICATE:
+            return
+        if lease is None:
+            self._note(LeaseNote(at=at, id=id, event=LeaseEvent.REFUSED, refusal=refusal))
+        elif lease.closure is not None:
+            self._note(LeaseNote(at=at, id=id, event=LeaseEvent.ENDED))
+        else:
+            remaining = lease.remaining(at.monotonic)
+            self._note(
+                LeaseNote(
+                    at=at,
+                    id=id,
+                    event=LeaseEvent.OPENED,
+                    remaining=remaining,
+                    provisional=lease.provisional,
+                    turns=lease.turns,
+                )
+            )
+
+    def _guest_refused(
+        self, card: ScoreboardCard[Any], hosts: tuple[LeagueScopedId, ...], refusal: LeaseRefusal, at: ClockReading
+    ) -> None:
+        key = card.dedupe_key.raw
+        if self._refused.get(key) is refusal:
+            return
+        self._refused[key] = refusal
+        self._note(GuestNote(at=at, card=card.id, hosts=hosts, refusal=refusal))
+
+    def _turn_noted(self, turn: Turn, air: Air, at: ClockReading, *, continues: bool) -> None:
+        assert turn.targets is not None and turn.reason is not None
+        target = turn.targets.game(turn.contest)
+        league = turn.targets.league(turn.contest.league)
+        assert target is not None and league is not None
+        snapshot = self._ledger.snapshot()
+        account, league_account = snapshot.game(turn.contest), snapshot.league(turn.contest.league)
+        self._note(
+            BaseTurnNote(
+                at=at,
+                policy=self._settings.policy,
+                card=air.card.id,
+                contest=turn.contest,
+                reason=turn.reason,
+                continues=continues,
+                weight=target.weight,
+                target=target.share,
+                league_target=league.share,
+                within_league=target.within_league,
+                actual=account.actual if account is not None else None,
+                debt=account.debt if account is not None else 0.0,
+                league_debt=league_account.debt if league_account is not None else 0.0,
+                rescue=turn.rescue,
+                hosts=turn.hosts,
+                why=turn.why,
+            )
+        )
+
+    def _card_noted(self, turn: Turn, air: Air, at: ClockReading) -> None:
+        note = CardNote(
+            at=at,
+            policy=self._settings.policy,
+            card=air.card.id,
+            role=air.role,
+            rung=turn.rung,
+            hosts=turn.hosts,
+            why=turn.why,
+        )
+        self._note(note)
+
+    def _promotion_noted(self, air: Air, scene: _Scene, at: ClockReading, hold: MonotonicTime | None) -> None:
+        turn = air.turn
+        assert turn.candidate is not None
+        context = scene.moment.context
+        self._note(
+            PromotionNote(
+                at=at,
+                policy=self._settings.policy,
+                card=air.card.id,
+                key=turn.candidate.key,
+                kind=turn.candidate.kind,
+                value=turn.candidate.value,
+                bar=self._broker.policy.bars.for_context(context),
+                context=context,
+                hold=hold,
+                cooldown_until=at.monotonic + self._broker.policy.cooldown,
+                hosts=turn.hosts,
+                why=turn.why,
+            )
+        )
+
+    # --- the "why" sentence ----------------------------------------------------------------------------------
+
+    def _subject(self, contest: Contest) -> str:
+        """The card's matchup by name: its favorite's team, or "Away at Home"."""
+        if not isinstance(contest, TeamGame):
+            return f"{contest.league.value.upper()} game"
+        ranked = sorted(
+            (rank, team.short_name)
+            for team in (contest.away, contest.home)
+            if (rank := self._favorites.rank(team)) is not None
+        )
+        return ranked[0][1] if ranked else f"{contest.away.short_name} at {contest.home.short_name}"
+
+    def _breaks(self, hosts: Iterable[LeagueScopedId]) -> str:
+        """ "; Braves in inning break", for each favorite whose break the card is in."""
+        parts: list[str] = []
+        for host in hosts:  # a favorite in a confirmed break: described, with its lease open
+            lease = self._leases.lease(host)
+            assert lease is not None
+            parts.append(f"; {self._subject(self._view.games[host].game)} in {BREAK_WORDS[lease.id.kind]}")
+        return "".join(parts)
+
+    def _base_why(self, scene: _Scene, turn: Turn) -> str:
+        assert turn.targets is not None and turn.reason is not None
+        entry = scene.entry(turn.contest)
+        parts: list[str] = []
+        if entry.favorite_rank is not None:
+            parts.append(rank_words(entry.favorite_rank))
+        if entry.leverage.g >= self._policy.close_late:
+            parts.append("close late game")
+        elif entry.leverage.g < self._policy.lopsided:
+            parts.append("lopsided game")
+        if entry.stakes.postseason:
+            parts.append("postseason")
+        parts.extend(_REASON_WORDS.get(turn.reason, ()))
+        if self._play_in_turn(scene, turn.contest) is not None:
+            parts.append("its big play first")
+        resting = [
+            aside.contest for aside in turn.targets.set_aside if aside.reason is SetAsideReason.FAVORITE_IN_BREAK
+        ]
+        said = ", ".join(parts) or "in rotation"
+        return f"{self._subject(scene.base[turn.contest].contest)}: {said}" + self._breaks(turn.hosts or resting)
+
+    def _promotion_why(self, scene: _Scene, turn: Turn, card: ScoreboardCard[Any]) -> str:
+        assert turn.candidate is not None
+        said = event_words(turn.candidate.kind, turn.candidate.value)
+        context = scene.moment.context
+        if turn.hosts:
+            where = self._breaks(turn.hosts)
+        elif context is BarContext.ACTION:
+            where = "; worth cutting into a favorite's action"
+        else:
+            where = "; no favorite in action"
+        return f"{self._subject(card.contest)}: {said}{where}"
+
+    def _ordinary_why(self, role: CardRole, card: ScoreboardCard[Any]) -> str:
+        subject = self._subject(card.contest)
+        if isinstance(card.payload, StatusCardPayload):
+            return f"{subject}: {status_words(card.payload.status)}"
+        return f"{subject}: {_ROLE_WORDS[role]}"
+
+
+_BASE_REASONS = MappingProxyType(
+    {
+        ChoiceReason.WEIGHTED: BaseReason.WEIGHTED,
+        ChoiceReason.RESCUE: BaseReason.RESCUE,
+        ChoiceReason.ONLY_CANDIDATE: BaseReason.ONLY_CANDIDATE,
+    }
+)
+
+_REASON_WORDS: Mapping[BaseReason, tuple[str, ...]] = MappingProxyType(
+    {
+        BaseReason.RESCUE: ("overdue for a turn",),
+        BaseReason.ONLY_CANDIDATE: ("the only game on",),
+        BaseReason.RECOVERY: ("a full turn after the alerts",),
+        BaseReason.RETURN: ("back before its break ends",),
+    }
+)
+
+_ROLE_WORDS = MappingProxyType(
+    {
+        CardRole.PREGAME: "starting soon",
+        CardRole.REPEAT: "final, again",
+        CardRole.STATUS: "paused",
+        CardRole.NEUTRAL: "no live game to weigh",
+    }
+)
+
+
+def _neutral(card: ScoreboardCard[Any], aired: bool) -> CardRole | None:
+    """With nothing live to weigh every card on hand rotates, but a final still waiting for its turn in end order."""
+    return None if card.kind is CardKind.FINAL and not aired else CardRole.NEUTRAL
+
+
+def _clamped(nominal: timedelta, card: ScoreboardCard[Any]) -> timedelta:
+    """A turn of ``nominal``, held within the card's own minimum and maximum."""
+    timing = card.timing
+    return min(max(nominal, timing.min_display.as_timedelta()), timing.max_display.as_timedelta())
+
+
+def _ended(card: ScoreboardCard[Any], scene: _Scene) -> float:
+    """When a final's game ended, for the end order, as the queue orders finals."""
+    instant = card.ended.at if card.ended is not None else card.timing.available_at
+    return (instant - scene.at.utc).total_seconds()
+
+
+def _caption(card: ScoreboardCard[Any]) -> PlaySummary | None:
+    payload = card.payload
+    return payload.last_play if isinstance(payload, LiveFootballCardPayload) else None
+
+
+def _without_caption(card: ScoreboardCard[Any]) -> ScoreboardCard[Any]:
+    """A live football card drawn as the field alone."""
+    payload = card.payload
+    if not isinstance(payload, LiveFootballCardPayload) or payload.last_play is None:
+        return card
+    return replace(card, payload=replace(payload, last_play=None))

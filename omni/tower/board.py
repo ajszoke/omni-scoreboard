@@ -46,23 +46,39 @@ clock too, so a step of the wall clock moves none of them.
 
 The session runs on the frame thread, but for `publish`, which the decision thread calls once a refresh is
 done; the queue is thread-safe, and the input it publishes is replaced whole.
+
+**Which policy decides.** Without settings the board selects as above (`omni-board-policy/1`). Given the user's
+`PolicySettings`, a muted game's cards never air, and the turn is the settings' slot. Under `omni-board-policy/2`
+the policy director (`omni.tower.director`) decides from the published `PolicyView` instead of the queue's
+bands: base turns by debt, promotions through the broker, a favorite's break lent to guests, ordinary cards by
+the ladder. The card contract above stays the board's: dwell from the commit, a minimum never cut by ordinary
+priority, a card that leaves or expires coming down, a live card handing off to its final after its minimum, a
+card that can't draw set aside, the explicit frames and stale dimming. What the policy decided is read with
+`decisions`, for the trace.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Any, Union
+from typing import TYPE_CHECKING, Any, Union
 
 from omni.cards.base import ScoreboardCard
 from omni.core.clock import ClockReading, MonotonicTime
 from omni.core.enum import PanelProfile, StrEnumMixin
 from omni.core.ids import SourceRef
+from omni.domain.contest import Contest, TeamGame
 from omni.policy.view import EMPTY_POLICY_VIEW, PolicyView
+from omni.preferences.favorites import Favorites
 from omni.queue.scheduler import CardView, InterleavedCardQueue, Pick, SelectionReason
 from omni.tower.lane import ChangeKind, EndReason, LaneChange, earliest
 from omni.tower.segment import Dwell, Provenance, Segment, SegmentKey, Surface
+
+if TYPE_CHECKING:  # the policy's settings import the app, whose loop imports the board
+    from omni.policy.settings import Mutes, PolicySettings
+    from omni.tower.decisions import PolicyDecision
+    from omni.tower.director import Air, DirectorPolicy, PolicyDirector
 
 __all__ = [
     "BoardCue",
@@ -76,6 +92,7 @@ __all__ = [
     "FrameKind",
     "SourceHealth",
     "UNDRAWN_RETRY",
+    "muted",
 ]
 
 _BOARD_SOURCE = SourceRef("board")
@@ -185,14 +202,33 @@ class _OnAir:
     slot: timedelta
     since: MonotonicTime | None = None  # when its first frame was committed
     expires: MonotonicTime | None = None  # a card: its expiry, as the queue pinned it; None if it never expires
+    air: Air | None = None  # a card the policy director put up
 
 
 class BoardSession:
     """The board surface's schedule: what's on air, why, and when it goes."""
 
-    def __init__(self, queue: InterleavedCardQueue, profile: PanelProfile, *, policy: BoardPolicy = BoardPolicy()):
+    def __init__(
+        self,
+        queue: InterleavedCardQueue,
+        profile: PanelProfile,
+        *,
+        policy: BoardPolicy = BoardPolicy(),
+        settings: PolicySettings | None = None,
+        favorites: Favorites = Favorites(),
+        rules: DirectorPolicy | None = None,
+    ):
         self._queue = queue
         self._profile = profile
+        self._settings = settings
+        self._director: PolicyDirector | None = None
+        if settings is not None:
+            from omni.tower.director import DirectorPolicy, PolicyDirector  # deferred: the settings import the app
+
+            policy = replace(policy, slot=settings.slot)
+            if PolicyDirector.decides(settings):
+                rules = rules if rules is not None else DirectorPolicy()
+                self._director = PolicyDirector(profile, settings, favorites=favorites, aired=queue.aired, policy=rules)
         self._policy = policy
         self._input = BoardInput(queue.published, BoardHealth())
         self._on_air: _OnAir | None = None
@@ -217,6 +253,8 @@ class BoardSession:
         """What should be on the board at ``at``, once the rules have run: the card up, the next card, or
         an explicit frame."""
         board = self._input  # one input for the whole decision, whatever a refresh publishes meanwhile
+        if self._director is not None:
+            return self._cue_policy(self._director, board, at)
         health = board.health
         on = self._on_air
         if on is not None and on.pick is not None:
@@ -228,16 +266,13 @@ class BoardSession:
                 pick = self._choose(board.cards, at)
             if pick is not None:
                 self._air_card(pick, board.cards, at)
-            elif health.source is SourceHealth.OFFLINE:
-                self._air_frame(BoardFrame(FrameKind.OFFLINE, health.reason), at)
-            elif health.unfed:
-                self._air_frame(BoardFrame(FrameKind.OFFLINE, f"no feed for {_games(health.unfed)}"), at)
-            elif health.held:
-                reason = f"{_games(health.held)} in the TV delay"
-                self._air_frame(BoardFrame(FrameKind.HELD, reason, self._waiting_since(at), health.held_until), at)
             else:
-                self._air_frame(BoardFrame(FrameKind.IDLE, "nothing eligible"), at)
+                self._air_frame(self._explicit(health, at), at)
         return self._cue(health)
+
+    def decisions(self) -> list[PolicyDecision]:
+        """What the policy decided since the last ask, oldest first, for the trace; nothing under policy v1."""
+        return self._director.decisions() if self._director is not None else []
 
     def committed(self, cue: BoardCue, at: ClockReading) -> None:
         """The display drew ``cue`` at ``at``. A card's first commit starts its dwell and books it, if the
@@ -248,6 +283,9 @@ class BoardSession:
             return  # no longer on air, or its dwell already runs
         if on.pick is None:
             self._takeover_run = timedelta(0)  # a quiet board: takeovers before it weren't back to back
+        elif on.air is not None:
+            if not self._started(on.air, at):
+                return
         else:
             drawn = cue.payload
             assert not isinstance(drawn, BoardFrame)
@@ -276,11 +314,15 @@ class BoardSession:
         if on is None:
             return at.monotonic  # nothing has been cued yet
         view = self._input.cards
+        director = self._director.next_deadline(at) if self._director is not None else None
         upcoming = earliest(
-            (self._queue.next_deadline(at, self._profile, view=view), *self._set_aside(view, at).values())
+            (self._queue.next_deadline(at, self._profile, view=view), director, *self._set_aside(view, at).values())
         )
         if on.pick is None or on.since is None:
             return upcoming  # a frame stays until a card can replace it; a card's dwell waits on its commit
+        if on.air is not None:
+            assert self._director is not None
+            return earliest((upcoming, self._director.deadline(on.air, at), _ahead(on.expires, at)))
         deadlines = [upcoming, on.since + on.segment.dwell.minimum, on.since + on.slot, on.expires]
         return earliest(deadline for deadline in deadlines if deadline is None or deadline > at.monotonic)
 
@@ -345,8 +387,15 @@ class BoardSession:
         return pick
 
     def _peek(self, view: CardView, at: ClockReading, *, recovery: bool, prefer: str | None = None) -> Pick | None:
-        skip = frozenset(self._set_aside(view, at))
+        skip = frozenset(self._set_aside(view, at)) | self._muted(view)
         return self._queue.peek(at, self._profile, view=view, recovery=recovery, prefer=prefer, skip=skip)
+
+    def _muted(self, view: CardView) -> frozenset[str]:
+        """The cards of games the settings mute, which never air."""
+        settings = self._settings
+        if settings is None or not settings.mutes:
+            return frozenset()
+        return frozenset(key for key, card in view.cards.items() if muted(settings.mutes, card.contest))
 
     def _set_aside(self, view: CardView, at: ClockReading) -> dict[str, MonotonicTime]:
         """The cards set aside after failing to draw, with when each may be tried again; forgets the rest."""
@@ -409,7 +458,10 @@ class BoardSession:
         on = self._on_air
         assert on is not None
         aired = at.monotonic.since(on.since) if on.since is not None else None
-        if aired is not None and on.pick is not None:
+        if on.air is not None:
+            assert self._director is not None
+            self._director.down(on.air, at)
+        elif aired is not None and on.pick is not None:
             if on.pick.reason is SelectionReason.TAKEOVER:
                 self._takeover_run += aired
             elif on.pick.reason is SelectionReason.ROTATION and aired >= on.slot:
@@ -428,9 +480,117 @@ class BoardSession:
         stale = health.source is SourceHealth.STALE or card.stale_since is not None
         return BoardCue(on.segment, on.occurrence, reason=on.pick.reason, stale=stale)
 
+    def _explicit(self, health: BoardHealth, at: ClockReading) -> BoardFrame:
+        """The explicit frame for when no card should be up: offline, a game with no feed, games held in the TV
+        delay, or idle."""
+        if health.source is SourceHealth.OFFLINE:
+            return BoardFrame(FrameKind.OFFLINE, health.reason)
+        if health.unfed:
+            return BoardFrame(FrameKind.OFFLINE, f"no feed for {_games(health.unfed)}")
+        if health.held:
+            return BoardFrame(
+                FrameKind.HELD, f"{_games(health.held)} in the TV delay", self._waiting_since(at), health.held_until
+            )
+        return BoardFrame(FrameKind.IDLE, "nothing eligible")
+
+    # --- policy v2: the director decides, the board keeps the card contract ----------------------------------
+
+    def _cue_policy(self, director: PolicyDirector, board: BoardInput, at: ClockReading) -> BoardCue:
+        health = board.health
+        offline = health.source is SourceHealth.OFFLINE
+        director.refresh(board.cards, board.policy, offline=offline, at=at)
+        on = self._on_air
+        if on is not None and on.air is not None:
+            self._review_policy(director, on, on.air, board, at)
+        on = self._on_air
+        if on is None or on.pick is None:
+            air = None
+            if not offline:
+                air = director.choose(board.cards, at, skip=frozenset(self._set_aside(board.cards, at)))
+            if air is not None:
+                self._air_policy(air, board.cards, at)
+            else:
+                self._air_frame(self._explicit(health, at), at)
+        return self._cue(health)
+
+    def _review_policy(
+        self, director: PolicyDirector, on: _OnAir, air: Air, board: BoardInput, at: ClockReading
+    ) -> None:
+        """Take the card on air down if its time is up or the policy says it gives way; else keep it, drawn as the
+        policy says, in its newest version."""
+        if board.health.source is SourceHealth.OFFLINE:
+            self._down(EndReason.CLEARED, at)
+            return
+        if on.expires is not None and at.monotonic >= on.expires:
+            self._down(EndReason.EXPIRED, at)
+            return
+        key = on.segment.key.subject
+        latest = board.cards.card(key)
+        if latest is None:
+            successor = board.cards.successor(key)
+            if successor is not None and on.since is not None and at.monotonic < on.since + on.segment.dwell.minimum:
+                return  # the game's last delay-safe frame keeps its minimum
+            if successor is not None:
+                director.handoff(air, successor, board.cards, at, skip=frozenset(self._set_aside(board.cards, at)))
+            self._down(EndReason.INVALIDATED, at)
+            return
+        if latest is not air.card:
+            director.revised(air, latest, at)
+            on.pick = Pick(latest, air.reason)
+            on.expires = board.cards.windows[key].expires
+        if on.since is not None:
+            reason = director.review(air, board.cards, at, skip=frozenset(self._set_aside(board.cards, at)))
+            if reason is not None:
+                self._down(reason, at)
+                return
+        if on.segment.frames[0] is not air.shown:
+            on.segment = _card_segment(air.shown, revision=on.segment.revision + 1)  # same dwell: drawn anew
+
+    def _air_policy(self, air: Air, view: CardView, at: ClockReading) -> None:
+        if self._on_air is not None:
+            self._down(EndReason.NEXT_WAITING, at)  # a frame gives way to a card at once
+        self._occurrences += 1
+        self._on_air = _OnAir(
+            segment=_card_segment(air.shown, revision=0),
+            occurrence=self._occurrences,
+            pick=Pick(air.card, air.reason),
+            slot=air.turn.length,
+            expires=view.windows[air.card.dedupe_key.raw].expires,
+            air=air,
+        )
+
+    def _started(self, air: Air, at: ClockReading) -> bool:
+        """A director's card drew its first frame: it counts if the latest view still holds it as drawn and the
+        policy confirms its start; a promotion the broker rejects comes down unseen, having spent nothing."""
+        director = self._director
+        assert director is not None
+        board = self._input
+        director.refresh(board.cards, board.policy, offline=board.health.source is SourceHealth.OFFLINE, at=at)
+        if self._queue.published.card(air.card.dedupe_key.raw) is not air.card:
+            return False  # it changed or left while it was drawn: the next cue takes up the change
+        if not director.started(air, at):
+            on = self._on_air
+            assert on is not None
+            self._changes.append(LaneChange(ChangeKind.DROPPED, on.segment, at, reason=EndReason.INVALIDATED))
+            self._on_air = None
+            return False
+        self._queue.book(Pick(air.card, air.reason), at)
+        return True
+
+
+def muted(mutes: Mutes, contest: Contest) -> bool:
+    """Whether the user's ``mutes`` silence ``contest``: its league, or either team of a team game."""
+    if isinstance(contest, TeamGame):
+        return mutes.mutes(contest)
+    return contest.league in mutes.leagues
+
 
 def _games(count: int) -> str:
     return "a game" if count == 1 else f"{count} games"
+
+
+def _ahead(instant: MonotonicTime | None, at: ClockReading) -> MonotonicTime | None:
+    return instant if instant is not None and instant > at.monotonic else None
 
 
 def _card_segment(card: ScoreboardCard[Any], *, revision: int) -> Segment[BoardPayload]:
