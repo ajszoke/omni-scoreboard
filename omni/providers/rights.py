@@ -468,6 +468,10 @@ READS: Mapping[str, frozenset[DataSource]] = {
     "tools/fetch_nfl_logos.py": frozenset({DataSource.NFLVERSE, DataSource.TEAM_LOGOS}),
     "tools/nflmeta_record.py": frozenset({DataSource.NFLMETA}),
     "tools/nflmeta_replay_trace.py": frozenset({DataSource.NFLMETA}),  # reads a recording
+    "omni/telemetry/nflmeta_mine.py": frozenset({DataSource.NFLMETA}),  # reads a recording, keeps our measurements
+    "omni/telemetry/runner_log_mine.py": frozenset({DataSource.NFLMETA}),  # reads a run log that quotes the feed
+    "omni/telemetry/miners.py": frozenset({DataSource.NFLMETA}),
+    "tools/nflmeta_mine.py": frozenset({DataSource.NFLMETA}),
 }
 
 

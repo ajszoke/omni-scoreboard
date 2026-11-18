@@ -7,7 +7,7 @@ one set of upstream requests and no board holds a market key.
 board ── POST /v1/heartbeat (every 5 min) ──► API Lambda ──► DynamoDB (active_until)
 board ◄─ GET /v1/latest?games=… (each tick) ─ API Lambda ◄── DynamoDB (newest row per game)
 EventBridge (every minute) ─► Poller Lambda ─┬─► DynamoDB rows (TTL 1 hour)
-   stream + REST quotes ─────────────────────┘└─► S3 archive (kept)
+   stream + REST quotes ─────────────────────┘└─► S3 archive (1 day)
 ```
 
 ## How it behaves
@@ -23,8 +23,9 @@ EventBridge (every minute) ─► Poller Lambda ─┬─► DynamoDB rows (TTL 
   proves the poller is alive. A frozen poller leaves an old timestamp, and *boards must ignore old rows*.
 - **No key needed to run.** With no key in SSM, the poller uses public quotes, cached for 30 seconds.
 - **Archive.** Each run's rows also go to `s3://<bucket>/readings/dt=YYYY-MM-DD/hour=HH/*.jsonl.gz`, one
-  self-describing JSON line per reading with a schema version. It's a plain archive, not a data lake.
-  The bucket survives deleting the stack.
+  self-describing JSON line per reading with a schema version. A lifecycle rule deletes each a day after it's
+  written: the family's boards see prices from a short-lived copy that expires, which is display, not
+  redistribution (the user's ruling, `omni/providers/rights.py`). The bucket survives deleting the stack.
 
 ## API
 

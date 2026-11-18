@@ -81,7 +81,7 @@ Every spacing/animation bug fixed should get a fixture or golden-image snapshot 
 Free/low-cost by default:
 
 - MLB: upstream MLB StatsAPI integration.
-- NFL: NFLMeta (chosen 2026-11-15; ESPN's terms bar automated access), behind a provider.
+- NFL: NFLMeta (chosen 2026-11-15; ESPN's terms bar automated access), behind a provider. Free until its month is spent, then Builder (the user's plan, 2026-11-17).
 - NBA: BALLDONTLIE's Free tier (chosen 2026-11-16), behind a provider. Its terms bar sharing a key, so the key never goes onto a friend's board.
 - NHL/PGA: not yet chosen; candidates in `docs/agent_context/SOURCES.md`.
 - PGA probability/cut-line optional: DataGolf if worth the key/cost.
@@ -89,7 +89,8 @@ Free/low-cost by default:
 - MLB in-game win probability: Polymarket US public market data first (MLB's own model ignores team strength), with the MLB feed as the fallback.
 - Do not use Kalshi's API (its Developer Agreement limits use to a member's own trading) or polymarket.com's APIs from the US (its terms limit US residents to content features). Details: `docs/agent_context/SOURCES.md`.
 - Commercial fallback only after free sources fail product needs.
-- Each source's terms are typed in `omni/providers/rights.py`. A recording carries a `RETENTION.json` with its delete-by date, and `tools/recordings_due.py` lists overdue ones; deleting stays a person's step. Every account's requests and rows are counted against its limits (`omni/app/quota.py`).
+- Each source's terms are typed in `omni/providers/rights.py`, with the user's ruling beside them: showing data on the family's own boards from a short-lived copy that expires is display, not redistribution (revisit before any commercial use).
+- A recording or run log quoting a provider whose terms allow no standing copy (NFLMeta) is stamped with a delete-by (`RETENTION.json`), and the expiry sweep mines it into our own telemetry, then deletes it (`tools/recordings_due.py --expire`; the NFL runner sweeps at start and exit). Provider wording never lands anywhere else. Every account's requests and rows are counted against its limits (`omni/app/quota.py`).
 
 ## Device policy
 
