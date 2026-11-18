@@ -19,6 +19,12 @@ folder gets a `RETENTION.json` stamp when it's made (`stamp_recording`), naming 
 made, when it must be deleted by, and the terms' date. `recordings_due` lists recording folders with their
 stamps, reading nothing but the stamps; deleting stays the user's step.
 
+Beside each source's terms stands the project's own use of its data (`ProjectUse`), and the user's ruling
+on that use (`RULINGS`). The one use so far is `ProjectUse.FAMILY_BOARD_DISPLAY`: showing a source's data on
+the family's own boards. Each entry answers whether its data may reach a family board that way
+(`FamilyDisplay`), and says where the answer comes from: the source's terms, or the user's ruling. The
+terms stay as written; the ruling never turns a refusal in them into a permission.
+
 `READS` says which sources each module reads or ships, so a new provider without an entry fails a test.
 """
 
@@ -35,16 +41,22 @@ from typing import Any
 from omni.core.enum import StrEnumMixin
 
 __all__ = [
+    "FAMILY_DISPLAY_RULING",
     "MANIFEST",
     "READS",
     "RETENTION_FILE",
+    "RULINGS",
     "Archive",
+    "Basis",
     "DataSource",
     "DueRecording",
     "DueStatus",
+    "FamilyDisplay",
     "OnTermination",
     "Permission",
+    "ProjectUse",
     "RetentionStamp",
+    "Ruling",
     "SourceRights",
     "Telemetry",
     "read_stamp",
@@ -106,9 +118,66 @@ class Telemetry(StrEnumMixin, str, Enum):
     THIRD_PARTY_CONTENT = "third_party_content"  # anything a provider worded: its source's archive rule
 
 
+class ProjectUse(StrEnumMixin, str, Enum):
+    """A use the project makes of a source's data, which its terms may not name as such."""
+
+    # Showing a source's data on the family's own boards, from a short-lived copy that expires: never
+    # archived, never sold, never shown to the public.
+    FAMILY_BOARD_DISPLAY = "family_board_display"
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Ruling:
+    """The user's ruling on one of the project's uses: when it was made, what it holds, the condition it rests
+    on, and when to look at it again."""
+
+    use: ProjectUse
+    ruled: date
+    holds: str
+    condition: str  # what every reliance on the ruling must keep true
+    revisit: str
+
+
+FAMILY_DISPLAY_RULING = Ruling(
+    use=ProjectUse.FAMILY_BOARD_DISPLAY,
+    ruled=date(2026, 11, 17),
+    holds="Friends and family seeing a source's data briefly on their own boards isn't a redistribution of it.",
+    condition="the copy that reaches a board expires quickly: never archived, sold or shown to the public",
+    revisit="revisit before any commercial use",
+)
+RULINGS: Mapping[ProjectUse, Ruling] = {FAMILY_DISPLAY_RULING.use: FAMILY_DISPLAY_RULING}
+
+
+class Basis(StrEnumMixin, str, Enum):
+    """Where an answer about a use comes from."""
+
+    TERMS = "terms"  # the source's own terms settle it
+    RULING = "ruling"  # the terms grant display or leave it open, and the user's ruling settles the rest
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class FamilyDisplay:
+    """Whether a source's data may reach a family board as `ProjectUse.FAMILY_BOARD_DISPLAY`, on what basis,
+    and how soon its longest-lived copy on the way expires.
+
+    An answer that rests on the ruling keeps the ruling's condition, so it records a bounded expiry: the
+    longest any copy the use makes (a cache's row, a diagnosis recording, a run log) is kept.
+    """
+
+    allowed: bool
+    basis: Basis
+    expiry: timedelta | None = None
+    why: str
+
+    def __post_init__(self) -> None:
+        if self.basis is Basis.RULING and self.allowed and (self.expiry is None or self.expiry <= timedelta(0)):
+            raise ValueError("a family display that rests on the ruling keeps its condition: a bounded expiry")
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class SourceRights:
-    """One source's terms, as far as they bear on what the project does with its data."""
+    """One source's terms, as far as they bear on what the project does with its data, and the answer for the
+    family's boards."""
 
     source: DataSource
     terms_url: str | None  # None when no single page holds them
@@ -123,16 +192,27 @@ class SourceRights:
     on_termination: OnTermination
     key_shared: Permission | None  # one key on several boards; None when the source takes no key
     notes: str
+    family_display: FamilyDisplay
 
     def __post_init__(self) -> None:
         if (self.archive is Archive.DIAGNOSIS) != (self.retention is not None):
             raise ValueError(f"{self.source}: a retention goes with a diagnosis archive, and only with one")
+        answer = self.family_display
+        if answer.allowed and self.display is Permission.DENIED:
+            raise ValueError(f"{self.source}: its terms bar display, so no family board may show it")
+        if answer.allowed and answer.basis is Basis.TERMS and not self.display.granted:
+            raise ValueError(f"{self.source}: its terms don't grant display, so they can't be what allows it")
 
 
 _RETROSHEET_NOTICE = (
     "The information used here was obtained free of charge from and is copyrighted by Retrosheet.  Interested"
     ' parties may contact Retrosheet at "www.retrosheet.org".'
 )
+
+_NFLMETA_RETENTION = timedelta(days=7)  # the user's rule for NFLMeta's recordings and run logs, since 2026-11-15
+# The market service's longest-lived copy: its S3 objects expire a day after they're written. Its table rows
+# expire after an hour, and a board ignores a price more than a minute old.
+_MARKET_SERVICE_COPIES = timedelta(days=1)
 
 # Where each term comes from: "SOURCES.md" is docs/agent_context/SOURCES.md, already verified there;
 # "read 2026-11-17" is a read of the terms themselves on that day, for this manifest.
@@ -150,6 +230,11 @@ _ENTRIES = (
         on_termination=OnTermination.DELETE,  # no agreement to end; the stricter value
         key_shared=None,
         notes="MLBAM's notice: individual, non-commercial, non-bulk use only; every other use needs its consent.",
+        family_display=FamilyDisplay(
+            allowed=True,
+            basis=Basis.TERMS,
+            why="Individual, non-commercial use: each board asks for its own owner and holds only what it shows.",
+        ),
     ),
     SourceRights(
         source=DataSource.NFLMETA,
@@ -158,13 +243,22 @@ _ENTRIES = (
         display=Permission.ALLOWED,  # SOURCES.md: Free is personal, non-commercial; paid plans may display scores
         cache=Permission.ALLOWED,  # SOURCES.md: "normal application caching", never a standing copy
         archive=Archive.DIAGNOSIS,  # SOURCES.md: no standing copy, no systematic accumulation
-        retention=timedelta(days=7),  # the user's rule since 2026-11-15
+        retention=_NFLMETA_RETENTION,
         train=Permission.DENIED,  # read 2026-11-17: "does not include model training or fine-tuning"
         redistribute=Permission.DENIED,  # read 2026-11-17: no redistributing, republishing or reselling
         attribution=None,  # read 2026-11-17: none of its own; material from nflverse carries nflverse's
         on_termination=OnTermination.DELETE,  # SOURCES.md: termination doesn't entitle keeping; a breach deletes
         key_shared=Permission.UNSTATED,  # read 2026-11-17: keys stay server-side and the holder answers for them
         notes="No standing copy and no training; a recording is for a diagnosis, deleted within 7 days.",
+        family_display=FamilyDisplay(
+            allowed=True,
+            basis=Basis.RULING,
+            expiry=_NFLMETA_RETENTION,
+            why=(
+                "Its terms bar redistributing it; the ruling holds the family seeing it briefly isn't that. Boards"
+                " hold it in memory, and its words land only in stamped folders deleted within 7 days."
+            ),
+        ),
     ),
     SourceRights(
         source=DataSource.BALLDONTLIE,
@@ -179,6 +273,11 @@ _ENTRIES = (
         on_termination=OnTermination.KEEP,  # SOURCES.md: §17, data may be kept after access ends
         key_shared=Permission.DENIED,  # SOURCES.md: §5 and §7(b) bar sharing keys
         notes="One key in a central poller may serve every Omni board; a key on each board would be sharing it.",
+        family_display=FamilyDisplay(
+            allowed=True,
+            basis=Basis.TERMS,
+            why="§6 allows any lawful personal or commercial use, and serving Omni's own boards isn't a substitute feed.",
+        ),
     ),
     SourceRights(
         source=DataSource.POLYMARKET_US,
@@ -193,6 +292,16 @@ _ENTRIES = (
         on_termination=OnTermination.DELETE,  # nothing allows keeping it; the stricter value
         key_shared=Permission.UNSTATED,  # SOURCES.md: the agreement binds each account holder
         notes="Public market data needs no key; the keyed stream's key stays in Omni's market service.",
+        family_display=FamilyDisplay(
+            allowed=True,
+            basis=Basis.RULING,
+            expiry=_MARKET_SERVICE_COPIES,
+            why=(
+                "Clause 22 bars redistributing it and nothing in the agreement speaks to display; the ruling holds"
+                " the family seeing a price briefly isn't redistribution. The market service's copies expire"
+                " within a day, and a board ignores a price a minute old."
+            ),
+        ),
     ),
     SourceRights(
         source=DataSource.BOVADA,
@@ -207,13 +316,19 @@ _ENTRIES = (
         on_termination=OnTermination.DELETE,  # nothing allows keeping it; the stricter value
         key_shared=None,
         notes="Private personal use: a board shows pregame lines for its owner, and the cloud poller leaves it off.",
+        family_display=FamilyDisplay(
+            allowed=False,
+            basis=Basis.TERMS,
+            why="9.3 bars storing it in another system, so it can't reach a board from a cache; 8.1 still lets a"
+            " board show its owner's pregame lines.",
+        ),
     ),
     SourceRights(
         source=DataSource.OMNI_MARKET_SERVICE,
         terms_url="https://github.com/ajszoke/omni-scoreboard/blob/main/cloud/README.md",  # our own service
         terms_read=date(2026, 11, 17),  # read 2026-11-17: cloud/README.md
         display=Permission.ALLOWED,
-        cache=Permission.ALLOWED,  # read 2026-11-17: its rows expire after an hour
+        cache=Permission.ALLOWED,  # read 2026-11-17: its rows expire after an hour, and its S3 copies after a day
         archive=Archive.NONE,  # what it holds is Polymarket US's prices, so Polymarket's rule
         train=Permission.UNSTATED,  # Polymarket US's rule
         redistribute=Permission.DENIED,  # it serves Omni's boards only
@@ -221,6 +336,12 @@ _ENTRIES = (
         on_termination=OnTermination.DELETE,
         key_shared=Permission.DENIED,  # read 2026-11-17: one token per board
         notes="Omni's own relay of market prices to its boards; what it holds follows the market's source.",
+        family_display=FamilyDisplay(
+            allowed=True,
+            basis=Basis.RULING,
+            expiry=_MARKET_SERVICE_COPIES,
+            why="It relays Polymarket US's prices, so Polymarket's answer: rows expire after an hour, S3 copies a day.",
+        ),
     ),
     SourceRights(
         source=DataSource.NFLVERSE,
@@ -235,6 +356,9 @@ _ENTRIES = (
         on_termination=OnTermination.KEEP,
         key_shared=None,
         notes="FTN's charting columns are CC BY-SA 4.0 (share-alike), so they're excluded; nothing here reads them.",
+        family_display=FamilyDisplay(
+            allowed=True, basis=Basis.TERMS, why="CC BY 4.0 allows any use, with the attribution."
+        ),
     ),
     SourceRights(
         source=DataSource.RETROSHEET,
@@ -249,6 +373,7 @@ _ENTRIES = (
         on_termination=OnTermination.KEEP,
         key_shared=None,
         notes="Not read yet: the planned MLB win-probability table's source. Its notice ships with it and in About.",
+        family_display=FamilyDisplay(allowed=True, basis=Basis.TERMS, why="Its notice allows any use, shown with it."),
     ),
     SourceRights(
         source=DataSource.WIKIPEDIA_COLORS,
@@ -263,6 +388,11 @@ _ENTRIES = (
         on_termination=OnTermination.KEEP,
         key_shared=None,
         notes="The NBA palette's starting colors; share-alike.",
+        family_display=FamilyDisplay(
+            allowed=True,
+            basis=Basis.TERMS,
+            why="CC BY-SA 4.0 allows any use, with the attribution, under the same license.",
+        ),
     ),
     SourceRights(
         source=DataSource.TEAM_LOGOS,
@@ -277,6 +407,11 @@ _ENTRIES = (
         on_termination=OnTermination.DELETE,  # no agreement to end; the stricter value
         key_shared=None,
         notes="Team trademarks: display only, as the boards' committed tiles; never redistributed beyond the boards.",
+        family_display=FamilyDisplay(
+            allowed=True,
+            basis=Basis.TERMS,
+            why="Display only, as the boards' committed tiles, never beyond the boards.",
+        ),
     ),
 )
 

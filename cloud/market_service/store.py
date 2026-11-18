@@ -5,8 +5,9 @@ one key, newest last, so the latest is a one-row query however many have piled u
 hour, and that's generous: boards only want the newest, and rows cost almost nothing to keep. DynamoDB
 deletes expired rows within days rather than on the dot, so a read must check the expiry itself.
 
-Each run's readings also go to S3 as gzipped JSON lines. That is the keepsake copy: it is written up
-front rather than rescued from the table on the way out, so nothing depends on when a row is deleted.
+Each run's readings also go to S3 as gzipped JSON lines, under ``readings/``, to diagnose the poller by. They
+expire a day after they're written (the bucket's lifecycle rule in ``cloud/template.yaml``): a board may show a
+market's prices only from a copy that expires quickly (`omni.providers.rights`).
 """
 
 from __future__ import annotations

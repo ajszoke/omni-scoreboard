@@ -12,18 +12,26 @@ from typing import Any
 
 import pytest
 
+from cloud.market_service.readings import Reading, ReadingKind
+from cloud.market_service.store import _READING_TTL, ReadingArchive
 from omni.core.enum import League
 from omni.core.ids import SourceRef
+from omni.providers.market_service import _MAX_AGE
 from omni.providers.rights import (
+    FAMILY_DISPLAY_RULING,
     MANIFEST,
     READS,
     RETENTION_FILE,
+    RULINGS,
     Archive,
+    Basis,
     DataSource,
     DueRecording,
     DueStatus,
+    FamilyDisplay,
     OnTermination,
     Permission,
+    ProjectUse,
     SourceRights,
     read_stamp,
     recordings_due,
@@ -112,6 +120,105 @@ def test_a_retention_goes_with_a_diagnosis_archive_and_only_with_one() -> None:
         SourceRights(**{**fields, "retention": timedelta(days=1)})
     with pytest.raises(ValueError, match="a retention goes with a diagnosis archive"):
         SourceRights(**{**fields, "archive": Archive.DIAGNOSIS})
+
+
+# --- the family's boards ----------------------------------------------------------------------------------
+
+
+def test_the_user_s_ruling_on_the_family_s_boards_is_recorded_with_its_date_its_condition_and_its_revisit() -> None:
+    assert list(ProjectUse) == [ProjectUse.FAMILY_BOARD_DISPLAY]
+    assert RULINGS == {ProjectUse.FAMILY_BOARD_DISPLAY: FAMILY_DISPLAY_RULING}
+    assert FAMILY_DISPLAY_RULING.ruled == date(2026, 11, 17)
+    assert "isn't a redistribution" in FAMILY_DISPLAY_RULING.holds
+    assert "expires quickly" in FAMILY_DISPLAY_RULING.condition
+    assert FAMILY_DISPLAY_RULING.revisit == "revisit before any commercial use"
+
+
+def test_each_source_answers_for_the_family_s_boards_and_says_where_the_answer_comes_from() -> None:
+    answers = {source: (entry.family_display.allowed, entry.family_display.basis) for source, entry in MANIFEST.items()}
+    assert answers == {
+        DataSource.MLB_STATSAPI: (True, Basis.TERMS),
+        DataSource.NFLMETA: (True, Basis.RULING),
+        DataSource.BALLDONTLIE: (True, Basis.TERMS),
+        DataSource.POLYMARKET_US: (True, Basis.RULING),
+        DataSource.BOVADA: (False, Basis.TERMS),  # it bars storing its content elsewhere: no cache may carry it
+        DataSource.OMNI_MARKET_SERVICE: (True, Basis.RULING),
+        DataSource.NFLVERSE: (True, Basis.TERMS),
+        DataSource.RETROSHEET: (True, Basis.TERMS),
+        DataSource.WIKIPEDIA_COLORS: (True, Basis.TERMS),
+        DataSource.TEAM_LOGOS: (True, Basis.TERMS),
+    }
+    assert all(entry.family_display.why for entry in MANIFEST.values())
+
+
+def test_every_source_shown_on_the_ruling_records_a_bounded_expiry_and_keeps_its_terms_as_written() -> None:
+    relying = {source: entry for source, entry in MANIFEST.items() if entry.family_display.basis is Basis.RULING}
+    assert {source: entry.family_display.expiry for source, entry in relying.items()} == {
+        DataSource.NFLMETA: timedelta(days=7),  # its recordings and run logs, stamped
+        DataSource.POLYMARKET_US: timedelta(days=1),  # the market service's longest-lived copy
+        DataSource.OMNI_MARKET_SERVICE: timedelta(days=1),
+    }
+    assert all(not entry.redistribute.granted for entry in relying.values())  # the ruling flips no term
+    assert MANIFEST[DataSource.POLYMARKET_US].redistribute is Permission.DENIED
+    assert MANIFEST[DataSource.NFLMETA].family_display.expiry == MANIFEST[DataSource.NFLMETA].retention
+
+
+def _with(source: DataSource, **fields: Any) -> SourceRights:
+    entry = MANIFEST[source]
+    current: dict[str, Any] = {name: getattr(entry, name) for name in SourceRights.__dataclass_fields__}
+    return SourceRights(**{**current, **fields})
+
+
+def test_a_source_whose_terms_bar_display_can_t_be_marked_for_the_family_s_boards() -> None:
+    on_terms = FamilyDisplay(allowed=True, basis=Basis.TERMS, why="x")
+    on_ruling = FamilyDisplay(allowed=True, basis=Basis.RULING, expiry=timedelta(hours=1), why="x")
+    for answer in (on_terms, on_ruling):
+        with pytest.raises(ValueError, match="its terms bar display"):
+            _with(DataSource.MLB_STATSAPI, display=Permission.DENIED, family_display=answer)
+    with pytest.raises(ValueError, match="can't be what allows it"):
+        _with(DataSource.POLYMARKET_US, family_display=on_terms)  # its terms leave display open: only the ruling
+    refused = FamilyDisplay(allowed=False, basis=Basis.TERMS, why="x")
+    assert not _with(DataSource.MLB_STATSAPI, display=Permission.DENIED, family_display=refused).family_display.allowed
+
+
+@pytest.mark.parametrize("expiry", [None, timedelta(0)])
+def test_a_family_display_on_the_ruling_without_a_bounded_expiry_is_refused(expiry: timedelta | None) -> None:
+    with pytest.raises(ValueError, match="a bounded expiry"):
+        FamilyDisplay(allowed=True, basis=Basis.RULING, expiry=expiry, why="x")
+    assert not FamilyDisplay(allowed=False, basis=Basis.RULING, why="x").allowed
+
+
+def _resource(template: str, name: str) -> list[str]:
+    """One resource's lines in the CloudFormation template, stripped: up to the next line at its indentation."""
+    lines = template.splitlines()
+    start = lines.index(f"  {name}:")
+    block: list[str] = []
+    for line in lines[start + 1 :]:
+        if line.strip() and not line.startswith("    "):
+            break
+        block.append(line.strip())
+    return block
+
+
+def test_the_market_service_s_copies_expire_within_what_its_entry_records() -> None:
+    """The table's rows within an hour, the archive's objects within a day, and a board ignores a minute-old one."""
+    recorded = MANIFEST[DataSource.OMNI_MARKET_SERVICE].family_display.expiry
+    assert recorded == timedelta(days=1) and _READING_TTL == timedelta(hours=1)
+    archive = _resource((REPO / "cloud" / "template.yaml").read_text(), "Archive")
+    assert {"Status: Enabled", "Prefix: readings/", "ExpirationInDays: 1"} <= set(archive)
+
+    class _S3:
+        def __init__(self) -> None:
+            self.keys: list[str] = []
+
+        def put_object(self, **kwargs: Any) -> dict[str, Any]:
+            self.keys.append(kwargs["Key"])
+            return {}
+
+    s3 = _S3()
+    ReadingArchive(s3, "bucket").write([Reading(game_id="g", kind=ReadingKind.WIN, observed_at=NOW, body={})], NOW)
+    assert s3.keys and all(key.startswith("readings/") for key in s3.keys)  # every object falls under the rule
+    assert _MAX_AGE == timedelta(seconds=60)
 
 
 # --- the stamp --------------------------------------------------------------------------------------------
