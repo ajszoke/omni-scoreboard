@@ -355,18 +355,15 @@ class PolicyDirector:
                 return False
             self._promotion_noted(air, scene, at, hold.deadline if hold is not None else None)
         air.since = now
+        if air.role is CardRole.PLAY_IN_TURN:
+            self._broker.aired(air.card.dedupe_key)  # shown in its game's turn: no promotion waits for it now
         if turn.started is None:
             air.protected = now + air.minimum
             self._begin(turn, air, at, now)
         else:  # the game's base card, after its big play: it keeps the turn's protection
             air.protected = turn.started + turn.minimum
             self._card_noted(turn, air, at)
-        key = air.card.dedupe_key.raw
-        self._shown_at[key] = now
-        if air.role is CardRole.STATUS:
-            self._open[key] = OpenTime.mark(open_now=self._context is not BarContext.ACTION, at=now)
-        if air.role is CardRole.REPEAT:
-            self._repeats[key] = self._repeats.get(key, 0) + 1
+        self._showing(air, now)
         caption = _caption(air.shown)
         if caption is not None and turn.base:
             self._caption_from(air, caption, now)
@@ -416,9 +413,12 @@ class PolicyDirector:
             self._next = option.air
             return EndReason.RAN_ITS_TIME
         # The same card again (its game won again, or a lone card): its frame stays, and a new turn begins.
-        renewed = option.air.turn
-        air.turn = renewed
-        self._begin(renewed, air, at, turn.started + turn.length)
+        renewed, role = option.air.turn, option.air.role
+        again = role is air.role is CardRole.NEUTRAL  # the same card rotating on its own says nothing new
+        air.turn, air.role = renewed, role
+        start = turn.started + turn.length
+        self._begin(renewed, air, at, start, again=again)
+        self._showing(air, start)  # its new turn counts as a showing: a repeat, a status's mark, its last airing
         air.shown = self._present(air, air.card, now)
         return None
 
@@ -530,8 +530,8 @@ class PolicyDirector:
         )
 
     def _account(self, pool: Targets, entries: Iterable[PoolEntry], at: ClockReading) -> None:
-        """Keep the ledger in step with the pool: freeze a game in a break and thaw it after, retire one that left
-        (once the turn on air, if it's that game's, is credited), and write a lease that ran out."""
+        """Keep the ledger in step with the pool: freeze a favorite resting in its break and thaw it after, retire one
+        that left (once the turn on air, if it's that game's, is credited), and write a lease that ran out."""
         now = at.monotonic
         resting = {aside.contest for aside in pool.set_aside if aside.reason is SetAsideReason.FAVORITE_IN_BREAK}
         staying = {game.contest for game in pool.games} | resting
@@ -546,10 +546,12 @@ class PolicyDirector:
             if lease is not None and lease.state(now) is LeaseState.LAPSED and lease.id not in self._lapsed:
                 self._lapsed.add(lease.id)
                 self._note(LeaseNote(at=at, id=lease.id, event=LeaseEvent.LAPSED))
-            if entry.in_break and entry.contest not in self._frozen:
+            # A favorite resting in its break is frozen; a game whose break leaves it in the pool still takes turns,
+            # so it accrues as it pays, or games sharing a break would starve one another.
+            if entry.contest in resting and entry.contest not in self._frozen:
                 self._ledger.freeze(entry.contest)
                 self._frozen.add(entry.contest)
-            elif not entry.in_break and entry.contest in self._frozen:
+            elif entry.contest not in resting and entry.contest in self._frozen:
                 self._ledger.thaw(entry.contest)
                 self._frozen.discard(entry.contest)
 
@@ -618,13 +620,15 @@ class PolicyDirector:
         return _Option(rung, self._air(first[0], first[1], turn, scene.now))
 
     def _play_in_turn(self, scene: _Scene, contest: LeagueScopedId) -> ScoreboardCard[Any] | None:
-        """The game's oldest unaired big play still in its window, which no promotion is waiting for."""
+        """The game's oldest unaired big play still in its window, which no promotion is waiting for. A favorite's
+        own play is the exception: its own turn shows it, promoted or not (`started` settles the promotion), since
+        a play of a favorite in action waits on a bar it seldom clears, and its window would run out unseen."""
         plays = [
             card
             for key, card in scene.usable.items()
             if card.kind is CardKind.BIG_PLAY
             and card.contest.id == contest
-            and key not in scene.reserved
+            and (key not in scene.reserved or self._related(card.contest))
             and not self._aired(key)
         ]
         return min(
@@ -666,8 +670,10 @@ class PolicyDirector:
         )
 
     def _result(self, scene: _Scene) -> _Option | None:
-        """The first initial final in end order (or the unseen play that decided it), when it may play here."""
+        """The first initial final in end order of those that may play here (or the unseen play that decided it). An
+        unrelated final waiting for a favorite's break doesn't hold back a favorite's own."""
         base_keys = {card.dedupe_key.raw for card in scene.base.values()}
+        context = scene.moment.context
         finals = [
             card
             for key, card in scene.usable.items()
@@ -675,13 +681,11 @@ class PolicyDirector:
             and key not in base_keys
             and key not in scene.reserved
             and not self._aired(key)
+            and initial_final_permitted(context=context, related=self._related(card.contest))
         ]
         if not finals:
             return None
         final = min(finals, key=lambda card: (_ended(card, scene), card.dedupe_key.raw))
-        related = self._related(final.contest)
-        if not initial_final_permitted(context=scene.moment.context, related=related):
-            return None
         before = [key.raw for key in final.after if key.raw in scene.usable and not self._aired(key.raw)]
         if any(key in scene.reserved for key in before):
             return None  # the play that decided it is waiting on its promotion
@@ -798,8 +802,9 @@ class PolicyDirector:
         air.turn.captioned = True
         self._captions[air.card.contest.id] = caption
 
-    def _begin(self, turn: Turn, air: Air, at: ClockReading, start: MonotonicTime) -> None:
-        """A turn's first frame (or its game's frame staying up for it): the run, its guests, the trace."""
+    def _begin(self, turn: Turn, air: Air, at: ClockReading, start: MonotonicTime, *, again: bool = False) -> None:
+        """A turn's first frame (or its card's frame staying up for it): the run, its guests, the trace. A card
+        rotating on its own at neutral weight (``again``) isn't written again."""
         turn.started = start
         self._current = turn
         self._run = self._run.after(turn.rung, start)
@@ -815,10 +820,20 @@ class PolicyDirector:
             continues = air.since is not None and air.since < start
             if not continues or turn.reason is not BaseReason.ONLY_CANDIDATE:
                 self._turn_noted(turn, air, at, continues=continues)
-        elif turn.candidate is None:
+        elif turn.candidate is None and not again:
             self._card_noted(turn, air, at)
         if air.role is CardRole.PREGAME:
             self._base_turns = 0
+
+    def _showing(self, air: Air, at: MonotonicTime) -> None:
+        """``air``'s card begins a turn on air at ``at``: when it last aired, a status's open time marked afresh, a
+        repeat counted."""
+        key = air.card.dedupe_key.raw
+        self._shown_at[key] = at
+        if air.role is CardRole.STATUS:
+            self._open[key] = OpenTime.mark(open_now=self._context is not BarContext.ACTION, at=at)
+        if air.role is CardRole.REPEAT:
+            self._repeats[key] = self._repeats.get(key, 0) + 1
 
     def _end(self, turn: Turn, at: ClockReading) -> None:
         """A turn is over: a base turn is credited with its confirmed time, and a full one clears an owed
@@ -965,6 +980,7 @@ class PolicyDirector:
                 rescue=turn.rescue,
                 hosts=turn.hosts,
                 why=turn.why,
+                targets=turn.targets,
             )
         )
 

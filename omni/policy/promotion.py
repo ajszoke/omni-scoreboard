@@ -373,6 +373,15 @@ class PromotionBroker(Generic[CardT]):
         worth = candidate.interrupt
         return worth is not None and worth < self._policy.bars.open
 
+    def aired(self, card: CardT) -> tuple[PromotionCandidate[CardT], ...]:
+        """The card waiting candidates name aired without a promotion (in its own game's turn): they're dropped, and
+        refused from now on as shown. No cooldown is spent. Returns them."""
+        settled = tuple(c for c in self._pending.values() if c.card == card)
+        for candidate in settled:
+            self._drop(candidate.key)
+            self._shown[candidate.key] = self._policy.hard_end_of(candidate) + self._policy.remember_for
+        return settled
+
     def withdraw(self, contest: LeagueScopedId) -> tuple[PromotionCandidate[CardT], ...]:
         """Drop a contest's waiting candidates at once (a mute); returns them."""
         dropped = tuple(c for c in self._pending.values() if c.key.contest == contest)

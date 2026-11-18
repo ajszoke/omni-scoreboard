@@ -30,7 +30,7 @@ from omni.core.clock import ClockReading, MonotonicTime
 from omni.core.enum import GameStatus, StrEnumMixin
 from omni.core.ids import LeagueScopedId
 from omni.domain.breaks import BreakId, BreakKind
-from omni.policy.allocation import GameWeight
+from omni.policy.allocation import GameWeight, Targets
 from omni.policy.interrupts import BarContext, InterruptClass, InterruptValue
 from omni.policy.ladder import Rung
 from omni.policy.leases import LeaseRefusal
@@ -123,6 +123,7 @@ class BaseTurnNote:
     rescue: Rescue | None
     hosts: tuple[LeagueScopedId, ...]  # the favorites whose break it's a guest of
     why: str
+    targets: Targets | None = None  # every pool game's and league's targets the turn was chosen by
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
