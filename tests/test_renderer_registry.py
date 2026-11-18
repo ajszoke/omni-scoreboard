@@ -161,3 +161,18 @@ def test_default_registry_routes_a_live_football_card_to_its_renderer() -> None:
 
     card = live_football_card(FootballGameState(period=1, clock_seconds=900, away_score=0, home_score=0))
     assert isinstance(default_registry().renderer_for(card), LiveFootballRenderer)
+
+
+def test_default_registry_routes_a_football_final_to_the_live_football_renderer_s_final_state() -> None:
+    import dataclasses
+
+    from omni.cards.base import CardKind
+    from omni.domain.football import FootballGameState, FootballInterval
+    from tests.football_fixtures import live_football_card
+
+    over = FootballGameState(period=4, clock_seconds=0, away_score=17, home_score=10, interval=FootballInterval.FINAL)
+    card = dataclasses.replace(live_football_card(over), kind=CardKind.FINAL)
+    assert isinstance(default_registry().renderer_for(card), LiveFootballRenderer)
+    canvas = RecordingCanvas(128, 64)
+    default_registry().render(card, CTX, canvas)
+    assert "FINAL" in {t.text for t in canvas.texts()}
