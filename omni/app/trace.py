@@ -130,6 +130,7 @@ class DecisionTracer:
             self._changed(change, painted)
         for note in painted.notes:
             self._log(f"note {self._clock(painted.at)}: {note.value}")
+        self.decided(painted.decisions)
         if painted.render_error is not None:
             if painted.render_error != self._paint_error:
                 self._paint_error = painted.render_error

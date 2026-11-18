@@ -91,7 +91,10 @@ from omni.tower.board import (
 )
 from omni.tower.lane import ChangeKind, LaneChange, earliest
 from omni.tower.segment import Surface
+from omni.policy.names import PolicyName
 from omni.policy.settings import PolicySettings
+from omni.preferences.favorites import Favorites
+from omni.tower.decisions import PolicyDecision
 
 __all__ = [
     "FRESH_PAST_DUE",
@@ -169,6 +172,7 @@ class Painted:
     presented: Presentation | None = None  # set on a card's first committed frame
     changes: tuple[LaneChange[BoardPayload], ...] = ()  # what the board did since the last paint
     notes: tuple[BoardNote, ...] = ()  # what the board noted since the last paint
+    decisions: tuple[PolicyDecision, ...] = ()  # what the board's policy decided since the last paint
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -208,13 +212,14 @@ class AppLoop:
         quota: QuotaNote | None = None,
         football: LiveFootballPipeline | None = None,
         settings: PolicySettings | None = None,
+        favorites: Favorites = Favorites(),
         fresh_past_due: timedelta = FRESH_PAST_DUE,
     ) -> None:
         if not schedules:
             raise ValueError("a board needs at least one schedule source")
-        if settings is None:
-            settings = PolicySettings()
-        self._settings = settings  # what the user set about how the board shares its airtime
+        # What the user set about how the board shares its airtime. None keeps the scheduler's bands
+        # (omni-board-policy/1), as a replay or a test that predates the policy decides.
+        self._settings = settings if settings is not None else PolicySettings(policy=PolicyName.BOARD_V1)
         self._schedules = tuple(schedules)
         self._store = store
         self._pipeline = pipeline
@@ -234,7 +239,7 @@ class AppLoop:
         self._offline_after = offline_after
         self._fresh_past_due = fresh_past_due
         self._quota = quota  # why a quota holds a scope back; None: no quota is consulted
-        self._board = BoardSession(queue, sink.profile, policy=policy)
+        self._board = BoardSession(queue, sink.profile, policy=policy, settings=settings, favorites=favorites)
         self._frames = BoardFrameRenderer()
         self._health_changes_at: MonotonicTime | None = None  # when a league's health next changes by itself
 
@@ -325,9 +330,11 @@ class AppLoop:
             shown = clock.read()
             lanes.shown(shown.monotonic)
         self._board.committed(cue, shown)
-        changes, notes = tuple(self._board.changes()), tuple(self._board.notes())
+        changes, notes, decisions = self._board_says()
         if isinstance(payload, BoardFrame):
-            return Painted(at=shown.utc, shown=None, frame=payload.kind, changes=changes, notes=notes)
+            return Painted(
+                at=shown.utc, shown=None, frame=payload.kind, changes=changes, notes=notes, decisions=decisions
+            )
         presented = None
         if cue.reason is not None and any(change.kind is ChangeKind.UP for change in changes):
             presented = Presentation(
@@ -345,12 +352,19 @@ class AppLoop:
             presented=presented,
             changes=changes,
             notes=notes,
+            decisions=decisions,
         )
 
     def _failed(self, at: ClockReading, exc: Exception) -> Painted:
-        changes, notes = tuple(self._board.changes()), tuple(self._board.notes())
+        changes, notes, decisions = self._board_says()
         error = f"{type(exc).__name__}: {exc}"
-        return Painted(at=at.utc, shown=None, render_error=error, changes=changes, notes=notes)
+        return Painted(at=at.utc, shown=None, render_error=error, changes=changes, notes=notes, decisions=decisions)
+
+    def _board_says(
+        self,
+    ) -> tuple[tuple[LaneChange[BoardPayload], ...], tuple[BoardNote, ...], tuple[PolicyDecision, ...]]:
+        """What the board did, noted and decided since it was last asked."""
+        return tuple(self._board.changes()), tuple(self._board.notes()), tuple(self._board.decisions())
 
     def run_once(self, at: ClockReading) -> TickResult:
         """One refresh, then one paint, at ``at``."""

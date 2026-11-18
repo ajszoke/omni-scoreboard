@@ -15,6 +15,7 @@ import pytest
 from omni.app import loop as loop_module
 from omni.app.contest_store import ContestStore
 from omni.app.display import RecordingDisplaySink
+from omni.app.trace import DecisionTracer
 from omni.app.loop import AppLoop
 from omni.app.nfl_pipeline import LiveFootballPipeline
 from omni.app.pipeline import LiveBaseballPipeline
@@ -29,6 +30,7 @@ from omni.domain.contest import TeamGame
 from omni.events.base import EventImportance
 from omni.events.baseball import BaseballGameEvent, BaseballGameEventType, BaseballPlayPayload, LiveBaseballFeed
 from omni.policy.promotion import PromotionKind
+from omni.policy.names import PolicyName
 from omni.policy.settings import PolicySettings
 from omni.policy.view import PolicyView
 from omni.providers.base import CurrentSlate, PollScope, ProviderUpdate, ScopeObservation, ScopeReport, ScopeSpan
@@ -80,9 +82,12 @@ def _mlb_state(*, away_hits: int = 3, home: int = 0) -> BaseballGameState:
     )
 
 
-def _loop(*slates: Any, feed: Any, feeds: FakeNflFeeds, mlb_lag: int = 0) -> tuple[AppLoop, InterleavedCardQueue]:
+def _loop(
+    *slates: Any, feed: Any, feeds: FakeNflFeeds, mlb_lag: int = 0, settings: PolicySettings | None = None
+) -> tuple[AppLoop, InterleavedCardQueue]:
     queue = InterleavedCardQueue()
     loop = AppLoop(
+        settings=settings,
         schedules=slates,
         store=ContestStore(),
         pipeline=LiveBaseballPipeline(
@@ -225,4 +230,22 @@ def test_a_board_runs_with_the_settings_it_s_built_with_and_the_defaults_otherwi
     built = build_loop(FakeSlate(League.MLB, MLB_SOURCE), _no_feed, RecordingDisplaySink(QUAD), settings=muted)
     assert built.settings is muted
     plain, _ = _loop(FakeSlate(League.MLB, MLB_SOURCE), feed=_no_feed, feeds=feeds)
-    assert plain.settings == PolicySettings()
+    assert plain.settings == PolicySettings(policy=PolicyName.BOARD_V1)  # none given: the scheduler's bands
+
+
+def test_under_policy_v2_the_board_decides_from_the_published_view_and_the_trace_writes_why() -> None:
+    mlb = _mlb_game()
+    feeds = FakeNflFeeds()
+
+    def live(game: TeamGame, now: datetime) -> LiveBaseballFeed:
+        return LiveBaseballFeed(state=_mlb_state())
+
+    settings = PolicySettings(policy=PolicyName.BOARD_V2)
+    loop, _ = _loop(FakeSlate(League.MLB, MLB_SOURCE, mlb), nfl_slate(GAME), feed=live, feeds=feeds, settings=settings)
+    feeds.answer(GAME, drive(), _seconds(0))
+    loop.refresh(_seconds(0))
+    painted = loop.paint(_seconds(0))
+    assert painted.shown is not None and painted.decisions
+    lines: list[str] = []
+    DecisionTracer(lines.append).painted(painted)
+    assert any(line.startswith("base ") and "omni-board-policy/2" in line and "why:" in line for line in lines)

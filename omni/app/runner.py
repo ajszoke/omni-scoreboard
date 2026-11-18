@@ -175,6 +175,7 @@ def build_loop(
         quota=quota,
         football=football,
         settings=settings,
+        favorites=favorites,
     )
 
 
