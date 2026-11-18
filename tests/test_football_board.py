@@ -33,6 +33,7 @@ from omni.app.football_board import (
     FootballBoard,
 )
 from omni.app.frame_stream import DisplayLink, DisplayUnavailable, StreamDisplaySink, StreamFrame
+from omni.app.run_log import LogLine
 from omni.cards.base import ScoreboardCard
 from omni.cards.football import LiveFootballCardPayload
 from omni.core.colors import RGBColor
@@ -64,6 +65,11 @@ T0 = datetime(2026, 11, 16, 2, 0, tzinfo=timezone.utc)
 S = timedelta(seconds=1)
 
 
+def _full(lines: list[str]) -> Callable[[LogLine], None]:
+    """A board's log that keeps each line in full, as the stamped run log does."""
+    return lambda line: lines.append(line.full)
+
+
 def _at(moment: datetime) -> ClockReading:
     """The clock's two readings at ``moment``; the monotonic one counts from T0."""
     return ClockReading(utc=moment, monotonic=MonotonicTime((moment - T0).total_seconds()))
@@ -76,7 +82,7 @@ def _board(
     lines: list[str] = []
     sink = sink if sink is not None else RecordingDisplaySink(PanelProfile.QUAD_128X64)
     source = GameFeed(provider, GAME, win_probability=kwargs.pop("win_probability", None))
-    return FootballBoard(source, sink, log=lines.append, **kwargs), sink, lines
+    return FootballBoard(source, sink, log=_full(lines), **kwargs), sink, lines
 
 
 def test_polls_when_due_and_draws_every_step() -> None:
@@ -367,7 +373,7 @@ def test_stops_polling_once_the_final_and_its_last_play_are_in() -> None:
     feed = FakeFeed()
     board = _period_ends("matched", feed)
     lines: list[str] = []
-    board._log = lines.append
+    board._log = _full(lines)
     for second in range(0, 10 + int(FINAL_DRAIN.total_seconds())):
         board.step(_at(T0 + second * S))
     assert "final: no more polling" not in lines  # still reading the feed for the final's last plays
@@ -653,7 +659,7 @@ def _streamed(feed: FakeFeed, stream: _Stream) -> tuple[FootballBoard, _Ticking,
     provider = NflMetaLiveProvider(NflTeamRegistry.default(source=NFLMETA_SOURCE), fetch=feed)
     lines: list[str] = []
     renderer = _Ticking()
-    board = FootballBoard(GameFeed(provider, GAME), stream.sink, log=lines.append, renderer=renderer)
+    board = FootballBoard(GameFeed(provider, GAME), stream.sink, log=_full(lines), renderer=renderer)
     return board, renderer, lines
 
 
@@ -857,7 +863,7 @@ def test_a_touchdown_whose_second_frame_a_stalled_display_never_shows_is_gone_by
     touchdown = _event("td", "TOUCHDOWN PIT", tone=PlayTone.SCORE, players="players line")
     lines: list[str] = []
     script = _Script(_answer(0, _LIVE, touchdown), *(_answer(second, _LIVE) for second in range(10, 200, 10)))
-    board = FootballBoard(script, stream.sink, log=lines.append, renderer=_Ticking())
+    board = FootballBoard(script, stream.sink, log=_full(lines), renderer=_Ticking())
     for second in range(0, 200):
         board.step(_at(T0 + second * S))
         if second in (0, 181):  # the display shows its first frame, then nothing until 181 s
@@ -879,7 +885,7 @@ def _official_timeout_then_the_snap_at_171() -> _Script:
 def test_an_official_timeout_on_the_panel_stays_past_its_hard_end_until_the_field_moves() -> None:
     lines: list[str] = []
     board = FootballBoard(
-        _official_timeout_then_the_snap_at_171(), RecordingDisplaySink(PanelProfile.QUAD_128X64), log=lines.append
+        _official_timeout_then_the_snap_at_171(), RecordingDisplaySink(PanelProfile.QUAD_128X64), log=_full(lines)
     )
     cleared = None
     for second in range(0, 200):
@@ -899,7 +905,7 @@ def test_an_official_timeout_a_stalled_display_never_shows_goes_unseen_at_its_la
     stream = _Stream()
     stream.start()  # a display that acknowledges, and shows nothing
     lines: list[str] = []
-    board = FootballBoard(_official_timeout_then_the_snap_at_171(), stream.sink, log=lines.append, renderer=_Ticking())
+    board = FootballBoard(_official_timeout_then_the_snap_at_171(), stream.sink, log=_full(lines), renderer=_Ticking())
     dropped = None
     for second in range(0, 200):
         board.step(_at(T0 + second * S))
@@ -1038,7 +1044,7 @@ def test_a_period_closes_in_its_bound_keeping_the_decisive_plays_minimum_and_dro
     renderer = _Breaks("PLAY 2")
     lines: list[str] = []
     sink = RecordingDisplaySink(PanelProfile.QUAD_128X64)
-    board = FootballBoard(_backlog_then_final(walk_off_at=35), sink, delay=30 * S, renderer=renderer, log=lines.append)
+    board = FootballBoard(_backlog_then_final(walk_off_at=35), sink, delay=30 * S, renderer=renderer, log=_full(lines))
     for second in range(0, 75):
         board.step(_at(T0 + second * S))
     assert not _final_shown(board)  # the bound (30 s from the final's release at 40 s) has passed at 70 s ...
@@ -1065,7 +1071,7 @@ def test_a_display_outage_doesnt_hold_up_the_close_and_its_first_frame_back_show
     renderer = _Breaks()
     lines: list[str] = []
     board = FootballBoard(
-        _backlog_then_final(walk_off_at=35), stream.sink, delay=30 * S, renderer=renderer, log=lines.append
+        _backlog_then_final(walk_off_at=35), stream.sink, delay=30 * S, renderer=renderer, log=_full(lines)
     )
     for second in range(0, 46):
         board.step(_at(T0 + second * S))
@@ -1099,7 +1105,7 @@ def test_a_close_with_a_backlog_a_broken_caption_and_a_display_outage_still_ends
     renderer = _Breaks("PLAY 2")
     lines: list[str] = []
     board = FootballBoard(
-        _backlog_then_final(walk_off_at=35), stream.sink, delay=30 * S, renderer=renderer, log=lines.append
+        _backlog_then_final(walk_off_at=35), stream.sink, delay=30 * S, renderer=renderer, log=_full(lines)
     )
     for second in range(0, 78):
         if second == 55:
@@ -1287,7 +1293,7 @@ def _run(seconds: int, *answers: FeedResult) -> list[str]:
     quiet = range(int((answers[-1].received_at - T0) / S) + 10, seconds, 10)
     lines: list[str] = []
     script = _Script(*answers, *(_answer(second, _LIVE) for second in quiet))
-    board = FootballBoard(script, RecordingDisplaySink(PanelProfile.QUAD_128X64), log=lines.append)
+    board = FootballBoard(script, RecordingDisplaySink(PanelProfile.QUAD_128X64), log=_full(lines))
     for second in range(seconds):
         board.step(_at(T0 + second * S))
     return lines

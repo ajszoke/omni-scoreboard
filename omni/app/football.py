@@ -14,6 +14,12 @@ allow ordinary caching but not a standing copy of its data, so keep recordings t
 and delete them after: the recording's ``RETENTION.json`` says by when (`omni.providers.rights`). The log
 opens with what the run decides with (`omni.app.versions`).
 
+The log quotes NFLMeta (a play's description, an injury's text, a note from the feed), and its terms allow
+no standing copy. So stdout gets our own telemetry only: kinds, ids, reasons, timings, counts, where a line
+names a play by its kind ("routine play #57") instead of quoting it. Every line in full goes to
+``runner.log`` in a folder for the run under ``--log-dir`` (``build/logs/nflmeta/<date>-<away>-<home>/``),
+stamped to expire with NFLMeta's recordings (`omni.app.run_log`).
+
 Every NFLMeta request is counted against the month's quota (`omni.app.quota`), at the plan
 ``--nflmeta-plan`` names (free unless you say otherwise), and the count is kept under ``--state-dir`` so a
 restart doesn't forget it. The game is followed at its cadence until the month is exhausted; then the
@@ -26,7 +32,7 @@ import argparse
 import json
 import os
 import shlex
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import cast
@@ -36,6 +42,7 @@ from omni.core.clock import Pacer, SystemClock
 from omni.app.football_board import FootballBoard
 from omni.app.football_feed import BackgroundFeed, GameFeed
 from omni.app.quota import HttpAnswer, NflMetaPlan
+from omni.app.run_log import LogLine, RunLog
 from omni.app.versions import DecisionConfig, PolicyName, SourceRevision, Versions, read_source_revision
 from omni.core.enum import PanelProfile
 from omni.core.env import read_env_file
@@ -45,10 +52,11 @@ from omni.providers.nflmeta import HALFTIME_HOLD, PlayFeedPace
 from omni.providers.rights import DataSource, stamp_recording
 from omni.renderers.text_lane import DEFAULT_MARQUEE, ScrollSpeed
 
-__all__ = ["main"]
+__all__ = ["main", "open_run_log"]
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _BASE_URL = "https://nflmeta.org"
+_LOG_DIR = _REPO_ROOT / "build" / "logs" / "nflmeta"
 
 
 class NflMetaHttp:  # pragma: no cover - real network
@@ -129,7 +137,22 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         default=None,
         help="where the month's quota usage is kept (default $XDG_STATE_HOME/omni, else ~/.local/state/omni)",
     )
+    parser.add_argument(
+        "--log-dir",
+        type=Path,
+        default=_LOG_DIR,
+        help="where each run's full log goes, in a folder stamped to expire (default build/logs/nflmeta)",
+    )
     return parser.parse_args(argv)
+
+
+def open_run_log(
+    log_dir: Path, away: str, home: str, now: datetime, *, out: Callable[[str], None] | None = None
+) -> RunLog:
+    """The run's log: telemetry to ``out`` (stdout), and every line in full to ``runner.log`` in the run's
+    folder under ``log_dir``, named for the local date and the game and stamped to expire with NFLMeta's
+    recordings. A second run of the game that day appends to the same folder, under its first stamp."""
+    return RunLog(log_dir / f"{now.astimezone():%Y-%m-%d}-{away}-{home}", DataSource.NFLMETA, now, out=out)
 
 
 def _versions(args: argparse.Namespace, source: SourceRevision) -> Versions:
@@ -174,14 +197,19 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
     if not key:
         raise SystemExit("omni.app.football: set NFLMETA_API_KEY in the environment or .env")
     away, _, home = args.teams.upper().partition(",")
+    clock = SystemClock()
+    run_log = open_run_log(args.log_dir, away, home, clock.now())
+
+    def log(line: LogLine | str) -> None:
+        run_log(line, at=clock.now())
+
     record_dir = None
     if args.record:
         day = datetime.now().strftime("%Y-%m-%d")
         record_dir = _REPO_ROOT / "build" / "recordings" / "nflmeta" / f"{day}-{away}-{home}"
         stamp_recording(record_dir, DataSource.NFLMETA, datetime.now(timezone.utc))
-    clock = SystemClock()
     state_dir = args.state_dir if args.state_dir is not None else default_state_dir(os.environ, Path.home())
-    ledger = open_ledger(state_dir, NflMetaPlan(args.nflmeta_plan), log=lambda line: print(line, flush=True))
+    ledger = open_ledger(state_dir, NflMetaPlan(args.nflmeta_plan), log=run_log)
     meter = Meter(ledger, ProviderAccount.NFLMETA, clock, billed=nflmeta_billed)
     provider = NflMetaLiveProvider(
         NflTeamRegistry.default(source=NFLMETA_SOURCE),
@@ -193,14 +221,14 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
         game_id = provider.find_game(away, home)
     except ProviderError as exc:
         ledger.save(clock.read(), force=True)
-        raise SystemExit(f"omni.app.football: {exc}") from exc
+        log(LogLine("omni.app.football: the game couldn't be found", f"omni.app.football: {exc}"))
+        run_log.close()
+        raise SystemExit("omni.app.football: the game couldn't be found (the run log says why)") from None
     if game_id is None:
         ledger.save(clock.read(), force=True)
+        run_log.close()
         raise SystemExit(f"omni.app.football: no game today between {away} and {home}")
-    print(usage_line(ledger, ProviderAccount.NFLMETA, clock.read()), flush=True)
-
-    def log(line: str) -> None:
-        print(f"{clock.now().astimezone():%H:%M:%S}  {line}", flush=True)
+    run_log(usage_line(ledger, ProviderAccount.NFLMETA, clock.read()))
 
     sink: DisplaySink
     pipe: SinkProcess | None = None
@@ -231,7 +259,8 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
         marquee=DEFAULT_MARQUEE.at(ScrollSpeed(args.scroll_speed)),
         log=log,
     )
-    print(f"omni.app.football: {away} @ {home} (game {game_id}), {profile.value}, delay {args.delay}s", flush=True)
+    run_log(f"omni.app.football: {away} @ {home} (game {game_id}), {profile.value}, delay {args.delay}s")
+    run_log(f"omni.app.football: the full log is {run_log.path}, deleted by {run_log.stamp.delete_by:%Y-%m-%d}")
     versions = _versions(args, read_source_revision(_REPO_ROOT))
     log(versions.line())
     log(versions.config.line())
@@ -247,7 +276,8 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
             except Exception as exc:  # a bug in one step never stops the board: the next one tries again
                 if f"{exc!r}" != failing:
                     failing = f"{exc!r}"
-                    print(f"step failed: {type(exc).__name__}: {exc}", flush=True)
+                    failed = f"step failed: {type(exc).__name__}"
+                    run_log(LogLine(failed, f"{failed}: {exc}"))  # its message may quote the feed
             else:
                 failing = None
             frames.wait()
@@ -260,7 +290,8 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
         if pipe is not None:
             pipe.close()
         ledger.save(clock.read(), force=True)
-        print(usage_line(ledger, ProviderAccount.NFLMETA, clock.read()), flush=True)
+        run_log(usage_line(ledger, ProviderAccount.NFLMETA, clock.read()))
+        run_log.close()
     return 0
 
 

@@ -13,7 +13,8 @@ Everything lands in ``build/recordings/nflmeta/<date>-<away>-<home>/``: the raw 
 lines, stamped with when they arrived, and ``summary.log``, a readable line per change to compare
 against the broadcast (``tail -f`` it during the game). NFLMeta's terms allow no standing copy, so the
 folder is made with a ``RETENTION.json`` stamp saying when it must be deleted by (7 days on); see
-``tools/recordings_due.py``.
+``tools/recordings_due.py``. The feed's words land only there: what this prints is ids, teams, times,
+phases and counts, and a refusal's reason without the body NFLMeta sent with it.
 """
 
 from __future__ import annotations
@@ -44,7 +45,12 @@ _FINAL_POLLS = 3  # polls to keep making after the game reports itself completed
 
 
 class Stop(Exception):
-    """An answer that means recording can't usefully go on."""
+    """An answer that means recording can't usefully go on: our reason, and apart from it what NFLMeta's
+    answer said, which only the stamped summary may quote."""
+
+    def __init__(self, reason: str, said: str = "") -> None:
+        super().__init__(reason)
+        self.said = said
 
 
 class Client:
@@ -71,11 +77,11 @@ class Client:
                 if exc.code == 429:
                     wait = float(exc.headers.get("Retry-After", "30"))
                     if wait > 120:
-                        raise Stop(f"429 with Retry-After {wait:.0f}s (monthly quota?): {body}") from exc
+                        raise Stop(f"429 with Retry-After {wait:.0f}s (monthly quota?)", body) from exc
                     time.sleep(wait)
                     continue
                 if exc.code in (401, 402, 403):
-                    raise Stop(f"HTTP {exc.code}: {body}") from exc
+                    raise Stop(f"HTTP {exc.code}", body) from exc
                 raise
         raise Stop("still rate-limited after retries")
 
@@ -226,10 +232,10 @@ def _print_slate(client: Client) -> None:
         kickoff = _parse(game.get("kickoff_at"))
         when = _local(kickoff) if kickoff else "?"
         print(
-            f"{game.get('game_id'):>8}  {_abbr(game, 'away'):>3} @ {_abbr(game, 'home'):<3}  kickoff {when}  {game.get('phase')}  {game.get('status_detail') or ''}"
+            f"{game.get('game_id'):>8}  {_abbr(game, 'away'):>3} @ {_abbr(game, 'home'):<3}  kickoff {when}  {game.get('phase')}"
         )
     meta = body.get("meta") if isinstance(body, dict) else {}
-    print(f"{len(games)} games; meta {json.dumps(meta)[:200]}; rows billed {headers.get('x-nflmeta-response-rows')}")
+    print(f"{len(games)} games; meta keys {sorted(meta or {})}; rows billed {headers.get('x-nflmeta-response-rows')}")
     print(f"quota headers: {({k: v for k, v in headers.items() if 'ratelimit' in k or 'quota' in k})}")
 
 
@@ -241,13 +247,16 @@ def main() -> int:
     parser.add_argument("--max-requests", type=int, default=2000)
     args = parser.parse_args()
     client = Client(_key(), max_requests=args.max_requests)
-    if args.list:
-        _print_slate(client)
-        return 0
-    if not args.teams:
-        parser.error("--teams is required unless --list")
-    teams = {team.strip().upper() for team in args.teams.split(",")}
-    game = _find_game(client, teams)
+    try:
+        if args.list:
+            _print_slate(client)
+            return 0
+        if not args.teams:
+            parser.error("--teams is required unless --list")
+        teams = {team.strip().upper() for team in args.teams.split(",")}
+        game = _find_game(client, teams)
+    except Stop as exc:
+        raise SystemExit(f"nflmeta_record: stopped: {exc}") from None  # no folder yet to hold what NFLMeta said
     game_id = int(game["game_id"])
     kickoff = _parse(game.get("kickoff_at")) or datetime.now(timezone.utc)
     out = (
@@ -281,7 +290,8 @@ def main() -> int:
                 finals += 1
             time.sleep(max(0.0, pace - (time.monotonic() - started)))
     except Stop as exc:
-        recorder._log(f"{_local(datetime.now(timezone.utc))}  stopped: {exc}")
+        said = f": {exc.said}" if exc.said else ""
+        recorder._log(f"{_local(datetime.now(timezone.utc))}  stopped: {exc}{said}")
     finally:
         recorder._log(
             f"{_local(datetime.now(timezone.utc))}  done: {client.requests} requests, {client.rows} rows billed"

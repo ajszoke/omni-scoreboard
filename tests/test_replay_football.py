@@ -29,6 +29,7 @@ from omni.providers.nfl_teams import NflTeamRegistry
 from omni.providers.nflmeta import FeedNote, FeedNoteKind, NflLiveSnapshot, NflPhase
 from omni.replay.football import (
     REPLAY_SOURCE,
+    EntryLabels,
     FootballTrace,
     ReplayFeed,
     _Cards,
@@ -238,32 +239,58 @@ def test_the_replay_feed_hands_over_answers_as_they_arrive() -> None:
     assert feed.collect(_reading(60 * S)) == []
 
 
-def test_a_replay_lists_each_change_of_strip_and_field_and_each_drop() -> None:
+def _worded(key: str, kind: FootballEventKind = FootballEventKind.PLAY, *, players: bool = True) -> FootballEvent:
+    """An entry worded as the feed words one, with a phrase no decision may quote."""
+    return FootballEvent(
+        key=key,
+        kind=kind,
+        summary=PlaySummary(tone=PlayTone.STANDARD, headline="RUSH +4", detail=f"J.Doe ZEBRA CROSSING {key}"),
+        players_line=f"J.Doe ZEBRA 4 yds {key}" if players else None,
+    )
+
+
+def test_a_replay_lists_each_change_of_strip_and_field_and_each_drop_naming_entries_by_kind_and_order() -> None:
     snap = _state(possession=HomeAway.AWAY, down=1, distance=10, yards_to_goal=75)
     try_after = _state(away_score=6)
+    timeout = _worded("t", FootballEventKind.OFFICIAL_TIMEOUT, players=False)
     lines = replay_board(
         load_trace(
             _trace(
-                _answer(0 * S, _state(interval=FootballInterval.END_OF_QUARTER), _play("a")),  # starts in a break
+                _answer(0 * S, _state(interval=FootballInterval.END_OF_QUARTER), _worded("a")),  # starts in a break
                 _answer(10 * S, _state(possession=HomeAway.AWAY, set_piece=SetPiece.KICKOFF, yards_to_goal=65)),
-                _answer(20 * S, snap, _play("1", players=False)),
-                _answer(40 * S, try_after, _play("2")),
+                _answer(20 * S, snap, _worded("1", players=False)),
+                _answer(40 * S, try_after, _worded("2")),
+                _answer(80 * S, try_after, timeout),
             )
         ),
         tail=40 * S,
     )
     assert lines[1:] == [
-        "     0.00  drop   PLAY a | detail a (unseen: during a break)",
+        "     0.00  drop   PLAY 1 | detail 1 (unseen: during a break)",
         "     0.00  field  Q1 0-0 end_of_quarter",
         "     0.00  strip  -",
         "    10.00  field  Q1 0-0 kickoff away",
         "    20.00  field  Q1 0-0 away 1&10 @75",
-        "    20.00  strip  PLAY 1 | detail 1",
+        "    20.00  strip  PLAY 2 | detail 2",
         "    40.00  field  Q1 6-0 -",
-        "    40.00  strip  PLAY 2 | detail 2",
-        "    60.00  strip  PLAY 2 | players 2",
-        "    80.00  strip  -",
+        "    40.00  strip  PLAY 3 | detail 3",
+        "    60.00  strip  PLAY 3 | players 3",
+        "    80.00  strip  OFFICIAL TIMEOUT 4 | detail 4",
     ]
+    assert not any("ZEBRA" in line or "RUSH" in line for line in lines)  # never the feed's words
+
+
+def test_entry_labels_number_each_entry_once_by_its_first_appearance() -> None:
+    labels = EntryLabels()
+    first, again = labels.event(_worded("x")), labels.event(_worded("x", players=False))
+    assert (first.summary.headline, first.summary.detail, first.players_line) == ("PLAY 1", "detail 1", "players 1")
+    assert (again.summary.headline, again.players_line, first.key) == ("PLAY 1", None, "x")  # the key is kept
+    bare = FootballEvent(
+        key="s", kind=FootballEventKind.SCORE, summary=PlaySummary(tone=PlayTone.SCORE, headline="PIT +3")
+    )
+    assert labels.event(bare).summary == PlaySummary(tone=PlayTone.SCORE, headline="SCORE 2")
+    failed = FeedResult(asked_at=START, received_at=START, next_ask=START, snapshot=None, error="down")
+    assert labels.answer(failed) is failed
 
 
 def test_a_replay_of_no_answers_decides_nothing() -> None:

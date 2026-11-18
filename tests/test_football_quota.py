@@ -28,6 +28,7 @@ from omni.core.clock import FakeClock
 from omni.core.enum import PanelProfile
 from omni.providers.nfl_teams import NflTeamRegistry
 from omni.providers.nflmeta import NFLMETA_SOURCE, NflMetaLiveProvider
+from tests.test_football_board import _full
 from tests.test_nflmeta import GAME, T0, FakeFeed, _change, _page, _scores, _synced
 
 S = timedelta(seconds=1)
@@ -63,7 +64,7 @@ def _board(ledger: QuotaLedger, nflmeta: _Billing, clock: FakeClock) -> tuple[Fo
     provider = NflMetaLiveProvider(NflTeamRegistry.default(source=NFLMETA_SOURCE), fetch=MeteredHttp(nflmeta, meter))
     lines: list[str] = []
     feed = GameFeed(provider, GAME, ledger=ledger)
-    return FootballBoard(feed, RecordingDisplaySink(PanelProfile.QUAD_128X64), log=lines.append), lines
+    return FootballBoard(feed, RecordingDisplaySink(PanelProfile.QUAD_128X64), log=_full(lines)), lines
 
 
 def _run(board: FootballBoard, clock: FakeClock, seconds: int) -> None:
