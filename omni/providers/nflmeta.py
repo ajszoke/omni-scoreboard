@@ -1,4 +1,4 @@
-"""NFLMeta's live scores for one game at a time, put into the board's football types.
+"""NFLMeta's live scores, for a followed game or a slate of games, put into the board's football types.
 
 NFLMeta re-publishes each game's scoreboard about every ten seconds and says so in its response, so the
 provider is polled at that pace. Each poll is one request against a monthly quota, which is what the
@@ -38,17 +38,29 @@ Each entry a play brings is dated by when the feed wrote it (`FootballEvent.writ
 change to that play in the read that brought it. A correction (a ruling, a try) is dated by the change
 that carried it, not by the play it corrects. That's how a board tells a play that reached it late.
 
-Raw JSON stays in this module: what leaves it is a `NflLiveSnapshot`.
+**Slate reads** list several games in one live-scores request, with no plays (`NflSlate`):
+- `day_list`, unfiltered: every game NFLMeta lists for the day, finals and games not yet started included. It
+  bills each game and each of its injury entries, so a board reads it once a day, for the games' ids.
+- `live_scores`, the listed games in progress (``phase=in``, halftime included), by id: a game not started or
+  already final isn't listed, and bills nothing.
+- `scoreboard`, one game by its id: a game's last read once it has left the games in progress.
+
+Each gives a `NflLiveSnapshot` per game it could read, with no events and nothing proven about the plays; a final
+is settled, since nothing is left to ask. NFLMeta files a game under its kickoff's date in the league's own time
+zone (`SCHEDULE_TIMEZONE`).
+
+Raw JSON stays in this module: what leaves it is a `NflLiveSnapshot`, or a `NflSlate` of them.
 """
 
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from omni.core.clock import ClockReading, MonotonicTime
 from omni.core.enum import GameStatus, HomeAway, League, SeasonStage, StrEnumMixin
@@ -83,8 +95,10 @@ __all__ = [
     "HALFTIME_GRACE",
     "HALFTIME_HOLD",
     "INJURY_NEWS",
+    "MAX_GAME_IDS",
     "MISMATCH_RETRY",
     "NFLMETA_SOURCE",
+    "SCHEDULE_TIMEZONE",
     "FeedNote",
     "FeedNoteKind",
     "InjuryStatus",
@@ -92,12 +106,15 @@ __all__ = [
     "NflMetaFetcher",
     "NflMetaLiveProvider",
     "NflPhase",
+    "NflSlate",
     "PlayFeedPace",
     "PlaySyncStatus",
     "SCORE_BACKSTOP",
 ]
 
 NFLMETA_SOURCE = SourceRef("nflmeta")
+SCHEDULE_TIMEZONE = ZoneInfo("America/New_York")  # the league's own: a game is filed under its kickoff's date here
+MAX_GAME_IDS = 100  # the most games one live-scores read may name
 HALFTIME_HOLD = timedelta(minutes=13)  # no requests until this long after a game's halftime began
 HALFTIME_GRACE = timedelta(seconds=30)  # the hold waits up to this long for the half's last play to land
 FINAL_DRAIN = timedelta(minutes=2)  # after the final, the feed is still read this long for its last plays and fixes
@@ -230,6 +247,16 @@ class NflLiveSnapshot:
     drain_left: timedelta | None = None  # while the final drains: how long after this look its last read is due
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class NflSlate:
+    """One live-scores read that lists games: an answer for each row it could read, the id of every game it
+    listed (read or not), and a warning for each row it couldn't read."""
+
+    snapshots: tuple[NflLiveSnapshot, ...] = ()
+    listed: frozenset[int] = frozenset()
+    warnings: tuple[str, ...] = ()
+
+
 @dataclass(frozen=True, slots=True)
 class _Injury:
     player: str
@@ -298,6 +325,11 @@ class NflMetaLiveProvider:
         self._play_feed = play_feed
         self._games: dict[int, _TrackedGame] = {}
 
+    @property
+    def schedule_timezone(self) -> ZoneInfo:
+        """The time zone whose calendar date NFLMeta files a game under."""
+        return SCHEDULE_TIMEZONE
+
     def find_game(self, away: str, home: str) -> int | None:
         """Today's game between ``away`` and ``home`` (any spelling a feed uses), or None."""
         wanted = (canonical_abbreviation(away), canonical_abbreviation(home))
@@ -315,6 +347,43 @@ class NflMetaLiveProvider:
             and tracked.latest is not None
             and at.monotonic.since(tracked.halftime_at.monotonic) < self._hold
         )
+
+    def hold_ends(self, game_id: int) -> MonotonicTime | None:
+        """When ``game_id``'s halftime hold runs out, on the monotonic clock, once the hold has begun; None before."""
+        tracked = self._games.get(game_id)
+        if tracked is None or tracked.halftime_at is None:
+            return None
+        return tracked.halftime_at.monotonic + self._hold
+
+    def day_list(self) -> NflSlate:
+        """Every game NFLMeta lists for the day, read unfiltered: not started, in progress and final alike.
+
+        Raises `ProviderError` when the read fails.
+        """
+        return self._slate({})
+
+    def live_scores(self, game_ids: Collection[int]) -> NflSlate:
+        """The scores of those of ``game_ids`` in progress (halftime included), read together; no plays.
+
+        Raises `ProviderError` when the read fails, and `ValueError` for no ids or more than `MAX_GAME_IDS`.
+        """
+        if not 0 < len(game_ids) <= MAX_GAME_IDS:
+            raise ValueError(f"a live-scores read names 1 to {MAX_GAME_IDS} games, not {len(game_ids)}")
+        named = ",".join(str(game_id) for game_id in sorted(game_ids))
+        return self._slate({"phase": NflPhase.IN.value, "game_ids": named})
+
+    def scoreboard(self, game_id: int) -> NflLiveSnapshot:
+        """One game's scoreboard, read by its id, with no plays.
+
+        Raises `ProviderError` when the read fails, or doesn't list the game in a row it can read.
+        """
+        slate = self._slate({"game_id": game_id})
+        wanted = str(game_id)
+        snapshot = next((each for each in slate.snapshots if each.game.id.raw == wanted), None)
+        if snapshot is None:
+            why = "; ".join(slate.warnings) if game_id in slate.listed else "no longer lists it"
+            raise ProviderError(f"NFLMeta has no readable game {game_id}: {why}")
+        return snapshot
 
     def poll(self, game_id: int, at: ClockReading) -> NflLiveSnapshot:
         """The game as it stands at ``at``; inside the halftime hold, the last answer (with no new events),
@@ -466,6 +535,41 @@ class NflMetaLiveProvider:
                 batch.complete = True
                 break
         return batch
+
+    def _slate(self, query: Mapping[str, str | int]) -> NflSlate:
+        """A live-scores read of several games, each row that can be read as an answer with no plays."""
+        body = self._get("/api/v1/live-scores", query)
+        poll_every = _poll_every(body)
+        snapshots: list[NflLiveSnapshot] = []
+        listed: set[int] = set()
+        warnings: list[str] = []
+        for row in _rows(body):
+            game_id = row.get("game_id")
+            if type(game_id) is int:
+                listed.add(game_id)
+            try:
+                snapshots.append(self._listed(row, poll_every))
+            except (KeyError, TypeError, ValueError) as exc:
+                warnings.append(f"game {game_id}: unreadable ({type(exc).__name__}: {exc})")
+        return NflSlate(snapshots=tuple(snapshots), listed=frozenset(listed), warnings=tuple(warnings))
+
+    def _listed(self, row: Mapping[str, Any], poll_every: DurationSeconds) -> NflLiveSnapshot:
+        """A slate's row as an answer: the scoreboard alone, no plays read. A final is settled: nothing is left
+        to ask of it."""
+        game = self._game(row)
+        phase = NflPhase(row["phase"])
+        state = _without_plays(_state(row, game)) if phase is not NflPhase.PRE else None
+        return NflLiveSnapshot(
+            game=game,
+            phase=phase,
+            state=state,
+            events=(),
+            caught_up=False,
+            break_ends_at=None,
+            observed_at=_instant(row.get("observed_at")),
+            poll_every=poll_every,
+            settled=phase is NflPhase.POST,
+        )
 
     def _game(self, row: Mapping[str, Any]) -> TeamGame:
         kickoff = _instant(row.get("kickoff_at"))
@@ -708,6 +812,16 @@ def _with_plays(
             FootballField.DOWN_DISTANCE: FieldCoverage.NOT_APPLICABLE,  # a kickoff has no down
         }
         state = _marked(state, coverage, set_piece=SetPiece.KICKOFF, possession=kicker, yards_to_goal=to_goal)
+    return state
+
+
+def _without_plays(state: FootballGameState) -> FootballGameState:
+    """A state no plays were read for. The counts only the plays give stay a gap, except where there is nothing
+    to count: after the final, and the timeouts over halftime, which start over for the second half."""
+    if state.interval is FootballInterval.FINAL:
+        return _marked(state, dict.fromkeys(_COUNTS, FieldCoverage.NOT_APPLICABLE))
+    if state.interval is FootballInterval.HALFTIME:
+        return _marked(state, {FootballField.TIMEOUTS: FieldCoverage.NOT_APPLICABLE})
     return state
 
 

@@ -30,7 +30,9 @@ rules in one place:
 - **Last good, until it expires.** A failed ask doesn't erase the last answer. That answer stands for
   `keep_for`, so a blip doesn't drop a game from the board, and an outage eventually does. Answers that
   still stand are kept, so a read can ask for the newest one that arrived by an earlier moment.
-- **Forgetting.** A key that no decision has asked about for `forget_after` is dropped.
+- **Forgetting.** A key that no decision has asked about for `forget_after` is dropped. A decision that knows it's
+  done with a key (a read made once, a game in its halftime hold) drops it at once (`drop`), so a metered source
+  isn't asked on meanwhile.
 - **Keys.** A game's key names the game by its full id; a slate's names its `PollScope` (source, league and
   window), so two leagues' slates for the same date are two keys.
 
@@ -83,6 +85,10 @@ class PollSource(StrEnumMixin, str, Enum):
     MODEL_WIN_PROBABILITY = "model_win_probability"  # one game's model probability, the fallback
     PREGAME_DETAILS = "pregame_details"  # one upcoming game's records and probable starters
     GAME_LINES = "game_lines"  # one upcoming game's odds
+    DAY_LIST = "day_list"  # one scope's whole day, listed once for its games and their ids
+    LIVE_SCORES = "live_scores"  # the scores of one scope's games in progress, read together
+    FOLLOWED_GAME = "followed_game"  # one game's score and its plays, at the live pace: a favorite's
+    FINAL_SCORE = "final_score"  # one game's score once it has ended, read once
 
 
 class PollPriority(IntEnum):
@@ -304,6 +310,12 @@ class PollPlan:
                 sooner = entry.answers[-1].received.monotonic + self._policy(key).cadence(priority)
                 entry.due = min(entry.due, sooner)
             entry.fetch, entry.priority, entry.wanted = fetch, priority, at.monotonic
+
+    def drop(self, key: PollKey[Any]) -> None:
+        """A decision no longer needs this key: it's dropped now, its answers with it, instead of being asked on
+        until `forget_after` passes. An ask out for it is never begun, and what it brings back is ignored."""
+        with self._lock:
+            self._entries.pop(key, None)
 
     def latest(self, key: PollKey[T], at: ClockReading) -> Answer[T] | None:
         """The newest answer, unless it has outlived its source's `keep_for`."""
