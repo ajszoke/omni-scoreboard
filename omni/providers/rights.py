@@ -17,7 +17,13 @@ versions, counts) may be kept. **Third-party content** (raw rows, play text, inj
 provider worded) follows its source's archive rule. A recording is third-party content: each recording
 folder gets a `RETENTION.json` stamp when it's made (`stamp_recording`), naming the source, when it was
 made, when it must be deleted by, and the terms' date. `recordings_due` lists recording folders with their
-stamps, reading nothing but the stamps; deleting stays the user's step.
+stamps, reading nothing but the stamps.
+
+The data expires on its own: `sweep_expired` deletes each stamped folder past its delete-by, after offering
+it to its source's `Miner`, which may keep our own telemetry from it first. A miner's failure never keeps an
+overdue folder: the terms bind, and mining is only our benefit. The sweep never deletes an unstamped folder
+(that's the user's step, by the source's rule), never one whose source's terms allow keeping it, and never
+anything a link under its root points to.
 
 Beside each source's terms stands the project's own use of its data (`ProjectUse`), and the user's ruling
 on that use (`RULINGS`). The one use so far is `ProjectUse.FAMILY_BOARD_DISPLAY`: showing a source's data on
@@ -31,12 +37,14 @@ terms stay as written; the ruling never turns a refusal in them into a permissio
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator, Mapping
+import shutil
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path, PurePosixPath
-from typing import Any
+from types import MappingProxyType
+from typing import Any, Protocol
 
 from omni.core.enum import StrEnumMixin
 
@@ -52,17 +60,23 @@ __all__ = [
     "DueRecording",
     "DueStatus",
     "FamilyDisplay",
+    "Miner",
+    "Mining",
     "OnTermination",
     "Permission",
     "ProjectUse",
     "RetentionStamp",
     "Ruling",
     "SourceRights",
+    "SweepAction",
+    "SweepReport",
+    "SweptRecording",
     "Telemetry",
     "read_stamp",
     "recordings_due",
     "retention_stamp",
     "stamp_recording",
+    "sweep_expired",
 ]
 
 RETENTION_FILE = "RETENTION.json"
@@ -468,6 +482,7 @@ class DueStatus(StrEnumMixin, str, Enum):
     KEPT = "kept"  # its source allows keeping it
     UNSTAMPED = "unstamped"
     UNREADABLE = "unreadable"  # a stamp that can't be read
+    LINKED = "linked"  # a link, which nothing here follows
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -498,7 +513,9 @@ class RetentionStamp:
         }
 
     def status(self, now: datetime) -> DueStatus:
-        if self.delete_by is None:
+        """Where the recording stands at ``now``. A source whose terms allow keeping is kept, whatever a stamp
+        says of a deadline."""
+        if self.delete_by is None or MANIFEST[self.source].archive is Archive.KEEP:
             return DueStatus.KEPT
         return DueStatus.OVERDUE if now >= self.delete_by else DueStatus.CURRENT
 
@@ -565,13 +582,14 @@ class DueRecording:
     def line(self) -> str:
         """The recording as the due-list prints it: its name and its stamp, never its content."""
         stamp = self.stamp
+        if self.status is DueStatus.LINKED:
+            return f"{self.path}  a link: not followed"
         if stamp is None:
             why = "stamp unreadable" if self.status is DueStatus.UNREADABLE else "unstamped"
             return f"{self.path}  {why}: follow the source's rule by hand"
-        if stamp.delete_by is None:
+        if stamp.delete_by is None or self.status is DueStatus.KEPT:
             return f"{self.path}  {stamp.source}  kept: its terms allow keeping"
-        due = f"{stamp.delete_by.astimezone(timezone.utc):%Y-%m-%d %H:%M} UTC"
-        return f"{self.path}  {stamp.source}  delete by {due}" + (
+        return f"{self.path}  {stamp.source}  delete by {_due(stamp.delete_by)}" + (
             "  OVERDUE" if self.status is DueStatus.OVERDUE else ""
         )
 
@@ -580,7 +598,8 @@ def recordings_due(root: Path, now: datetime) -> tuple[DueRecording, ...]:
     """Every recording under ``root``, by its path, with where it stands at ``now``. Deletes nothing.
 
     A folder with a stamp is a recording, and nothing under it is looked at. A folder with no stamp and no
-    folders in it is an unstamped recording, and so is a file lying beside folders. Only stamps are read.
+    folders in it is an unstamped recording, and so is a file lying beside folders; an empty folder is
+    nothing. A link to a folder under ``root`` is listed and never followed. Only stamps are read.
     """
     if not root.is_dir():
         return ()
@@ -598,14 +617,155 @@ def _walk(folder: Path, root: Path, now: datetime) -> Iterator[DueRecording]:
         yield DueRecording(name, stamp.status(now), stamp)
         return
     children = sorted(folder.iterdir())
+    if not children:
+        return  # an empty folder holds nothing: one the sweep emptied, say
     if folder != root and not any(child.is_dir() for child in children):
         yield DueRecording(name, DueStatus.UNSTAMPED)
         return
     for child in children:
-        if child.is_dir():
+        path = PurePosixPath(child.relative_to(root).as_posix())
+        if child.is_symlink():
+            yield DueRecording(path, DueStatus.LINKED)
+        elif child.is_dir():
             yield from _walk(child, root, now)
         else:
-            yield DueRecording(PurePosixPath(child.relative_to(root).as_posix()), DueStatus.UNSTAMPED)
+            yield DueRecording(path, DueStatus.UNSTAMPED)
+
+
+# --- the expiry sweep -------------------------------------------------------------------------------------
+
+
+class Miner(Protocol):
+    """Keeps our own telemetry from a recording (ids, kinds, reasons, timings, counts) before it's deleted, as
+    a digest outside the recording's folder."""
+
+    def digest_for(self, folder: Path, stamp: RetentionStamp) -> Path:
+        """Where ``folder``'s digest goes. Once it exists, the folder has been mined."""
+        ...
+
+    def mine(self, folder: Path, stamp: RetentionStamp) -> Path | None:
+        """Write ``folder``'s digest; its path, or None when the folder held nothing to mine."""
+        ...
+
+
+class Mining(StrEnumMixin, str, Enum):
+    """What came of offering an overdue recording to its source's miner."""
+
+    MINED = "mined"
+    ALREADY_MINED = "already mined"  # its digest was there: not mined twice
+    NOTHING_TO_MINE = "nothing to mine"
+    FAILED = "mining failed"  # reported; the recording is deleted anyway
+    NO_MINER = "no miner"  # its source has none
+
+
+class SweepAction(StrEnumMixin, str, Enum):
+    """What the sweep did with a recording."""
+
+    DELETED = "deleted"
+    KEPT = "kept"  # not due, kept by its terms, or not the sweep's to judge (unstamped, unreadable, a link)
+    DELETE_FAILED = "delete failed"
+
+
+@dataclass(frozen=True, slots=True)
+class SweptRecording:
+    """One recording the sweep looked at: where it stood, what the sweep did, and what its miner did."""
+
+    due: DueRecording
+    action: SweepAction
+    mining: Mining | None = None  # for an overdue recording
+    digest: Path | None = None  # the digest its miner wrote, or had already
+    # What failed, by its type, never its message: a message could quote the recording.
+    mining_failed: str | None = None
+    delete_failed: str | None = None
+
+    def line(self) -> str:
+        """The recording as the sweep reports it: its name, its stamp and what was done; never its content."""
+        stamp = self.due.stamp
+        if self.action is SweepAction.KEPT or stamp is None or stamp.delete_by is None:
+            return self.due.line()
+        done = "deleted" if self.action is SweepAction.DELETED else f"not deleted ({self.delete_failed})"
+        mined = self.mining.value if self.mining is not None else Mining.NO_MINER.value
+        if self.digest is not None:
+            mined += f" to {self.digest}"
+        elif self.mining_failed is not None:
+            mined += f" ({self.mining_failed})"
+        return f"{self.due.path}  {stamp.source}  {done}: due {_due(stamp.delete_by)}; {mined}"
+
+
+@dataclass(frozen=True, slots=True)
+class SweepReport:
+    """What one sweep of a root did, recording by recording."""
+
+    root: Path
+    recordings: tuple[SweptRecording, ...]
+
+    def count(self, action: SweepAction) -> int:
+        return sum(1 for swept in self.recordings if swept.action is action)
+
+    def summary(self) -> str:
+        """A line of counts for the root: what was deleted, kept, left to the user, and what failed."""
+        by_hand = sum(1 for swept in self.recordings if swept.due.stamp is None)
+        failed = self.count(SweepAction.DELETE_FAILED)
+        mining = sum(1 for swept in self.recordings if swept.mining is Mining.FAILED)
+        return (
+            f"swept {self.root}: {self.count(SweepAction.DELETED)} deleted, {self.count(SweepAction.KEPT)} kept"
+            f" ({by_hand} without a readable stamp, left to the source's rule by hand)"
+            + (f", {failed} failed to delete" if failed else "")
+            + (f", {mining} failed to mine" if mining else "")
+        )
+
+
+_NO_MINERS: Mapping[DataSource, Miner] = MappingProxyType({})
+
+
+def sweep_expired(
+    root: Path,
+    now: datetime,
+    *,
+    miners: Mapping[DataSource, Miner] = _NO_MINERS,
+    remove: Callable[[Path], None] = shutil.rmtree,
+) -> SweepReport:
+    """Delete each stamped recording under ``root`` past its delete-by at ``now``, offering it first to its
+    source's miner in ``miners``; what was done with each recording.
+
+    A miner's failure is reported and the recording deleted anyway, and one whose digest already exists isn't
+    mined again. A recording the sweep can't delete is reported and kept. Only stamps are read (a miner reads
+    what it mines), and only what ``remove`` is given is deleted: overdue stamped folders under ``root``, and
+    never a link or what it points to.
+    """
+    swept: list[SweptRecording] = []
+    for due in recordings_due(root, now):
+        stamp = due.stamp
+        if due.status is not DueStatus.OVERDUE or stamp is None:
+            swept.append(SweptRecording(due, SweepAction.KEPT))
+            continue
+        folder = root / str(due.path)
+        mining, digest, mining_failed = _mine(folder, stamp, miners.get(stamp.source))
+        action, delete_failed = SweepAction.DELETED, None
+        try:
+            remove(folder)
+        except OSError as exc:
+            action, delete_failed = SweepAction.DELETE_FAILED, type(exc).__name__
+        swept.append(SweptRecording(due, action, mining, digest, mining_failed, delete_failed))
+    return SweepReport(root, tuple(swept))
+
+
+def _mine(folder: Path, stamp: RetentionStamp, miner: Miner | None) -> tuple[Mining, Path | None, str | None]:
+    """Offer an overdue recording to its miner: what came of it, the digest, and what failed, if anything."""
+    if miner is None:
+        return Mining.NO_MINER, None, None
+    try:
+        digest = miner.digest_for(folder, stamp)
+        if digest.exists():
+            return Mining.ALREADY_MINED, digest, None
+        written = miner.mine(folder, stamp)
+    except Exception as exc:  # whatever the miner does wrong, the overdue recording still goes
+        return Mining.FAILED, None, type(exc).__name__
+    return (Mining.MINED, written, None) if written is not None else (Mining.NOTHING_TO_MINE, None, None)
+
+
+def _due(instant: datetime) -> str:
+    return f"{instant.astimezone(timezone.utc):%Y-%m-%d %H:%M} UTC"
 
 
 def _instant(raw: str) -> datetime:

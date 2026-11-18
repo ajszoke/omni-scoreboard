@@ -64,7 +64,8 @@ the final, released under the delay like any reading.
 A feed that stops answering is shown as stale: once no answer has come for `FEED_STALE_AFTER` past when
 the next was due, the card dims, the strip clears (a stoppage held on it too) and the meter goes, until
 the next answer is released. A feed the quota holds back goes stale the same way, and says so: its log
-names the quota once, and again only when the reason changes. A halftime hold is quiet on purpose and
+names the quota once, and again only when the reason changes. When the month is spent on NFLMeta's Free
+plan, the log says so once, plainly, with the next step: switch the account to Builder and restart. A halftime hold is quiet on purpose and
 never stale, nor is a final the feed has parked on.
 
 The market moves on a play as it happens, while the feed reports it 20 to 30 seconds later, so a fresh
@@ -274,6 +275,7 @@ class FootballBoard:
         self._majors: set[SegmentKey] = set()  # the strip entries offered as major, which no backlog drops
         self._labels: dict[SegmentKey, str] = {}  # each strip entry's kind, as the log's telemetry names it
         self._refused: str | None = None  # why the quota is holding the feed's asks back, while it is
+        self._spent_noted = False  # the log has said the plan's month is spent, and what to do next
 
     @property
     def showing(self) -> NflLiveSnapshot | None:
@@ -520,6 +522,10 @@ class FootballBoard:
         if snapshot is None:
             if result.refused is not None and result.error != self._refused:
                 self._note(f"feed: {result.error}")  # the quota's own reason
+                notice = result.refused.notice
+                if notice is not None and not self._spent_noted:
+                    self._spent_noted = True
+                    self._note(notice)  # once, plainly, with the next step
             elif result.refused is None:
                 self._note("feed: the ask failed", f"feed: {result.error}")  # a failure's message may quote the feed
             self._refused = result.error if result.refused is not None else None

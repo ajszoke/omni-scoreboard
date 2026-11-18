@@ -23,7 +23,12 @@ stamped to expire with NFLMeta's recordings (`omni.app.run_log`).
 Every NFLMeta request is counted against the month's quota (`omni.app.quota`), at the plan
 ``--nflmeta-plan`` names (free unless you say otherwise), and the count is kept under ``--state-dir`` so a
 restart doesn't forget it. The game is followed at its cadence until the month is exhausted; then the
-feed stops asking and the card goes stale, saying why. At shutdown the runner prints the month's usage.
+feed stops asking and the card goes stale, saying why. When Free's month is spent, the log says so once,
+with the next step: switch the account to Builder and restart with ``--nflmeta-plan builder``. The month's
+counts carry over, and Builder's limits judge them. At shutdown the runner prints the month's usage.
+
+At start and at exit the runner runs the expiry sweep (`omni.app.expiry`) over ``build/recordings/`` and
+the log folder, deleting each stamped folder past its delete-by and logging a line for each.
 """
 
 from __future__ import annotations
@@ -41,6 +46,7 @@ from zoneinfo import ZoneInfo
 from omni.core.clock import Pacer, SystemClock
 from omni.app.football_board import FootballBoard
 from omni.app.football_feed import BackgroundFeed, GameFeed
+from omni.app.expiry import NFLMETA_RUN_LOGS, RECORDINGS, expire
 from omni.app.quota import HttpAnswer, NflMetaPlan
 from omni.app.run_log import LogLine, RunLog
 from omni.app.versions import DecisionConfig, PolicyName, SourceRevision, Versions, read_source_revision
@@ -56,7 +62,7 @@ __all__ = ["main", "open_run_log"]
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _BASE_URL = "https://nflmeta.org"
-_LOG_DIR = _REPO_ROOT / "build" / "logs" / "nflmeta"
+_LOG_DIR = NFLMETA_RUN_LOGS
 
 
 class NflMetaHttp:  # pragma: no cover - real network
@@ -146,6 +152,11 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _expiry_roots(args: argparse.Namespace) -> tuple[Path, ...]:
+    """What the runner's expiry sweep sweeps: the recordings, and its own log folder."""
+    return RECORDINGS, args.log_dir
+
+
 def open_run_log(
     log_dir: Path, away: str, home: str, now: datetime, *, out: Callable[[str], None] | None = None
 ) -> RunLog:
@@ -190,7 +201,7 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
     from omni.providers.nflmeta import NFLMETA_SOURCE, NflMetaLiveProvider
     from omni.providers.polymarket_us import PolymarketUsProvider
     from omni.renderers.image import LogoStore
-    from omni.app.quota import Meter, MeteredHttp, ProviderAccount, nflmeta_billed, usage_line
+    from omni.app.quota import Meter, MeteredHttp, ProviderAccount, nflmeta_billed, spent_notice, usage_line
     from omni.app.quota_store import default_state_dir, open_ledger
 
     key = {**read_env_file(_REPO_ROOT / ".env"), **os.environ}.get("NFLMETA_API_KEY")
@@ -203,10 +214,11 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
     def log(line: LogLine | str) -> None:
         run_log(line, at=clock.now())
 
+    expire(_expiry_roots(args), clock.now(), log)
     record_dir = None
     if args.record:
         day = datetime.now().strftime("%Y-%m-%d")
-        record_dir = _REPO_ROOT / "build" / "recordings" / "nflmeta" / f"{day}-{away}-{home}"
+        record_dir = RECORDINGS / "nflmeta" / f"{day}-{away}-{home}"
         stamp_recording(record_dir, DataSource.NFLMETA, datetime.now(timezone.utc))
     state_dir = args.state_dir if args.state_dir is not None else default_state_dir(os.environ, Path.home())
     ledger = open_ledger(state_dir, NflMetaPlan(args.nflmeta_plan), log=run_log)
@@ -217,15 +229,20 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
         halftime_hold=_halftime_hold(args),
         play_feed=PlayFeedPace(args.play_feed),
     )
+    notice = spent_notice(ledger, clock.read())
+    if notice is not None:
+        log(notice)
     try:
         game_id = provider.find_game(away, home)
     except ProviderError as exc:
         ledger.save(clock.read(), force=True)
         log(LogLine("omni.app.football: the game couldn't be found", f"omni.app.football: {exc}"))
+        expire(_expiry_roots(args), clock.now(), log)
         run_log.close()
         raise SystemExit("omni.app.football: the game couldn't be found (the run log says why)") from None
     if game_id is None:
         ledger.save(clock.read(), force=True)
+        expire(_expiry_roots(args), clock.now(), log)
         run_log.close()
         raise SystemExit(f"omni.app.football: no game today between {away} and {home}")
     run_log(usage_line(ledger, ProviderAccount.NFLMETA, clock.read()))
@@ -291,6 +308,7 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
             pipe.close()
         ledger.save(clock.read(), force=True)
         run_log(usage_line(ledger, ProviderAccount.NFLMETA, clock.read()))
+        expire(_expiry_roots(args), clock.now(), log)
         run_log.close()
     return 0
 

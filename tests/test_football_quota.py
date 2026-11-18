@@ -10,14 +10,18 @@ from omni.app.__main__ import _parse_args as _parse_mlb_args
 from omni.app.display import RecordingDisplaySink
 from omni.app.football import _parse_args
 from omni.app.football_board import FootballBoard
-from omni.app.football_feed import GameFeed
+from omni.app.football_feed import FeedResult, GameFeed
+from omni.app.poll_plan import PollPriority
 from omni.app.quota import (
     AccountLimits,
+    Admission,
     HttpAnswer,
+    Measure,
     MeteredHttp,
     Meter,
     MonthUsage,
     BillingMonth,
+    NflMetaPlan,
     ProviderAccount,
     QuotaLedger,
     Refusal,
@@ -28,7 +32,7 @@ from omni.core.clock import FakeClock
 from omni.core.enum import PanelProfile
 from omni.providers.nfl_teams import NflTeamRegistry
 from omni.providers.nflmeta import NFLMETA_SOURCE, NflMetaLiveProvider
-from tests.test_football_board import _full
+from tests.test_football_board import _answer, _at, _full, _Script, _state
 from tests.test_nflmeta import GAME, T0, FakeFeed, _change, _page, _scores, _synced
 
 S = timedelta(seconds=1)
@@ -93,12 +97,51 @@ def test_once_the_month_is_spent_the_feed_stops_asking_and_the_card_goes_stale_n
     _run(board, clock, 600)
     assert len(nflmeta.feed.requests) == 5  # the first look (two), then three more polls: none after
     assert ledger.exhausted(NFL, clock.read())
-    quota = [line for line in lines if "quota" in line]
+    reason = "quota: NFLMeta Free spent for 2026-11: switch to Builder"  # the league's health reason, in short
+    quota = [line for line in lines if "quota" in line or "NFLMeta Free" in line]
     assert quota == [
-        "feed: quota: NFLMeta requests exhausted",  # once, however often it's held back
-        "feed stale: no answer (quota: NFLMeta requests exhausted); dimming the card until it answers",
+        f"feed: {reason}",  # once, however often it's held back
+        "NFLMeta Free is spent for 2026-11: switch the account to Builder and restart with --nflmeta-plan builder",
+        f"feed stale: no answer ({reason}); dimming the card until it answers",
     ]
-    assert lines.index(quota[1]) > lines.index(quota[0])
+    assert lines.index(quota[2]) > lines.index(quota[1]) == lines.index(quota[0]) + 1
+
+
+def _refused(second: int, admission: Admission) -> FeedResult:
+    at = T0 + second * S
+    return FeedResult(
+        asked_at=at, received_at=at, next_ask=at + 30 * S, snapshot=None, error=admission.reason, refused=admission
+    )
+
+
+def test_the_spent_month_s_next_step_is_logged_once_however_often_the_quota_s_reason_is() -> None:
+    spent = Admission(
+        account=NFL,
+        priority=PollPriority.FOCUS,
+        refusal=Refusal.EXHAUSTED,
+        measure=Measure.REQUESTS,
+        left=0,
+        plan=NflMetaPlan.FREE,
+        month=BillingMonth(2026, 11),
+    )
+    full = Admission(account=NFL, priority=PollPriority.FOCUS, refusal=Refusal.PER_MINUTE, used=20, per_minute=20)
+    script = _Script(
+        _refused(0, full),  # a full minute has no next step to name
+        _refused(10, spent),
+        _answer(20, _state()),  # an answer between (a halftime repeat, say): the reason is news again after it
+        _refused(30, spent),
+    )
+    lines: list[str] = []
+    board = FootballBoard(script, RecordingDisplaySink(PanelProfile.QUAD_128X64), log=_full(lines))
+    for second in range(0, 40, 10):
+        board.step(_at(T0 + second * S))
+    notice = "NFLMeta Free is spent for 2026-11: switch the account to Builder and restart with --nflmeta-plan builder"
+    assert [line for line in lines if line.startswith("feed:") or line.startswith("NFLMeta")] == [
+        "feed: quota: NFLMeta 20 of 20 a minute used, focus waiting",
+        "feed: quota: NFLMeta Free spent for 2026-11: switch to Builder",
+        notice,
+        "feed: quota: NFLMeta Free spent for 2026-11: switch to Builder",
+    ]
 
 
 def test_a_minute_that_s_full_holds_the_ask_only_until_it_has_room() -> None:

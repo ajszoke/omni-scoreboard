@@ -36,6 +36,7 @@ from omni.app.quota import (
     Refusal,
     account_limits,
     nflmeta_billed,
+    spent_notice,
     tallying,
     usage_line,
 )
@@ -87,6 +88,33 @@ def test_every_account_is_declared_with_today_s_known_limits_and_nflmeta_s_plan_
         "Bovada",
         "the market service",
     ]
+
+
+def test_nflmeta_s_plans_go_free_then_builder_and_a_spent_free_month_says_what_to_do_next() -> None:
+    assert [(plan.label, plan.upgrade) for plan in NflMetaPlan] == [("Free", NflMetaPlan.BUILDER), ("Builder", None)]
+    assert NflMetaPlan.on(NFLMETA_FREE) is NflMetaPlan.FREE and NflMetaPlan.on(NFLMETA_BUILDER) is NflMetaPlan.BUILDER
+    assert NflMetaPlan.on(AccountLimits(per_minute=3)) is None
+    november = BillingMonth(2026, 11)
+    assert NflMetaPlan.FREE.spent_notice(november) == (
+        "NFLMeta Free is spent for 2026-11: switch the account to Builder and restart with --nflmeta-plan builder"
+    )
+    assert NflMetaPlan.BUILDER.spent_notice(november) is None  # nothing bigger to switch to: wait for December
+    for plan, reason, notice in (
+        (NflMetaPlan.FREE, "quota: NFLMeta Free spent for 2026-11: switch to Builder", True),
+        (NflMetaPlan.BUILDER, "quota: NFLMeta requests exhausted", False),
+    ):
+        ledger, clock = QuotaLedger(account_limits(plan)), FakeClock(T0)
+        assert spent_notice(ledger, clock.read()) is None
+        ledger.charge(NFL, at=clock.read(), balance=ProviderBalance(requests_left=0))
+        refused = ledger.admit(NFL, Demand(FOCUS, 1), clock.read())
+        assert (refused.refusal, refused.plan, refused.month) == (Refusal.EXHAUSTED, plan, november)
+        assert refused.reason == reason and (refused.notice is not None) is notice
+        assert spent_notice(ledger, clock.read()) == refused.notice
+    unplanned, clock = QuotaLedger({NFL: AccountLimits(requests_a_month=1)}), FakeClock(T0)
+    unplanned.charge(NFL, at=clock.read())
+    assert spent_notice(unplanned, clock.read()) is None and unplanned.exhausted(NFL, clock.read())
+    assert unplanned.admit(NFL, Demand(FOCUS, 1), clock.read()).reason == "quota: NFLMeta requests exhausted"
+    assert _admit(*_ledger(UNLIMITED), FOCUS).notice is None  # admitted: nothing is spent
 
 
 @pytest.mark.parametrize(
@@ -186,6 +214,16 @@ def test_the_billing_month_is_the_utc_calendar_month_and_a_new_one_starts_from_z
     assert ledger.usage(TEST, clock.read()).month == BillingMonth(2026, 12)
     assert str(BillingMonth.of(datetime(2026, 11, 30, 20, 15, tzinfo=timezone(-timedelta(hours=5))))) == "2026-12"
     assert BillingMonth.parse("2026-11") == BillingMonth(2026, 11)
+
+
+def test_a_provider_s_word_carried_over_is_kept_only_by_an_account_with_no_monthly_limit() -> None:
+    """With a monthly limit, the word already raised the counts to it: the counts carry the exhaustion."""
+    spent = MonthUsage(BillingMonth(2026, 11), requests=3, exhausted=True)
+    ledger, clock = _ledger(UNLIMITED, usage={TEST: spent})
+    assert ledger.exhausted(TEST, clock.read()) and ledger.usage(TEST, clock.read()) == spent
+    ledger, clock = _ledger(AccountLimits(requests_a_month=5_000), usage={TEST: spent})
+    assert not ledger.exhausted(TEST, clock.read())
+    assert ledger.usage(TEST, clock.read()) == MonthUsage(BillingMonth(2026, 11), requests=3)
 
 
 def test_usage_carried_over_counts_on_in_its_own_month_and_is_dropped_in_a_later_one() -> None:
