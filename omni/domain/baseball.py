@@ -8,6 +8,7 @@ cards build on them, so they live in `domain` and import from here directly.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from enum import Enum
 
 from omni.core.enum import HomeAway, StrEnumMixin
@@ -33,6 +34,12 @@ __all__ = [
     "BatterGameLine",
     "PitcherGameLine",
     "DueUp",
+    "BaseballStoppageKind",
+    "BaseballStoppage",
+    "BaseballReview",
+    "BaseballFinishedPlay",
+    "BaseballAction",
+    "BaseballBreakSignals",
     "BaseballField",
     "BaseballGameState",
     "PitchingFeatKind",
@@ -480,6 +487,82 @@ class DueUp:
             raise ValueError("due up names one to three batters")
 
 
+class BaseballStoppageKind(StrEnumMixin, str, Enum):
+    """A pause in play that the live feed logs as an event of its own within a plate appearance.
+
+    Only the pauses the board policy lends (`docs/agent_context/BOARD_POLICY.md` §5) are kept. The pauses
+    between pitches that lend nothing (a batter's timeout, a step-off, a pickoff throw) are left out.
+    """
+
+    MOUND_VISIT = "mound visit"
+    PITCHING_CHANGE = "pitching change"
+    INJURY = "injury"  # an injury delay, a player's or an umpire's
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class BaseballStoppage:
+    """A pause the feed logged in a plate appearance: what it was, where, when it began, and whether play has
+    resumed since (a pitch came after it, or the plate appearance ended)."""
+
+    kind: BaseballStoppageKind
+    at_bat: int  # the plate appearance whose events log it
+    event: int  # its place among that plate appearance's events
+    began: datetime | None = None  # by the source's clock
+    resumed: bool = False
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class BaseballReview:
+    """A replay review of a plate appearance's result, or of one of its events: in progress, or ruled."""
+
+    at_bat: int
+    event: int | None = None  # the event under review; None when it's the plate appearance's result
+    in_progress: bool
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class BaseballFinishedPlay:
+    """The newest finished plate appearance: which one, the half it was in, and when it ended."""
+
+    at_bat: int
+    inning: int
+    phase: InningPhase
+    ended: datetime | None = None  # by the source's clock
+
+    def __post_init__(self) -> None:
+        if self.phase.is_break:
+            raise ValueError("a plate appearance happens in the top or the bottom of an inning")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class BaseballAction:
+    """The newest action in a game: a pitch, or the end of a plate appearance."""
+
+    at_bat: int
+    pitch: int | None = None  # the pitch's place among the plate appearance's events; None for its end
+    at: datetime | None = None  # by the source's clock
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class BaseballBreakSignals:
+    """What the feed says about pauses in play, for the break detector (`omni.events.mlb_breaks`).
+
+    ``inning_break_length`` is the game's scheduled inning break (120 s, 145 s on national TV, 175 s in the
+    World Series); None when the provider hasn't read it. The rest comes from the play log's newest plate
+    appearances.
+    """
+
+    inning_break_length: timedelta | None = None
+    last_finished: BaseballFinishedPlay | None = None
+    last_action: BaseballAction | None = None
+    stoppages: tuple[BaseballStoppage, ...] = ()  # those logged in the newest plate appearance, in order
+    reviews: tuple[BaseballReview, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.inning_break_length is not None and self.inning_break_length <= timedelta(0):
+            raise ValueError("an inning break's length must be positive")
+
+
 class BaseballField(StrEnumMixin, str, Enum):
     """A part of a `BaseballGameState` whose coverage is kept; a two-sided one covers both sides."""
 
@@ -531,6 +614,8 @@ class BaseballGameState:
     last_pitch: PitchSnapshot | None = None
     # Who bats next, during a break between halves; None mid-half or when the feed names no one.
     due_up: DueUp | None = None
+    # What the feed says about pauses in play (stoppages, reviews, the newest action), for break detection.
+    break_signals: BaseballBreakSignals = BaseballBreakSignals()
     # What each field above rests on. A field the feed left out still shows a stand-in (0 outs, empty bases, the
     # top of the inning); its coverage is what says so.
     coverage: CoverageMap[BaseballField] = CoverageMap()

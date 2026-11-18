@@ -13,7 +13,7 @@ both, so callers never double-fetch. Everything it returns is typed.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable, Iterable
 from zoneinfo import ZoneInfo
 
@@ -21,11 +21,17 @@ from omni.core.enum import DisplayPriority, GameStatus, HomeAway, League, Season
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.core.time import local_date
 from omni.domain.baseball import (
+    BaseballAction,
     BaseballBaseState,
+    BaseballBreakSignals,
     BaseballCount,
     BaseballField,
+    BaseballFinishedPlay,
     BaseballGameState,
+    BaseballReview,
     BaseballScoringImpact,
+    BaseballStoppage,
+    BaseballStoppageKind,
     BatterGameLine,
     DueUp,
     InningPhase,
@@ -56,8 +62,8 @@ __all__ = ["MlbStatsApiProvider", "ScheduleFetcher", "GameFetcher", "ContextMetr
 
 # (game_date, sport_ids) -> the list of flat schedule rows. A row has `statsapi.schedule`'s keys for what the two
 # share (`game_id`, `game_datetime`, `game_date`, `game_type`, `status`, `away_id`, `away_name`, `home_id`,
-# `home_name`, `venue_name`, `doubleheader`, `game_num`), and three of its own: `start_time_tbd`,
-# `resumed_from_date` and `broadcasts` (`_schedule_rows`).
+# `home_name`, `venue_name`, `doubleheader`, `game_num`), and four of its own: `start_time_tbd`,
+# `resumed_from_date`, `broadcasts` and `inning_break_length` (`_schedule_rows`).
 ScheduleFetcher = Callable[[date, str], list[dict[str, Any]]]
 # game_pk -> the raw nested game feed (statsapi.get("game", ...)).
 GameFetcher = Callable[[Any], dict[str, Any]]
@@ -120,6 +126,16 @@ _EVENT_BAND_RARITY: dict[BaseballGameEventType, tuple[DisplayPriority, float]] =
 _BAND_URGENCY: dict[DisplayPriority, UpdateUrgency] = {
     DisplayPriority.ALERT: UpdateUrgency.LIVE_CRITICAL,
     DisplayPriority.HIGH_LEVERAGE: UpdateUrgency.HIGH,
+}
+
+# StatsAPI `playEvents[].details.eventType` -> the pauses in play the board policy lends (BOARD_POLICY.md §5).
+# `mound_visit` and `pitching_substitution` were seen in recorded games; `injury` is from StatsAPI's list of event
+# types. The pauses that lend nothing (`batter_timeout`, a pickoff, a step-off, `offensive_substitution`) and the
+# stoppages the feed has no event type for (equipment) are left out.
+_STOPPAGE_EVENT_TYPES: dict[str, BaseballStoppageKind] = {
+    "mound_visit": BaseballStoppageKind.MOUND_VISIT,
+    "pitching_substitution": BaseballStoppageKind.PITCHING_CHANGE,
+    "injury": BaseballStoppageKind.INJURY,
 }
 
 # StatsAPI `gameType` -> the part of the year it files the game under: spring training, the regular season, the
@@ -205,6 +221,8 @@ class MlbStatsApiProvider:
         self.source = source if source is not None else _SOURCE
         self._sport_ids = sport_ids
         self._tz = schedule_timezone if schedule_timezone is not None else _DEFAULT_SCHEDULE_TZ
+        # game_pk -> the game's scheduled inning break, as the schedule (or the game's context metrics) states it.
+        self._inning_breaks: dict[str, timedelta] = {}
 
     @property
     def schedule_timezone(self) -> ZoneInfo:
@@ -227,9 +245,12 @@ class MlbStatsApiProvider:
         warnings: list[str] = []
         for row in rows:
             try:
-                contests.append(self._parse_game(row))
+                contest = self._parse_game(row)
             except _SkipGame as skip:
                 warnings.append(str(skip))
+                continue
+            contests.append(contest)
+            self._note_inning_break(contest.id.raw, row.get("inning_break_length"))
         return ProviderUpdate(
             source=self.source,
             observed_at=now,
@@ -245,13 +266,15 @@ class MlbStatsApiProvider:
         current `BaseballGameState` and the typed play-by-play `events`; events are
         stamped `observed_at=now` and scoped to ``game`` so each carries stable lineage.
         The feed's own status (the only word that its state is final) and its timestamp
-        ride along. Raises `ProviderError` if the fetch fails or the feed has no live state.
+        ride along. The state's break signals carry the game's scheduled inning break when
+        the schedule (or the game's context metrics) has stated it. Raises `ProviderError`
+        if the fetch fails or the feed has no live state.
         """
         try:
             raw = self._fetch_game(game.id.raw)
         except Exception as exc:
             raise ProviderError(f"MLB game fetch failed for {game.id.raw}: {exc}") from exc
-        state = _parse_game_state(raw)
+        state = _parse_game_state(raw, inning_break_length=self._inning_breaks.get(game.id.raw))
         events, warnings = _parse_game_events(raw, contest=game, source=self.source, observed_at=now)
         return LiveBaseballFeed(
             state=state,
@@ -286,7 +309,16 @@ class MlbStatsApiProvider:
             raw = self._fetch_context_metrics(game.id.raw)
         except Exception as exc:
             raise ProviderError(f"MLB win-probability fetch failed for {game.id.raw}: {exc}") from exc
+        # The payload's game block is the schedule's, so it states the game's inning break too.
+        block = _obj(raw.get("game"))
+        self._note_inning_break(game.id.raw, block.get("inningBreakLength", raw.get("inningBreakLength")))
         return _parse_win_probability(raw)
+
+    def _note_inning_break(self, game_pk: str, raw: Any) -> None:
+        """Keep a game's scheduled inning break, when ``raw`` states one; one that doesn't changes nothing."""
+        length = _inning_break_length(raw)
+        if length is not None:
+            self._inning_breaks[game_pk] = length
 
     def _parse_game(self, row: dict[str, Any]) -> TeamGame:
         """One schedule row as a typed game. StatsAPI's schedule has no neutral-site flag, so that stays unknown."""
@@ -318,6 +350,11 @@ class MlbStatsApiProvider:
             national_broadcast=_national_tv(row.get("broadcasts")),
             resumed_from=_schedule_date(row.get("resumed_from_date"), self._tz),
         )
+
+
+def _inning_break_length(raw: Any) -> timedelta | None:
+    """A game's scheduled inning break from StatsAPI's ``inningBreakLength`` (whole seconds), or None."""
+    return timedelta(seconds=raw) if type(raw) is int and raw > 0 else None
 
 
 def _doubleheader_game(row: dict[str, Any]) -> int | None:
@@ -386,6 +423,7 @@ def _schedule_rows(response: Any) -> list[dict[str, Any]]:
                 "start_time_tbd": status.get("startTimeTBD"),
                 "resumed_from_date": game.get("resumedFromDate") or game.get("resumedFrom"),
                 "broadcasts": game.get("broadcasts"),
+                "inning_break_length": game.get("inningBreakLength"),
             }
             rows.append({key: value for key, value in row.items() if value is not None})
     return rows
@@ -653,7 +691,7 @@ def _coverage_of(
     return FieldCoverage.REPORTED if given else gap
 
 
-def _parse_game_state(raw: dict[str, Any]) -> BaseballGameState:
+def _parse_game_state(raw: dict[str, Any], *, inning_break_length: timedelta | None = None) -> BaseballGameState:
     """Parse a StatsAPI game feed's linescore into typed `BaseballGameState`.
 
     Base occupancy is read from `offense.{first,second,third}` (a key is present
@@ -669,6 +707,9 @@ def _parse_game_state(raw: dict[str, Any]) -> BaseballGameState:
     ``inningState`` it doesn't know (the top), a side's missing errors (0). A side
     yet to bat has a true 0 of runs and hits, INFERRED from the half, unless the
     half is itself a stand-in.
+
+    Its break signals come from the play log (`_break_signals`), with ``inning_break_length``
+    the game's scheduled inning break when it's known.
     """
     try:
         line = raw["liveData"]["linescore"]
@@ -728,6 +769,7 @@ def _parse_game_state(raw: dict[str, Any]) -> BaseballGameState:
             inning=inning,
             phase=phase,
             due_up=_due_up(raw, offense) if phase.is_break else None,
+            break_signals=_break_signals(raw, inning_break_length=inning_break_length),
             count=BaseballCount(
                 balls=int(line.get("balls", 0) or 0),
                 strikes=int(line.get("strikes", 0) or 0),
@@ -893,6 +935,113 @@ def _last_pitch_snapshot(raw: dict[str, Any]) -> PitchSnapshot | None:
     if velocity <= 0:
         return None
     return PitchSnapshot(velocity_mph=velocity, pitch_type=pitch_type)
+
+
+def _at_bat_index(play: dict[str, Any]) -> int | None:
+    """A play's ``atBatIndex`` (on the play or under its ``about``), or None when it has no usable one."""
+    index = play.get("atBatIndex", _obj(play.get("about")).get("atBatIndex"))
+    return index if type(index) is int and index >= 0 else None
+
+
+def _play_events(play: dict[str, Any]) -> list[tuple[int, dict[str, Any]]]:
+    """A play's events, each with its place among them: the feed's ``index``, else its position in the list."""
+    events = _objects(play.get("playEvents"))
+    return [
+        (index if type(index := event.get("index")) is int and index >= 0 else position, event)
+        for position, event in enumerate(events)
+    ]
+
+
+def _newest_plays(raw: dict[str, Any]) -> list[tuple[int, dict[str, Any]]]:
+    """The newest plate appearances, oldest first, each once with its index: the log's last two and the current
+    play (which stands for its own entry in the log). The one before the current play still matters: a review of
+    its result can run after the next plate appearance has begun."""
+    plays = _obj(_obj(raw.get("liveData")).get("plays"))
+    newest: dict[int, dict[str, Any]] = {}
+    for play in [*_objects(plays.get("allPlays"))[-2:], _obj(plays.get("currentPlay"))]:
+        index = _at_bat_index(play)
+        if index is not None:
+            newest[index] = play
+    return sorted(newest.items())
+
+
+def _finished(play: dict[str, Any]) -> bool:
+    return _obj(play.get("about")).get("isComplete") is True
+
+
+def _finished_play(at_bat: int, play: dict[str, Any]) -> BaseballFinishedPlay | None:
+    """A finished plate appearance's place and end, or None when it doesn't say which half it was in."""
+    about = _obj(play.get("about"))
+    inning, phase = about.get("inning"), _HALF_INNING_PHASE.get(str(about.get("halfInning")))
+    if type(inning) is not int or inning < 1 or phase is None:
+        return None
+    return BaseballFinishedPlay(at_bat=at_bat, inning=inning, phase=phase, ended=_parse_iso(about.get("endTime")))
+
+
+def _last_action(plays: list[tuple[int, dict[str, Any]]]) -> BaseballAction | None:
+    """The newest action: the newest plate appearance's last pitch while it's under way, else the newest finished
+    plate appearance's end. None when the log shows neither."""
+    if plays and not _finished(plays[-1][1]):
+        at_bat, play = plays[-1]
+        pitches = [(index, event) for index, event in _play_events(play) if event.get("isPitch") is True]
+        if pitches:
+            index, pitch = pitches[-1]
+            return BaseballAction(at_bat=at_bat, pitch=index, at=_parse_iso(pitch.get("startTime")))
+    finished = [(at_bat, play) for at_bat, play in plays if _finished(play)]
+    if not finished:
+        return None
+    at_bat, play = finished[-1]
+    return BaseballAction(at_bat=at_bat, at=_parse_iso(_obj(play.get("about")).get("endTime")))
+
+
+def _stoppages(at_bat: int, play: dict[str, Any]) -> tuple[BaseballStoppage, ...]:
+    """The pauses logged in a plate appearance's events, each marked resumed once a pitch follows it or the plate
+    appearance has ended."""
+    events = _play_events(play)
+    ended = _finished(play)
+    found: list[BaseballStoppage] = []
+    for position, (index, event) in enumerate(events):
+        kind = _STOPPAGE_EVENT_TYPES.get(str(_obj(event.get("details")).get("eventType")))
+        if kind is None:
+            continue
+        pitched = any(later.get("isPitch") is True for _, later in events[position + 1 :])
+        began = _parse_iso(event.get("startTime"))
+        found.append(BaseballStoppage(kind=kind, at_bat=at_bat, event=index, began=began, resumed=ended or pitched))
+    return tuple(found)
+
+
+def _review(at_bat: int, details: Any, event: int | None = None) -> BaseballReview | None:
+    in_progress = _obj(details).get("inProgress")
+    return BaseballReview(at_bat=at_bat, event=event, in_progress=in_progress) if type(in_progress) is bool else None
+
+
+def _reviews(at_bat: int, play: dict[str, Any]) -> list[BaseballReview]:
+    """The replay reviews on a plate appearance: of its result (``reviewDetails`` on the play) and of its non-pitch
+    events (a steal, a pickoff). A review on a pitch is left out: replay doesn't review balls and strikes, so one
+    there is a ball-strike challenge, which lends nothing."""
+    found = [_review(at_bat, play.get("reviewDetails"))]
+    found += [
+        _review(at_bat, event.get("reviewDetails"), index)
+        for index, event in _play_events(play)
+        if event.get("isPitch") is not True
+    ]
+    return [review for review in found if review is not None]
+
+
+def _break_signals(raw: dict[str, Any], *, inning_break_length: timedelta | None) -> BaseballBreakSignals:
+    """What the play log's newest plate appearances say about pauses in play.
+
+    Nothing here sinks the state's parse: a play or an event the feed garbles is read as absent.
+    """
+    plays = _newest_plays(raw)
+    finished = [(at_bat, play) for at_bat, play in plays if _finished(play)]
+    return BaseballBreakSignals(
+        inning_break_length=inning_break_length,
+        last_finished=_finished_play(*finished[-1]) if finished else None,
+        last_action=_last_action(plays),
+        stoppages=_stoppages(*plays[-1]) if plays else (),
+        reviews=tuple(review for at_bat, play in plays for review in _reviews(at_bat, play)),
+    )
 
 
 def _parse_one_play(
@@ -1117,6 +1266,9 @@ _GAME_FIELDS = (
     # Each play's runners -> the reach ledger. `end` and `originBase` occur only under `movement`; `isOut` also
     # keeps a flag on each play's result and pitch events.
     "isComplete,runners,movement,originBase,end,isOut,"
+    # Pauses in play -> the break signals: each event's place in its plate appearance (`index`; its type, times
+    # and `isPitch` are kept above), and replay reviews on a play or an event.
+    "index,reviewDetails,inProgress,"
     "gameData,status,detailedState,metaData,timeStamp"  # the feed's own status and timestamp
 )
 
