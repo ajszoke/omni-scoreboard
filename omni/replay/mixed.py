@@ -4,9 +4,11 @@ A `MixedTimeline` is the world one board watches over a day, in its viewer's tim
 - **MLB:** each game's `GameFrame`s, as `omni.replay.timeline` has them: its schedule entry, and while it's live
   or final, its feed's state, plays and decisions. A fake StatsAPI serves both, and `PlannedMlb` asks it through
   the plan, date by date.
-- **NFL:** each game's `SlateFrame`s: its schedule entry, its status changing over the day. NFL's own scope source
-  asks its slate, date by date, through the same plan. The board's pipeline cards baseball only, so NFL games show
-  up as members and as NFL's health, not as airtime.
+- **NFL:** each game's `SlateFrame`s: its schedule entry, its status changing over the day, and while it's live or
+  final its feed's answer: its state, the plays written at that frame, and when a halftime it's in ends. NFL's own
+  scope source asks its slate, date by date, through the same plan. A fake of NFL's feeds reads each live game every
+  `NFL_FEED_EVERY` on its own pace, off the plan (so MLB's asks are what they'd be without NFL), and once more when
+  it's final; NFL's own pipeline cards its games beside MLB's, into the one queue.
 - **Dates.** A game is listed on its `provider_date`'s slate from its first frame. `AlsoListed` lists it on another
   date's slate too, as around midnight.
 - **Faults**, typed:
@@ -24,11 +26,12 @@ clock doesn't move them.
 
 **The runner** (`run_mixed`) wires the production spine around the fakes: `PlannedMlb` over one `PollPlan`, an
 inline `Poller`, NFL's scope source on the same plan, and an `AppLoop` built as `build_planned_loop` builds it, with
-NFL's schedule beside MLB's. It warms up as the running board does, then steps at every instant something can
-change: a frame or fault, the poller's next check with an ask due, and the loop's own deadlines (on a grid of 1/64 s,
-just past each). The poller checks the plan on a steady beat of its own, every quarter second, as the running one
-does, and asks what's due; then the loop refreshes and paints. So when a source is asked doesn't depend on what else
-steps the replay. With ``nfl=False`` the same world runs without NFL's source.
+NFL's schedule and pipeline beside MLB's. It warms up as the running board does, then steps at every instant
+something can change: a frame or fault, the poller's next check with an ask due, NFL's next read, and the loop's own
+deadlines (on a grid of 1/64 s, just past each). The poller checks the plan on a steady beat of its own, every quarter
+second, as the running one does, and asks what's due; NFL's feeds read what's due; then the loop refreshes and paints.
+So when a source is asked doesn't depend on what else steps the replay. With ``nfl=False`` the same world runs
+without NFL's source.
 
 **The decisions** (`mixed_decisions`), one line per change:
 - the board's lines, as `omni.replay.harness.replay_decisions` writes them: ``up``, ``down``, ``drop``, ``frame``,
@@ -38,9 +41,9 @@ steps the replay. With ``nfl=False`` the same world runs without NFL's source.
   drops it), and the ids it added and removed;
 - ``health``: a league's health changed: fresh, stale, offline or never loaded, and why.
 
-**What a run measures** (`MixedRun`): every request each source got, and each MLB card drawn with a score or a
-final before its TV-delay release. Each league's airtime share, its cards' waits, lease overruns and spoilers join
-these with NFL's cards on the shared board; requests and rows against each account's quota, with the quota ledger.
+**What a run measures** (`MixedRun`): every request each source got, and each card, of either league, drawn with a
+score or a final before its own league's TV-delay release. Each league's airtime share, its cards' waits and lease
+overruns join these with the board policy; requests and rows against each account's quota, with the quota ledger.
 """
 
 from __future__ import annotations
@@ -55,21 +58,26 @@ from zoneinfo import ZoneInfo
 
 from omni.app.contest_store import ContestStore, ProviderStatus
 from omni.app.loop import AppLoop, Painted, Refresh
+from omni.app.nfl_feeds import NflReading
+from omni.app.nfl_pipeline import LiveFootballPipeline
 from omni.app.pipeline import LiveBaseballPipeline
 from omni.app.planned_mlb import MLB_POLICIES, PlannedMlb
 from omni.app.poll_plan import PollKey, PollPlan, PollPriority, PollSource
 from omni.app.poller import Poller
 from omni.app.runner import warm_up
-from omni.cards.base import CardId, ScoreboardCard
+from omni.cards.base import CardId, CardKind, ScoreboardCard
 from omni.cards.baseball import BigPlayCardPayload, FinalCardPayload, LiveBaseballCardPayload
 from omni.cards.factory import CardFactory
+from omni.cards.football import LiveFootballCardPayload
 from omni.core.clock import ClockReading, FakeClock, MonotonicTime
 from omni.core.enum import GameStatus, League, PanelProfile
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.core.time import DurationSeconds, local_date
 from omni.domain.baseball import PregameDetails, WinProbability
 from omni.domain.contest import TeamGame
+from omni.domain.football import FootballGameState
 from omni.events.baseball import LiveBaseballFeed
+from omni.events.football import FootballEvent
 from omni.preferences.favorites import Favorites
 from omni.providers.base import (
     LocalDate,
@@ -81,10 +89,10 @@ from omni.providers.base import (
     ScopeSource,
     ScopeSpan,
 )
-from omni.providers.nflmeta import NFLMETA_SOURCE
+from omni.providers.nflmeta import DEFAULT_POLL, NFLMETA_SOURCE, NflLiveSnapshot, NflPhase
 from omni.queue.delay_policy import DelayPolicy
 from omni.queue.priority import PriorityScorer
-from omni.queue.scheduler import InterleavedCardQueue
+from omni.queue.scheduler import CardView, InterleavedCardQueue
 from omni.renderers.canvas import Canvas
 from omni.renderers.context import RenderContext
 from omni.renderers.registry import RendererRegistry, default_registry
@@ -93,6 +101,7 @@ from omni.replay.timeline import GameFrame, Timeline
 
 __all__ = [
     "MLB_STATSAPI",
+    "NFL_FEED_EVERY",
     "NFL_SLATE_MAX_AGE",
     "AlsoListed",
     "ClockStep",
@@ -115,6 +124,9 @@ MLB_STATSAPI = SourceRef("mlb_statsapi", "https://statsapi.mlb.com")
 # How long an answer of NFL's slate counts as fresh: past this its health goes stale.
 NFL_SLATE_MAX_AGE = timedelta(minutes=2)
 
+# How often the replay's NFL feeds read each live game. Each answer is current for two of these.
+NFL_FEED_EVERY = timedelta(seconds=30)
+
 # The replay steps on a grid of 1/64 s, which both floating point and the clock's whole microseconds hold exactly, so
 # an answer's receipt, and every span counted from it, lands exactly on a step.
 _TICK = timedelta(microseconds=15625)
@@ -125,10 +137,15 @@ _LEAGUES = (League.MLB, League.NFL)
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class SlateFrame:
-    """One game as its league's slate lists it, from ``at`` until its next frame: a schedule entry, no feed."""
+    """One NFL game as its slate lists it, from ``at`` until its next frame, and, while it's live or final, as its
+    feed answers: its state, the plays written at ``at``, and when the halftime it's in ends (by the world's time).
+    A frame with no state is a schedule entry alone: its feed has nothing to say."""
 
     at: datetime
     game: TeamGame
+    state: FootballGameState | None = None
+    plays: tuple[FootballEvent, ...] = ()
+    break_ends_at: datetime | None = None
 
     def __post_init__(self) -> None:
         if self.at.tzinfo is None:
@@ -246,6 +263,22 @@ class MixedTimeline:
         """The wall-clock steps, in order."""
         return sorted((fault for fault in self.faults if isinstance(fault, ClockStep)), key=lambda step: step.at)
 
+    def nfl_games_at(self, now: datetime) -> list[TeamGame]:
+        """Each NFL game as its slate entry stands at ``now``, from its first frame on, in id order."""
+        return sorted(self._effective(now), key=lambda game: str(game.id))
+
+    def nfl_feed_at(
+        self, game_id: LeagueScopedId, now: datetime, *, since: datetime | None = None
+    ) -> tuple[SlateFrame | None, tuple[FootballEvent, ...]]:
+        """An NFL game's frame as of ``now`` (None before its first), and the plays written after ``since`` up to
+        then. Raises `ProviderError` while NFL's source is out."""
+        self._check_source(League.NFL, now)
+        instants, frames = self._slates[game_id]
+        found = bisect_right(instants, now)
+        first = bisect_right(instants, since) if since is not None else 0
+        plays = tuple(play for frame in frames[first:found] for play in frame.plays)
+        return (frames[found - 1] if found else None), plays
+
     def feed_at(self, game_id: LeagueScopedId, now: datetime) -> GameFrame | None:
         """An MLB game's frame as of ``now``, corrections included; None before its first. Raises `ProviderError`
         while MLB's source is out."""
@@ -256,10 +289,7 @@ class MixedTimeline:
         """``league``'s slate for ``day`` as of ``now``, as its source answers it when asked at ``asked`` by the
         board's clock. Raises `ProviderError` while the league's source is out."""
         self._check_source(league, now)
-        if league is League.MLB:
-            games = self._feeds.schedule_at(now)
-        else:
-            games = tuple(sorted(self._effective(now), key=lambda game: str(game.id)))
+        games = self._feeds.schedule_at(now) if league is League.MLB else tuple(self.nfl_games_at(now))
         extra = {listing.game for listing in self.also_listed if listing.day == day}
         listed = [game for game in games if game.provider_date == day or game.id in extra]
         warnings: list[str] = []
@@ -314,6 +344,7 @@ class MixedStep:
     painted: Painted
     drawn: ScoreboardCard[Any] | None  # the card this step's frame drew, if one was
     store: ContestStore
+    view: CardView  # the cards this step's refresh gave the board to air, both leagues'
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -322,7 +353,7 @@ class MixedRun:
 
     decisions: tuple[str, ...]
     fetched: tuple[Fetched, ...]  # every request each source got, in order
-    early: tuple[EarlyReveal, ...]  # MLB cards drawn with a score or a final before its release: none, ever
+    early: tuple[EarlyReveal, ...]  # cards drawn with a score or a final before its release: none, ever
 
 
 def mixed_decisions(
@@ -332,10 +363,13 @@ def mixed_decisions(
     favorites: Favorites = Favorites(),
     broadcast_lag: DurationSeconds = DurationSeconds(45),
     nfl: bool = True,
+    nfl_lag: DurationSeconds | None = None,
 ) -> list[str]:
     """Every change across ``timeline``, one line each, timed in seconds since its start, under a header naming
     what the replay decided with (`replay_versions`)."""
-    run = run_mixed(timeline, profile=profile, favorites=favorites, broadcast_lag=broadcast_lag, nfl=nfl)
+    run = run_mixed(
+        timeline, profile=profile, favorites=favorites, broadcast_lag=broadcast_lag, nfl=nfl, nfl_lag=nfl_lag
+    )
     header = replay_versions(profile, broadcast_lag=broadcast_lag, favorites=favorites).header()
     return [header, *run.decisions]
 
@@ -347,12 +381,14 @@ def run_mixed(
     favorites: Favorites = Favorites(),
     broadcast_lag: DurationSeconds = DurationSeconds(45),
     nfl: bool = True,
+    nfl_lag: DurationSeconds | None = None,
     watch: Callable[[MixedStep], None] | None = None,
 ) -> MixedRun:
     """Run the board through ``timeline`` from its start to its end, and say what it decided and measured.
 
-    ``favorites`` feeds the scorer and the plan's priorities, ``broadcast_lag`` is the TV delay, and ``nfl=False``
-    leaves NFL's source off the board. ``watch`` hears every step. Pure and deterministic: no real time, no I/O.
+    ``favorites`` feeds the scorers and the plan's priorities, ``broadcast_lag`` is MLB's TV delay and ``nfl_lag``
+    NFL's (MLB's unless given), and ``nfl=False`` leaves NFL's source and cards off the board. ``watch`` hears every
+    step. Pure and deterministic: no real time, no I/O.
     """
     clock = FakeClock(timeline.start)
     world = _World(timeline.start, clock)
@@ -360,8 +396,15 @@ def run_mixed(
     mlb = _ReplayMlb(timeline, world)
     planned = PlannedMlb(plan, clock, mlb, favorites=favorites)
     schedules: tuple[ScopeSource, ...] = (planned, _NflSlates(timeline, world, plan)) if nfl else (planned,)
+    nfl_lag = nfl_lag if nfl_lag is not None else broadcast_lag
+    feeds = _ReplayNfl(timeline, world, served=mlb.served) if nfl else None
     witness = _Witness()
     queue = InterleavedCardQueue()
+    football = None
+    if feeds is not None:
+        football = LiveFootballPipeline(
+            feeds=feeds, delay_policy=DelayPolicy(broadcast_lag=nfl_lag), queue=queue, favorites=favorites
+        )
     store = ContestStore()
     loop = AppLoop(
         schedules=schedules,
@@ -378,6 +421,7 @@ def run_mixed(
         fetch_feed=planned.fetch_feed,
         fetch_pregame_details=planned.fetch_pregame_details,
         fetch_game_lines=planned.fetch_game_lines,
+        football=football,
     )
     poller = Poller(plan, clock)
     warm_up(loop, poller, clock)
@@ -385,7 +429,7 @@ def run_mixed(
     lines: list[str] = []
     early: list[EarlyReveal] = []
     seen = _Seen()
-    lag = broadcast_lag.as_timedelta()
+    lags = {League.MLB: broadcast_lag.as_timedelta(), League.NFL: nfl_lag.as_timedelta()}
     end = _ticks_from(world.monotonic(timeline.end))
     changes = sorted({_ticks_from(world.monotonic(instant)) for instant in timeline.changes})
     steps = timeline.clock_steps()
@@ -396,6 +440,8 @@ def run_mixed(
         if tick % _BEAT == 0:
             poller.run_due()
         at = clock.read()
+        if feeds is not None:
+            feeds.read_due(at)
         refresh = loop.refresh(at)
         witness.drawn = None
         painted = loop.paint(at)
@@ -407,9 +453,10 @@ def run_mixed(
             painted=painted,
             drawn=witness.drawn if painted.shown is not None else None,
             store=store,
+            view=queue.published,
         )
         lines.extend(_lines(step, seen, timeline.zone))
-        early.extend(_spoiled(step, mlb.served, lag))
+        early.extend(_spoiled(step, mlb.served, lags))
         if watch is not None:
             watch(step)
 
@@ -422,6 +469,8 @@ def run_mixed(
         upcoming = [-(-beat // _BEAT) * _BEAT]  # the poller's first check with an ask due
         upcoming += changes[:1]
         upcoming += [max(_ticks_from(deadline, past=True), tick + 1)] if deadline is not None else []
+        read = feeds.next_due() if feeds is not None else None
+        upcoming += [max(_ticks_from(read), tick + 1)] if read is not None else []
         following = min(upcoming)
         clock.advance(_TICK * (following - tick))
         tick = following
@@ -500,10 +549,8 @@ class _ReplayMlb:
 
 
 class _NflSlates:
-    """NFL's schedule, one local date at a time, asked through the board's plan beside MLB's slates.
-
-    Its games have no cards on the board yet, so the plan asks it at its background cadence.
-    """
+    """NFL's schedule, one local date at a time, asked through the board's plan beside MLB's slates, at its
+    background cadence."""
 
     def __init__(self, timeline: MixedTimeline, world: _World, plan: PollPlan) -> None:
         self._timeline = timeline
@@ -529,6 +576,87 @@ class _NflSlates:
         if failure is not None:
             observed.append(ScopeObservation.failure(scope, failure.error, failure.at))
         return ScopeReport(span=ScopeSpan(current=scope, max_age=NFL_SLATE_MAX_AGE), observations=tuple(observed))
+
+
+class _ReplayNfl:
+    """NFL's feeds over the timeline, an `NflFeeds`: each game its slate lists live is read every `NFL_FEED_EVERY`
+    from the first step it's live, as its feed answers at the world's time, and once more when it's final; then it's
+    left alone. A read brings the plays written since the last one. Each answer is taken once, and says it's current
+    for two of those reads.
+
+    ``served`` is each score a game's feed has answered with, and when it first did, once with any status and once
+    as a final: the replay's MLB feed keeps the same, and the ids keep the leagues apart.
+    """
+
+    def __init__(
+        self,
+        timeline: MixedTimeline,
+        world: _World,
+        *,
+        served: dict[tuple[LeagueScopedId, int, int, bool], MonotonicTime],
+    ) -> None:
+        self._timeline = timeline
+        self._world = world
+        self._served = served
+        self._due: dict[LeagueScopedId, MonotonicTime] = {}  # each live game's next read
+        self._read_to: dict[LeagueScopedId, datetime] = {}  # the world's time each game's plays were read to
+        self._done: set[LeagueScopedId] = set()  # read final: nothing left to ask
+        self._waiting: dict[LeagueScopedId, list[NflReading]] = {}
+        self._latest: dict[LeagueScopedId, NflReading] = {}
+
+    def read_due(self, at: ClockReading) -> None:
+        """Read each live or final game whose read is due as of ``at``."""
+        for game in self._timeline.nfl_games_at(self._world.now()):
+            due = self._due.get(game.id)
+            if game.id in self._done or game.status not in _READ or (due is not None and due > at.monotonic):
+                continue
+            self._due[game.id] = at.monotonic + NFL_FEED_EVERY
+            self._read(game.id, at)
+
+    def next_due(self) -> MonotonicTime | None:
+        """When a game is next read, on the running clock; None when none is being read."""
+        return min((due for game_id, due in self._due.items() if game_id not in self._done), default=None)
+
+    def take(self, game: TeamGame) -> list[NflReading]:
+        return self._waiting.pop(game.id, [])
+
+    def latest(self, game: TeamGame) -> NflReading | None:
+        return self._latest.get(game.id)
+
+    def _read(self, game_id: LeagueScopedId, at: ClockReading) -> None:
+        """One read of a game: its answer, unless the source is out or has nothing to say."""
+        world = self._world.fetch(PollKey(PollSource.GAME_FEED, game_id))
+        try:
+            frame, plays = self._timeline.nfl_feed_at(game_id, world, since=self._read_to.get(game_id))
+        except ProviderError:
+            return
+        if frame is None or frame.state is None:
+            return
+        self._read_to[game_id] = world
+        final = frame.game.status is GameStatus.FINAL
+        ends = frame.break_ends_at
+        snapshot = NflLiveSnapshot(
+            game=frame.game,
+            phase=NflPhase.POST if final else NflPhase.IN,
+            state=frame.state,
+            events=plays,
+            caught_up=True,
+            break_ends_at=ends + (at.utc - world) if ends is not None else None,  # on the board's clock, as asked
+            observed_at=world,
+            poll_every=DEFAULT_POLL,
+            settled=final,
+        )
+        reading = NflReading(snapshot, at, current_for=NFL_FEED_EVERY * 2)
+        self._waiting.setdefault(game_id, []).append(reading)
+        self._latest[game_id] = reading
+        score = (frame.state.away_score, frame.state.home_score)
+        self._served.setdefault((game_id, *score, False), at.monotonic)
+        if final:
+            self._served.setdefault((game_id, *score, True), at.monotonic)
+            self._done.add(game_id)
+
+
+_READ = frozenset({GameStatus.LIVE, GameStatus.FINAL})  # the NFL games whose feed the replay reads
 
 
 class _Witness(RendererRegistry):
@@ -601,9 +729,12 @@ def _lines(step: MixedStep, seen: _Seen, zone: ZoneInfo) -> list[str]:
 
 
 def _spoiled(
-    step: MixedStep, served: dict[tuple[LeagueScopedId, int, int, bool], MonotonicTime], lag: timedelta
+    step: MixedStep,
+    served: dict[tuple[LeagueScopedId, int, int, bool], MonotonicTime],
+    lags: dict[League, timedelta],
 ) -> list[EarlyReveal]:
-    """The card drawn this step, if it shows a score its feed hadn't answered with a full TV delay before."""
+    """The card drawn this step, if it shows a score its feed hadn't answered with its league's full TV delay
+    before."""
     card = step.drawn
     if card is None:
         return []
@@ -612,10 +743,12 @@ def _spoiled(
         score, final = (payload.away_line.runs, payload.home_line.runs), False
     elif isinstance(payload, (BigPlayCardPayload, FinalCardPayload)):
         score, final = (payload.away_score, payload.home_score), isinstance(payload, FinalCardPayload)
+    elif isinstance(payload, LiveFootballCardPayload):
+        score, final = (payload.state.away_score, payload.state.home_score), card.kind is CardKind.FINAL
     else:
         return []
     received = served.get((card.contest.id, *score, final))
-    if received is not None and received + lag <= step.at.monotonic:
+    if received is not None and received + lags[card.league] <= step.at.monotonic:
         return []
     return [EarlyReveal(card=card.id, at=step.elapsed, away=score[0], home=score[1])]
 
