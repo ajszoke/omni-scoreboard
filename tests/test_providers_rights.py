@@ -550,7 +550,7 @@ def test_the_due_tool_expires_each_root_it_s_given_printing_names_and_counts_onl
     assert capsys.readouterr().out.splitlines()[-1] == (
         f"5 recordings under {recordings}: 0 overdue, 3 without a readable stamp"
     )
-    assert EXPIRY_ROOTS == (RECORDINGS, NFLMETA_RUN_LOGS) and dict(MINERS) == {}
+    assert EXPIRY_ROOTS == (RECORDINGS, NFLMETA_RUN_LOGS) and set(MINERS) == {DataSource.NFLMETA}
     assert RECORDINGS == REPO / "build" / "recordings" and NFLMETA_RUN_LOGS == REPO / "build" / "logs" / "nflmeta"
 
 

@@ -3,8 +3,8 @@
 A recording or run log of a source whose terms allow no standing copy is stamped to expire, and
 `omni.providers.rights.sweep_expired` deletes each one past its delete-by, mining it first. `expire` runs it
 over the roots this checkout writes to: ``tools/recordings_due.py --expire`` runs it, and so does the NFL
-runner at start and at exit. Each source's miner is wired in `MINERS`; a source without one is deleted
-unmined once overdue.
+runner at start and at exit. Each source's miner is wired in `MINERS` (NFLMeta's keeps its digests under
+`TELEMETRY`); a source without one is deleted unmined once overdue.
 """
 
 from __future__ import annotations
@@ -16,14 +16,16 @@ from pathlib import Path
 from types import MappingProxyType
 
 from omni.providers.rights import DataSource, Miner, SweepAction, SweepReport, sweep_expired
+from omni.telemetry.miners import NflMetaMiner
 
-__all__ = ["EXPIRY_ROOTS", "MINERS", "NFLMETA_RUN_LOGS", "RECORDINGS", "expire"]
+__all__ = ["EXPIRY_ROOTS", "MINERS", "NFLMETA_RUN_LOGS", "RECORDINGS", "TELEMETRY", "expire"]
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 RECORDINGS = _REPO_ROOT / "build" / "recordings"  # recordings made to diagnose a feed
 NFLMETA_RUN_LOGS = _REPO_ROOT / "build" / "logs" / "nflmeta"  # the NFL runner's full logs, a folder a run
 EXPIRY_ROOTS = (RECORDINGS, NFLMETA_RUN_LOGS)
-MINERS: Mapping[DataSource, Miner] = MappingProxyType({})  # each source's miner, by its source
+TELEMETRY = _REPO_ROOT / "build" / "telemetry"  # our own measurements, mined before a recording expires; kept
+MINERS: Mapping[DataSource, Miner] = MappingProxyType({DataSource.NFLMETA: NflMetaMiner(TELEMETRY)})
 
 
 def expire(
