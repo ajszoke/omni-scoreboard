@@ -15,7 +15,10 @@ A `MixedTimeline` is the world one board watches over a day, in its viewer's tim
   - `SourceOutage`: every request to one league's source fails for a span: its slates, and its games' feeds;
   - `PartialSlate`: a date's slate skips a row it can't read, with a warning;
   - `ClockStep`: the board's wall clock jumps back or ahead;
-  - `Correction`: a final's score corrected by a later answer.
+  - `Correction`: a final's score corrected by a later answer;
+  - `Wake`: the board's host sleeps: the world runs on while the board does nothing and its monotonic clock stands
+    still, as a suspended host's does; on waking its wall clock has jumped ahead by the sleep. It has no other
+    sign of the sleep.
 
   Quota exhaustion joins these with the quota ledger.
 
@@ -39,11 +42,15 @@ without NFL's source.
   when a later answer changes a final shown;
 - ``scope``: a scope's membership or outcome changed: its league and window, its outcome (``gone`` once the store
   drops it), and the ids it added and removed;
-- ``health``: a league's health changed: fresh, stale, offline or never loaded, and why.
+- ``health``: a league's health changed: fresh, stale, offline or never loaded, and why;
+- under the board policy's settings (`omni-board-policy/2`), what the policy decided and why, after the board's own
+  lines of the same step (`omni.replay.policy_lines`).
 
-**What a run measures** (`MixedRun`): every request each source got, and each card, of either league, drawn with a
-score or a final before its own league's TV-delay release. Each league's airtime share, its cards' waits and lease
-overruns join these with the board policy; requests and rows against each account's quota, with the quota ledger.
+**What a run measures** (`MixedRun`): every request each source got; what each account spent of its month, as the
+quota ledger counts it (`QuotaLedger.charge`: one request each, and for NFLMeta the rows its billing model bills: one
+a game a slate lists, one for a game's read and one for each play it brings); and each card, of either league, drawn
+with a score or a final before its own league's TV-delay release. A run under the board policy's settings is scored
+by `omni.replay.scorecard`.
 """
 
 from __future__ import annotations
@@ -64,6 +71,7 @@ from omni.app.pipeline import LiveBaseballPipeline
 from omni.app.planned_mlb import MLB_POLICIES, PlannedMlb
 from omni.app.poll_plan import PollKey, PollPlan, PollPriority, PollSource
 from omni.app.poller import Poller
+from omni.app.quota import MonthUsage, NflMetaPlan, ProviderAccount, QuotaLedger, account_limits
 from omni.app.runner import warm_up
 from omni.cards.base import CardId, CardKind, ScoreboardCard
 from omni.cards.baseball import BigPlayCardPayload, FinalCardPayload, LiveBaseballCardPayload
@@ -78,6 +86,7 @@ from omni.domain.contest import TeamGame
 from omni.domain.football import FootballGameState
 from omni.events.baseball import LiveBaseballFeed
 from omni.events.football import FootballEvent
+from omni.policy.settings import PolicySettings
 from omni.preferences.favorites import Favorites
 from omni.providers.base import (
     LocalDate,
@@ -97,6 +106,7 @@ from omni.renderers.canvas import Canvas
 from omni.renderers.context import RenderContext
 from omni.renderers.registry import RendererRegistry, default_registry
 from omni.replay.harness import _describe, _Discarding, replay_versions
+from omni.replay.policy_lines import policy_line
 from omni.replay.timeline import GameFrame, Timeline
 
 __all__ = [
@@ -115,6 +125,7 @@ __all__ = [
     "PartialSlate",
     "SlateFrame",
     "SourceOutage",
+    "Wake",
     "mixed_decisions",
     "run_mixed",
 ]
@@ -207,8 +218,21 @@ class Correction:
     home: int
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Wake:
+    """At ``at``, by the world's time, the board's host sleeps for ``slept``: the world runs on, the board takes no
+    step, and its monotonic clock stands still. It wakes with its wall clock ``slept`` ahead."""
+
+    at: datetime
+    slept: timedelta
+
+    def __post_init__(self) -> None:
+        if self.slept <= timedelta(0):
+            raise ValueError("a sleep must last")
+
+
 # The faults a mixed day can carry.
-Fault = SourceOutage | PartialSlate | ClockStep | Correction
+Fault = SourceOutage | PartialSlate | ClockStep | Correction | Wake
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -255,6 +279,8 @@ class MixedTimeline:
         for fault in self.faults:
             if isinstance(fault, (SourceOutage, PartialSlate)):
                 instants.update((fault.start, fault.end))
+            elif isinstance(fault, Wake):
+                instants.update((fault.at, fault.at + fault.slept))
             else:
                 instants.add(fault.at)
         return tuple(sorted(instants))
@@ -262,6 +288,10 @@ class MixedTimeline:
     def clock_steps(self) -> list[ClockStep]:
         """The wall-clock steps, in order."""
         return sorted((fault for fault in self.faults if isinstance(fault, ClockStep)), key=lambda step: step.at)
+
+    def wakes(self) -> list[Wake]:
+        """The host's sleeps, in order."""
+        return sorted((fault for fault in self.faults if isinstance(fault, Wake)), key=lambda wake: wake.at)
 
     def nfl_games_at(self, now: datetime) -> list[TeamGame]:
         """Each NFL game as its slate entry stands at ``now``, from its first frame on, in id order."""
@@ -354,6 +384,12 @@ class MixedRun:
     decisions: tuple[str, ...]
     fetched: tuple[Fetched, ...]  # every request each source got, in order
     early: tuple[EarlyReveal, ...]  # cards drawn with a score or a final before its release: none, ever
+    usage: tuple[MonthUsage, ...] = ()  # what each account spent, in `ProviderAccount` order, as the ledger counts it
+    accounts: tuple[ProviderAccount, ...] = ()  # the accounts ``usage`` is of, in the same order
+
+    def spent(self, account: ProviderAccount) -> MonthUsage:
+        """What ``account`` spent over the run."""
+        return self.usage[self.accounts.index(account)]
 
 
 def mixed_decisions(
@@ -364,13 +400,24 @@ def mixed_decisions(
     broadcast_lag: DurationSeconds = DurationSeconds(45),
     nfl: bool = True,
     nfl_lag: DurationSeconds | None = None,
+    settings: PolicySettings | None = None,
 ) -> list[str]:
     """Every change across ``timeline``, one line each, timed in seconds since its start, under a header naming
-    what the replay decided with (`replay_versions`)."""
+    what the replay decided with (`replay_versions`). With ``settings``, the header names their policy and NFL's
+    delay too."""
     run = run_mixed(
-        timeline, profile=profile, favorites=favorites, broadcast_lag=broadcast_lag, nfl=nfl, nfl_lag=nfl_lag
+        timeline,
+        profile=profile,
+        favorites=favorites,
+        broadcast_lag=broadcast_lag,
+        nfl=nfl,
+        nfl_lag=nfl_lag,
+        settings=settings,
     )
-    header = replay_versions(profile, broadcast_lag=broadcast_lag, favorites=favorites).header()
+    nfl_delay = (nfl_lag if nfl_lag is not None else broadcast_lag) if settings is not None and nfl else None
+    header = replay_versions(
+        profile, broadcast_lag=broadcast_lag, favorites=favorites, settings=settings, nfl_delay=nfl_delay
+    ).header()
     return [header, *run.decisions]
 
 
@@ -383,12 +430,14 @@ def run_mixed(
     nfl: bool = True,
     nfl_lag: DurationSeconds | None = None,
     watch: Callable[[MixedStep], None] | None = None,
+    settings: PolicySettings | None = None,
 ) -> MixedRun:
     """Run the board through ``timeline`` from its start to its end, and say what it decided and measured.
 
     ``favorites`` feeds the scorers and the plan's priorities, ``broadcast_lag`` is MLB's TV delay and ``nfl_lag``
-    NFL's (MLB's unless given), and ``nfl=False`` leaves NFL's source and cards off the board. ``watch`` hears every
-    step. Pure and deterministic: no real time, no I/O.
+    NFL's (MLB's unless given), and ``nfl=False`` leaves NFL's source and cards off the board. ``settings`` are the
+    board policy's user settings: without them the board decides by the queue's bands (`omni-board-policy/1`).
+    ``watch`` hears every step. Pure and deterministic: no real time, no I/O.
     """
     clock = FakeClock(timeline.start)
     world = _World(timeline.start, clock)
@@ -422,6 +471,8 @@ def run_mixed(
         fetch_pregame_details=planned.fetch_pregame_details,
         fetch_game_lines=planned.fetch_game_lines,
         football=football,
+        settings=settings,
+        favorites=favorites,
     )
     poller = Poller(plan, clock)
     warm_up(loop, poller, clock)
@@ -433,8 +484,16 @@ def run_mixed(
     end = _ticks_from(world.monotonic(timeline.end))
     changes = sorted({_ticks_from(world.monotonic(instant)) for instant in timeline.changes})
     steps = timeline.clock_steps()
+    wakes = timeline.wakes()
     tick = 0
     while tick <= end:
+        while wakes and wakes[0].at <= world.now():
+            wake = wakes.pop(0)
+            world.sleep(wake.slept)  # the world runs on; the board's monotonic clock stands still
+            clock.jump(wake.slept)
+            end = _ticks_from(world.monotonic(timeline.end))
+            ahead = (instant for instant in timeline.changes if instant > world.now())
+            changes = sorted({_ticks_from(world.monotonic(instant)) for instant in ahead})
         while steps and steps[0].at <= world.now():
             clock.jump(steps.pop(0).by)
         if tick % _BEAT == 0:
@@ -474,31 +533,50 @@ def run_mixed(
         following = min(upcoming)
         clock.advance(_TICK * (following - tick))
         tick = following
-    return MixedRun(decisions=tuple(lines), fetched=tuple(world.fetched), early=tuple(early))
+    accounts = tuple(ProviderAccount)
+    at = ClockReading(world.now(), clock.monotonic())
+    return MixedRun(
+        decisions=tuple(lines),
+        fetched=tuple(world.fetched),
+        early=tuple(early),
+        usage=tuple(world.ledger.usage(account, at) for account in accounts),
+        accounts=accounts,
+    )
 
 
 @dataclass(slots=True)
 class _World:
-    """The world's time: the replay's start, moved on by its monotonic clock."""
+    """The world's time: the replay's start, moved on by its monotonic clock and by every sleep of the board's host.
+    It keeps every request and charges each to its account in the quota ledger."""
 
     start: datetime
     clock: FakeClock
+    ledger: QuotaLedger = field(default_factory=lambda: QuotaLedger(account_limits(NflMetaPlan.FREE)))
     fetched: list[Fetched] = field(default_factory=list)  # every request any source got, in order
+    slept: timedelta = timedelta(0)  # how long the board's host has slept, which its monotonic clock didn't count
 
     def now(self) -> datetime:
-        return self.start + self.elapsed()
+        return self.start + self.slept + self.elapsed()
 
     def elapsed(self) -> timedelta:
         return timedelta(seconds=self.clock.monotonic().seconds)
 
+    def sleep(self, by: timedelta) -> None:
+        self.slept += by
+
     def monotonic(self, instant: datetime) -> MonotonicTime:
-        """The running clock's reading when the world reaches ``instant``."""
-        return MonotonicTime((instant - self.start).total_seconds())
+        """The running clock's reading when the world reaches ``instant`` (with no more sleep before it)."""
+        return MonotonicTime((instant - self.start - self.slept).total_seconds())
 
     def fetch(self, key: PollKey[Any]) -> datetime:
         """Note a request for ``key``; the world's time it's answered as of."""
         self.fetched.append(Fetched(at=self.elapsed(), key=key))
         return self.now()
+
+    def charge(self, league: League, *, rows: int | None = None) -> None:
+        """Charge one request to ``league``'s account, as of the world's time, with the rows it billed."""
+        account = ProviderAccount.MLB_STATSAPI if league is League.MLB else ProviderAccount.NFLMETA
+        self.ledger.charge(account, at=ClockReading(self.now(), self.clock.monotonic()), rows=rows)
 
 
 class _ReplayMlb:
@@ -518,10 +596,13 @@ class _ReplayMlb:
 
     def fetch_schedule(self, day: date, *, now: datetime) -> ProviderUpdate:
         world = self._world.fetch(PollKey(PollSource.SLATE, PollScope(self.source, League.MLB, LocalDate(day))))
+        self._world.charge(League.MLB)
         return self._timeline.slate(League.MLB, day, world, source=self.source, asked=now)
 
     def fetch_live_feed(self, game: TeamGame, *, now: datetime) -> LiveBaseballFeed:
-        frame = self._timeline.feed_at(game.id, self._world.fetch(PollKey(PollSource.GAME_FEED, game.id)))
+        world = self._world.fetch(PollKey(PollSource.GAME_FEED, game.id))
+        self._world.charge(League.MLB)
+        frame = self._timeline.feed_at(game.id, world)
         if frame is None or frame.state is None:
             raise ProviderError(f"no feed for {game.id}")
         received = self._world.clock.monotonic()
@@ -537,7 +618,11 @@ class _ReplayMlb:
         if frame.game.status is GameStatus.FINAL:
             self.served.setdefault((game.id, frame.state.away_score, frame.state.home_score, True), received)
         return LiveBaseballFeed(
-            state=frame.state, events=frame.events, decisions=frame.decisions, status=frame.game.status
+            state=frame.state,
+            events=frame.events,
+            decisions=frame.decisions,
+            status=frame.game.status,
+            as_of=world if frame.dated else None,
         )
 
     def fetch_win_probability(self, game: TeamGame) -> WinProbability | None:
@@ -545,6 +630,7 @@ class _ReplayMlb:
 
     def fetch_pregame_details(self, game: TeamGame) -> PregameDetails:
         self._world.fetch(PollKey(PollSource.PREGAME_DETAILS, game.id))
+        self._world.charge(League.MLB)
         return PregameDetails()
 
 
@@ -565,7 +651,13 @@ class _NflSlates:
 
         def fetch(asked: datetime) -> ProviderUpdate:
             world = self._world.fetch(key)
-            return self._timeline.slate(League.NFL, today, world, source=NFLMETA_SOURCE, asked=asked)
+            try:
+                answer = self._timeline.slate(League.NFL, today, world, source=NFLMETA_SOURCE, asked=asked)
+            except ProviderError:
+                self._world.charge(League.NFL)
+                raise
+            self._world.charge(League.NFL, rows=len(answer.contests))  # one row a game it lists
+            return answer
 
         self._plan.want(key, fetch, priority=PollPriority.BACKGROUND, at=at)
         observed: list[ScopeObservation] = []
@@ -629,7 +721,9 @@ class _ReplayNfl:
         try:
             frame, plays = self._timeline.nfl_feed_at(game_id, world, since=self._read_to.get(game_id))
         except ProviderError:
+            self._world.charge(League.NFL)
             return
+        self._world.charge(League.NFL, rows=1 + len(plays))  # the game, and each play the read brings
         if frame is None or frame.state is None:
             return
         self._read_to[game_id] = world
@@ -725,6 +819,7 @@ def _lines(step: MixedStep, seen: _Seen, zone: ZoneInfo) -> list[str]:
     if stale is not None and stale != seen.stale:
         lines.append(f"{seconds}  stale   {stale}")
     seen.stale = stale
+    lines.extend(f"{seconds}  {policy_line(decision)}" for decision in painted.decisions)
     return lines
 
 

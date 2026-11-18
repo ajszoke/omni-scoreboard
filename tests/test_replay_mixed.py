@@ -58,6 +58,7 @@ from omni.providers.mlb_teams import MlbTeamRegistry
 from omni.providers.nfl_teams import NflTeamRegistry
 from omni.providers.nflmeta import NFLMETA_SOURCE
 from omni.app.poll_plan import PollKey, PollSource
+from omni.app.quota import ProviderAccount
 from omni.replay.mixed import (
     MLB_STATSAPI,
     NFL_FEED_EVERY,
@@ -71,6 +72,7 @@ from omni.replay.mixed import (
     PartialSlate,
     SlateFrame,
     SourceOutage,
+    Wake,
     _ReplayMlb,
     _spoiled,
     _World,
@@ -861,6 +863,24 @@ def test_a_card_drawn_with_a_score_its_feed_gave_less_than_a_delay_before_is_an_
     assert _spoiled(step, {key: step.at.monotonic + timedelta(seconds=-45)}, lags) == []
 
 
+def test_a_host_that_sleeps_takes_no_step_while_the_world_runs_on_and_wakes_with_its_wall_clock_ahead() -> None:
+    """Asleep from 12:02 for 49 minutes, the board's monotonic clock stands still and nothing is asked; it wakes with
+    its wall clock at the world's 12:51, and the source answers as of then."""
+    game = _playing().live(SHORT + timedelta(minutes=30), _Line(9, _TOP, 3, 0, 8, 5))
+    sleep = Wake(at=SHORT + timedelta(minutes=2), slept=timedelta(minutes=49))
+    steps: list[MixedStep] = []
+    run = run_mixed(
+        _short(game, end=timedelta(minutes=55), faults=(sleep,)), profile=QUAD, nfl=False, watch=steps.append
+    )
+    awake = [step for step in steps if step.world >= sleep.at + sleep.slept]
+    assert awake and all(step.at.utc == step.world for step in steps)  # its wall clock jumped with the world
+    assert awake[0].elapsed < timedelta(minutes=3) and steps[-1].elapsed < timedelta(minutes=7)
+    asked = [fetched.at for fetched in run.fetched]
+    assert max(later - earlier for earlier, later in zip(asked, asked[1:])) < timedelta(minutes=1)
+    assert run.spent(ProviderAccount.MLB_STATSAPI).requests == len(run.fetched)
+    assert (awake[0].store.contests[0].status, awake[-1].world) == (GameStatus.LIVE, SHORT + timedelta(minutes=55))
+
+
 def _naive_start() -> MixedTimeline:
     return MixedTimeline(zone=ZONE, start=SHORT.replace(tzinfo=None), end=SHORT, mlb=tuple(_playing().frames))
 
@@ -897,6 +917,7 @@ def _backward_outage() -> SourceOutage:
         (_undated, "needs the date its slate files it under"),
         (_live_corrected, "corrects a final"),
         (_naive_frame, "timezone-aware"),
+        (lambda: Wake(at=SHORT, slept=timedelta(0)), "a sleep must last"),
     ],
 )
 def test_a_timeline_that_can_t_be_replayed_is_refused(build: Callable[[], object], match: str) -> None:

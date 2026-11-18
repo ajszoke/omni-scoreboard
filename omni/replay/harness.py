@@ -14,6 +14,10 @@ decides as it would at any finer pace. `replay()` samples what was on the panel 
 replay decided with (`replay_versions`). Identical timeline + parameters always yield an identical
 trace, so a fixture timeline proves entry, fairness, delay, and removal without real time or network.
 
+Without the board policy's settings a replay decides by the queue's bands (`omni-board-policy/1`), as every replay that
+predates the policy does, so their fixtures stand. Given settings that choose `omni-board-policy/2`, the policy
+director decides, and `replay_decisions` lists its decisions too (`omni.replay.policy_lines`).
+
 A feed's answer arrives when the replay first reads its frame, which is the frame's own instant
 (the replay steps there), or the end of an outage since: the first answer after one is new,
 however old the state in it. The loop gets the whole clock reading, so its delays run on the
@@ -45,6 +49,7 @@ from omni.domain.rules import RULES
 from omni.cards.base import ScoreboardCard
 from omni.events.baseball import LiveBaseballFeed
 from omni.panels.geometry import geometry_for
+from omni.policy.settings import PolicySettings
 from omni.preferences.favorites import Favorites
 from omni.providers.base import ProviderError, ProviderUpdate
 from omni.queue.scheduler import SelectionReason
@@ -52,6 +57,7 @@ from omni.renderers.canvas import Canvas, RecordingCanvas
 from omni.renderers.context import RenderContext
 from omni.renderers.registry import RendererRegistry, default_registry
 from omni.renderers.text_lane import ScrollSpeed
+from omni.replay.policy_lines import policy_line
 from omni.replay.timeline import Timeline
 from omni.tower.board import BoardFrame, BoardPayload, BoardPolicy, FrameKind
 from omni.tower.lane import ChangeKind, LaneChange
@@ -118,12 +124,14 @@ def replay(
     broadcast_lag: DurationSeconds = DurationSeconds(0),
     favorites: Favorites = Favorites(),
     policy: BoardPolicy = BoardPolicy(),
+    settings: PolicySettings | None = None,
 ) -> list[TraceEntry]:
     """Drive the real `AppLoop` across ``timeline`` and sample what was on the panel every ``tick``.
 
     Runs from ``timeline.start`` to ``until`` (default ``timeline.end``). ``broadcast_lag``
-    exercises the TV-delay path end to end; ``favorites`` feeds the scorer. Pure and
-    deterministic — no real time, no I/O.
+    exercises the TV-delay path end to end; ``favorites`` feeds the scorer. ``settings`` are the board
+    policy's user settings; without them the board decides by the queue's bands (`omni-board-policy/1`). Pure
+    and deterministic — no real time, no I/O.
     """
     if tick.value <= 0:
         raise ValueError("tick must be a positive duration")
@@ -143,7 +151,9 @@ def replay(
             )
         )
 
-    _drive(timeline, profile, until, broadcast_lag, favorites, policy, sample, every=every, draw=True)
+    _drive(
+        timeline, profile, until, broadcast_lag, favorites, policy, sample, every=every, draw=True, settings=settings
+    )
     return trace
 
 
@@ -156,6 +166,7 @@ def replay_decisions(
     favorites: Favorites = Favorites(),
     policy: BoardPolicy = BoardPolicy(),
     seek: Seek | None = None,
+    settings: PolicySettings | None = None,
 ) -> list[str]:
     """Every change on the board across ``timeline``, one line each, timed in seconds from its start.
 
@@ -165,9 +176,12 @@ def replay_decisions(
     and why; ``stale`` a card on air whose data passed its age; ``unseen`` one that left before it
     ever aired, and why; ``final`` a final revealed, with when its game ended and what that rests on;
     ``note`` something else the board decided; ``source`` a change in how far the board trusts its
-    source. With ``seek``, the replay's wall clock jumps once, and the times follow it.
+    source. With ``seek``, the replay's wall clock jumps once, and the times follow it. With ``settings`` choosing
+    `omni-board-policy/2`, each step's lines end with what the policy decided (`omni.replay.policy_lines`).
     """
-    versions = replay_versions(profile, broadcast_lag=broadcast_lag, favorites=favorites, policy=policy)
+    versions = replay_versions(
+        profile, broadcast_lag=broadcast_lag, favorites=favorites, policy=policy, settings=settings
+    )
     lines: list[str] = [versions.header()]
     seen: dict[str, object] = {"source": None, "stale": None}
 
@@ -191,8 +205,21 @@ def replay_decisions(
         if stale is not None and stale != seen["stale"]:
             lines.append(f"{seconds}  stale   {stale}")
         seen["stale"] = stale
+        lines.extend(f"{seconds}  {policy_line(decision)}" for decision in painted.decisions)
 
-    _drive(timeline, profile, until, broadcast_lag, favorites, policy, observe, every=None, draw=False, seek=seek)
+    _drive(
+        timeline,
+        profile,
+        until,
+        broadcast_lag,
+        favorites,
+        policy,
+        observe,
+        every=None,
+        draw=False,
+        seek=seek,
+        settings=settings,
+    )
     return lines
 
 
@@ -202,20 +229,46 @@ def replay_versions(
     broadcast_lag: DurationSeconds = DurationSeconds(0),
     favorites: Favorites = Favorites(),
     policy: BoardPolicy = BoardPolicy(),
+    settings: PolicySettings | None = None,
+    nfl_delay: DurationSeconds | None = None,
 ) -> Versions:
     """What a replay of the shared board decides with. A replay wires no win meter, no odds and no clock
-    zone: the meter and odds are off, and its marquees scroll at the default speed."""
+    zone: the meter and odds are off, and its marquees scroll at the default speed.
+
+    Without ``settings`` the board decides by the queue's bands (`omni-board-policy/1`) and the header is as it
+    always was. With them, it names their policy, and the config covers their turn, mutes, league weights and
+    promotions, as the running app's does; ``nfl_delay`` is NFL's own delay, when the replay has NFL."""
+    if settings is None:
+        return Versions(
+            policy=PolicyName.BOARD_V1,
+            config=DecisionConfig(
+                profile=profile,
+                delay=broadcast_lag.as_timedelta(),
+                favorites=favorites,
+                turn=policy.slot,
+                takeover_cap=policy.takeover_cap,
+                meter=False,
+                odds=False,
+                scroll_speed=ScrollSpeed.SLOW,
+            ),
+            rules=RULES,
+        )
     return Versions(
-        policy=PolicyName.BOARD_V1,
+        policy=settings.policy,
         config=DecisionConfig(
             profile=profile,
             delay=broadcast_lag.as_timedelta(),
             favorites=favorites,
-            turn=policy.slot,
+            turn=settings.slot,
             takeover_cap=policy.takeover_cap,
             meter=False,
             odds=False,
             scroll_speed=ScrollSpeed.SLOW,
+            policy=settings.policy,
+            mutes=settings.mutes,
+            league_weights=settings.league_weights,
+            promotions=settings.promotions,
+            nfl_delay=nfl_delay.as_timedelta() if nfl_delay is not None else None,
         ),
         rules=RULES,
     )
@@ -247,6 +300,7 @@ def _drive(
     every: timedelta | None,
     draw: bool,
     seek: Seek | None = None,
+    settings: PolicySettings | None = None,
 ) -> None:
     """Step the loop through ``timeline`` at every instant something can change, and every ``every``."""
     stop = until if until is not None else timeline.end
@@ -263,12 +317,14 @@ def _drive(
             raise ProviderError("replay outage")
         if frame is None or frame.state is None:
             raise ProviderError(f"no replay state for {game.id}")
+        received = arrivals.setdefault((game.id, frame.at), clock.read())
         return LiveBaseballFeed(
             state=frame.state,
             events=frame.events,
             decisions=frame.decisions,
             status=frame.game.status,  # the feed says what the frame says
-            received=arrivals.setdefault((game.id, frame.at), clock.read()),
+            as_of=received.utc if frame.dated else None,  # a dated answer stood when it first arrived
+            received=received,
         )
 
     loop = build_loop(
@@ -280,6 +336,7 @@ def _drive(
         backoff=_NO_BACKOFF,
         policy=policy,
         registry=None if draw else _Undrawn(),
+        settings=settings,
     )
     changes = [instant for instant in timeline.changes if instant > timeline.start]
     sample_at = timeline.start
