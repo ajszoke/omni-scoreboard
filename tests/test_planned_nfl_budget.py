@@ -153,7 +153,9 @@ def test_planned_nfl_reads_a_typical_sunday_as_strategy_e_models_it_but_for_read
     world, metered = _sunday_through_planned_nfl()
     modeled = model.asked
     assert dict(world.requests) == {
-        ReadKind.DAY_LIST: modeled[ReadKind.DAY_LIST],  # once, before the first kickoff
+        # Once before the first kickoff, and again half an hour past each window's kickoffs while a later one is
+        # ahead (13:30 and 16:55): the schedule as it moves. The model lists the day once.
+        ReadKind.DAY_LIST: modeled[ReadKind.DAY_LIST] + 2,
         # The model starts the hold at halftime; the board starts it on the read that finds halftime.
         ReadKind.FAVORITE: modeled[ReadKind.FAVORITE] + 1,
         # The first look at kickoff, and a read each poll through the final's drain: none of them bills a row.
@@ -163,11 +165,13 @@ def test_planned_nfl_reads_a_typical_sunday_as_strategy_e_models_it_but_for_read
         ReadKind.DRAIN: modeled[ReadKind.DRAIN],  # one for each other final
     }
     assert dict(world.rows) == {  # the model's rows by kind, but for the read that finds halftime (a game, an injury)
-        ReadKind.DAY_LIST: 14,
+        ReadKind.DAY_LIST: 14 + 14 + 52,  # the day's 14 games each time, and by 16:55 the early finals' injuries
         ReadKind.FAVORITE: 2_720 + 2,
         ReadKind.FAVORITE_PLAYS: 280,
         ReadKind.LIVE_GAMES: 8_245,
         ReadKind.DRAIN: 65,
     }
-    assert (sum(world.requests.values()), sum(world.rows.values())) == (model.requests + 16, model.rows + 2)
-    assert metered == model.requests + 16  # every request reached the ledger
+    requests, rows = sum(world.requests.values()), sum(world.rows.values())
+    assert (requests, rows) == (model.requests + 18, model.rows + 68) == (2_162, 11_392)
+    assert requests <= model.requests * 1.01 and rows <= model.rows * 1.01  # within 1% of the model's budget
+    assert metered == requests  # every request reached the ledger

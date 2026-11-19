@@ -5,9 +5,20 @@ NFL's feeds (`NflFeeds`). Each pass (`observe`) it decides what NFLMeta should b
 nothing here waits on the network. NFLMeta bills requests and rows by the month, so the reads are the cheapest
 that keep every live score current (strategy E of `omni.replay.nfl_budget`):
 
-- **The day's games** (`PollSource.DAY_LIST`, normal): one unfiltered read once the date is current, for its
-  games and their ids. It bills every game it lists, so it's made once. A date that lists no game of its own is
-  listed again after `NflSchedulePolicy.recheck_empty`, in case NFLMeta hadn't turned to it yet.
+- **The day's games** (`PollSource.DAY_LIST`): one unfiltered read once the date is current, for its games and their
+  ids. It bills every game it lists. Until it answers no game is known, so nothing else can be read: it goes as
+  focus on a board with an NFL favorite (the favorite's reads need it, and focus runs until the month is spent),
+  as normal on one without. A date that lists no game of its own is listed again, the same way, after
+  `NflSchedulePolicy.recheck_empty`, in case NFLMeta hadn't turned to it yet.
+- **The day's games again** (`PollSource.DAY_LIST`, background): a schedule moves after it's first listed (a
+  kickoff moved, a game postponed or added), so the day is listed again, within a budget (`NflSchedulePolicy`):
+  each hour over the three before its first kickoff, and half an hour past each window's last kickoff (kickoffs
+  that close together are one window) while a later window is still to kick off, or a game of the window hasn't
+  been seen to start. A listing again updates the games that haven't kicked off and adds new ones; the games
+  being played are their own reads'. A game it leaves out before its kickoff has left the date, and leaves the
+  board without a final: an omitted game isn't over. One it leaves out once kicked off is read on, since only its
+  own final says it's over. Being due doesn't age the date's answer, so a listing again that the quota sheds
+  never takes the date stale.
 - **A favorite's game** (`PollSource.FOLLOWED_GAME`, focus): read by id at the live pace with its plays on change,
   by the provider's `poll`, as the single-game runner reads its game. Nothing is asked through its halftime hold,
   and nothing once its final has settled.
@@ -27,7 +38,8 @@ is failing and nothing has answered since.
 
 **Freshness.** A scope's answer counts as fresh for `NflSchedulePolicy.fresh_for` from when a read of it falls
 due. Between reads (before the first kickoff, through a lone game's halftime hold, after the last final) nothing
-is due, so the answer counts as fresh until the next read is (`ScopeSpan.max_age` says how long, each pass).
+is due, so the answer counts as fresh until the next read is (`ScopeSpan.max_age` says how long, each pass). A
+listing again isn't such a read.
 
 **The quota.** The plan's ledger admits each ask on NFLMeta's account by its class, and NFLMeta's own counts reach
 the ledger through the provider's metered fetcher (`omni.app.quota.MeteredHttp`). An ask refused stays due, and
@@ -88,14 +100,19 @@ _READS = tuple(NFL_POLICIES)
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class NflSchedulePolicy:
-    """How NFL's scopes are judged: how long an answer counts as fresh once a read falls due, and when a date that
-    listed no game of its own is listed again."""
+    """How NFL's scopes are judged: how long an answer counts as fresh once a read falls due, when a date that listed
+    no game of its own is listed again, and when a date's games are listed again to see its schedule move."""
 
     fresh_for: timedelta = timedelta(minutes=2)
     recheck_empty: timedelta = timedelta(hours=2)
+    recheck_before: timedelta = timedelta(hours=1)  # the day is listed this often before its first kickoff
+    recheck_from: timedelta = timedelta(hours=3)  # from this long before it
+    recheck_after: timedelta = timedelta(minutes=30)  # and this long past each window's last kickoff; kickoffs this
+    # close together are one window
 
     def __post_init__(self) -> None:
-        if self.fresh_for <= timedelta(0) or self.recheck_empty <= timedelta(0):
+        spans = (self.fresh_for, self.recheck_empty, self.recheck_before, self.recheck_from, self.recheck_after)
+        if any(span <= timedelta(0) for span in spans):
             raise ValueError("a schedule policy's spans must be positive")
 
 
@@ -119,6 +136,11 @@ class _Game:
     done: bool = False  # its final is in hand and settled: nothing is left to read
     hold_ends: MonotonicTime | None = None  # a followed game's halftime hold, once it has begun
 
+    @property
+    def started(self) -> bool:
+        """Whether it has been played: in progress, or over. From then on its own reads say how it stands."""
+        return self.seen_in or self.ended or self.done
+
 
 @dataclass(slots=True)
 class _Day:
@@ -132,11 +154,13 @@ class _Day:
 
 @dataclass(frozen=True, slots=True)
 class _Want:
-    """A read this pass wants: how to make it, its class, and the date whose scope it serves."""
+    """A read this pass wants: how to make it, its class, the date whose scope it serves, and whether it's a listing
+    again, whose being due doesn't age the date's answer."""
 
     fetch: Callable[[datetime], object]
     priority: PollPriority
     day: date
+    again: bool = False
 
 
 class PlannedNfl:
@@ -167,6 +191,9 @@ class PlannedNfl:
         self._provider = provider
         self._favorites = favorites
         self._policy = policy
+        # Until the day's list answers, no game is known to read: on a board with an NFL favorite it's what focus
+        # reads need, so it goes as focus.
+        self._listing = PollPriority.FOCUS if favorites.teams(League.NFL) else PollPriority.NORMAL
         self._zone = provider.schedule_timezone
         self._games: dict[LeagueScopedId, _Game] = {}
         self._days: dict[date, _Day] = {}
@@ -237,15 +264,15 @@ class PlannedNfl:
     def _wants(self, today: date, yesterday: date, at: ClockReading) -> dict[PollKey[Any], _Want]:
         """Every read the two dates need now."""
         wants: dict[PollKey[Any], _Want] = {}
-        key: PollKey[Any]
+        key: PollKey[Any] = PollKey(PollSource.DAY_LIST, self._scope(today))
         listing = self._days.setdefault(today, _Day())
         if listing.listed is None or (
             not self._filed(today) and at.monotonic >= listing.listed.monotonic + self._policy.recheck_empty
         ):
-            key = PollKey(PollSource.DAY_LIST, self._scope(today))
-            wants[key] = _Want(
-                self._day_list(today, self._current_for(key, PollPriority.NORMAL)), PollPriority.NORMAL, today
-            )
+            wants[key] = _Want(self._day_list(today, self._current_for(key, self._listing)), self._listing, today)
+        elif self._again(today, listing.listed, at):
+            background = PollPriority.BACKGROUND
+            wants[key] = _Want(self._day_list(today, self._current_for(key, background)), background, today, again=True)
         for day in (today, yesterday):
             playing: list[int] = []
             for game in self._filed(day):
@@ -273,6 +300,35 @@ class PlannedNfl:
                 )
         return wants
 
+    def _again(self, today: date, listed: ClockReading, at: ClockReading) -> bool:
+        """Whether today's games are due to be listed again: each `NflSchedulePolicy.recheck_before` over the
+        `NflSchedulePolicy.recheck_from` before the first kickoff; and once a window's last kickoff is
+        `NflSchedulePolicy.recheck_after` past, if the last listing came before then and a later window is still to
+        kick off or one of the window's games hasn't been seen to start."""
+        policy = self._policy
+        games = self._filed(today)
+        kickoffs = sorted({game.contest.scheduled_start for game in games})
+        if not kickoffs:
+            return False  # a date with no game of its own is listed again on its own schedule
+        if at.utc < kickoffs[0]:
+            return (
+                at.utc >= kickoffs[0] - policy.recheck_from and at.monotonic >= listed.monotonic + policy.recheck_before
+            )
+        windows = [[kickoffs[0]]]
+        for kickoff in kickoffs[1:]:
+            if kickoff - windows[-1][-1] > policy.recheck_after:
+                windows.append([kickoff])
+            else:
+                windows[-1].append(kickoff)
+        for n, window in enumerate(windows):
+            due = at.monotonic + (window[-1] + policy.recheck_after - at.utc)
+            later = n + 1 < len(windows)
+            if listed.monotonic < due <= at.monotonic and (
+                later or any(not game.started for game in games if game.contest.scheduled_start in window)
+            ):
+                return True
+        return False
+
     def _current_for(self, key: PollKey[Any], priority: PollPriority) -> timedelta:
         """How long an answer to ``key``, asked as ``priority``, counts as current: two of the cadence it's read at."""
         return self._plan.policy(key.source).cadence(priority) * _CURRENT_CADENCES
@@ -281,7 +337,7 @@ class PlannedNfl:
         """How long today's answer counts as fresh: `NflSchedulePolicy.fresh_for` past when a read fell due, or
         will next fall due while none is."""
         listing = self._days[today]
-        if any(want.day == today for want in self._wanted.values()):
+        if any(want.day == today and not want.again for want in self._wanted.values()):
             if listing.due_since is None:
                 listing.due_since = at.monotonic
             due = listing.due_since
@@ -360,10 +416,24 @@ class PlannedNfl:
             with self._lock:
                 listing = self._days.setdefault(day, _Day())
                 listing.listed, listing.warnings = arrived, slate.warnings
+                listed: set[LeagueScopedId] = set()
                 for snapshot in slate.snapshots:
                     filed = local_date(snapshot.game.scheduled_start, self._zone)
-                    if filed in (day, day - timedelta(days=1)):  # another date's game is that date's to list
+                    if filed not in (day, day - timedelta(days=1)):
+                        continue  # another date's game is that date's to list
+                    listed.add(snapshot.game.id)
+                    known = self._games.get(snapshot.game.id)
+                    if known is None or not known.started:  # a game being played is its own reads' to update
                         self._file(snapshot, filed, arrived, current_for)
+                unread = slate.listed - {int(snapshot.game.id.raw) for snapshot in slate.snapshots}
+                for game_id, game in list(self._games.items()):
+                    if (
+                        game.day == day
+                        and not game.started
+                        and game_id not in listed
+                        and int(game_id.raw) not in unread
+                    ):
+                        del self._games[game_id]  # off the date before its kickoff: it has left it, not ended
             return slate
 
         return fetch
@@ -375,7 +445,7 @@ class PlannedNfl:
             unlisted = set(game_ids) - slate.listed
             with self._lock:
                 for snapshot in slate.snapshots:
-                    self._file(snapshot, day, arrived, current_for)
+                    self._update(snapshot, arrived, current_for)
                 for game in self._games.values():
                     if game.seen_in and int(game.contest.id.raw) in unlisted:
                         game.ended = True  # no longer in progress: its final is read next
@@ -384,19 +454,19 @@ class PlannedNfl:
         return fetch
 
     def _final(self, game: _Game, current_for: timedelta) -> Callable[[datetime], NflLiveSnapshot]:
-        game_id, day = int(game.contest.id.raw), game.day
+        game_id = int(game.contest.id.raw)
 
         def fetch(asked: datetime) -> NflLiveSnapshot:
             snapshot = self._provider.scoreboard(game_id)
             arrived = self._clock.read()
             with self._lock:
-                self._file(snapshot, day, arrived, current_for)
+                self._update(snapshot, arrived, current_for)
             return snapshot
 
         return fetch
 
     def _followed(self, game: _Game, current_for: timedelta) -> Callable[[datetime], NflLiveSnapshot]:
-        game_id, day = int(game.contest.id.raw), game.day
+        game_id = int(game.contest.id.raw)
 
         def fetch(asked: datetime) -> NflLiveSnapshot:
             with self._polling:
@@ -404,10 +474,18 @@ class PlannedNfl:
                 hold_ends = self._provider.hold_ends(game_id)
             arrived = self._clock.read()
             with self._lock:
-                self._file(snapshot, day, arrived, current_for).hold_ends = hold_ends
+                followed = self._update(snapshot, arrived, current_for)
+                if followed is not None:
+                    followed.hold_ends = hold_ends
             return snapshot
 
         return fetch
+
+    def _update(self, snapshot: NflLiveSnapshot, arrived: ClockReading, current_for: timedelta) -> _Game | None:
+        """Keep a game's own read, while the game is still the plan's: one that has left its date since (or rolled
+        off) isn't brought back by a late answer."""
+        game = self._games.get(snapshot.game.id)
+        return self._file(snapshot, game.day, arrived, current_for) if game is not None else None
 
     def _file(self, snapshot: NflLiveSnapshot, day: date, arrived: ClockReading, current_for: timedelta) -> _Game:
         """Keep an answer about a game, current for ``current_for``: its newest, one more to take, and where the game
