@@ -11,8 +11,12 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from omni.app.nfl_feeds import NflReading
+from omni.core.clock import ClockReading
+from omni.core.time import DurationSeconds
 from omni.domain.contest import TeamGame
-from tests.test_app_nfl_pipeline import LONG, Board, T
+from omni.providers.nflmeta import NflLiveSnapshot
+from omni.queue.delay_policy import Arrival, DelayPolicy
+from tests.test_app_nfl_pipeline import LAG, LONG, Board, T
 from tests.test_nflmeta import FakeFeed, _change, _page, _provider, _row, _scores, _synced
 
 GAME = 22920  # PIT at CIN
@@ -39,12 +43,14 @@ class _Shared:
         self.provider = _provider(feed)
         self.board = Board()
         self.game: TeamGame | None = None
+        self.read_at: list[tuple[ClockReading, NflLiveSnapshot]] = []
 
     def read(self, seconds: float) -> None:
         """A poll at ``seconds`` past ``T``, handed to the pipeline as it arrived."""
         reading = self.board.to(seconds)
         snapshot = self.provider.poll(GAME, reading)
         self.game = snapshot.game
+        self.read_at.append((reading, snapshot))
         answer = NflReading(snapshot, reading, LONG)
         self.board.feeds.waiting[snapshot.game.id].append(answer)
         self.board.feeds.newest[snapshot.game.id] = answer
@@ -87,7 +93,8 @@ def test_a_touchdown_read_with_its_try_waits_the_full_delay_not_its_snap_s_age()
 
 def test_a_try_read_on_its_own_is_dated_by_its_own_write() -> None:
     """The touchdown came in an earlier read; the try's change, written 10 s before the read at 60, is the only one
-    of its play there, so it's dated by it: shown 10 s sooner than the full delay."""
+    of its play there, so it's dated by it: released 10 s sooner than the full delay. Its caption still waits for a
+    field that agrees with it, its own answer's, which has no occurrence to date it and clears the full delay."""
     feed = FakeFeed()
     feed.scores = [
         _scores(_row(home_team={"abbr": "CIN", "score": 0}, observed_at=_iso(T))),
@@ -102,8 +109,16 @@ def test_a_try_read_on_its_own_is_dated_by_its_own_write() -> None:
     shared = _Shared(feed)
     for seconds in (0, 30, 60):
         shared.read(seconds)
-    assert shared.caption(72.9) is None
-    touchdown = shared.caption(73)  # 2 s old when read at 30: it clears at 73
+    policy = DelayPolicy(broadcast_lag=DurationSeconds(LAG))
+    releases = [
+        policy.release(Arrival(received=reading, occurred=event.written_at, as_of=snapshot.observed_at), reading)
+        for reading, snapshot in shared.read_at
+        for event in snapshot.events
+    ]
+    assert [release.seconds for release in releases] == [73.0, 95.0]  # 2 s old at 30; the try 10 s old at 60
+    assert shared.caption(74.9) is None
+    touchdown = shared.caption(75)  # with the field its answer showed
     assert touchdown is not None
     assert shared.caption(94.9) == touchdown
-    assert shared.caption(95) not in (None, touchdown)  # the try, 10 s old when read at 60, clears at 95
+    assert shared.caption(95) is None  # the try is out, but not the field that scored it: the field alone
+    assert shared.caption(105) not in (None, touchdown)  # the try, beside the field that scored it

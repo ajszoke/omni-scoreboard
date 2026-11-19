@@ -9,7 +9,8 @@ from datetime import timedelta
 from omni.cards.base import ScoreboardCard
 from omni.domain.breaks import BreakKind
 from omni.tower.board import BoardCue
-from omni.tower.decisions import GuestNote
+from omni.policy.leases import LeaseRefusal
+from omni.tower.decisions import GrantBoundary, GuestNote
 from omni.tower.lane import ChangeKind, EndReason
 from tests.board_policy import Run, at, evidence, facts, games, live
 
@@ -39,5 +40,6 @@ def test_a_guest_whose_first_frame_lands_after_its_host_s_break_ran_short_is_an_
     assert run.board.committed(cue, at(30)) is False  # 6 s of the visit left
     [down] = run.board.changes()
     assert (down.kind, down.reason, down.aired) == (ChangeKind.DOWN, EndReason.GRANT_LAPSED, timedelta(0))
-    assert [note for note in run.board.decisions() if isinstance(note, GuestNote)] == []  # no guest turn granted
+    guests = [note for note in run.board.decisions() if isinstance(note, GuestNote)]
+    assert [(note.refusal, note.boundary) for note in guests] == [(LeaseRefusal.NO_ROOM, GrantBoundary.SWAP)]
     assert not run.queue.aired(key)
