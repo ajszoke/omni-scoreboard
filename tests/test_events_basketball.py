@@ -15,9 +15,11 @@ from omni.events.basketball import (
     CaptionWords,
     ChallengeWon,
     FieldGoalMade,
+    FreeThrow,
     FreeThrows,
     PersonalFoul,
     ShotValue,
+    TechnicalFoul,
     TimeoutTaken,
 )
 
@@ -82,6 +84,93 @@ _TRIP: dict[str, Any] = {
 def test_free_throws_refuse_what_doesnt_add_up(changes: dict[str, Any]) -> None:
     with pytest.raises(ValueError):
         FreeThrows(**{**_TRIP, **changes})
+
+
+@pytest.mark.parametrize(
+    "place, made, headline, result, tone",
+    [
+        (1, True, "FREE THROW 1 GOOD", "GOOD 6/7 FT", PlayTone.SCORE),
+        (2, False, "FREE THROW 2 MISSED", "MISSED 6/7 FT", PlayTone.STANDARD),
+        (3, True, "FREE THROW 3 GOOD", "GOOD 6/7 FT", PlayTone.SCORE),
+    ],
+)
+def test_a_free_throw_says_its_place_and_result_but_never_the_trips_size(
+    place: int, made: bool, headline: str, result: str, tone: PlayTone
+) -> None:
+    shot = FreeThrow(side=H, shooter="A.Edwards", place=place, made=made, game_made=6, game_attempted=7)
+    assert shot.words(CODES) == CaptionWords(
+        tone=tone,
+        headline=headline,
+        detail="A.Edwards (6/7 FT)",
+        narrow=(CaptionLines(f"FREE THROW {place}", "A.Edwards"), CaptionLines(f"FREE THROW {place}", result)),
+    )
+    assert "OF" not in headline
+
+
+_SHOT: dict[str, Any] = {
+    "side": H,
+    "shooter": "A.Edwards",
+    "place": 1,
+    "made": True,
+    "game_made": 6,
+    "game_attempted": 7,
+}
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"shooter": ""},
+        {"place": 0},
+        {"game_attempted": 0, "game_made": 0},
+        {"game_made": -1},
+        {"game_made": 8},  # more makes than attempts for the game
+        {"game_made": 0},  # it went in, so the game has a make
+        {"made": False, "game_made": 7},  # it missed, so the game has a miss
+    ],
+    ids=str,
+)
+def test_a_free_throw_refuses_a_game_line_that_leaves_it_out(changes: dict[str, Any]) -> None:
+    with pytest.raises(ValueError):
+        FreeThrow(**{**_SHOT, **changes})
+
+
+@pytest.mark.parametrize("made, result", [(True, "GOOD"), (False, "MISSED")])
+def test_a_technical_names_the_side_charged_and_the_shooter_but_no_one_charged(made: bool, result: str) -> None:
+    technical = TechnicalFoul(side=A, shooter="A.Edwards", made=made, game_made=5, game_attempted=6)
+    assert technical.words(CODES) == CaptionWords(
+        tone=PlayTone.ALERT,
+        headline="TECHNICAL: POR",
+        detail=f"A.Edwards FT {result} (5/6)",
+        narrow=(
+            CaptionLines("TECHNICAL: POR", "A.Edwards FT"),
+            CaptionLines("TECHNICAL: POR", f"{result} 5/6 FT"),
+        ),
+    )
+    assert (
+        TechnicalFoul(side=H, shooter="A.George", made=True, game_made=1, game_attempted=1)
+        .words(BySide("UTA", "LAL"))
+        .headline
+        == "TECHNICAL: LAL"
+    )
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"shooter": ""},
+        {"game_attempted": 0, "game_made": 0},
+        {"game_made": 7},
+        {"game_made": 0},
+        {"made": False, "game_made": 6},
+    ],
+    ids=str,
+)
+def test_a_technical_refuses_a_game_line_that_leaves_its_free_throw_out(changes: dict[str, Any]) -> None:
+    with pytest.raises(ValueError):
+        TechnicalFoul(
+            **{"side": A, "shooter": "A.Edwards", "made": True, "game_made": 5, "game_attempted": 6, **changes}
+        )
 
 
 @pytest.mark.parametrize("count, detail", [(1, "1st"), (2, "2nd"), (3, "3rd"), (4, "4th"), (6, "6th")])

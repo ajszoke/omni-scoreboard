@@ -1,8 +1,8 @@
 """Basketball's events: the taxonomy, and the plays and rulings a board captions.
 
-A caption says only what the data can establish: a made basket (with its assister when one is known), free
-throws, a personal foul and the player's count, a timeout and what's left, a won challenge, and a call taken back
-with no challenge signal. Each is a typed event, and its words on the board (the headline, the detail and the tone
+A caption says only what the data can establish: a made basket (with its assister when one is known), a free throw
+as it lands or a whole trip to the line, a personal foul and the player's count, a technical foul seen through its
+free throw, a timeout and what's left, a won challenge, and a call taken back with no challenge signal. Each is a typed event, and its words on the board (the headline, the detail and the tone
 they're drawn in) come from the event, never from free text.
 
 A ruling's full lines don't fit a 16-character lane, so a ruling also words itself for one: a pair of lines for
@@ -26,9 +26,11 @@ __all__ = [
     "CaptionWords",
     "ChallengeWon",
     "FieldGoalMade",
+    "FreeThrow",
     "FreeThrows",
     "PersonalFoul",
     "ShotValue",
+    "TechnicalFoul",
     "TimeoutTaken",
 ]
 
@@ -143,6 +145,93 @@ class FreeThrows:
         return CaptionWords(tone=tone, headline=headline, detail=detail)
 
 
+def _free_throw_result(made: bool) -> str:
+    return "GOOD" if made else "MISSED"
+
+
+def _free_throw_line(made: bool, game_made: int, game_attempted: int) -> None:
+    """A shooter's free throws for the game include this one: its make, or its miss."""
+    if not 0 <= game_made <= game_attempted or game_attempted < 1:
+        raise ValueError("the game's free throws include this one, with no more makes than attempts")
+    if made and game_made < 1:
+        raise ValueError("a free throw that went in is among the game's makes")
+    if not made and game_made == game_attempted:
+        raise ValueError("a missed free throw is among the game's misses")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class FreeThrow:
+    """One free throw, told as it lands: its place among the shooter's free throws on the trip, whether it went
+    in, and the shooter's free throws for the game. ``FREE THROW 1 GOOD`` over ``A.Edwards (6/7 FT)``.
+
+    The words never give the trip's size: at its first free throw, a two-shot trip and a three-shot one look the
+    same. A narrow lane gives the first half to ``FREE THROW 1`` over the shooter, and the second to the result
+    with the game's line (``GOOD 6/7 FT``).
+    """
+
+    side: HomeAway
+    shooter: str
+    place: int
+    made: bool
+    game_made: int
+    game_attempted: int
+
+    def __post_init__(self) -> None:
+        _named(self.shooter)
+        if self.place < 1:
+            raise ValueError("a free throw's place on its trip counts from 1")
+        _free_throw_line(self.made, self.game_made, self.game_attempted)
+
+    def words(self, codes: BySide[str]) -> CaptionWords:
+        result = _free_throw_result(self.made)
+        shot = f"FREE THROW {self.place}"
+        narrow = (
+            CaptionLines(shot, self.shooter),
+            CaptionLines(shot, f"{result} {self.game_made}/{self.game_attempted} FT"),
+        )
+        return CaptionWords(
+            tone=PlayTone.SCORE if self.made else PlayTone.STANDARD,
+            headline=f"{shot} {result}",
+            detail=f"{self.shooter} ({self.game_made}/{self.game_attempted} FT)",
+            narrow=narrow,
+        )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class TechnicalFoul:
+    """A technical foul, as its free throw shows it: ``TECHNICAL: LAL`` over ``A.George FT GOOD (5/6)``.
+
+    ``side`` is the side charged: the side that didn't shoot. The data can't say whether a player, a coach or the
+    bench was charged, so the words name no one but the shooter, along with whether the free throw went in and the
+    shooter's free throws for the game. A narrow lane keeps the headline over ``A.George FT``, then over the result
+    and the game's line (``GOOD 5/6 FT``).
+    """
+
+    side: HomeAway
+    shooter: str
+    made: bool
+    game_made: int
+    game_attempted: int
+
+    def __post_init__(self) -> None:
+        _named(self.shooter)
+        _free_throw_line(self.made, self.game_made, self.game_attempted)
+
+    def words(self, codes: BySide[str]) -> CaptionWords:
+        result = _free_throw_result(self.made)
+        headline = f"TECHNICAL: {codes[self.side]}"
+        narrow = (
+            CaptionLines(headline, f"{self.shooter} FT"),
+            CaptionLines(headline, f"{result} {self.game_made}/{self.game_attempted} FT"),
+        )
+        return CaptionWords(
+            tone=PlayTone.ALERT,
+            headline=headline,
+            detail=f"{self.shooter} FT {result} ({self.game_made}/{self.game_attempted})",
+            narrow=narrow,
+        )
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class PersonalFoul:
     """A personal foul, with the player's count for the game: ``PERSONAL FOUL`` over ``D.Clingan (4th foul)``."""
@@ -244,5 +333,7 @@ class CallReversed:
         return CaptionWords(tone=PlayTone.ALERT, headline=_REVERSED, detail=_change_detail(self.change), narrow=narrow)
 
 
-BasketballCaption = FieldGoalMade | FreeThrows | PersonalFoul | TimeoutTaken | ChallengeWon | CallReversed
+BasketballCaption = (
+    FieldGoalMade | FreeThrow | FreeThrows | PersonalFoul | TechnicalFoul | TimeoutTaken | ChallengeWon | CallReversed
+)
 """Anything a basketball card captions: a play, a timeout, or a ruling."""

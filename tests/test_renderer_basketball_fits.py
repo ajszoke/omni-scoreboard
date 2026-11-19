@@ -13,10 +13,12 @@ from dataclasses import dataclass
 
 import pytest
 
-from omni.cards.basketball import BasketballGameCardPayload
+from omni.cards.basketball import BasketballGameCardPayload, CaptionPanel, QueuePlace
 from omni.core.clock import MonotonicTime
-from omni.core.enum import PanelProfile
+from omni.core.enum import HomeAway, PanelProfile
 from omni.domain.baseball import WinLossRecord
+from omni.domain.basketball import BySide
+from omni.events.basketball import BasketballCaption, FreeThrow, TechnicalFoul
 from omni.panels.geometry import geometry_for
 from omni.providers.nba_teams import NBA_TEAMS
 from omni.renderers.canvas import DrawOp, RecordingCanvas
@@ -24,10 +26,12 @@ from omni.renderers.context import RenderContext
 from omni.renderers.font import rasterize
 from omni.renderers.live_basketball import _RED as RED
 from omni.renderers.live_basketball import LiveBasketballRenderer
+from omni.renderers.text import text_width
 from omni.renderers.text_lane import LaneClock, Marquee
 from tests.basketball_fixtures import T, game_card, live, side
 
 QUAD, STACK, SINGLE = PanelProfile.QUAD_128X64, PanelProfile.STACK_64X64, PanelProfile.SINGLE_64X32
+A, H = HomeAway.AWAY, HomeAway.HOME
 _ROW_HEIGHT = {QUAD: 20, STACK: 20, SINGLE: 16}
 _MODULE_LEFT = {QUAD: 80, STACK: 64, SINGLE: 44}  # where the clock and pips begin, right of the scores
 _DIGITS = "0123456789"
@@ -161,3 +165,55 @@ def test_two_blank_rows_part_the_stacks_record_from_a_two_digit_score() -> None:
 
 def test_the_widest_code_and_digit() -> None:
     assert _widest("6x10") == _widest("5x7") == _widest("4x6") == ("ATL", "0")
+
+
+# --- the free throw and technical captions in the bottom panel ------------------------------------------------
+
+_PANEL_TOP = {QUAD: 40, STACK: 50}  # the divider's row: the caption's lines sit under it
+
+
+def _panel_texts(caption: BasketballCaption, profile: PanelProfile, up: float, place: QueuePlace | None) -> list[str]:
+    """The text a live card draws under its divider ``up`` seconds into the turn, with ``caption`` in the panel."""
+    payload = live(
+        side(58, 4, False, (26, 25, 7)),
+        side(68, 5, True, (26, 33, 9)),
+        3,
+        3670,
+        home_win=None,
+        bottom=CaptionPanel(caption=caption, place=place),
+    )
+    width, height = geometry_for(profile).size
+    canvas = RecordingCanvas(width, height)
+    lanes = LaneClock()
+    lanes.frame("card", MonotonicTime(0.0)).commit()
+    context = RenderContext(profile=profile, now=T, marquee=Marquee(clock=lanes.frame("card", MonotonicTime(up))))
+    LiveBasketballRenderer().render(game_card(payload, away="ATL"), context, canvas)  # the widest code
+    return [op.text for op in canvas.texts() if op.y > _PANEL_TOP[profile] and not op.text[0].isdigit()]
+
+
+# The widest each new caption reads with an eight-character name (the common short form) and two-digit game lines.
+_EDWARDS = "A.George"
+_WIDEST = (
+    FreeThrow(side=H, shooter=_EDWARDS, place=3, made=False, game_made=18, game_attempted=19),
+    TechnicalFoul(side=A, shooter=_EDWARDS, made=False, game_made=8, game_attempted=9),
+)
+
+
+@pytest.mark.parametrize("caption", _WIDEST, ids=lambda caption: type(caption).__name__)
+def test_the_quads_free_throw_and_technical_lines_fit_whole_even_beside_a_queue_count(
+    caption: BasketballCaption,
+) -> None:
+    words = caption.words(BySide("ATL", "MIN"))
+    for place in (None, QueuePlace(2, 3)):
+        texts = _panel_texts(caption, QUAD, 1.0, place)
+        assert texts == [words.headline, words.detail]  # drawn whole: a line that overflowed would be clipped
+    assert text_width(words.headline, "6x10") <= 114  # the headline's lane beside ``i/N``
+
+
+@pytest.mark.parametrize("caption", _WIDEST, ids=lambda caption: type(caption).__name__)
+def test_the_stacks_narrow_words_fit_its_16_character_lanes_whole_at_both_halves(caption: BasketballCaption) -> None:
+    words = caption.words(BySide("ATL", "MIN"))
+    assert words.narrow is not None
+    for up, lines in ((1.0, words.narrow[0]), (7.0, words.narrow[1])):
+        assert _panel_texts(caption, STACK, up, None) == [lines.headline, lines.detail]
+        assert all(text_width(line, "4x6") <= 64 for line in (lines.headline, lines.detail))
