@@ -1,11 +1,11 @@
-"""Draw the NBA cards' third design pass: native mock cards on all three profiles, and contact sheets.
+"""Draw the NBA cards' fourth design pass: native mock cards on all three profiles, and contact sheets.
 
     python tools/nba_card_study.py --out <dir> [--sample <BALLDONTLIE sample json>]
 
 A design study, not a renderer. It draws with the repo's own drawing stack (`PillowCanvas`, the patched BDF
 faces, the matchup treatment and logo store, the win meter, text lanes) from the small typed mock inputs
 defined here, so what the sheets show is what the board's own pixels would be. It writes
-``native/<profile>/<card>.png`` (1 LED = 1 px) and ``nba-v3-contact-<profile>.png`` (enlarged, with a faint
+``native/<profile>/<card>.png`` (1 LED = 1 px) and ``nba-v4-contact-<profile>.png`` (enlarged, with a faint
 pixel grid, a title per card and whether the card's data is recorded or synthetic) under ``--out``.
 
 A live card's 12 s turn has two 6 s halves: the first names each team (its code over its record), the second
@@ -13,7 +13,7 @@ shows what each team has left (its timeouts over the bonus). The sheets set each
 
 The recorded specimens were transcribed from a BALLDONTLIE Free recording of the 2026-11-16 slate. Given
 ``--sample``, the tool checks each one against the state it names before drawing anything. Player names,
-stat lines, records, odds and every win-probability value are synthetic.
+stat lines, plus-minus values, records, odds and every win-probability value are synthetic.
 """
 
 from __future__ import annotations
@@ -51,7 +51,7 @@ from omni.renderers.text_lane import LaneAnchor, TextLane, draw_text_lane  # noq
 from omni.renderers.visual_treatment import MatchupVisualTreatment, resolve_matchup_treatment  # noqa: E402
 from omni.renderers.win_meter import draw_win_meter  # noqa: E402
 
-_PASS = "v3"
+_PASS = "v4"
 
 # --- colors: the house set, the MLB pregame's odds and stats colors, and NFL's play tones ---------------
 
@@ -62,8 +62,8 @@ _DIM_GOLD = RGBColor(110, 92, 0)  # an unbegun quarter's pip ring, and a final's
 _SECONDARY = RGBColor(180, 180, 180)
 _LOSER = RGBColor(110, 110, 110)
 _DIVIDER = RGBColor(55, 55, 55)
-_RED = RGBColor(255, 50, 50)  # NFL's turnover red, here also the bonus box
-_GREEN = RGBColor(60, 220, 90)  # NFL's scoring-play green
+_RED = RGBColor(255, 50, 50)  # NFL's turnover red, here also the bonus box and a minus
+_GREEN = RGBColor(60, 220, 90)  # NFL's scoring-play green, here also a plus
 _ODDS_GREEN = RGBColor(50, 180, 50)  # the MLB pregame's odds
 _STATS_TEAL = RGBColor(50, 180, 180)  # the MLB pregame's stat lines
 
@@ -112,7 +112,47 @@ class Bottom(Enum):
     LINE_SCORE = "line_score"
     CAPTION = "caption"
     BOX_SCORE = "box_score"
-    HIGHLIGHTS = "highlights"
+    PLAYER_LINES = "player_lines"
+
+
+class TimeoutLength(Enum):
+    """How long a timeout's break should run, for break planning only: no caption says which.
+
+    The first and second timeouts of a regulation quarter are the long ones (play resumes about 3.5 minutes
+    after the clock stopped); the third and later, and every overtime timeout, are short (1.5 to 2 minutes).
+    The data can't tell a called timeout from a mandatory one charged to a team, so the caption never says TV.
+    """
+
+    LONG = "long"
+    SHORT = "short"
+
+
+def timeout_length(period: int, nth_in_period: int) -> TimeoutLength:
+    """The length class of the period's ``nth_in_period`` timeout (1 for the first)."""
+    if period <= _REGULATION and nth_in_period <= 2:
+        return TimeoutLength.LONG
+    return TimeoutLength.SHORT
+
+
+class CallChange(Enum):
+    """How a call taken back shows in one player's line."""
+
+    FOUL_OFF = "foul_off"  # -1 PF
+    FOUL_TO_BLOCK = "foul_to_block"  # +1 BLK, -1 PF
+    OFFENSIVE_FOUL_OFF = "offensive_foul_off"  # -1 TOV, -1 PF
+
+
+# The quad's detail line for each change, and the short words the stack puts over the player's name.
+_CHANGE_DETAIL = {
+    CallChange.FOUL_OFF: "FOUL OFF {name}",
+    CallChange.FOUL_TO_BLOCK: "BLOCK, NOT FOUL: {name}",
+    CallChange.OFFENSIVE_FOUL_OFF: "OFFENSIVE FOUL OFF: {name}",
+}
+_CHANGE_WORDS = {
+    CallChange.FOUL_OFF: "FOUL OFF",
+    CallChange.FOUL_TO_BLOCK: "BLOCK, NOT FOUL",
+    CallChange.OFFENSIVE_FOUL_OFF: "OFFENSIVE FOUL OFF",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,17 +185,111 @@ class BettingLine:
 
 @dataclass(frozen=True, slots=True)
 class Caption:
-    """One play, put into a board's words: a headline in the play's tone over a detail line."""
+    """One play or ruling, put into a board's words: a headline in the play's tone over a detail line.
+
+    ``halves`` is the stack's wording when the quad's lines don't fit its 16-character lane: one
+    (headline, detail) pair for each 6 s half of the turn.
+    """
 
     tone: Tone
     headline: str
     detail: str
-    team: HomeAway  # whose play it was
+    team: HomeAway | None  # whose play it was; None when the data can't say
+    halves: tuple[tuple[str, str], ...] = ()
+
+
+def timeout_caption(team: HomeAway, code: str, left: int) -> Caption:
+    """A team's count dropped by one: ``TIMEOUT POR`` over ``4 LEFT``, whatever its length class."""
+    return Caption(Tone.ALERT, f"TIMEOUT {code}", f"{left} LEFT", team)
+
+
+def challenge_caption(team: HomeAway, code: str, change: tuple[CallChange, str] | None) -> Caption:
+    """A team's count came back with the clock still stopped: its challenge won, and the call reversed."""
+    headline = f"{code} CHALLENGE WON"
+    first = (f"{code} CHALLENGE", "CALL REVERSED")
+    if change is None:
+        return Caption(Tone.ALERT, headline, "CALL REVERSED", team, halves=(first, first))
+    kind, name = change
+    detail = _CHANGE_DETAIL[kind].format(name=name)
+    return Caption(Tone.ALERT, headline, detail, team, halves=(first, (_CHANGE_WORDS[kind], name)))
+
+
+def reversal_caption(kind: CallChange, name: str) -> Caption:
+    """A player's line took a call back with no challenge signal; nobody is named as having asked."""
+    detail = _CHANGE_DETAIL[kind].format(name=name)
+    halves = (("CALL REVERSED", _CHANGE_WORDS[kind]), ("CALL REVERSED", name))
+    return Caption(Tone.ALERT, "CALL REVERSED", detail, None, halves=halves)
+
+
+@dataclass(frozen=True, slots=True)
+class PlayerLine:
+    """One player's box-score line, as BALLDONTLIE's stat rows carry it."""
+
+    name: str
+    plus_minus: int
+    fgm: int
+    fga: int
+    tpm: int  # threes made
+    tpa: int
+    ftm: int
+    fta: int
+    oreb: int
+    dreb: int
+    ast: int
+    stl: int
+    blk: int
+    tov: int
+    pf: int
+
+    @property
+    def points(self) -> int:
+        return 2 * self.fgm + self.tpm + self.ftm
+
+    @property
+    def rebounds(self) -> int:
+        return self.oreb + self.dreb
+
+    def game_score(self) -> float:
+        """Hollinger's game score: one number for a whole line, not just the points."""
+        return (
+            self.points
+            + 0.4 * self.fgm
+            - 0.7 * self.fga
+            - 0.4 * (self.fta - self.ftm)
+            + 0.7 * self.oreb
+            + 0.3 * self.dreb
+            + self.stl
+            + 0.7 * self.ast
+            + 0.7 * self.blk
+            - 0.4 * self.pf
+            - self.tov
+        )
+
+    def plus_minus_text(self) -> str:
+        return f"{self.plus_minus:+d}" if self.plus_minus else "0"
+
+    def shooting(self) -> str:
+        """Makes over attempts, threes first; a player who hasn't tried a three shows only his field goals."""
+        field_goals = f"{self.fgm}/{self.fga} FG"
+        return f"{self.tpm}/{self.tpa} 3PT {field_goals}" if self.tpa else field_goals
+
+    def stats(self) -> str:
+        """Points, then shooting as makes over attempts: ``16 PTS 2/5 3PT 6/11 FG``."""
+        return f"{self.points} PTS {self.shooting()}"
+
+    def counting(self) -> tuple[str, ...]:
+        """The line's other numbers worth a mention, biggest first: ``11 AST``, ``8 REB``, ``3 BLK``.
+
+        Rebounds and assists count from one; blocks and steals from two. A tie keeps that order.
+        """
+        found = [(self.rebounds, "REB", 1), (self.ast, "AST", 1), (self.blk, "BLK", 2), (self.stl, "STL", 2)]
+        kept = [(value, label) for value, label, least in found if value >= least]
+        return tuple(f"{value} {label}" for value, label in sorted(kept, key=lambda item: -item[0]))
 
 
 @dataclass(frozen=True, slots=True)
 class TeamBox:
-    """A team's box-score line."""
+    """A team's box-score line, summed from its players."""
 
     fg_pct: int
     threes_made: int
@@ -164,17 +298,17 @@ class TeamBox:
     assists: int
     turnovers: int
 
-
-@dataclass(frozen=True, slots=True)
-class Leader:
-    """One player's line in the highlights: points, then shooting as makes over attempts."""
-
-    name: str
-    points: int
-    shooting: str  # "2/5 3PT 6/11 FG"
-
-    def stats(self) -> str:
-        return f"{self.points} PTS {self.shooting}"
+    @classmethod
+    def of(cls, players: Sequence[PlayerLine]) -> TeamBox:
+        fga = sum(p.fga for p in players)
+        return cls(
+            fg_pct=round(100 * sum(p.fgm for p in players) / fga) if fga else 0,
+            threes_made=sum(p.tpm for p in players),
+            threes_attempted=sum(p.tpa for p in players),
+            rebounds=sum(p.rebounds for p in players),
+            assists=sum(p.ast for p in players),
+            turnovers=sum(p.tov for p in players),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -211,8 +345,15 @@ class Side:
     periods: tuple[int, ...] = ()
     record: Record | None = None  # as of tip; a final's includes the result
     ranks: Ranks | None = None
-    box: TeamBox | None = None
-    leader: Leader | None = None
+    players: tuple[PlayerLine, ...] = ()
+
+    def by_plus_minus(self) -> tuple[PlayerLine, ...]:
+        """The players the player-lines panel walks: plus-minus first, points breaking a tie."""
+        return tuple(sorted(self.players, key=lambda p: (-p.plus_minus, -p.points)))
+
+    def best(self) -> PlayerLine | None:
+        """The player with the best game score, if any are known."""
+        return max(self.players, key=lambda p: p.game_score(), default=None)
 
 
 @dataclass(frozen=True, slots=True)
@@ -232,6 +373,8 @@ class Game:
     caption: Caption | None = None
     caption_of: tuple[int, int] | None = None  # (i, n) while more than one play is waiting
     break_ends: datetime | None = None
+    timeout: HomeAway | None = None  # whose timeout the game is stopped for
+    rank: int = 0  # which pair of players the player-lines panel shows, 0 for the top of each team's order
 
     def side(self, which: HomeAway) -> Side:
         return self.away if which is HomeAway.AWAY else self.home
@@ -247,6 +390,8 @@ class StateRef:
 
 _ALL = frozenset(PanelProfile)
 _NO_SINGLE = frozenset({PanelProfile.QUAD_128X64, PanelProfile.STACK_64X64})
+_STACK_ONLY = frozenset({PanelProfile.STACK_64X64})
+_NO_STACK = frozenset({PanelProfile.QUAD_128X64, PanelProfile.SINGLE_64X32})
 
 
 @dataclass(frozen=True, slots=True)
@@ -284,9 +429,10 @@ def _pair(
     source: StateRef | None = None,
     scroll: tuple[float, float] = (0.0, 0.0),
     profiles: frozenset[PanelProfile] = _ALL,
+    whens: tuple[str, str] = ("first 6 s", "second 6 s"),
 ) -> tuple[Specimen, ...]:
     """One live turn as its two 6 s halves: the teams named, then what they have left."""
-    halves = (("a", "first 6 s", Half.NAMES, scroll[0]), ("b", "second 6 s", Half.COUNTS, scroll[1]))
+    halves = (("a", whens[0], Half.NAMES, scroll[0]), ("b", whens[1], Half.COUNTS, scroll[1]))
     return tuple(
         Specimen(
             f"{key}-{suffix}",
@@ -309,18 +455,87 @@ _POR, _MIN = Record(6, 8), Record(9, 5)
 _ORL, _BOS = Record(8, 6), Record(7, 7)
 _DET, _GSW = Record(10, 4), Record(8, 7)
 
-_POR_BOX = TeamBox(fg_pct=44, threes_made=7, threes_attempted=21, rebounds=24, assists=13, turnovers=9)
-_MIN_BOX = TeamBox(fg_pct=52, threes_made=9, threes_attempted=22, rebounds=29, assists=18, turnovers=6)
+_P = PlayerLine  # fields: name, +/-, FGM, FGA, 3PM, 3PA, FTM, FTA, OREB, DREB, AST, STL, BLK, TOV, PF
 
-# POR at MIN, game 0 state 160: Q3 6:07, the base for the three rotation panels.
-_Q3_AWAY = Side("POR", 58, 4, False, (26, 25, 7), _POR, box=_POR_BOX, leader=Leader("D.Avdija", 16, "2/5 3PT 6/11 FG"))
-_Q3_HOME = Side("MIN", 68, 5, False, (26, 33, 9), _MIN, box=_MIN_BOX, leader=Leader("A.Edwards", 22, "4/9 3PT 8/15 FG"))
+# POR at MIN through Q3 7:18 (58-68): every point accounted for. Synthetic.
+_POR_Q3 = (
+    _P("T.Camara", 3, 3, 5, 2, 3, 0, 0, 1, 3, 1, 2, 1, 0, 2),
+    _P("D.Avdija", -4, 6, 12, 2, 5, 2, 2, 1, 5, 4, 1, 0, 2, 2),
+    _P("D.Clingan", -6, 3, 5, 0, 0, 0, 2, 3, 6, 1, 0, 2, 1, 3),
+    _P("J.Grant", -8, 2, 7, 1, 3, 2, 2, 0, 2, 1, 0, 0, 1, 1),
+    _P("S.Sharpe", -9, 5, 13, 2, 6, 2, 3, 0, 2, 1, 1, 0, 3, 2),
+    _P("J.Holiday", -11, 3, 8, 1, 3, 0, 0, 1, 1, 5, 1, 0, 1, 2),
+)
+_MIN_Q3 = (
+    _P("A.Edwards", 15, 8, 15, 4, 9, 2, 2, 0, 4, 3, 1, 0, 2, 1),
+    _P("R.Gobert", 12, 4, 5, 0, 0, 0, 1, 3, 7, 1, 0, 2, 1, 2),
+    _P("J.Randle", 9, 4, 9, 1, 3, 3, 4, 1, 4, 4, 0, 0, 2, 3),
+    _P("J.McDaniels", 7, 4, 7, 1, 2, 0, 0, 1, 2, 1, 2, 1, 0, 2),
+    _P("N.Reid", 4, 4, 8, 2, 4, 1, 2, 1, 3, 2, 0, 1, 1, 1),
+    _P("M.Conley", 3, 2, 4, 2, 3, 0, 0, 0, 1, 6, 1, 0, 0, 1),
+)
+# The final, 98-106. Game score picks D.Avdija (22) for POR over S.Sharpe's 26 on 24 shots. Synthetic.
+_POR_FINAL = (
+    _P("D.Avdija", -6, 8, 13, 2, 5, 4, 5, 2, 7, 7, 1, 0, 3, 3),
+    _P("S.Sharpe", -12, 9, 24, 4, 11, 4, 4, 0, 3, 2, 1, 0, 4, 2),
+    _P("J.Holiday", -10, 6, 12, 3, 7, 0, 0, 0, 3, 6, 1, 0, 2, 2),
+    _P("J.Grant", -9, 5, 11, 2, 6, 2, 2, 0, 4, 1, 0, 1, 1, 3),
+    _P("D.Clingan", -2, 5, 7, 0, 0, 0, 2, 4, 8, 1, 0, 3, 1, 4),
+    _P("T.Camara", 1, 4, 8, 3, 6, 0, 0, 1, 4, 2, 2, 1, 1, 3),
+)
+_MIN_FINAL = (
+    _P("A.Edwards", 11, 11, 20, 4, 9, 5, 6, 1, 6, 5, 2, 0, 3, 2),
+    _P("R.Gobert", 14, 6, 7, 0, 0, 2, 3, 5, 10, 1, 1, 4, 1, 3),
+    _P("J.Randle", 6, 6, 14, 1, 4, 5, 6, 1, 6, 5, 0, 0, 3, 3),
+    _P("N.Reid", 4, 6, 11, 3, 6, 0, 0, 1, 4, 1, 1, 1, 1, 2),
+    _P("J.McDaniels", 9, 5, 9, 2, 4, 0, 0, 1, 3, 2, 2, 1, 0, 3),
+    _P("M.Conley", 8, 5, 9, 4, 7, 2, 2, 0, 2, 6, 1, 0, 1, 1),
+)
+# DET at GSW, 117-119 in double overtime. Synthetic.
+_DET_FINAL = (
+    _P("C.Cunningham", -3, 12, 28, 3, 9, 7, 8, 1, 7, 11, 1, 0, 5, 3),
+    _P("J.Duren", 2, 8, 10, 0, 0, 4, 6, 6, 11, 2, 1, 3, 2, 4),
+    _P("A.Thompson", -1, 5, 9, 0, 1, 2, 4, 2, 5, 3, 3, 1, 1, 4),
+    _P("T.Harris", -4, 6, 13, 2, 5, 2, 2, 1, 5, 2, 0, 0, 1, 2),
+    _P("J.Ivey", -5, 7, 15, 2, 6, 2, 3, 0, 3, 3, 1, 0, 3, 3),
+    _P("D.Robinson", 1, 6, 11, 5, 9, 0, 0, 0, 2, 1, 0, 0, 0, 2),
+)
+_GSW_FINAL = (
+    _P("S.Curry", 5, 13, 27, 7, 15, 5, 5, 0, 5, 6, 2, 0, 4, 2),
+    _P("J.Butler", 7, 7, 13, 0, 1, 9, 11, 2, 6, 7, 3, 0, 2, 3),
+    _P("D.Green", 4, 4, 8, 1, 4, 0, 0, 1, 8, 9, 2, 1, 3, 5),
+    _P("B.Podziemski", -2, 5, 11, 2, 5, 2, 2, 1, 5, 3, 1, 0, 1, 2),
+    _P("J.Kuminga", -1, 7, 14, 1, 3, 2, 4, 2, 4, 1, 0, 1, 2, 3),
+    _P("M.Moody", 3, 6, 10, 4, 7, 2, 2, 0, 3, 1, 1, 0, 0, 2),
+)
+
+# POR at MIN, game 0 state 155: POR's count drops 5 to 4 with the clock stopped at Q3 7:18, the quarter's first
+# timeout (the long class). Its first turn is the caption; the stat panels rotate through the rest of the break.
+_TO_AWAY = Side("POR", 58, 4, False, (26, 25, 7), _POR, players=_POR_Q3)
+_TO_HOME = Side("MIN", 68, 4, False, (26, 33, 9), _MIN, players=_MIN_Q3)
+_TO_NOW = _utc("2026-11-17T02:35:30Z")
+
+
+def _timeout_game(bottom: Bottom, rank: int = 0) -> Game:
+    caption = timeout_caption(HomeAway.AWAY, "POR", 4) if bottom is Bottom.CAPTION else None
+    return Game(
+        _TO_AWAY,
+        _TO_HOME,
+        Phase.LIVE,
+        3,
+        GameClock(4380),
+        home_win_pct=83.0,
+        bottom=bottom,
+        caption=caption,
+        timeout=HomeAway.AWAY,
+        rank=rank,
+    )
+
+
+# POR at MIN, game 0 state 160: Q3 6:07, play back on, so the bottom panel is back to the line score.
+_Q3_AWAY = Side("POR", 58, 4, False, (26, 25, 7), _POR)
+_Q3_HOME = Side("MIN", 68, 5, False, (26, 33, 9), _MIN)
 _Q3_NOW = _utc("2026-11-17T02:39:42Z")
-
-
-def _q3(bottom: Bottom) -> Game:
-    return Game(_Q3_AWAY, _Q3_HOME, Phase.LIVE, 3, GameClock(3670), home_win_pct=84.0, bottom=bottom)
-
 
 # The play queue. The first read (game 0 state 181) had both teams scoring; a second, synthetic read lands
 # during the first play's 6 s with a foul and the free throws it gave. Plays within a read go away, then home.
@@ -368,6 +583,20 @@ def _queue_frame(i: int) -> Specimen:
 
 _LATE_PERIODS = ((26, 25, 22, 25), (26, 33, 28, 11))  # POR at MIN, tied after four (synthetic Q4)
 
+_FINAL = Game(
+    Side("POR", 98, 2, True, (26, 25, 22, 25), Record(6, 9), players=_POR_FINAL),
+    Side("MIN", 106, 1, True, (26, 33, 28, 19), Record(10, 5), players=_MIN_FINAL),
+    Phase.FINAL,
+    4,
+)
+_FINAL_OT = Game(
+    Side("DET", 117, None, False, (29, 24, 29, 22, 7, 6), Record(10, 5), players=_DET_FINAL),
+    Side("GSW", 119, None, False, (25, 28, 25, 26, 7, 8), Record(9, 7), players=_GSW_FINAL),
+    Phase.FINAL,
+    6,
+)
+_BEST = ("winner's best player", "loser's best player")
+
 SPECIMENS: tuple[Specimen, ...] = (
     Specimen(
         "pregame",
@@ -411,10 +640,10 @@ SPECIMENS: tuple[Specimen, ...] = (
     ),
     *_pair(
         "live-line-score",
-        "Line score",
+        "Line score (two-digit scores)",
         "Recorded · POR at MIN, Q3 6:07",
         False,
-        _q3(Bottom.LINE_SCORE),
+        Game(_Q3_AWAY, _Q3_HOME, Phase.LIVE, 3, GameClock(3670), home_win_pct=84.0),
         _Q3_NOW,
         source=StateRef(0, 160),
     ),
@@ -438,24 +667,80 @@ SPECIMENS: tuple[Specimen, ...] = (
     ),
     *(_queue_frame(i) for i in range(1, 5)),
     *_pair(
+        "live-timeout",
+        "Timeout, turn 1 · caption",
+        "Recorded · POR 5 to 4 at Q3 7:18, the quarter's 1st (long class)",
+        False,
+        _timeout_game(Bottom.CAPTION),
+        _TO_NOW,
+        source=StateRef(0, 155),
+    ),
+    *_pair(
         "live-box-score",
-        "Team box score",
-        "Recorded state · synthetic box score",
+        "Timeout, turn 2 · box score",
+        "Recorded state (Q3 7:18) · synthetic box score",
         True,
-        _q3(Bottom.BOX_SCORE),
-        _Q3_NOW,
-        source=StateRef(0, 160),
+        _timeout_game(Bottom.BOX_SCORE),
+        _TO_NOW + timedelta(seconds=12),
+        source=StateRef(0, 155),
         profiles=_NO_SINGLE,
     ),
     *_pair(
-        "live-highlights",
-        "Player highlights",
-        "Recorded state · synthetic players",
+        "live-player-lines",
+        "Timeout, turn 3 · player lines",
+        "Recorded state · synthetic players and +/-, each team's top",
         True,
-        _q3(Bottom.HIGHLIGHTS),
-        _Q3_NOW,
-        source=StateRef(0, 160),
-        scroll=(1.0, 10.0),  # the head, then the tail
+        _timeout_game(Bottom.PLAYER_LINES),
+        _TO_NOW + timedelta(seconds=24),
+        source=StateRef(0, 155),
+        scroll=(1.0, 11.5),  # the head, then the tail
+        profiles=_NO_SINGLE,
+    ),
+    *_pair(
+        "live-player-lines-next",
+        "Timeout, turn 4 · player lines",
+        "Recorded state · synthetic players and +/-, each team's 2nd",
+        True,
+        _timeout_game(Bottom.PLAYER_LINES, rank=1),
+        _TO_NOW + timedelta(seconds=36),
+        source=StateRef(0, 155),
+        scroll=(1.0, 11.5),
+        profiles=_NO_SINGLE,
+    ),
+    *_pair(
+        "live-challenge",
+        "Challenge won, stat change",
+        "Synthetic · POR TO 3 back to 4, Q3 5:06 stopped; +1 BLK -1 PF",
+        True,
+        Game(
+            Side("POR", 58, 4, False, (26, 25, 7), _POR),
+            Side("MIN", 73, 5, False, (26, 33, 14), _MIN),
+            Phase.LIVE,
+            3,
+            GameClock(3060),
+            home_win_pct=88.0,
+            bottom=Bottom.CAPTION,
+            caption=challenge_caption(HomeAway.AWAY, "POR", (CallChange.FOUL_TO_BLOCK, "T.Camara")),
+        ),
+        _utc("2026-11-17T02:44:30Z"),
+        profiles=_NO_SINGLE,
+    ),
+    *_pair(
+        "live-reversal",
+        "Call reversed, no challenge",
+        "Synthetic · J.Randle -1 PF, no count change, Q2 3:40",
+        True,
+        Game(
+            Side("POR", 47, 5, False, (26, 21), _POR),
+            Side("MIN", 50, 4, False, (26, 24), _MIN),
+            Phase.LIVE,
+            2,
+            GameClock(2200),
+            home_win_pct=61.0,
+            bottom=Bottom.CAPTION,
+            caption=reversal_caption(CallChange.FOUL_OFF, "J.Randle"),
+        ),
+        _utc("2026-11-17T02:05:40Z"),
         profiles=_NO_SINGLE,
     ),
     *_pair(
@@ -524,7 +809,7 @@ SPECIMENS: tuple[Specimen, ...] = (
     ),
     *_pair(
         "overtime",
-        "Overtime",
+        "Overtime (three digits)",
         "Synthetic · first OT",
         True,
         Game(
@@ -539,7 +824,7 @@ SPECIMENS: tuple[Specimen, ...] = (
     ),
     *_pair(
         "double-overtime",
-        "Double overtime",
+        "Double overtime (three digits)",
         "Synthetic · DET at GSW color clash",
         True,
         Game(
@@ -568,32 +853,45 @@ SPECIMENS: tuple[Specimen, ...] = (
         now=_utc("2026-11-17T02:14:21Z"),
         source=StateRef(0, 130),
     ),
+    *_pair(
+        "final",
+        "Final",
+        "Recorded score · synthetic players · best by game score",
+        True,
+        _FINAL,
+        _utc("2026-11-17T03:56:15Z"),
+        source=StateRef(0, 212),
+        profiles=_STACK_ONLY,
+        whens=_BEST,
+    ),
     Specimen(
         "final",
         "Final · teams named all turn",
         "Recorded · POR at MIN",
         False,
-        Game(
-            Side("POR", 98, 2, True, (26, 25, 22, 25), Record(6, 9)),
-            Side("MIN", 106, 1, True, (26, 33, 28, 19), Record(10, 5)),
-            Phase.FINAL,
-            4,
-        ),
+        _FINAL,
         now=_utc("2026-11-17T03:56:15Z"),
         source=StateRef(0, 212),
+        profiles=_NO_STACK,
+    ),
+    *_pair(
+        "final-overtime",
+        "Final, 2OT",
+        "Synthetic · DET at GSW · best by game score",
+        True,
+        _FINAL_OT,
+        _utc("2026-11-17T04:40:00Z"),
+        profiles=_STACK_ONLY,
+        whens=_BEST,
     ),
     Specimen(
         "final-overtime",
         "Final · double overtime",
         "Synthetic · DET at GSW color clash",
         True,
-        Game(
-            Side("DET", 117, None, False, (29, 24, 29, 22, 7, 6), Record(10, 5)),
-            Side("GSW", 119, None, False, (25, 28, 25, 26, 7, 8), Record(9, 7)),
-            Phase.FINAL,
-            6,
-        ),
+        _FINAL_OT,
         now=_utc("2026-11-17T04:40:00Z"),
+        profiles=_NO_STACK,
     ),
 )
 
@@ -662,10 +960,15 @@ def _ink_height(font: str) -> int:
     return max(i for i, row in enumerate(rows) if any(row)) + 1
 
 
+def _box_height(font: str) -> int:
+    """Rows an inverted box takes: the capitals with a red row above and below."""
+    return _ink_height(font) + 2
+
+
 def _draw_inverted(canvas: Canvas, x: int, y: int, text: str, font: str) -> None:
     """``text`` inverted, black letters on a red box with a pixel of red around them; the box's top-left at (x, y)."""
     width = text_width(text, font)  # the last glyph's blank column is the box's right margin
-    canvas.fill_rect(x, y, width + 1, _ink_height(font) + 2, _RED)
+    canvas.fill_rect(x, y, width + 1, _box_height(font), _RED)
     canvas.text(x + 1, y + 1, text, _BLACK, font=font)
 
 
@@ -676,6 +979,11 @@ def _timeouts_text(timeouts: int | None) -> str:
 
 def _score_text(score: int | None) -> str:
     return "-" if score is None else str(score)
+
+
+def _three_digits(game: Game) -> bool:
+    """Whether either team has reached 100, which shrinks the codes and counts on the smaller boards."""
+    return any(score is not None and score >= 100 for score in (game.away.score, game.home.score))
 
 
 def _ordinal(n: int) -> str:
@@ -750,6 +1058,12 @@ def _text_color(game: Game, side: HomeAway) -> RGBColor:
     return _LOSER if _lost(game, side) else _WHITE
 
 
+def _plus_minus_color(player: PlayerLine) -> RGBColor:
+    if player.plus_minus > 0:
+        return _GREEN
+    return _RED if player.plus_minus < 0 else _SECONDARY
+
+
 def _shows_counts(spec: Specimen) -> bool:
     """Whether a frame shows timeouts and bonus: a live or end-of-period card's second 6 s.
 
@@ -803,6 +1117,18 @@ def _time_width(label: str, font: str) -> int:
     return text_width(clock, font) + 3 + text_width(meridiem, font)
 
 
+def _ranked(side: Side, rank: int) -> PlayerLine | None:
+    order = side.by_plus_minus()
+    return order[rank] if rank < len(order) else None
+
+
+def _caption_lines(caption: Caption, half: Half) -> tuple[str, str]:
+    """The stack's two lines for a caption in one half of its turn."""
+    if not caption.halves:
+        return caption.headline, caption.detail
+    return caption.halves[0 if half is Half.NAMES else min(1, len(caption.halves) - 1)]
+
+
 # --- quad 128x64 ------------------------------------------------------------------------------------------
 
 _Q_ROW = 20
@@ -849,8 +1175,8 @@ def _quad_scored(canvas: Canvas, context: RenderContext, spec: Specimen) -> None
         _quad_caption(canvas, spec, game.caption)
     elif game.bottom is Bottom.BOX_SCORE:
         _quad_box(canvas, game)
-    elif game.bottom is Bottom.HIGHLIGHTS:
-        _quad_highlights(canvas, spec)
+    elif game.bottom is Bottom.PLAYER_LINES:
+        _quad_player_lines(canvas, spec)
     else:
         _quad_line_score(canvas, game)
 
@@ -949,30 +1275,37 @@ def _quad_box(canvas: Canvas, game: Game) -> None:
     for which, y in ((HomeAway.AWAY, 49), (HomeAway.HOME, 56)):
         side = game.side(which)
         canvas.text(4, y, side.abbreviation, _WHITE, font="4x6")
-        if side.box is None:
+        if not side.players:
             continue
-        for (_, right), value in zip(_BOX_COLUMNS, _box_values(side.box)):
+        for (_, right), value in zip(_BOX_COLUMNS, _box_values(TeamBox.of(side.players))):
             draw_right_aligned(canvas, right, y, value, _WHITE, "4x6")
 
 
-def _quad_highlights(canvas: Canvas, spec: Specimen) -> None:
-    """Each team's leader, away over home: the code, the name held still, and the stats scrolling beside it.
+_Q_NAME_X = 18
 
-    The names stay put while the stats scroll, as the house's name-with-stats lines do. Both stat lines start in
-    one column past the longer name, so like-for-like stats line up and the two lanes move together.
+
+def _quad_player_lines(canvas: Canvas, spec: Specimen) -> None:
+    """One player a team, away over home, walking each team's plus-minus order a turn at a time.
+
+    The code, the name and the plus-minus hold still while the stats scroll beside them. The plus-minus sits in
+    one right-aligned column past the longer name, and both stat lines start in one column past it, so they
+    scroll in step.
     """
     game = spec.game
     now = _lane_now(spec)
-    leaders = [(which, game.side(which)) for which in (HomeAway.AWAY, HomeAway.HOME)]
-    names = [side.leader.name for _, side in leaders if side.leader is not None]
-    stats_x = 20 + max((text_width(f"{name} ", "5x7") for name in names), default=0)
-    for (which, side), y in zip(leaders, (44, 55)):
-        canvas.text(4, y + 1, side.abbreviation, _SECONDARY, font="4x6")
-        if side.leader is None:
+    shown = [(game.side(which), _ranked(game.side(which), game.rank)) for which in (HomeAway.AWAY, HomeAway.HOME)]
+    players = [player for _, player in shown if player is not None]
+    names_w = max((text_width(p.name, "5x7") for p in players), default=0)
+    pm_right = _Q_NAME_X + names_w + 3 + max((text_width(p.plus_minus_text(), "5x7") for p in players), default=0)
+    stats_x = pm_right + 4  # with the face's trailing blank column, a five-pixel gap
+    for (side, player), y in zip(shown, (44, 55)):
+        canvas.text(3, y + 1, side.abbreviation, _SECONDARY, font="4x6")
+        if player is None:
             continue
-        canvas.text(20, y, side.leader.name, _WHITE, font="5x7")
+        canvas.text(_Q_NAME_X, y, player.name, _WHITE, font="5x7")
+        draw_right_aligned(canvas, pm_right, y, player.plus_minus_text(), _plus_minus_color(player), "5x7")
         lane = TextLane(x=stats_x, y=y, width=128 - stats_x, font="5x7")
-        draw_text_lane(canvas, lane, side.leader.stats(), _STATS_TEAL, now=now)
+        draw_text_lane(canvas, lane, player.stats(), _STATS_TEAL, now=now)
 
 
 def _quad_pregame(canvas: Canvas, context: RenderContext, spec: Specimen) -> None:
@@ -1020,7 +1353,12 @@ def _quad_column(canvas: Canvas, y: int, text: str, color: RGBColor) -> None:
 
 _S_ROW = 20
 _S_LANE_X = 23
+_S_COUNTS_X = 24  # the timeouts and the bonus box sit a pixel right of the code and record
+# The code over the record: 5x7 while both scores have two digits, spaced; 4x6 once either reaches 100, at the
+# face's own line pitch so the two lines read as one block. Rows are offsets from the team row's top.
+_S_NAMES = {False: ("5x7", (2, 11)), True: ("4x6", (5, 11))}
 _S_CLOCK_Y = 40
+_S_CLOCK_MARGIN = 2  # the clock this far from the left edge, the pips or OT this far from the right
 _S_PIP_GAP = 2
 _S_DIVIDER_Y = 50
 _S_LINES_Y = (52, 58)
@@ -1038,16 +1376,18 @@ def _stack_scored(canvas: Canvas, context: RenderContext, spec: Specimen) -> Non
         away_top=0,
         home_top=_S_ROW,
     )
+    names_font, names_rows = _S_NAMES[_three_digits(game)]
     rows = ((HomeAway.AWAY, away, treatment.away, 0), (HomeAway.HOME, home, treatment.home, _S_ROW))
     for which, team, mark, top in rows:
         side = game.side(which)
         draw_treated_mark(canvas, context, team, mark)
         if _shows_counts(spec):
-            canvas.text(_S_LANE_X, top + 4, _timeouts_text(side.timeouts), _GOLD, font="4x6")
+            canvas.text(_S_COUNTS_X, top + 4, _timeouts_text(side.timeouts), _GOLD, font="4x6")
             if game.phase is Phase.LIVE and side.in_bonus:
-                _draw_inverted(canvas, _S_LANE_X, top + 13, "BONUS", "4x6")
+                _draw_inverted(canvas, _S_COUNTS_X, top + 13, "BONUS", "4x6")
         else:
-            _names(canvas, game, which, _S_LANE_X, (top + 4, top + 14), "4x6")
+            ys = (top + names_rows[0], top + names_rows[1])
+            _names(canvas, game, which, _S_LANE_X, ys, names_font)
         draw_right_aligned(canvas, 64, top + 1, _score_text(side.score), _text_color(game, which), "8x13B")
     _meter_if_any(canvas, treatment, game)
     _stack_clock_line(canvas, spec)
@@ -1071,23 +1411,18 @@ def _stack_divider(canvas: Canvas, game: Game) -> None:
 
 
 def _stack_clock_line(canvas: Canvas, spec: Specimen) -> None:
-    """The clock beside the quarter pips (or the overtime), centered; at a break, the break's words."""
+    """The clock pinned left and the quarter pips (or the overtime) pinned right; at a break, the break's words."""
     game = spec.game
     font, y = "6x10", _S_CLOCK_Y
     if game.phase is Phase.LIVE:
         clock = game.clock.text() if game.clock is not None else "--:--"
-        clock_w = text_width(clock, font)
+        canvas.text(_S_CLOCK_MARGIN, y, clock, _GOLD, font=font)
+        right = 64 - _S_CLOCK_MARGIN
         if game.period <= _REGULATION:
-            tail_w = _pips_width(_PIP_STACK, _S_PIP_GAP)
-        else:
-            tail_w = text_width(_ot_label(game.period), font)
-        x = (64 - clock_w - 4 - tail_w) // 2
-        canvas.text(x, y, clock, _GOLD, font=font)
-        tail_x = x + clock_w + 4
-        if game.period <= _REGULATION:
-            _draw_pips(canvas, tail_x, y + 2, _PIP_STACK, _S_PIP_GAP, game.period)
-        else:
-            canvas.text(tail_x, y, _ot_label(game.period), _GOLD, font=font)
+            width = _pips_width(_PIP_STACK, _S_PIP_GAP)
+            _draw_pips(canvas, right - width, y + 2, _PIP_STACK, _S_PIP_GAP, game.period)
+        else:  # the face's trailing blank column stands in for one pixel of the margin
+            draw_right_aligned(canvas, right + 1, y, _ot_label(game.period), _GOLD, font)
         return
     if game.phase is Phase.END_PERIOD:
         label = f"END Q{game.period}" if game.period <= _REGULATION else f"END {_ot_label(game.period)}"
@@ -1100,42 +1435,78 @@ def _stack_clock_line(canvas: Canvas, spec: Specimen) -> None:
 
 
 def _stack_bottom(canvas: Canvas, spec: Specimen) -> None:
-    """Two small lines under the divider: the play, the rotation's panel, or a run while one is on."""
+    """Two small lines under the divider: the play or ruling, the rotation's panel, a run, or a final's best."""
     game = spec.game
     first, second = _S_LINES_Y
     now = _lane_now(spec)
+    if game.phase is Phase.FINAL:
+        _stack_best(canvas, game, spec.half)
+        return
     if game.phase is Phase.LIVE and game.caption is not None and game.bottom is Bottom.CAPTION:
         caption = game.caption
+        headline, detail = _caption_lines(caption, spec.half)
         lane = TextLane(x=0, y=first, width=64, font="4x6", anchor=LaneAnchor.CENTER)
-        draw_text_lane(canvas, lane, caption.headline, _TONE_COLOR[caption.tone], now=now)
+        draw_text_lane(canvas, lane, headline, _TONE_COLOR[caption.tone], now=now)
         lane = TextLane(x=0, y=second, width=64, font="4x6", anchor=LaneAnchor.CENTER)
-        draw_text_lane(canvas, lane, caption.detail, _WHITE, now=now)
+        draw_text_lane(canvas, lane, detail, _WHITE, now=now)
         return
     if game.phase is Phase.LIVE and game.run is not None:
         run = game.run
         draw_centered(canvas, 0, 64, first, f"{game.side(run.team).abbreviation} {run.points}-0", _WHITE, "4x6")
         draw_centered(canvas, 0, 64, second, f"LAST {_span_text(run.span_seconds)}", _SECONDARY, "4x6")
         return
-    if game.bottom is Bottom.BOX_SCORE and game.away.box is not None and game.home.box is not None:
-        lines = (
-            ("FG%", f"{game.away.box.fg_pct}-{game.home.box.fg_pct}"),
-            ("REB", f"{game.away.box.rebounds}-{game.home.box.rebounds}"),
-        )
+    if game.bottom is Bottom.BOX_SCORE and game.away.players and game.home.players:
+        away, home = TeamBox.of(game.away.players), TeamBox.of(game.home.players)
+        lines = (("FG%", f"{away.fg_pct}-{home.fg_pct}"), ("REB", f"{away.rebounds}-{home.rebounds}"))
         for (label, values), y in zip(lines, _S_LINES_Y):
             _stack_labeled(canvas, y, label, _SECONDARY, values)
         return
-    if game.bottom is Bottom.HIGHLIGHTS:
-        # One leader a half, away first, as the tiles above sit: the name and points, then the shooting.
-        leader = (game.away if spec.half is Half.NAMES else game.home).leader
-        if leader is not None:
-            name, points = f"{leader.name} ", f"{leader.points} PTS"
-            x = (64 - text_width(name + points, "4x6")) // 2
+    if game.bottom is Bottom.PLAYER_LINES:
+        # One player a half, away first, as the tiles above sit: the name and plus-minus, then points and shooting.
+        side = game.away if spec.half is Half.NAMES else game.home
+        player = _ranked(side, game.rank)
+        if player is not None:
+            name, pm = f"{player.name} ", player.plus_minus_text()
+            x = (64 - text_width(name + pm, "4x6")) // 2
             canvas.text(x, first, name, _WHITE, font="4x6")
-            canvas.text(x + text_width(name, "4x6"), first, points, _STATS_TEAL, font="4x6")
-            lane = TextLane(x=0, y=second, width=64, font="4x6", anchor=LaneAnchor.CENTER)
-            draw_text_lane(canvas, lane, leader.shooting, _STATS_TEAL, now=now)
+            canvas.text(x + text_width(name, "4x6"), first, pm, _plus_minus_color(player), font="4x6")
+            stats = f"{player.points} PTS {player.fgm}/{player.fga} FG"
+            draw_centered(canvas, 0, 64, second, stats, _STATS_TEAL, "4x6")
         return
     _stack_line_score(canvas, game)
+
+
+def _stack_best(canvas: Canvas, game: Game, half: Half) -> None:
+    """A final's bottom panel: the winner's best player by game score, then the loser's, with their numbers.
+
+    The name and points share the first line when they fit; the rest of the line's numbers follow on the
+    second, as many as fit.
+    """
+    winner = _winner(game)
+    if winner is None:
+        return
+    loser = HomeAway.HOME if winner is HomeAway.AWAY else HomeAway.AWAY
+    player = game.side(winner if half is Half.NAMES else loser).best()
+    if player is None:
+        return
+    first, second = _S_LINES_Y
+    points = f"{player.points} PTS"
+    rest = list(player.counting())
+    head = f"{player.name} "
+    if text_width(head + points, "4x6") <= 64:
+        x = (64 - text_width(head + points, "4x6")) // 2
+        canvas.text(x, first, head, _WHITE, font="4x6")
+        canvas.text(x + text_width(head, "4x6"), first, points, _STATS_TEAL, font="4x6")
+    else:
+        draw_centered(canvas, 0, 64, first, player.name, _WHITE, "4x6")
+        rest.insert(0, points)
+    line = ""
+    for item in rest:
+        trial = f"{line} {item}".strip()
+        if text_width(trial, "4x6") > 64:
+            break
+        line = trial
+    draw_centered(canvas, 0, 64, second, line, _STATS_TEAL, "4x6")
 
 
 def _stack_labeled(canvas: Canvas, y: int, label: str, label_color: RGBColor, values: str) -> None:
@@ -1146,28 +1517,39 @@ def _stack_labeled(canvas: Canvas, y: int, label: str, label_color: RGBColor, va
     canvas.text(x + text_width(f"{label} ", "4x6"), y, values, _WHITE, font="4x6")
 
 
-def _stack_line_score(canvas: Canvas, game: Game) -> None:
-    """The two latest periods, one per line, ``Q2 25-33``: the one under way gold, a finished one gray."""
+def _stack_line_rows(game: Game) -> list[tuple[str, int, int, bool]]:
+    """The line score's two rows, (label, away, home, under way), latest last.
+
+    Q1 alone after the first; Q1 over Q2 through the half; the first half's total (H1) over Q3; Q3 over Q4;
+    in overtime the last two periods, ``Q4`` over ``OT`` or ``OT1`` over ``OT2``.
+    """
     entered = min(len(game.away.periods), len(game.home.periods))
     headers = _period_headers(entered)
-    start = max(0, entered - 2)
-    for line, i in enumerate(range(start, entered)):
-        live = game.phase is Phase.LIVE and i == game.period - 1
-        values = f"{game.away.periods[i]}-{game.home.periods[i]}"
-        _stack_labeled(canvas, _S_LINES_Y[line], headers[i], _GOLD if live else _SECONDARY, values)
+    away, home = game.away.periods, game.home.periods
+
+    def row(i: int) -> tuple[str, int, int, bool]:
+        return headers[i], away[i], home[i], game.phase is Phase.LIVE and i == game.period - 1
+
+    if entered == 3:
+        return [("H1", away[0] + away[1], home[0] + home[1], False), row(2)]
+    return [row(i) for i in range(max(0, entered - 2), entered)]
+
+
+def _stack_line_score(canvas: Canvas, game: Game) -> None:
+    """The line score as two rows, ``Q2 25-33``: the period under way gold, a finished one gray."""
+    for (label, away, home, live), y in zip(_stack_line_rows(game), _S_LINES_Y):
+        _stack_labeled(canvas, y, label, _GOLD if live else _SECONDARY, f"{away}-{home}")
 
 
 def _stack_pregame(canvas: Canvas, context: RenderContext, spec: Specimen) -> None:
-    """Marks with the records mirrored about the odds row, each with its conference rank; then tip and countdown."""
+    """Marks, each team's code over its record the same way; the odds row between; then tip and countdown."""
     game = spec.game
     away, home = _teams(game)
     draw_matchup_marks(canvas, context, away, home, away_top=0, home_top=27)
-    rows = ((away, game.away, 10, 3), (home, game.home, 28, 39))  # (team, side, record y, standing y)
-    for team, side, record_y, standing_y in rows:
+    for side, top in ((game.away, 0), (game.home, 27)):
+        canvas.text(23, top, side.abbreviation, _WHITE, font="6x10")
         if side.record is not None:
-            canvas.text(23, record_y, side.record.text(), _WHITE, font="6x10")
-        if side.ranks is not None:
-            canvas.text(23, standing_y, _standing_text(team, side.ranks, division=False), _STATS_TEAL, font="4x6")
+            canvas.text(23, top + 10, side.record.text(), _STATS_TEAL, font="6x10")
     if game.line is not None:
         draw_centered(canvas, 0, 64, 21, _odds_text(game, game.line), _ODDS_GREEN, "4x6")
     if game.phase is Phase.PREGAME and game.tip is not None:
@@ -1192,6 +1574,34 @@ _I_CLOCK_Y = 10  # the clock and pips together, centered in the module
 _I_PIP_Y = 18
 _I_PIP_GAP = 1
 _I_WORDS_Y = (7, 16)
+_I_BONUS = "BON"
+_I_STACK_GAP = 1  # rows between the timeouts and the bonus box under them
+
+
+def _single_counts(canvas: Canvas, side: Side, top: int, font: str, *, live: bool) -> None:
+    """``5TO`` over the boxed ``BON``, both inside the team's lane, starting at ``top``."""
+    counts = f"{'-' if side.timeouts is None else side.timeouts}TO"
+    canvas.text(_I_CODE_X, top, counts, _GOLD, font=font)
+    if live and side.in_bonus:
+        _draw_inverted(canvas, _I_CODE_X, top + _ink_height(font) + _I_STACK_GAP, _I_BONUS, font)
+
+
+def _single_block_height(font: str) -> int:
+    return _ink_height(font) + _I_STACK_GAP + _box_height(font)
+
+
+def _single_count_tops(font: str) -> dict[HomeAway, int]:
+    """Where each team's timeouts-over-bonus block starts.
+
+    With a row or less to spare, the away block hugs the top of its lane and the home block the bottom of its
+    own, so the gap between the lanes is wider than the gap inside a block. With more, each centers in its lane.
+    """
+    slack = _I_ROW - _single_block_height(font)
+    if slack < 0:
+        raise ValueError(f"timeouts over the bonus box need {_single_block_height(font)} rows in {font}")
+    if slack <= 1:
+        return {HomeAway.AWAY: 0, HomeAway.HOME: _I_ROW + slack}
+    return {HomeAway.AWAY: slack // 2, HomeAway.HOME: _I_ROW + slack // 2}
 
 
 def _single_scored(canvas: Canvas, context: RenderContext, spec: Specimen) -> None:
@@ -1208,25 +1618,31 @@ def _single_scored(canvas: Canvas, context: RenderContext, spec: Specimen) -> No
     )
     scorer = game.caption.team if game.caption is not None and game.caption.tone is Tone.SCORE else None
     # A three-digit score reaches back to the lane, so the lane drops a size, as the NFL single board's code does.
-    scores = [score for score in (game.away.score, game.home.score) if score is not None]
-    font, drop = ("4x6", 1) if scores and max(scores) >= 100 else ("5x7", 0)
+    font, drop = ("4x6", 1) if _three_digits(game) else ("5x7", 0)
+    count_tops = _single_count_tops(font)
     rows = ((HomeAway.AWAY, away, treatment.away, 0), (HomeAway.HOME, home, treatment.home, _I_ROW))
     for which, team, mark, top in rows:
         side = game.side(which)
         draw_treated_mark(canvas, context, team, mark)  # a color bar: a 20px tile can't fit a 16px row
         color = _text_color(game, which)
-        y = top + 4 + drop
         if _shows_counts(spec):
-            counts = f"{'-' if side.timeouts is None else side.timeouts}TO"
-            canvas.text(_I_CODE_X, y, counts, _GOLD, font=font)
-            if game.phase is Phase.LIVE and side.in_bonus:  # the trailing blank column is the gap before the box
-                _draw_inverted(canvas, _I_CODE_X + text_width(counts, font), y - 1, "B", font)
+            _single_counts(canvas, side, count_tops[which], font, live=game.phase is Phase.LIVE)
         else:
-            canvas.text(_I_CODE_X, y, team.abbreviation, color, font=font)
+            canvas.text(_I_CODE_X, top + 4 + drop, team.abbreviation, color, font=font)
         score_color = _GREEN if which is scorer else color
         draw_right_aligned(canvas, _I_SCORE_RIGHT, top + 3, _score_text(side.score), score_color, "6x10")
     _meter_if_any(canvas, treatment, game)
+    _single_module(canvas, spec)
+
+
+def _single_module(canvas: Canvas, spec: Specimen) -> None:
+    """Right of the scores: the clock and pips; ``TO`` over the code while a timeout lasts; a break's words."""
+    game = spec.game
     left, right = _I_MODULE
+    if game.phase is Phase.LIVE and game.timeout is not None:
+        draw_centered(canvas, left, right, _I_WORDS_Y[0], "TO", _GOLD, "5x7")
+        draw_centered(canvas, left, right, _I_WORDS_Y[1], game.side(game.timeout).abbreviation, _WHITE, "5x7")
+        return
     if game.phase is Phase.LIVE:
         clock = game.clock.text() if game.clock is not None else "--:--"
         draw_centered(canvas, left, right, _I_CLOCK_Y, clock, _GOLD, "4x6")
@@ -1237,11 +1653,13 @@ def _single_scored(canvas: Canvas, context: RenderContext, spec: Specimen) -> No
             draw_centered(canvas, left, right, _I_PIP_Y - 1, _ot_label(game.period), _GOLD, "4x6")
         return
     if game.phase is Phase.FINAL:
+        # A big F; in overtime, over the overtime in the largest face that fits the module, its ink on the
+        # home score's rows.
         if game.period > _REGULATION:
-            draw_centered(canvas, left, right, 8, "FIN", _GOLD, "5x8")
-            draw_centered(canvas, left, right, 18, _ot_label(game.period), _GOLD, "4x6")
+            draw_centered(canvas, left, right, 5, "F", _GOLD, "8x13B")
+            draw_centered(canvas, left, right, 19, _ot_label(game.period), _GOLD, "6x10")
         else:
-            draw_centered(canvas, left, right, 12, "FIN", _GOLD, "5x8")
+            draw_centered(canvas, left, right, 10, "F", _GOLD, "8x13B")
         return
     words: tuple[str, str]
     if game.phase is Phase.END_PERIOD:
@@ -1255,7 +1673,11 @@ def _single_scored(canvas: Canvas, context: RenderContext, spec: Specimen) -> No
 
 
 def _single_pregame(canvas: Canvas, context: RenderContext, spec: Specimen) -> None:
-    """Bars and codes; at right the tip time (or the status) over the countdown."""
+    """Bars and codes; at right the tip time (or the status) over the countdown, both in the codes' face.
+
+    The tip in 6x10 would take 39 of the 40 columns right of the codes at ``6:00 PM`` and 45 at ``12:00 PM``,
+    with no room to breathe, so the tip and the countdown share 5x7, each on its team's code row.
+    """
     game = spec.game
     away, home = _teams(game)
     draw_single_bars(canvas, context, away, home)
@@ -1268,14 +1690,8 @@ def _single_pregame(canvas: Canvas, context: RenderContext, spec: Specimen) -> N
         _draw_time(canvas, left + (right - left - width) // 2, 4, clock, _GOLD, "5x7")
     else:
         draw_centered(canvas, left, right, 5, "POSTPONED", _GOLD, "4x6")
-    if game.tip is None:
-        draw_centered(canvas, left, right, 20, "TIP TBD", _WHITE, "5x7")
-        return
-    countdown = _time_to_tip(spec.now, game.tip)
-    if text_width(countdown, "6x10") <= right - left:
-        draw_centered(canvas, left, right, 17, countdown, _WHITE, "6x10")
-    else:  # ten hours or more out: a size down rather than into the code
-        draw_centered(canvas, left, right, 20, countdown, _WHITE, "5x7")
+    below = _time_to_tip(spec.now, game.tip) if game.tip is not None else "TIP TBD"
+    draw_centered(canvas, left, right, 20, below, _WHITE, "5x7")
 
 
 # --- drawing a card ---------------------------------------------------------------------------------------
@@ -1308,6 +1724,30 @@ _SHEET_NAME = {
     PanelProfile.QUAD_128X64: "128×64",
     PanelProfile.STACK_64X64: "64×64",
     PanelProfile.SINGLE_64X32: "64×32",
+}
+_LEGEND = {
+    PanelProfile.QUAD_128X64: (
+        "Away top · home bottom    first 6 s: code over record    second 6 s: n×TO over BONUS    "
+        "gold pips = quarters begun    LAST m:ss = game-clock span of the run",
+        "i/N = play i of the N queued while more than one waits    TIMEOUT holds the timeout's first turn, then "
+        "the stat panels rotate until play resumes",
+        "Player lines walk each team's plus-minus order, one player per team per turn    +n / -n = plus-minus",
+    ),
+    PanelProfile.STACK_64X64: (
+        "Away top · home bottom    first 6 s: code over record (5x7; 4x6 once a score reaches 100)    "
+        "second 6 s: n×TO over BONUS",
+        "Segmented divider = play queue    TIMEOUT holds the timeout's first turn, then the stat panels rotate    "
+        "a ruling splits across its turn's halves",
+        "Line score: Q1/Q2 to the half, H1/Q3, Q3/Q4    final: the winner's best player by game score, then the "
+        "loser's    +n / -n = plus-minus",
+    ),
+    PanelProfile.SINGLE_64X32: (
+        "Away top · home bottom    first 6 s: the code    second 6 s: nTO over a boxed BON, stacked in the team's "
+        "lane (5x7; 4x6 once a score reaches 100)",
+        "TO over the code replaces the clock and pips while a timeout lasts    F = final    "
+        "no stat panels, captions or rulings on the single",
+        "",
+    ),
 }
 _SHEET_BG = (15, 20, 26)
 _CARD_BG = (29, 38, 48)
@@ -1376,12 +1816,12 @@ def contact_sheet(profile: PanelProfile, cards: Sequence[tuple[Specimen, Image.I
     card_h = height * scale + 2 * _PAD + 40
     placed = _place(cards)
     rows = max(row for row, _, _, _ in placed) + 1
-    header_h, footer_h = 92, 64
+    header_h, footer_h = 92, 86
     sheet_w = _COLUMNS * card_w + (_COLUMNS + 1) * _GAP
     sheet_h = header_h + rows * card_h + (rows - 1) * _GAP + footer_h
     sheet = Image.new("RGB", (sheet_w, sheet_h), _SHEET_BG)
     draw = ImageDraw.Draw(sheet)
-    draw.text((_GAP + 4, 18), f"Omni · NBA cards, third pass   {_SHEET_NAME[profile]}", fill=_INK, font=head_font)
+    draw.text((_GAP + 4, 18), f"Omni · NBA cards, fourth pass   {_SHEET_NAME[profile]}", fill=_INK, font=head_font)
     draw.text(
         (_GAP + 4, 58),
         f"{scale}× pixel grid  ·  recorded BALLDONTLIE Free states and labeled synthetic specimens  ·  "
@@ -1411,19 +1851,8 @@ def contact_sheet(profile: PanelProfile, cards: Sequence[tuple[Specimen, Image.I
         )
         draw.text((x + _PAD, y + 28), label, fill=_SYNTHETIC_INK if spec.synthetic else _MUTED, font=label_font)
         sheet.paste(enlarge(image, scale), (x + _PAD, y + 40 + _PAD - 4))
-    draw.text(
-        (_GAP + 4, sheet_h - footer_h + 12),
-        "Away top · home bottom    first 6 s: code over record    second 6 s: n×TO over BONUS    "
-        "gold pips = quarters begun    LAST m:ss = game-clock span of the run",
-        fill=_MUTED,
-        font=sub_font,
-    )
-    draw.text(
-        (_GAP + 4, sheet_h - footer_h + 34),
-        "i/N = play i of the N that have queued while more than one waits; each shows 6 s, and N grows as plays arrive",
-        fill=_MUTED,
-        font=sub_font,
-    )
+    for i, line in enumerate(_LEGEND[profile]):
+        draw.text((_GAP + 4, sheet_h - footer_h + 12 + 22 * i), line, fill=_MUTED, font=sub_font)
     return sheet
 
 
@@ -1477,7 +1906,7 @@ def check_sample(path: Path) -> list[str]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Draw the NBA cards' third design pass.")
+    parser = argparse.ArgumentParser(description="Draw the NBA cards' fourth design pass.")
     parser.add_argument("--out", type=Path, required=True, help="where native/ and the contact sheets go")
     parser.add_argument("--sample", type=Path, help="the BALLDONTLIE recording to check the recorded specimens against")
     args = parser.parse_args()
