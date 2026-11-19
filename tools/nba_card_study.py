@@ -1,11 +1,11 @@
-"""Draw the NBA cards' fourth design pass: native mock cards on all three profiles, and contact sheets.
+"""Draw the NBA cards' fifth design pass: native mock cards on all three profiles, and contact sheets.
 
     python tools/nba_card_study.py --out <dir> [--sample <BALLDONTLIE sample json>]
 
 A design study, not a renderer. It draws with the repo's own drawing stack (`PillowCanvas`, the patched BDF
 faces, the matchup treatment and logo store, the win meter, text lanes) from the small typed mock inputs
 defined here, so what the sheets show is what the board's own pixels would be. It writes
-``native/<profile>/<card>.png`` (1 LED = 1 px) and ``nba-v4-contact-<profile>.png`` (enlarged, with a faint
+``native/<profile>/<card>.png`` (1 LED = 1 px) and ``nba-v5-contact-<profile>.png`` (enlarged, with a faint
 pixel grid, a title per card and whether the card's data is recorded or synthetic) under ``--out``.
 
 A live card's 12 s turn has two 6 s halves: the first names each team (its code over its record), the second
@@ -23,7 +23,7 @@ import json
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, tzinfo
 from enum import Enum
 from pathlib import Path
 from typing import Any, assert_never
@@ -38,7 +38,7 @@ from omni.core.colors import RGBColor  # noqa: E402
 from omni.core.enum import HomeAway, PanelProfile  # noqa: E402
 from omni.domain.baseball import WinProbability  # noqa: E402
 from omni.domain.teams import BasketballTeam  # noqa: E402
-from omni.providers.nba_teams import NbaTeamRegistry  # noqa: E402
+from omni.providers.nba_teams import NBA_TEAMS, NbaTeamRegistry  # noqa: E402
 from omni.renderers.canvas import Canvas  # noqa: E402
 from omni.renderers.context import RenderContext  # noqa: E402
 from omni.renderers.font import rasterize  # noqa: E402
@@ -51,7 +51,7 @@ from omni.renderers.text_lane import LaneAnchor, TextLane, draw_text_lane  # noq
 from omni.renderers.visual_treatment import MatchupVisualTreatment, resolve_matchup_treatment  # noqa: E402
 from omni.renderers.win_meter import draw_win_meter  # noqa: E402
 
-_PASS = "v4"
+_PASS = "v5"
 
 # --- colors: the house set, the MLB pregame's odds and stats colors, and NFL's play tones ---------------
 
@@ -249,22 +249,6 @@ class PlayerLine:
     def rebounds(self) -> int:
         return self.oreb + self.dreb
 
-    def game_score(self) -> float:
-        """Hollinger's game score: one number for a whole line, not just the points."""
-        return (
-            self.points
-            + 0.4 * self.fgm
-            - 0.7 * self.fga
-            - 0.4 * (self.fta - self.ftm)
-            + 0.7 * self.oreb
-            + 0.3 * self.dreb
-            + self.stl
-            + 0.7 * self.ast
-            + 0.7 * self.blk
-            - 0.4 * self.pf
-            - self.tov
-        )
-
     def plus_minus_text(self) -> str:
         return f"{self.plus_minus:+d}" if self.plus_minus else "0"
 
@@ -348,12 +332,14 @@ class Side:
     players: tuple[PlayerLine, ...] = ()
 
     def by_plus_minus(self) -> tuple[PlayerLine, ...]:
-        """The players the player-lines panel walks: plus-minus first, points breaking a tie."""
+        """The players in plus-minus order, points breaking a tie: the player-lines panel walks it, and a
+        final's best player heads it."""
         return tuple(sorted(self.players, key=lambda p: (-p.plus_minus, -p.points)))
 
     def best(self) -> PlayerLine | None:
-        """The player with the best game score, if any are known."""
-        return max(self.players, key=lambda p: p.game_score(), default=None)
+        """The player with the best plus-minus (the higher points on a tie), if any are known."""
+        order = self.by_plus_minus()
+        return order[0] if order else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -454,6 +440,7 @@ def _pair(
 _POR, _MIN = Record(6, 8), Record(9, 5)
 _ORL, _BOS = Record(8, 6), Record(7, 7)
 _DET, _GSW = Record(10, 4), Record(8, 7)
+_DEN_LATE, _LAL_LATE = Record(41, 30), Record(44, 27)  # five characters each, as most of a season's records are
 
 _P = PlayerLine  # fields: name, +/-, FGM, FGA, 3PM, 3PA, FTM, FTA, OREB, DREB, AST, STL, BLK, TOV, PF
 
@@ -474,7 +461,7 @@ _MIN_Q3 = (
     _P("N.Reid", 4, 4, 8, 2, 4, 1, 2, 1, 3, 2, 0, 1, 1, 1),
     _P("M.Conley", 3, 2, 4, 2, 3, 0, 0, 0, 1, 6, 1, 0, 0, 1),
 )
-# The final, 98-106. Game score picks D.Avdija (22) for POR over S.Sharpe's 26 on 24 shots. Synthetic.
+# The final, 98-106. Plus-minus picks T.Camara (+1) for POR, not the top scorer, S.Sharpe (26). Synthetic.
 _POR_FINAL = (
     _P("D.Avdija", -6, 8, 13, 2, 5, 4, 5, 2, 7, 7, 1, 0, 3, 3),
     _P("S.Sharpe", -12, 9, 24, 4, 11, 4, 4, 0, 3, 2, 1, 0, 4, 2),
@@ -571,7 +558,11 @@ def _queue_frame(i: int) -> Specimen:
     return Specimen(
         f"live-queue-{i}",
         f"Play queue {i}/{waiting} · {'first' if half is Half.NAMES else 'second'} 6 s",
-        "Recorded read (both teams scored) · synthetic plays" if first else "Synthetic second read at Q3 2:05 · plays",
+        (
+            "Recorded read, both scored · synthetic plays, ingest order"
+            if first
+            else "Synthetic second read · ingest order"
+        ),
         True,
         game,
         _utc("2026-11-17T02:52:08Z") + timedelta(seconds=6 * (i - 1)),
@@ -793,6 +784,36 @@ SPECIMENS: tuple[Specimen, ...] = (
         _utc("2026-11-17T03:40:00Z"),
     ),
     *_pair(
+        "late-season-two-digits",
+        "Late season, two digits",
+        "Synthetic · five-character records, the widest a season gives",
+        True,
+        Game(
+            Side("DEN", 74, 3, False, (28, 24, 22), _DEN_LATE),
+            Side("LAL", 71, 4, True, (25, 27, 19), _LAL_LATE),
+            Phase.LIVE,
+            3,
+            GameClock(2520),
+            home_win_pct=48.0,
+        ),
+        _utc("2026-03-20T03:31:00Z"),
+    ),
+    *_pair(
+        "late-season-three-digits",
+        "Late season, three digits",
+        "Synthetic · five-character records against 1xx scores",
+        True,
+        Game(
+            Side("DEN", 104, 1, True, (28, 24, 26, 26), _DEN_LATE),
+            Side("LAL", 101, 2, True, (25, 27, 24, 25), _LAL_LATE),
+            Phase.LIVE,
+            4,
+            GameClock(620),
+            home_win_pct=39.0,
+        ),
+        _utc("2026-03-20T04:12:00Z"),
+    ),
+    *_pair(
         "end-q1",
         "End of the first",
         "Recorded · ORL at BOS",
@@ -856,7 +877,7 @@ SPECIMENS: tuple[Specimen, ...] = (
     *_pair(
         "final",
         "Final",
-        "Recorded score · synthetic players · best by game score",
+        "Recorded score · synthetic players · best by plus-minus",
         True,
         _FINAL,
         _utc("2026-11-17T03:56:15Z"),
@@ -877,7 +898,7 @@ SPECIMENS: tuple[Specimen, ...] = (
     *_pair(
         "final-overtime",
         "Final, 2OT",
-        "Synthetic · DET at GSW · best by game score",
+        "Synthetic · DET at GSW · best by plus-minus",
         True,
         _FINAL_OT,
         _utc("2026-11-17T04:40:00Z"),
@@ -982,7 +1003,8 @@ def _score_text(score: int | None) -> str:
 
 
 def _three_digits(game: Game) -> bool:
-    """Whether either team has reached 100, which shrinks the codes and counts on the smaller boards."""
+    """Whether either team has reached 100, which shrinks every board's codes and the quad's and stack's records
+    and counts."""
     return any(score is not None and score >= 100 for score in (game.away.score, game.home.score))
 
 
@@ -1011,18 +1033,36 @@ def _countdown(left: timedelta) -> str:
     return f"{seconds // 60}:{seconds % 60:02d}"
 
 
-def _time_to_tip(now: datetime, tip: datetime) -> str:
-    """How long until tip: ``1h 23m``, ``45m``, ``1d 2h`` a day or more out, ``SOON`` inside a minute."""
+def _tip_lines(now: datetime, tip: datetime, zone: tzinfo | None) -> tuple[str, str, str]:
+    """What a scheduled tip shows, upper line first, and its time.
+
+    Later today: the time over the countdown (``1h 23m``, ``45m``, ``SOON`` inside a minute). On another day: the
+    date (``11/20``) where the time was, over the time where the countdown was.
+    """
+    clock = start_time_label(tip, zone)
+    local = tip.astimezone(zone)
+    if local.date() != now.astimezone(zone).date():
+        return f"{local.month}/{local.day}", clock, clock
     minutes = int((tip - now).total_seconds() // 60)
     if minutes < 1:
-        return "SOON"
-    if minutes < 60:
-        return f"{minutes}m"
-    hours, minutes = divmod(minutes, 60)
-    if hours < 24:
-        return f"{hours}h {minutes}m"
-    days, hours = divmod(hours, 24)
-    return f"{days}d {hours}h"
+        countdown = "SOON"
+    elif minutes < 60:
+        countdown = f"{minutes}m"
+    else:
+        countdown = "{}h {}m".format(*divmod(minutes, 60))
+    return clock, countdown, clock
+
+
+def _when_width(text: str, clock: str, font: str) -> int:
+    """How wide a tip line is; the tip time takes its narrow space."""
+    return _time_width(text, font) if text == clock else text_width(text, font)
+
+
+def _draw_when(canvas: Canvas, x: int, y: int, text: str, clock: str, color: RGBColor, font: str) -> None:
+    if text == clock:
+        _draw_time(canvas, x, y, text, color, font)
+    else:
+        canvas.text(x, y, text, color, font=font)
 
 
 def _span_text(seconds: int) -> str:
@@ -1133,8 +1173,14 @@ def _caption_lines(caption: Caption, half: Half) -> tuple[str, str]:
 
 _Q_ROW = 20
 _Q_LANE_X = 23
-_Q_SCORE_RIGHT = 80
-_Q_MODULE = (82, 128)
+_Q_SCORE_RIGHT = 78
+_Q_MODULE = (80, 128)  # the clock, pips and break words center in what's right of the scores
+# The code over the record, and the timeouts: 6x10 while both scores have two digits, 5x7 once either reaches 100,
+# where a five-character record in 6x10 would reach the first digit of the score. BONUS keeps 5x7. Rows are cell
+# tops below the team row's top.
+_Q_NAMES = {False: ("6x10", (1, 10)), True: ("5x7", (3, 12))}
+_Q_COUNTS = {False: ("6x10", 1), True: ("5x7", 3)}
+_Q_BONUS_ROW = 11
 # The clock over the pips, centered in the 40 rows above the divider; raised to make room while a run is on.
 _Q_CLOCK_Y = {False: 8, True: 2}
 _Q_PIP_DROP = 15  # pips' top below the clock's cell top
@@ -1157,16 +1203,19 @@ def _quad_scored(canvas: Canvas, context: RenderContext, spec: Specimen) -> None
         away_top=0,
         home_top=_Q_ROW,
     )
+    names_font, names_rows = _Q_NAMES[_three_digits(game)]
+    counts_font, counts_row = _Q_COUNTS[_three_digits(game)]
     rows = ((HomeAway.AWAY, away, treatment.away, 0), (HomeAway.HOME, home, treatment.home, _Q_ROW))
     for which, team, mark, top in rows:
         side = game.side(which)
         draw_treated_mark(canvas, context, team, mark)
         if _shows_counts(spec):
-            canvas.text(_Q_LANE_X, top + 3, _timeouts_text(side.timeouts), _GOLD, font="5x7")
+            canvas.text(_Q_LANE_X, top + counts_row, _timeouts_text(side.timeouts), _GOLD, font=counts_font)
             if game.phase is Phase.LIVE and side.in_bonus:
-                _draw_inverted(canvas, _Q_LANE_X, top + 11, "BONUS", "5x7")
+                _draw_inverted(canvas, _Q_LANE_X, top + _Q_BONUS_ROW, "BONUS", "5x7")
         else:
-            _names(canvas, game, which, _Q_LANE_X, (top + 3, top + 12), "5x7")
+            ys = (top + names_rows[0], top + names_rows[1])
+            _names(canvas, game, which, _Q_LANE_X, ys, names_font)
         draw_right_aligned(canvas, _Q_SCORE_RIGHT, top + 1, _score_text(side.score), _text_color(game, which), "9x18B")
     _meter_if_any(canvas, treatment, game)
     _quad_module(canvas, spec)
@@ -1216,8 +1265,9 @@ def _quad_module(canvas: Canvas, spec: Specimen) -> None:
     else:
         words = ("FINAL", _ot_label(game.period)) if game.period > _REGULATION else ("FINAL",)
     rows = [(words[0], sum(_Q_WORDS_Y) // 2)] if len(words) == 1 else list(zip(words, _Q_WORDS_Y))
+    font = "8x13B" if game.phase is Phase.FINAL else "8x13"  # a final in the bold face of the single's F
     for word, y in rows:
-        draw_centered(canvas, left, right, y, word, _GOLD, "8x13")
+        draw_centered(canvas, left, right, y, word, _GOLD, font)
 
 
 def _quad_line_score(canvas: Canvas, game: Game) -> None:
@@ -1287,23 +1337,22 @@ _Q_NAME_X = 18
 def _quad_player_lines(canvas: Canvas, spec: Specimen) -> None:
     """One player a team, away over home, walking each team's plus-minus order a turn at a time.
 
-    The code, the name and the plus-minus hold still while the stats scroll beside them. The plus-minus sits in
-    one right-aligned column past the longer name, and both stat lines start in one column past it, so they
-    scroll in step.
+    Each row runs on its own: the code, the name, a space, the plus-minus, a space, then the stats, which scroll
+    when they overflow while everything before them holds still. The rows don't line up with each other.
     """
     game = spec.game
     now = _lane_now(spec)
-    shown = [(game.side(which), _ranked(game.side(which), game.rank)) for which in (HomeAway.AWAY, HomeAway.HOME)]
-    players = [player for _, player in shown if player is not None]
-    names_w = max((text_width(p.name, "5x7") for p in players), default=0)
-    pm_right = _Q_NAME_X + names_w + 3 + max((text_width(p.plus_minus_text(), "5x7") for p in players), default=0)
-    stats_x = pm_right + 4  # with the face's trailing blank column, a five-pixel gap
-    for (side, player), y in zip(shown, (44, 55)):
+    for which, y in ((HomeAway.AWAY, 44), (HomeAway.HOME, 55)):
+        side = game.side(which)
         canvas.text(3, y + 1, side.abbreviation, _SECONDARY, font="4x6")
+        player = _ranked(side, game.rank)
         if player is None:
             continue
         canvas.text(_Q_NAME_X, y, player.name, _WHITE, font="5x7")
-        draw_right_aligned(canvas, pm_right, y, player.plus_minus_text(), _plus_minus_color(player), "5x7")
+        pm = player.plus_minus_text()
+        pm_x = _Q_NAME_X + text_width(f"{player.name} ", "5x7")
+        canvas.text(pm_x, y, pm, _plus_minus_color(player), font="5x7")
+        stats_x = pm_x + text_width(f"{pm} ", "5x7")
         lane = TextLane(x=stats_x, y=y, width=128 - stats_x, font="5x7")
         draw_text_lane(canvas, lane, player.stats(), _STATS_TEAL, now=now)
 
@@ -1332,9 +1381,9 @@ def _quad_pregame(canvas: Canvas, context: RenderContext, spec: Specimen) -> Non
     if game.tip is None:
         _quad_column(canvas, 27, "TIP TBD", _WHITE)
         return
-    clock = start_time_label(game.tip, context.timezone)
-    _draw_time(canvas, _quad_column_x(_time_width(clock, "6x10")), 27, clock, _WHITE, "6x10")
-    _quad_column(canvas, 39, _time_to_tip(spec.now, game.tip), _WHITE)
+    upper, lower, clock = _tip_lines(spec.now, game.tip, context.timezone)
+    for text, y in ((upper, 27), (lower, 39)):
+        _draw_when(canvas, _quad_column_x(_when_width(text, clock, "6x10")), y, text, clock, _WHITE, "6x10")
 
 
 _Q_COLUMN_CENTER = 107
@@ -1352,11 +1401,15 @@ def _quad_column(canvas: Canvas, y: int, text: str, color: RGBColor) -> None:
 # --- stack 64x64 ------------------------------------------------------------------------------------------
 
 _S_ROW = 20
-_S_LANE_X = 23
-_S_COUNTS_X = 24  # the timeouts and the bonus box sit a pixel right of the code and record
-# The code over the record: 5x7 while both scores have two digits, spaced; 4x6 once either reaches 100, at the
-# face's own line pitch so the two lines read as one block. Rows are offsets from the team row's top.
-_S_NAMES = {False: ("5x7", (2, 11)), True: ("4x6", (5, 11))}
+_S_LANE_X = 24  # the code, record, timeouts and bonus box all start here
+# The code over the record: 6x10 while both scores have two digits, 5x7 once either reaches 100, where a 6x10
+# code would touch the score's first digit. The code's ink ends on the score's bottom row; the record sits under
+# the score with a blank row between, so a five-character record may run beneath the score. Rows are cell tops
+# below the team row's top.
+_S_NAMES = {False: ("6x10", (4, 12)), True: ("5x7", (6, 13))}
+_S_COUNTS = {False: "5x7", True: "4x6"}  # the timeouts; BONUS keeps 4x6
+_S_COUNTS_ROW = 4
+_S_BONUS_ROW = 13
 _S_CLOCK_Y = 40
 _S_CLOCK_MARGIN = 2  # the clock this far from the left edge, the pips or OT this far from the right
 _S_PIP_GAP = 2
@@ -1382,9 +1435,10 @@ def _stack_scored(canvas: Canvas, context: RenderContext, spec: Specimen) -> Non
         side = game.side(which)
         draw_treated_mark(canvas, context, team, mark)
         if _shows_counts(spec):
-            canvas.text(_S_COUNTS_X, top + 4, _timeouts_text(side.timeouts), _GOLD, font="4x6")
+            counts_font = _S_COUNTS[_three_digits(game)]
+            canvas.text(_S_LANE_X, top + _S_COUNTS_ROW, _timeouts_text(side.timeouts), _GOLD, font=counts_font)
             if game.phase is Phase.LIVE and side.in_bonus:
-                _draw_inverted(canvas, _S_COUNTS_X, top + 13, "BONUS", "4x6")
+                _draw_inverted(canvas, _S_LANE_X, top + _S_BONUS_ROW, "BONUS", "4x6")
         else:
             ys = (top + names_rows[0], top + names_rows[1])
             _names(canvas, game, which, _S_LANE_X, ys, names_font)
@@ -1466,21 +1520,26 @@ def _stack_bottom(canvas: Canvas, spec: Specimen) -> None:
         side = game.away if spec.half is Half.NAMES else game.home
         player = _ranked(side, game.rank)
         if player is not None:
-            name, pm = f"{player.name} ", player.plus_minus_text()
-            x = (64 - text_width(name + pm, "4x6")) // 2
-            canvas.text(x, first, name, _WHITE, font="4x6")
-            canvas.text(x + text_width(name, "4x6"), first, pm, _plus_minus_color(player), font="4x6")
+            _stack_name_line(canvas, first, player)
             stats = f"{player.points} PTS {player.fgm}/{player.fga} FG"
             draw_centered(canvas, 0, 64, second, stats, _STATS_TEAL, "4x6")
         return
     _stack_line_score(canvas, game)
 
 
-def _stack_best(canvas: Canvas, game: Game, half: Half) -> None:
-    """A final's bottom panel: the winner's best player by game score, then the loser's, with their numbers.
+def _stack_name_line(canvas: Canvas, y: int, player: PlayerLine) -> None:
+    """A player's name (white) and plus-minus (in its sign's color), centered."""
+    name, pm = f"{player.name} ", player.plus_minus_text()
+    x = (64 - text_width(name + pm, "4x6")) // 2
+    canvas.text(x, y, name, _WHITE, font="4x6")
+    canvas.text(x + text_width(name, "4x6"), y, pm, _plus_minus_color(player), font="4x6")
 
-    The name and points share the first line when they fit; the rest of the line's numbers follow on the
-    second, as many as fit.
+
+def _stack_best(canvas: Canvas, game: Game, half: Half) -> None:
+    """A final's bottom panel: the winner's best player by plus-minus, then the loser's, with their numbers.
+
+    The name and plus-minus fill the first line; the points and then the line's biggest other numbers follow on
+    the second, as many as fit.
     """
     winner = _winner(game)
     if winner is None:
@@ -1490,19 +1549,10 @@ def _stack_best(canvas: Canvas, game: Game, half: Half) -> None:
     if player is None:
         return
     first, second = _S_LINES_Y
-    points = f"{player.points} PTS"
-    rest = list(player.counting())
-    head = f"{player.name} "
-    if text_width(head + points, "4x6") <= 64:
-        x = (64 - text_width(head + points, "4x6")) // 2
-        canvas.text(x, first, head, _WHITE, font="4x6")
-        canvas.text(x + text_width(head, "4x6"), first, points, _STATS_TEAL, font="4x6")
-    else:
-        draw_centered(canvas, 0, 64, first, player.name, _WHITE, "4x6")
-        rest.insert(0, points)
-    line = ""
-    for item in rest:
-        trial = f"{line} {item}".strip()
+    _stack_name_line(canvas, first, player)
+    line = f"{player.points} PTS"
+    for item in player.counting():
+        trial = f"{line} {item}"
         if text_width(trial, "4x6") > 64:
             break
         line = trial
@@ -1542,26 +1592,36 @@ def _stack_line_score(canvas: Canvas, game: Game) -> None:
 
 
 def _stack_pregame(canvas: Canvas, context: RenderContext, spec: Specimen) -> None:
-    """Marks, each team's code over its record the same way; the odds row between; then tip and countdown."""
+    """Marks, each team's code over its record the same way; the odds row between; then the tip.
+
+    Before a tip later today: ``TIPOFF 6:00 PM`` over the countdown. On another day the date takes the time's
+    place beside the label and the time takes the countdown's, so a postponed game reads ``POSTPONED 11/17`` over
+    ``12:00 PM``. (``POSTPONED`` and a time would be 70 px in 4x6, wider than the board.)
+    """
     game = spec.game
     away, home = _teams(game)
     draw_matchup_marks(canvas, context, away, home, away_top=0, home_top=27)
     for side, top in ((game.away, 0), (game.home, 27)):
-        canvas.text(23, top, side.abbreviation, _WHITE, font="6x10")
+        canvas.text(_S_LANE_X, top, side.abbreviation, _WHITE, font="6x10")
         if side.record is not None:
-            canvas.text(23, top + 10, side.record.text(), _STATS_TEAL, font="6x10")
+            canvas.text(_S_LANE_X, top + 10, side.record.text(), _STATS_TEAL, font="6x10")
     if game.line is not None:
         draw_centered(canvas, 0, 64, 21, _odds_text(game, game.line), _ODDS_GREEN, "4x6")
-    if game.phase is Phase.PREGAME and game.tip is not None:
-        clock = start_time_label(game.tip, context.timezone)
-        label_w = text_width("TIPOFF ", "4x6")
-        x = (64 - label_w - _time_width(clock, "4x6")) // 2
-        canvas.text(x, 48, "TIPOFF", _GOLD, font="4x6")
-        _draw_time(canvas, x + label_w, 48, clock, _WHITE, "4x6")
-    else:
+    if game.tip is None:
         draw_centered(canvas, 0, 64, 48, "POSTPONED", _GOLD, "4x6")
-    big = _time_to_tip(spec.now, game.tip) if game.tip is not None else "TIP TBD"
-    draw_centered(canvas, 0, 64, 53, big, _WHITE, "6x10")
+        draw_centered(canvas, 0, 64, 53, "TIP TBD", _WHITE, "6x10")
+        return
+    small, big, clock = _tip_lines(spec.now, game.tip, context.timezone)
+    label = "TIPOFF" if game.phase is Phase.PREGAME else "POSTPONED"
+    label_w = text_width(f"{label} ", "4x6")
+    if label_w + _when_width(small, clock, "4x6") > 64:  # POSTPONED and a time: the time goes big, the countdown goes
+        draw_centered(canvas, 0, 64, 48, label, _GOLD, "4x6")
+        small, big = "", small
+    else:
+        x = (64 - label_w - _when_width(small, clock, "4x6")) // 2
+        canvas.text(x, 48, label, _GOLD, font="4x6")
+        _draw_when(canvas, x + label_w, 48, small, clock, _WHITE, "4x6")
+    _draw_when(canvas, (64 - _when_width(big, clock, "6x10")) // 2, 53, big, clock, _WHITE, "6x10")
 
 
 # --- single 64x32 -----------------------------------------------------------------------------------------
@@ -1576,6 +1636,14 @@ _I_PIP_GAP = 1
 _I_WORDS_Y = (7, 16)
 _I_BONUS = "BON"
 _I_STACK_GAP = 1  # rows between the timeouts and the bonus box under them
+# The score's cell sits a row into its lane, so its ink is on rows 2-8. The code's ink ends on the score's last
+# row: 6x10 while both scores have two digits, 5x7 once either reaches 100 (a 6x10 code two columns from a 6x10
+# 1xx reads as one word). The record (5x7) takes rows 10-15 under both, on every card, so a five-character record
+# may run beneath a three-digit score. The timeouts and the bonus box keep 5x7 throughout.
+_I_SCORE_ROW = 1
+_I_CODE = {False: ("6x10", 1), True: ("5x7", 3)}  # face and cell row
+_I_RECORD = ("5x7", 10)
+_I_COUNTS_FONT = "5x7"
 
 
 def _single_counts(canvas: Canvas, side: Side, top: int, font: str, *, live: bool) -> None:
@@ -1617,20 +1685,23 @@ def _single_scored(canvas: Canvas, context: RenderContext, spec: Specimen) -> No
         home_top=_I_ROW,
     )
     scorer = game.caption.team if game.caption is not None and game.caption.tone is Tone.SCORE else None
-    # A three-digit score reaches back to the lane, so the lane drops a size, as the NFL single board's code does.
-    font, drop = ("4x6", 1) if _three_digits(game) else ("5x7", 0)
-    count_tops = _single_count_tops(font)
+    count_tops = _single_count_tops(_I_COUNTS_FONT)
+    code_font, code_row = _I_CODE[_three_digits(game)]
+    record_font, record_row = _I_RECORD
     rows = ((HomeAway.AWAY, away, treatment.away, 0), (HomeAway.HOME, home, treatment.home, _I_ROW))
     for which, team, mark, top in rows:
         side = game.side(which)
         draw_treated_mark(canvas, context, team, mark)  # a color bar: a 20px tile can't fit a 16px row
         color = _text_color(game, which)
         if _shows_counts(spec):
-            _single_counts(canvas, side, count_tops[which], font, live=game.phase is Phase.LIVE)
+            _single_counts(canvas, side, count_tops[which], _I_COUNTS_FONT, live=game.phase is Phase.LIVE)
         else:
-            canvas.text(_I_CODE_X, top + 4 + drop, team.abbreviation, color, font=font)
+            canvas.text(_I_CODE_X, top + code_row, team.abbreviation, color, font=code_font)
+            if side.record is not None:
+                record_color = _DIM_GOLD if _lost(game, which) else _GOLD
+                canvas.text(_I_CODE_X, top + record_row, side.record.text(), record_color, font=record_font)
         score_color = _GREEN if which is scorer else color
-        draw_right_aligned(canvas, _I_SCORE_RIGHT, top + 3, _score_text(side.score), score_color, "6x10")
+        draw_right_aligned(canvas, _I_SCORE_RIGHT, top + _I_SCORE_ROW, _score_text(side.score), score_color, "6x10")
     _meter_if_any(canvas, treatment, game)
     _single_module(canvas, spec)
 
@@ -1653,11 +1724,12 @@ def _single_module(canvas: Canvas, spec: Specimen) -> None:
             draw_centered(canvas, left, right, _I_PIP_Y - 1, _ot_label(game.period), _GOLD, "4x6")
         return
     if game.phase is Phase.FINAL:
-        # A big F; in overtime, over the overtime in the largest face that fits the module, its ink on the
-        # home score's rows.
+        # A big F; in overtime, over the overtime in the largest face that fits the module, on the home score's
+        # rows (the score's face and cell row) with two blank rows under the F.
         if game.period > _REGULATION:
-            draw_centered(canvas, left, right, 5, "F", _GOLD, "8x13B")
-            draw_centered(canvas, left, right, 19, _ot_label(game.period), _GOLD, "6x10")
+            ot_row = _I_ROW + _I_SCORE_ROW
+            draw_centered(canvas, left, right, ot_row - 12, "F", _GOLD, "8x13B")
+            draw_centered(canvas, left, right, ot_row, _ot_label(game.period), _GOLD, "6x10")
         else:
             draw_centered(canvas, left, right, 10, "F", _GOLD, "8x13B")
         return
@@ -1672,26 +1744,43 @@ def _single_module(canvas: Canvas, spec: Specimen) -> None:
         draw_centered(canvas, left, right, y + (1 if word_font == "4x6" else 0), word, _GOLD, word_font)
 
 
-def _single_pregame(canvas: Canvas, context: RenderContext, spec: Specimen) -> None:
-    """Bars and codes; at right the tip time (or the status) over the countdown, both in the codes' face.
+_I_PREGAME_COLUMN = (26, 64)  # two clear columns past the widest 4x6 record
+_I_PREGAME_ROWS = (5, 13, 21)  # cell tops of the tip, the countdown and the favorite's line
 
-    The tip in 6x10 would take 39 of the 40 columns right of the codes at ``6:00 PM`` and 45 at ``12:00 PM``,
-    with no room to breathe, so the tip and the countdown share 5x7, each on its team's code row.
+
+def _single_pregame(canvas: Canvas, context: RenderContext, spec: Specimen) -> None:
+    """Bars, each team's code over its record; at right, the tip over the countdown over the favorite's line.
+
+    The code is 6x10, as on the live cards. The record is 4x6 here: the right column needs the columns a 5x7
+    record would take (a five-character one ends at x28). The column is 38 wide, so the tip can't take 6x10
+    (``6:00 PM`` needs 39 and ``12:00 PM`` 45); the tip and the countdown share 5x7. A tip on another day shows
+    its date over its time in their place; a postponed game puts ``POSTPONED`` first and moves those two down one.
     """
     game = spec.game
     away, home = _teams(game)
     draw_single_bars(canvas, context, away, home)
-    canvas.text(_I_CODE_X, 4, away.abbreviation, _WHITE, font="5x7")
-    canvas.text(_I_CODE_X, 20, home.abbreviation, _WHITE, font="5x7")
-    left, right = 24, 64  # three clear columns past the widest code
-    if game.phase is Phase.PREGAME and game.tip is not None:
-        clock = start_time_label(game.tip, context.timezone)
-        width = _time_width(clock, "5x7")
-        _draw_time(canvas, left + (right - left - width) // 2, 4, clock, _GOLD, "5x7")
+    for side, top in ((game.away, 0), (game.home, _I_ROW)):
+        canvas.text(_I_CODE_X, top + 1, side.abbreviation, _WHITE, font="6x10")
+        if side.record is not None:
+            canvas.text(_I_CODE_X, top + 10, side.record.text(), _STATS_TEAL, font="4x6")
+    left, right = _I_PREGAME_COLUMN
+    tip_y, countdown_y, line_y = _I_PREGAME_ROWS
+    if game.tip is None:
+        draw_centered(canvas, left, right, tip_y + 1, "POSTPONED", _GOLD, "4x6")
+        draw_centered(canvas, left, right, countdown_y, "TIP TBD", _WHITE, "5x7")
+        return
+    upper, lower, clock = _tip_lines(spec.now, game.tip, context.timezone)
+    slots: tuple[tuple[str, int, RGBColor, str], ...]
+    if game.phase is Phase.POSTPONED:  # the status takes the tip's slot, so the tip's two lines move down one
+        draw_centered(canvas, left, right, tip_y + 1, "POSTPONED", _GOLD, "4x6")
+        slots = ((upper, countdown_y, _WHITE, "5x7"), (lower, line_y, _WHITE, "4x6"))
     else:
-        draw_centered(canvas, left, right, 5, "POSTPONED", _GOLD, "4x6")
-    below = _time_to_tip(spec.now, game.tip) if game.tip is not None else "TIP TBD"
-    draw_centered(canvas, left, right, 20, below, _WHITE, "5x7")
+        slots = ((upper, tip_y, _GOLD, "5x7"), (lower, countdown_y, _WHITE, "5x7"))
+    for text, y, color, font in slots:
+        _draw_when(canvas, left + (right - left - _when_width(text, clock, font)) // 2, y, text, clock, color, font)
+    if game.phase is Phase.PREGAME and game.line is not None:
+        favorite = game.side(game.line.favorite).abbreviation
+        draw_centered(canvas, left, right, line_y, f"{favorite} {game.line.moneyline:+d}", _ODDS_GREEN, "4x6")
 
 
 # --- drawing a card ---------------------------------------------------------------------------------------
@@ -1727,26 +1816,26 @@ _SHEET_NAME = {
 }
 _LEGEND = {
     PanelProfile.QUAD_128X64: (
-        "Away top · home bottom    first 6 s: code over record    second 6 s: n×TO over BONUS    "
-        "gold pips = quarters begun    LAST m:ss = game-clock span of the run",
-        "i/N = play i of the N queued while more than one waits    TIMEOUT holds the timeout's first turn, then "
-        "the stat panels rotate until play resumes",
+        "Away top · home bottom    first 6 s: code over record    second 6 s: n×TO over BONUS    6x10 while both "
+        "scores have two digits, 5x7 once one reaches 100",
+        "i/N = play i of the N queued, in ingest order    TIMEOUT holds the timeout's first turn, then the stat "
+        "panels rotate until play resumes",
         "Player lines walk each team's plus-minus order, one player per team per turn    +n / -n = plus-minus",
     ),
     PanelProfile.STACK_64X64: (
-        "Away top · home bottom    first 6 s: code over record (5x7; 4x6 once a score reaches 100)    "
-        "second 6 s: n×TO over BONUS",
-        "Segmented divider = play queue    TIMEOUT holds the timeout's first turn, then the stat panels rotate    "
-        "a ruling splits across its turn's halves",
-        "Line score: Q1/Q2 to the half, H1/Q3, Q3/Q4    final: the winner's best player by game score, then the "
+        "Away top · home bottom    first 6 s: code over record (6x10; 5x7 once a score reaches 100), the record "
+        "under the score    second 6 s: n×TO over BONUS",
+        "Segmented divider = play queue, in ingest order    TIMEOUT holds the timeout's first turn, then the stat "
+        "panels rotate    a ruling splits across its halves",
+        "Line score: Q1/Q2 to the half, H1/Q3, Q3/Q4    final: the winner's best player by plus-minus, then the "
         "loser's    +n / -n = plus-minus",
     ),
     PanelProfile.SINGLE_64X32: (
-        "Away top · home bottom    first 6 s: the code    second 6 s: nTO over a boxed BON, stacked in the team's "
-        "lane (5x7; 4x6 once a score reaches 100)",
+        "Away top · home bottom    first 6 s: code (6x10; 5x7 once a score reaches 100) over record (5x7)    "
+        "second 6 s: nTO over a boxed BON",
         "TO over the code replaces the clock and pips while a timeout lasts    F = final    "
         "no stat panels, captions or rulings on the single",
-        "",
+        "Pregame: tip over countdown over the favorite's moneyline; a tip on another day shows its date (m/d)",
     ),
 }
 _SHEET_BG = (15, 20, 26)
@@ -1821,7 +1910,7 @@ def contact_sheet(profile: PanelProfile, cards: Sequence[tuple[Specimen, Image.I
     sheet_h = header_h + rows * card_h + (rows - 1) * _GAP + footer_h
     sheet = Image.new("RGB", (sheet_w, sheet_h), _SHEET_BG)
     draw = ImageDraw.Draw(sheet)
-    draw.text((_GAP + 4, 18), f"Omni · NBA cards, fourth pass   {_SHEET_NAME[profile]}", fill=_INK, font=head_font)
+    draw.text((_GAP + 4, 18), f"Omni · NBA cards, fifth pass   {_SHEET_NAME[profile]}", fill=_INK, font=head_font)
     draw.text(
         (_GAP + 4, 58),
         f"{scale}× pixel grid  ·  recorded BALLDONTLIE Free states and labeled synthetic specimens  ·  "
@@ -1854,6 +1943,133 @@ def contact_sheet(profile: PanelProfile, cards: Sequence[tuple[Specimen, Image.I
     for i, line in enumerate(_LEGEND[profile]):
         draw.text((_GAP + 4, sheet_h - footer_h + 12 + 22 * i), line, fill=_MUTED, font=sub_font)
     return sheet
+
+
+# --- checking the team lanes against the scores ------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class LaneFit:
+    """One team-lane element at its widest, against the score in the same team row.
+
+    Columns are board columns; rows are offsets below the team row's top.
+    """
+
+    profile: PanelProfile
+    three_digits: bool
+    element: str
+    font: str
+    text: str
+    ends: int  # the last column its ink (or its box) reaches
+    rows: tuple[int, int]
+    score_starts: int  # the first column of the score's ink
+    score_rows: tuple[int, int]
+
+    @property
+    def clear(self) -> int | None:
+        """Blank columns between it and the score, or None when it sits wholly above or below the score's ink."""
+        if self.rows[1] < self.score_rows[0] or self.rows[0] > self.score_rows[1]:
+            return None
+        return self.score_starts - self.ends - 1
+
+
+def _ink_extent(font: str, text: str) -> tuple[int, int, int, int]:
+    """The first and last columns, then the first and last rows, that ``text``'s ink reaches in ``font``."""
+    lit = [(x, y) for y, row in enumerate(rasterize(font, text)) for x, on in enumerate(row) if on]
+    xs, ys = [x for x, _ in lit], [y for _, y in lit]
+    return min(xs), max(xs), min(ys), max(ys)
+
+
+def _widest_code(font: str) -> str:
+    return max(NBA_TEAMS, key=lambda code: _ink_extent(font, code)[1])
+
+
+def _widest_record(font: str) -> str:
+    """The widest record a season can show: five characters, ending in the digit whose ink reaches furthest."""
+    digit = max("0123456789", key=lambda d: _ink_extent(font, d)[1])
+    return f"{digit}{digit}-{digit}{digit}"
+
+
+def _score_ink(font: str, right: int, row: int, three: bool) -> tuple[int, tuple[int, int]]:
+    """Where the score's ink starts at its widest (a 1xx, or any two digits), and the rows it covers."""
+    lead = "1" if three else "123456789"
+    start = right - (3 if three else 2) * text_width("0", font) + min(_ink_extent(font, d)[0] for d in lead)
+    _, _, top, bottom = _ink_extent(font, "0123456789")
+    return start, (row + top, row + bottom)
+
+
+def _fit(
+    profile: PanelProfile,
+    three: bool,
+    element: str,
+    font: str,
+    text: str,
+    x: int,
+    row: int,
+    score: tuple[str, int, int],
+) -> LaneFit:
+    left, right, top, bottom = _ink_extent(font, text)
+    starts, rows = _score_ink(*score, three)
+    return LaneFit(profile, three, element, font, text, x + right, (row + top, row + bottom), starts, rows)
+
+
+def _box_fit(
+    profile: PanelProfile, three: bool, text: str, font: str, x: int, row: int, score: tuple[str, int, int]
+) -> LaneFit:
+    starts, rows = _score_ink(*score, three)
+    ends = x + text_width(text, font)  # the box's last column, as `_draw_inverted` fills it
+    return LaneFit(profile, three, "bonus", font, text, ends, (row, row + _box_height(font) - 1), starts, rows)
+
+
+def lane_fits() -> list[LaneFit]:
+    """Every team-lane element at its widest, on every profile, with two-digit and with three-digit scores."""
+    fits: list[LaneFit] = []
+    quad = (PanelProfile.QUAD_128X64, ("9x18B", _Q_SCORE_RIGHT, 1))
+    stack = (PanelProfile.STACK_64X64, ("8x13B", 64, 1))
+    single = (PanelProfile.SINGLE_64X32, ("6x10", _I_SCORE_RIGHT, _I_SCORE_ROW))
+    for three in (False, True):
+        profile, score = quad
+        font, (code_row, record_row) = _Q_NAMES[three]
+        counts_font, counts_row = _Q_COUNTS[three]
+        fits += [
+            _fit(profile, three, "code", font, _widest_code(font), _Q_LANE_X, code_row, score),
+            _fit(profile, three, "record", font, _widest_record(font), _Q_LANE_X, record_row, score),
+            _fit(profile, three, "timeouts", counts_font, f"7{_TIMES}TO", _Q_LANE_X, counts_row, score),
+            _box_fit(profile, three, "BONUS", "5x7", _Q_LANE_X, _Q_BONUS_ROW, score),
+        ]
+        profile, score = stack
+        font, (code_row, record_row) = _S_NAMES[three]
+        counts_font = _S_COUNTS[three]
+        fits += [
+            _fit(profile, three, "code", font, _widest_code(font), _S_LANE_X, code_row, score),
+            _fit(profile, three, "record", font, _widest_record(font), _S_LANE_X, record_row, score),
+            _fit(profile, three, "timeouts", counts_font, f"7{_TIMES}TO", _S_LANE_X, _S_COUNTS_ROW, score),
+            _box_fit(profile, three, "BONUS", "4x6", _S_LANE_X, _S_BONUS_ROW, score),
+        ]
+        profile, score = single
+        code_font, code_row = _I_CODE[three]
+        record_font, record_row = _I_RECORD
+        top = _single_count_tops(_I_COUNTS_FONT)[HomeAway.AWAY]
+        box_row = top + _ink_height(_I_COUNTS_FONT) + _I_STACK_GAP
+        fits += [
+            _fit(profile, three, "code", code_font, _widest_code(code_font), _I_CODE_X, code_row, score),
+            _fit(profile, three, "record", record_font, _widest_record(record_font), _I_CODE_X, record_row, score),
+            _fit(profile, three, "timeouts", _I_COUNTS_FONT, "7TO", _I_CODE_X, top, score),
+            _box_fit(profile, three, _I_BONUS, _I_COUNTS_FONT, _I_CODE_X, box_row, score),
+        ]
+    return fits
+
+
+def _lane_table(fits: Sequence[LaneFit]) -> str:
+    lines = []
+    for f in fits:
+        digits = "1xx" if f.three_digits else "2-digit"
+        where = "below the score" if f.clear is None else f"{f.clear} blank before x{f.score_starts}"
+        lines.append(
+            f"{f.profile.value:13} {digits:7} {f.element:8} {f.font:5} {f.text:6} "
+            f"ink x..{f.ends} rows {f.rows[0]}-{f.rows[1]}: {where}"
+        )
+    return "\n".join(lines)
 
 
 # --- checking the recorded specimens ----------------------------------------------------------------------
@@ -1906,10 +2122,18 @@ def check_sample(path: Path) -> list[str]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Draw the NBA cards' fourth design pass.")
+    parser = argparse.ArgumentParser(description="Draw the NBA cards' fifth design pass.")
     parser.add_argument("--out", type=Path, required=True, help="where native/ and the contact sheets go")
     parser.add_argument("--sample", type=Path, help="the BALLDONTLIE recording to check the recorded specimens against")
+    parser.add_argument("--fits", action="store_true", help="print each team-lane element's room beside the score")
     args = parser.parse_args()
+    fits = lane_fits()
+    if args.fits:
+        print(_lane_table(fits))
+    touching = [f for f in fits if f.clear is not None and f.clear < 1]
+    if touching:
+        print("team-lane elements touch the score:\n" + _lane_table(touching), file=sys.stderr)
+        return 1
     if args.sample is not None:
         problems = check_sample(args.sample)
         if problems:
