@@ -14,7 +14,8 @@ reports each start once the card's first frame is confirmed. Everything runs on 
   stays break-only. A confirmed start ends the episode, and its members never get a second one; an event first
   offered once an episode has closed opens its own.
 - **Choosing:** the highest ``I``, then the earliest expiry, then the oldest, then the typed id; snapshots and
-  reminders, which carry no ``I``, come after scored events.
+  reminders, which carry no ``I``, come after scored events. Having no ``I`` to clear a bar with, they start only
+  where the lowest bar stands: every live favorite in an ordinary break, or none live; never in a micro-break.
 - **Lifetimes:** a major must start within 120 s of eligibility, a snapshot or reminder within 60 s, and every
   promotion is gone by 120 s, so a 12 s major starts by +108 s. One that can't is retired to the results queue.
 - **Dedupe:** by contest, play and revision. A scoring summary offered under its play's key merges into it; a newer
@@ -224,6 +225,7 @@ class PromotionRefusal(StrEnumMixin, str, Enum):
     BELOW_BAR = "below_bar"  # under the bar the favorites set now
     HOLDING = "holding"  # it may cut into action, but the hold is waiting for a better moment
     BREAK_ONLY = "break_only"  # it can't cut into action: below the action bar, unscored, or on proxy leverage
+    ORDINARY_BREAK_ONLY = "ordinary_break_only"  # unscored: it plays only in an ordinary break or open rotation
     NO_ROOM = "no_room"  # the favorites' break can't fit the card and its return margin
     NOT_PENDING = "not_pending"  # a start reported for a candidate that isn't waiting
     SUPERSEDED = "superseded"  # a newer revision replaced the one cued
@@ -458,6 +460,8 @@ class PromotionBroker(Generic[CardT]):
             return PromotionRefusal.BELOW_BAR
         if context is BarContext.ACTION:
             return PromotionRefusal.HOLDING if holding else PromotionRefusal.BREAK_ONLY
+        if worth is None and context is not BarContext.OPEN:  # no value to weigh against a micro-break's bar
+            return PromotionRefusal.ORDINARY_BREAK_ONLY
         if cueing and not moment.ideal_for(policy.airtime(candidate.kind).full):
             return PromotionRefusal.HOLDING if holding else PromotionRefusal.NO_ROOM
         return None

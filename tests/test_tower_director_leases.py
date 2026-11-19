@@ -35,11 +35,12 @@ from omni.tower.decisions import (
     LeaseNote,
     PolicyDecision,
     UnspentNote,
+    WaitNote,
     YieldNote,
 )
 from omni.tower.lane import ChangeKind, EndReason
 from tests import mlb_break_feeds as statsapi
-from tests.board_policy import PROFILES, T0, Run, at, big_play, facts, games, live, major
+from tests.board_policy import PROFILES, T0, Run, at, big_play, evidence, facts, games, live, major, reminder
 
 COL = statsapi.game()  # Rockies at Dodgers
 OTHER = games(2)[1]
@@ -223,6 +224,25 @@ def test_a_rain_delay_during_a_mound_visit_supersedes_its_lease_and_lends_from_i
     assert given.at.monotonic.seconds == 8.0
     assert not any(note.reason is BaseReason.RETURN for note in run.of(BaseTurnNote))  # never back to the Rockies
     assert all(up.key == live(OTHER).dedupe_key.raw for up in run.ups)
+
+
+# --- An unscored promotion plays only in an ordinary break or open rotation -------------------------------------
+
+
+@pytest.mark.parametrize("profile", PROFILES)
+def test_an_unscored_reminder_waits_out_a_favorite_s_micro_break(profile: PanelProfile) -> None:
+    """The Braves are in a mound visit with room for an 8 s card: a bid reminder, which carries no value, still
+    waits, as a snapshot would; it may play in an ordinary break or open rotation."""
+    atl, other = games(2)
+    run = Run(profile=profile)
+    bid = live(other)
+    run.stage(live(atl), bid)
+    run.describe(facts(atl, 0.4, breaks=(evidence(atl, BreakKind.MLB_MOUND_VISIT, received=-45),)), facts(other, 0.4))
+    run.offers.append(reminder(bid))
+    run.publish()
+    run.run(0, 30)
+    assert run.promotions() == []
+    assert [note.reason for note in run.of(WaitNote)][:1] == [PromotionRefusal.ORDINARY_BREAK_ONLY]
 
 
 # --- What the trace says -----------------------------------------------------------------------------------------

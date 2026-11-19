@@ -365,14 +365,23 @@ def test_a_muted_contests_waiting_candidates_leave_at_once() -> None:
 # --- Snapshots and reminders ---------------------------------------------------------------------------------------
 
 
-def test_a_snapshot_never_plays_into_action_and_waits_for_room_in_a_break() -> None:
+def test_a_snapshot_never_plays_into_action_or_a_micro_break_and_waits_for_room_in_an_ordinary_one() -> None:
     broker = PromotionBroker[str]()
     broker.offer(_unscored("close game"), _m(0))
     assert broker.hold(_m(0)) is None  # an unscored card holds nothing
     assert broker.decide(IN_ACTION, _m(1)).reason is PromotionRefusal.BREAK_ONLY
-    tight = PromotionMoment((FavoriteMoment(activity=FavoriteActivity.MICRO_BREAK, room=7 * S),))
+    micro = PromotionMoment((FavoriteMoment(activity=FavoriteActivity.MICRO_BREAK, room=60 * S),))
+    assert broker.decide(micro, _m(2)).reason is PromotionRefusal.ORDINARY_BREAK_ONLY  # however much room it has
+    mixed = PromotionMoment(
+        (
+            FavoriteMoment(activity=FavoriteActivity.ORDINARY_BREAK, room=60 * S),
+            FavoriteMoment(activity=FavoriteActivity.MICRO_BREAK, room=60 * S),
+        )
+    )
+    assert broker.decide(mixed, _m(2)).reason is PromotionRefusal.ORDINARY_BREAK_ONLY  # every favorite's break counts
+    tight = PromotionMoment((FavoriteMoment(activity=FavoriteActivity.ORDINARY_BREAK, room=7 * S),))
     assert broker.decide(tight, _m(2)).reason is PromotionRefusal.NO_ROOM
-    roomy = PromotionMoment((FavoriteMoment(activity=FavoriteActivity.MICRO_BREAK, room=8 * S),))
+    roomy = PromotionMoment((FavoriteMoment(activity=FavoriteActivity.ORDINARY_BREAK, room=8 * S),))
     decision = broker.decide(roomy, _m(3))
     assert decision.start is not None and decision.start.card == "close game"
 
