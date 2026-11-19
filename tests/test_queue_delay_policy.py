@@ -157,3 +157,27 @@ def test_the_guard_pins_from_the_occurrence_until_a_jump_then_from_receipt() -> 
     jumped = 60 * S
     plausible = Arrival(received=_at(20, jumped=jumped), occurred=T + 75 * S, as_of=T + 80 * S)
     assert guard.pin(plausible, _at(20, jumped=jumped)) == _mono(65)
+
+
+def test_a_board_that_says_its_clock_cant_be_vouched_for_pins_from_receipt_until_it_settles() -> None:
+    """A wake that the readings alone don't show: after ``distrust``, a play with a plausible time waits its full
+    delay from receipt until `SETTLE_AFTER_JUMP` has passed, and a suspicion already longer stands."""
+    guard = ReleaseGuard(POLICY)
+    assert guard.observe(_at(0))
+    guard.distrust(_at(10))
+    plausible = Arrival(received=_at(15), occurred=T + 10 * S, as_of=T + 15 * S)
+    assert guard.pin(plausible, _at(15)) == _mono(15 + 45)  # the full delay from receipt
+    settled = 10 + SETTLE_AFTER_JUMP.total_seconds()
+    assert not guard.observe(_at(settled - 1))
+    later = Arrival(received=_at(settled), occurred=T + (settled - 5) * S, as_of=T + settled * S)
+    assert guard.pin(later, _at(settled)) == _mono(settled + 45 - 5)  # trusted again: 5 s of its age come off
+
+    watch = WallClockWatch()
+    watch.observe(_at(0))
+    assert not watch.observe(_at(10, jumped=60 * S))  # a jump: suspect until 130
+    watch.distrust(_at(20, jumped=60 * S))  # suspect until 140 now
+    assert not watch.observe(_at(135, jumped=60 * S))
+    assert watch.observe(_at(140, jumped=60 * S))
+    watch.distrust(_at(150, jumped=60 * S))
+    watch.distrust(_at(100, jumped=60 * S))  # an older word changes nothing: suspect until 270 still
+    assert not watch.observe(_at(260, jumped=60 * S)) and watch.observe(_at(270, jumped=60 * S))

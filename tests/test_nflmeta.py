@@ -296,7 +296,7 @@ def test_watches_the_feed_for_a_correction_when_the_scoreboard_moves_on_its_own(
     assert feed.play_reads() == reads
 
 
-def test_each_play_entry_carries_when_the_feed_wrote_it_and_a_correction_when_the_correction_was() -> None:
+def test_each_play_entry_carries_when_the_feed_wrote_its_one_change_and_a_correction_when_the_correction_was() -> None:
     feed = FakeFeed()
     touchdown = "C.Brown up the middle for 2 yards, TOUCHDOWN."
     hurt = {"player_name": "Dalton Risner", "team_abbr": "CIN", "state": "out"}
@@ -329,7 +329,7 @@ def test_each_play_entry_carries_when_the_feed_wrote_it_and_a_correction_when_th
     plays = provider.poll(GAME, _at(T0 + timedelta(seconds=10))).events
     dates = [(event.play, event.written_at) for event in plays]
     assert dates == [
-        (1, T0 - timedelta(seconds=200)),  # the earliest change to the play in the read
+        (1, None),  # two changes in the read, at -200 and -150: which one the entry stands for can't be told
         (2, T0 + timedelta(seconds=5)),
         (3, None),  # the feed didn't say
         (None, None),  # an injury: no play row is behind it
@@ -337,7 +337,7 @@ def test_each_play_entry_carries_when_the_feed_wrote_it_and_a_correction_when_th
     later = provider.poll(GAME, _at(T0 + timedelta(seconds=20))).events
     assert [(event.kind, event.play, event.written_at) for event in later] == [
         (FootballEventKind.CONVERSION, 1, T0 + timedelta(seconds=14)),  # the try, dated by its own change
-        (FootballEventKind.PLAY, 4, T0 + timedelta(seconds=15)),
+        (FootballEventKind.PLAY, 4, None),  # written at 15, then corrected at 18, in the same read
     ]
 
 

@@ -22,7 +22,9 @@ held item early nor hold it longer, and what has been released and dropped stays
 
 `WallClockWatch` notices a jump: between two readings UTC moved further than monotonic time did. UTC is
 then suspect for `SETTLE_AFTER_JUMP`, and everything admitted meanwhile waits its full delay from receipt.
-`ReleaseGuard` is one board's rule: its policy and its watch.
+A board that learns its clock can't be vouched for another way (a host that woke from a sleep, where the
+readings alone may not show it) says so (`distrust`), with the same effect; the trust lost carries across
+the wake, never reset by it. `ReleaseGuard` is one board's rule: its policy and its watch.
 
 **Display priority never shortens the delay.** A sports ALERT (walk-off, no-hitter) is exactly the most
 spoiler-heavy content, so it waits like everything else; only a separate system/setup status (not sports
@@ -161,9 +163,20 @@ class WallClockWatch:
         """Note ``at``; whether UTC can be trusted then."""
         origin = at.utc - timedelta(seconds=at.monotonic.seconds)
         if self._origin is not None and abs(origin - self._origin) > self._tolerance:
-            self._suspect_until = at.monotonic + self._settle
+            self._suspect(at)
         self._origin = origin
         return self._suspect_until is None or at.monotonic >= self._suspect_until
+
+    def distrust(self, at: ClockReading) -> None:
+        """UTC can't be vouched for as of ``at`` (the host woke from a sleep, say): suspect until ``settle`` has
+        passed since, however steady the readings look meanwhile. A suspicion already longer stands."""
+        self._suspect(at)
+        self._origin = at.utc - timedelta(seconds=at.monotonic.seconds)
+
+    def _suspect(self, at: ClockReading) -> None:
+        until = at.monotonic + self._settle
+        if self._suspect_until is None or until > self._suspect_until:
+            self._suspect_until = until
 
 
 class ReleaseGuard:
@@ -180,6 +193,11 @@ class ReleaseGuard:
     def observe(self, at: ClockReading) -> bool:
         """Note a reading of the clock (each decision pass does); whether UTC can be trusted at it."""
         return self._watch.observe(at)
+
+    def distrust(self, at: ClockReading) -> None:
+        """The board's clock can't be vouched for as of ``at`` (a wake): whatever is admitted until it settles waits
+        its full delay from receipt."""
+        self._watch.distrust(at)
 
     def pin(self, arrival: Arrival, admitted: ClockReading) -> MonotonicTime:
         """When an item admitted at ``admitted`` may surface, fixed now on the monotonic clock."""
