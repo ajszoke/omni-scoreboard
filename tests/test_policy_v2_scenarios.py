@@ -194,9 +194,10 @@ def test_an_inning_break_the_feed_states_lends_its_guests_the_airtime_section_9_
 M = timedelta(minutes=1)
 
 
-def _finals(*, rockies: bool) -> MixedTimeline:
+def _finals(*, rockies: bool, rockies_end: timedelta = 10 * M) -> MixedTimeline:
     """A (MIN@CLE) ends first, on a walk-off homer at 12:04; B (BOS@NYY) ends at 12:04:30. With ``rockies``, COL@SF
-    (the Rockies a favorite) is in action until its final at 12:10. A's final is corrected at 12:12."""
+    (the Rockies a favorite) is in action until its final, at ``rockies_end`` past 12:00 (12:10 unless said). A's
+    final is corrected at 12:12."""
     a = _MixedGame("1", away=142, home=114, day=SUN, start=SHORT).live(SHORT, _MixedLine(9, _TOP, 1, 1, 6, 6))
     a.live(SHORT + 2 * M, _MixedLine(9, _BOTTOM, 1, 1, 6, 6, 1))
     a.home_run(SHORT + 4 * M, _MixedLine(9, _BOTTOM, 1, 2, 6, 7, 1))
@@ -207,7 +208,7 @@ def _finals(*, rockies: bool) -> MixedTimeline:
     if rockies:
         c = _MixedGame("3", away=115, home=137, day=SUN, start=SHORT).live(SHORT, _MixedLine(5, _TOP, 1, 1, 4, 4))
         c.live(SHORT + 5 * M, _MixedLine(6, _TOP, 1, 1, 5, 4))
-        c.final(SHORT + 10 * M, _MixedLine(9, _BOTTOM, 2, 1, 8, 7, 3))
+        c.final(SHORT + rockies_end, _MixedLine(9, _BOTTOM, 2, 1, 8, 7, 3))
         games.append(c)
     correction = Correction(at=SHORT + 12 * M, game=_mlb_id("1"), away=1, home=3)
     return _short(*games, end=20 * M, faults=(correction,))
@@ -254,8 +255,8 @@ def test_finals_air_in_end_order_after_the_unseen_play_that_decided_the_first_an
 
 def test_a_final_whose_decisive_play_ran_out_unseen_is_unblocked_and_says_so_and_the_end_order_holds() -> None:
     """The Rockies act: A's walk-off can't cut in, retires unseen and its card runs out, and A's final waits for a
-    break. When the Rockies' game ends, A's final goes first, saying its deciding play is gone, then B's, then the
-    Rockies'."""
+    break. When the Rockies' game ends, more than five minutes after A's final cleared the delay, A's final goes first,
+    saying its deciding play is gone (its story is too old to lead it), then B's, then the Rockies'."""
     decided = _mixed(_finals(rockies=True), favorites=Favorites({League.MLB: ["COL"]}))
     assert _when(decided, "unseen", "1:bigplay:1:ab:1", "(too late to start)")
     results = [rest for at, kind, rest in decided if kind == "card" and "(result)" in rest]
@@ -266,16 +267,28 @@ def test_a_final_whose_decisive_play_ran_out_unseen_is_unblocked_and_says_so_and
     ]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="a major's lifetime and its card's window end together, so one retired unseen has no time left to air as a result",
-)
-def test_a_big_play_whose_promotion_ran_out_still_airs_as_a_result() -> None:
+@pytest.mark.parametrize("profile", PROFILES)
+def test_a_big_play_whose_promotion_ran_out_still_airs_as_a_result(profile: PanelProfile) -> None:
     """§4: a candidate below the action bar stays break-only until its lifetime ends, then goes to the results queue.
-    The pipeline gives a big play's card a window as long as every promotion's lifetime (120 s), and a 12 s major must
-    start by +108 s, so the card has six seconds left when it retires: less than its minimum."""
-    decided = _mixed(_finals(rockies=True), favorites=Favorites({League.MLB: ["COL"]}))
-    assert [at for at, kind, rest in decided if kind == "up" and "1:bigplay:1:ab:1" in rest]
+    A's walk-off can't cut into the Rockies' action; its promotion and its card both run out unseen. The Rockies' game
+    ends at 12:07, inside five minutes of A's final clearing the delay, so A's final, first in end order, airs first
+    as the walk-off's still with the final score: one result, spending no promotion."""
+    decided = _mixed(
+        _finals(rockies=True, rockies_end=7 * M), favorites=Favorites({League.MLB: ["COL"]}), profile=profile
+    )
+    assert _when(decided, "unseen", "1:bigplay:1:ab:1", "(too late to start)")
+    [summary] = [at for at, kind, rest in decided if kind == "up" and "1:bigplay:1:ab:1:result" in rest]
+    results = [(at, rest) for at, kind, rest in decided if kind == "card" and "(result)" in rest]
+    assert results[0] == (
+        summary,
+        "mlb:mlb_statsapi:1:final  (result) | why: Twins at Guardians: final, with the play that decided it",
+    )
+    assert [rest.split()[0] for _, rest in results] == [
+        "mlb:mlb_statsapi:1:final",
+        "mlb:mlb_statsapi:2:final",
+        "mlb:mlb_statsapi:3:final",
+    ]
+    assert not [rest for at, kind, rest in decided if kind == "promote"]
 
 
 # --- NFL's official timeout -------------------------------------------------------------------------------------

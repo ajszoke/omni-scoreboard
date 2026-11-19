@@ -230,6 +230,7 @@ class PromotionRefusal(StrEnumMixin, str, Enum):
     NOT_PENDING = "not_pending"  # a start reported for a candidate that isn't waiting
     SUPERSEDED = "superseded"  # a newer revision replaced the one cued
     BREAK_OVER = "break_over"  # the break it was cued into ended (play resumed, or its lease ran out) before its frame
+    WITHDRAWN = "withdrawn"  # the published view no longer offers it (a correction took it back)
 
 
 class OfferOutcome(StrEnumMixin, str, Enum):
@@ -327,6 +328,10 @@ class PromotionBroker(Generic[CardT]):
         """The waiting candidates, best first."""
         return tuple(sorted(self._pending.values(), key=self._rank))
 
+    def waiting(self, key: PromotionKey) -> PromotionCandidate[CardT] | None:
+        """The candidate waiting under ``key``, if one is."""
+        return self._pending.get(key)
+
     def offer(self, candidate: PromotionCandidate[CardT], at: MonotonicTime) -> OfferResult[CardT]:
         """Take in a released candidate: wait it, merge it, or refuse it."""
         refusal = self._screen(candidate, at)
@@ -390,6 +395,18 @@ class PromotionBroker(Generic[CardT]):
         for candidate in dropped:
             self._drop(candidate.key)
         return dropped
+
+    def retract(self, key: PromotionKey) -> PromotionCandidate[CardT] | None:
+        """Drop the candidate waiting under ``key`` (its offer was withdrawn, or no longer shows its event), and
+        return it. It isn't remembered as shown or retired: a later revision may be offered afresh."""
+        waiting = self._pending.get(key)
+        self._drop(key)
+        return waiting
+
+    def sweep(self, at: MonotonicTime) -> tuple[PromotionCandidate[CardT], ...]:
+        """Retire the candidates past their latest start at ``at``, oldest first, for the results queue, as a
+        decision would; returns them."""
+        return self._sweep(at)
 
     def decide(self, moment: PromotionMoment, at: MonotonicTime) -> PromotionDecision[CardT]:
         """At a legal decision: the best candidate that may start now, or why each waits. Candidates past their

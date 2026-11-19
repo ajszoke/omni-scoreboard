@@ -32,6 +32,18 @@ spends nothing. A non-base card waiting on its promotion airs by no other route 
 play, which leads its game's next turn. A no-hit bid's reminders are the director's to pace (§6): when new, then once
 60 open seconds have passed since the last one showed, three at most, each offered as a candidate of its own.
 
+**A promotion airs its exact event.** Every scored offer names a card whose content is fixed for that event's
+revision: the card as first offered is kept, and if the view's card under that key later shows something else, the
+offer no longer describes it and is never promoted (a newer revision is taken afresh, keeping its eligibility). Each
+published view is reconciled with the broker: a waiting candidate the view no longer offers is withdrawn, so a
+correction that took it back can't air it, nor cite it in a "why" line. A moment whose story has aired, promoted, in
+its own game's turn or as a result, is never promoted again while its game is on hand, whenever its offer arrives.
+
+**The unseen major's result** (`omni.tower.summary`): a decisive event or a confirmed feat whose promotion ran out
+unseen is kept as a `ResultSummary`, and its game's final, in its own place in end order, is first presented as that
+summary: the event's still with the final's score. It spends no cooldown. Stale (five minutes past the final's
+eligibility), already aired, or undrawable, it's dropped and the final airs plain, saying its deciding play is gone.
+
 **Leases** open on the view's released break evidence and close when released action after the break began names
 it (`ActionEvidence.closes`). Each is anchored at the release instant pinned for its evidence's answer, less the age
 the break already had when that answer arrived, however late the decision that reads it; a new independent interval
@@ -120,6 +132,7 @@ from omni.tower.decisions import (
 from omni.tower.board import muted
 from omni.tower.interruption import Interruption
 from omni.tower.lane import EndReason, earliest
+from omni.tower.summary import ResultSummary, SummaryPolicy, terminal
 
 if TYPE_CHECKING:  # the settings' module imports the app's versions, whose package imports the board
     from omni.policy.settings import PolicySettings
@@ -142,6 +155,7 @@ class DirectorPolicy:
     leases: LeasePolicy = LeasePolicy()
     ladder: LadderPolicy = LadderPolicy()
     timing: CardTimingPolicy = CardTimingPolicy()
+    summary: SummaryPolicy = SummaryPolicy()
     caption: timedelta = timedelta(seconds=10)
     status: timedelta = timedelta(seconds=8)
     # How often each league's live game feed is read: MLB's every 15 s, NFL's favorite every 10 s.
@@ -211,6 +225,7 @@ class Air:
     since: MonotonicTime | None = None  # its first confirmed frame
     protected: MonotonicTime | None = None  # until when nothing ordinary may take its place
     caption_until: MonotonicTime | None = None
+    summary: ResultSummary | None = None  # a final first presented as its unseen deciding play's story
 
     @property
     def reason(self) -> SelectionReason:
@@ -229,6 +244,14 @@ class _Bid:
     shown: int = 0
     since: OpenTime | None = None
     attempt: int = 1
+
+
+@dataclass(frozen=True, slots=True)
+class _Offered:
+    """A scored offer's card as it was first offered at its revision: the event the offer describes."""
+
+    revision: int
+    card: ScoreboardCard[Any]
 
 
 @dataclass(frozen=True, slots=True)
@@ -302,6 +325,10 @@ class PolicyDirector:
         self._captions: dict[LeagueScopedId, PlaySummary] = {}  # each game's caption that has aired
         self._bids: dict[LeagueScopedId, _Bid] = {}  # each standing no-hit bid's reminders
         self._waits: dict[PromotionKey, tuple[int, PromotionRefusal | OfferSkip]] = {}  # last reason written
+        self._offered: dict[PromotionKey, _Offered] = {}  # each scored offer's event, as its revision first showed it
+        self._consumed: set[PromotionKey] = set()  # moments whose story has aired: never promoted again
+        self._drawn: dict[str, ScoreboardCard[Any]] = {}  # each card as it last went up
+        self._stories: dict[PromotionKey, ResultSummary] = {}  # unseen decisive events, kept for their finals
         self._refused: dict[str, LeaseRefusal | None] = {}  # each card's last guest verdict written
         self._capped = False  # the cap's binding is written
         self._notes: list[PolicyDecision] = []
@@ -349,7 +376,8 @@ class PolicyDirector:
                     self._remind(candidate, cards, at)
                 else:
                     self._offer(candidate, cards, at)
-        self._prune(cards, view)
+            self._reconcile(view, at)
+        self._prune(cards, view, now)
 
     def choose(self, view: CardView, at: ClockReading, *, skip: frozenset[str]) -> Air | None:
         """What to put up with nothing on air: the card decided in this same cue as the last one came down, or the
@@ -380,13 +408,18 @@ class PolicyDirector:
                 self._note(UnspentNote(at=at, card=air.card.id, key=turn.candidate.key, reason=verdict.refusal))
                 return False
             self._promotion_noted(air, scene, at, hold.deadline if hold is not None else None)
+            self._consumed.add(turn.candidate.key)
             if turn.candidate.kind is PromotionKind.REMINDER:
                 bid = self._bids.setdefault(turn.contest, _Bid())
                 bid.shown, bid.attempt = bid.shown + 1, bid.attempt + 1
                 bid.since = OpenTime.mark(open_now=scene.moment.context is not BarContext.ACTION, at=now)
         air.since = now
-        if air.role is CardRole.PLAY_IN_TURN:
-            self._broker.aired(air.card.dedupe_key)  # shown in its game's turn: no promotion waits for it now
+        self._drawn[air.card.dedupe_key.raw] = air.card
+        if air.role is CardRole.PLAY_IN_TURN:  # shown in its game's turn: no promotion waits for it now
+            self._consumed.update(settled.key for settled in self._broker.aired(air.card.dedupe_key))
+        if air.summary is not None:  # its final's first presentation told the unseen event's story
+            self._consumed.add(air.summary.key)
+            self._stories.pop(air.summary.key, None)
         if turn.started is None:
             air.protected = now + air.minimum
             self._begin(turn, air, at, now)
@@ -446,7 +479,7 @@ class PolicyDirector:
         # The same card again (its game won again, or a lone card): its frame stays, and a new turn begins.
         renewed, role = option.air.turn, option.air.role
         again = role is air.role is CardRole.NEUTRAL  # the same card rotating on its own says nothing new
-        air.turn, air.role = renewed, role
+        air.turn, air.role, air.summary = renewed, role, option.air.summary
         start = turn.started + turn.length
         self._begin(renewed, air, at, start, again=again)
         self._showing(air, start)  # its new turn counts as a showing: a repeat, a status's mark, its last airing
@@ -677,11 +710,7 @@ class PolicyDirector:
         if not self._settings.promotions:
             return None
         decision = self._broker.decide(scene.moment, scene.now)
-        for retired in decision.retired:  # its lifetime ran out: it may still air as an ordinary card
-            self._waited(retired.key, retired.revision, PromotionRefusal.RETIRED, scene.at)
-            bid = self._bids.get(retired.key.contest) if retired.kind is PromotionKind.REMINDER else None
-            if bid is not None:
-                bid.attempt += 1  # unshown: the reminder is still due, offered again as the next attempt
+        self._retire(decision.retired, scene.at)
         for refusal in decision.refusals:
             self._waited(refusal.key, refusal.revision, refusal.reason, scene.at, decision.bar, decision.context)
         start = decision.start
@@ -730,11 +759,43 @@ class PolicyDirector:
         if any(key in scene.reserved for key in before):
             return None  # the play that decided it is waiting on its promotion
         card = scene.usable[before[0]] if before else final
-        # A decisive play that can't air (its card expired or never staged) no longer holds its final back: said so.
+        # A decisive play that can't air (its card expired or never staged) no longer holds its final back: its story
+        # leads the final when it's kept and fresh, and otherwise the final says it's gone.
         gone = any(key.raw not in scene.usable and not self._aired(key.raw) for key in final.after)
-        said = "the play that decided it" if before else "final; the play that decided it is gone" if gone else "final"
+        told = self._summary(scene, final) if gone and not before else None
+        said = (
+            "the play that decided it"
+            if before
+            else (
+                "final, with the play that decided it"
+                if told is not None
+                else "final; the play that decided it is gone" if gone else "final"
+            )
+        )
         why = f"{self._subject(card.contest)}: {said}"
-        return self._ordinary(scene, card, CardRole.RESULT, Rung.INITIAL_RESULT, self._policy.timing.final, why)
+        option = self._ordinary(scene, card, CardRole.RESULT, Rung.INITIAL_RESULT, self._policy.timing.final, why)
+        if option is not None and told is not None:
+            option.air.summary, option.air.shown = told
+        return option
+
+    def _summary(self, scene: _Scene, final: ScoreboardCard[Any]) -> tuple[ResultSummary, ScoreboardCard[Any]] | None:
+        """The kept story of the unseen play that decided ``final``, and the final drawn as it, if it may lead the
+        final now: not aired by any route, fresh (before the earlier of the final's expiry and the policy's span after
+        the final became eligible), from a current source, and drawable here."""
+        window = scene.view.windows[final.dedupe_key.raw]
+        fresh_until = earliest((window.available + self._policy.summary.fresh_for, window.expires))
+        if fresh_until is None or scene.now >= fresh_until or final.stale_since is not None:
+            return None
+        leading = [
+            story
+            for _, story in sorted(self._stories.items(), key=lambda item: str(item[0]))
+            if story.leads(final) and not self._aired(story.card.dedupe_key.raw)
+        ]
+        for story in leading:
+            drawing = story.drawn(final)
+            if drawing is not None and drawing.layout_support.supports(self._profile):
+                return story, drawing
+        return None
 
     def _auxiliary(self, scene: _Scene) -> _Option | None:
         """A due pregame, status or repeat while games are live; with none live, the cards on hand at neutral weight,
@@ -827,6 +888,8 @@ class PolicyDirector:
     def _present(self, air: Air, card: ScoreboardCard[Any], now: MonotonicTime) -> ScoreboardCard[Any]:
         """How a card is drawn in its turn: a live football card in a base turn shows a caption it hasn't shown, once
         and only if the turn has room for all of it; otherwise the field alone."""
+        if air.summary is not None:  # a final led by its unseen deciding play: drawn as that story, its score current
+            return air.summary.drawn(card) or card
         caption = _caption(card)
         turn = air.turn
         if caption is None or not turn.base or air.caption_until is not None:
@@ -911,11 +974,21 @@ class PolicyDirector:
         self._cards = None
         self._run, self._recovery_owed, self._next, self._current = NonBaseRun(), False, None, None
 
-    def _prune(self, cards: CardView, view: PolicyView) -> None:
+    def _prune(self, cards: CardView, view: PolicyView, now: MonotonicTime) -> None:
         """Forget what's remembered of cards, games and candidates no longer in the input, so nothing slowly leaks."""
-        for memory in (self._shown_at, self._repeats, self._open, self._refused):
+        for memory in (self._shown_at, self._repeats, self._open, self._refused, self._drawn):
             for key in [key for key in memory if key not in cards.cards]:
                 del memory[key]
+        standing = {offer.key for offer in view.offers}
+        for promotion in [
+            each for each in self._offered if each not in standing and self._broker.waiting(each) is None
+        ]:
+            del self._offered[promotion]
+        present = {card.contest.id for card in cards.cards.values()} | set(view.games)
+        self._consumed = {key for key in self._consumed if key.contest in present}
+        self._stories = {
+            key: story for key, story in self._stories.items() if key.contest in present and now < story.until
+        }
         for contest in [contest for contest in self._captions if contest not in view.games]:
             del self._captions[contest]
         bidding = {offer.key.contest for offer in view.offers if offer.kind is PromotionKind.REMINDER}
@@ -994,19 +1067,97 @@ class PolicyDirector:
 
     def _offer(self, candidate: PromotionCandidate[DedupeKey], cards: CardView, at: ClockReading) -> None:
         card = cards.card(candidate.card.raw)
-        skip: OfferSkip | None = None
         if card is None:
-            skip = OfferSkip.NOT_IN_VIEW
-        elif not card.layout_support.supports(self._profile):
+            self._waited(candidate.key, candidate.revision, OfferSkip.NOT_IN_VIEW, at)
+            return
+        skip: OfferSkip | None = None
+        if not card.layout_support.supports(self._profile):
             skip = OfferSkip.NOT_DRAWABLE
         elif self._muted(card.contest):
             skip = OfferSkip.MUTED
+        elif candidate.kind is not PromotionKind.REMINDER:  # a reminder's card is the standing bid's, as it stands
+            skip = self._exact(candidate, card)
         if skip is not None:
             self._waited(candidate.key, candidate.revision, skip, at)
             return
         result = self._broker.offer(candidate, at.monotonic)
-        if result.outcome is OfferOutcome.REFUSED and result.refusal is not None:
+        if result.outcome is OfferOutcome.ACCEPTED and candidate.value is not None and self._told(candidate):
+            self._broker.retract(candidate.key)  # its story aired before its offer arrived: never twice
+            self._waited(candidate.key, candidate.revision, PromotionRefusal.ALREADY_SHOWN, at)
+        elif result.outcome is OfferOutcome.REFUSED and result.refusal is not None:
+            if result.refusal is PromotionRefusal.RETIRED:
+                self._revise_story(candidate, card)
             self._waited(candidate.key, candidate.revision, result.refusal, at)
+
+    def _exact(self, candidate: PromotionCandidate[DedupeKey], card: ScoreboardCard[Any]) -> OfferSkip | None:
+        """Whether a scored offer still names its exact event. The card a revision is first offered with is the event
+        it describes; once the card under its key shows something else, the offer is refused, and a candidate waiting
+        on it withdrawn, until a newer revision describes the card anew."""
+        key = candidate.key
+        offered = self._offered.get(key)
+        if offered is None or candidate.revision > offered.revision:
+            self._offered[key] = _Offered(candidate.revision, card)
+        elif candidate.revision == offered.revision and not _same_event(offered.card, card):
+            self._broker.retract(key)
+            return OfferSkip.CHANGED
+        return None
+
+    def _told(self, candidate: PromotionCandidate[DedupeKey]) -> bool:
+        """Whether a scored moment's story has aired already: promoted, or its event's card committed as it was offered
+        (in its own game's turn, or as a result), whenever its offer arrives."""
+        drawn = self._drawn.get(candidate.card.raw)
+        return candidate.key in self._consumed or (
+            drawn is not None and _same_event(self._offered[candidate.key].card, drawn)
+        )
+
+    def _reconcile(self, view: PolicyView, at: ClockReading) -> None:
+        """Withdraw each waiting candidate the published view no longer offers (a reminder: while its bid stands), so
+        a correction that took an offer back keeps it off the board. One past its latest start had run out first:
+        it's retired, as a decision would have."""
+        offered = {offer.key for offer in view.offers if offer.kind is not PromotionKind.REMINDER}
+        bidding = {offer.key.contest for offer in view.offers if offer.kind is PromotionKind.REMINDER}
+        gone = [
+            candidate
+            for candidate in self._broker.pending()
+            if not (
+                candidate.key.contest in bidding
+                if candidate.kind is PromotionKind.REMINDER
+                else candidate.key in offered
+            )
+        ]
+        now = at.monotonic
+        if any(now > self._broker.policy.latest_start(candidate) for candidate in gone):
+            self._retire(self._broker.sweep(now), at)
+        for candidate in gone:
+            if self._broker.retract(candidate.key) is not None:
+                self._waited(candidate.key, candidate.revision, PromotionRefusal.WITHDRAWN, at)
+
+    def _retire(self, retired: Iterable[PromotionCandidate[DedupeKey]], at: ClockReading) -> None:
+        """Candidates whose lifetime ran out unseen: written so; a bid's reminder is offered again as its next attempt,
+        and a decisive event's or a feat's story is kept for its game's final."""
+        for candidate in retired:
+            self._waited(candidate.key, candidate.revision, PromotionRefusal.RETIRED, at)
+            bid = self._bids.get(candidate.key.contest) if candidate.kind is PromotionKind.REMINDER else None
+            if bid is not None:
+                bid.attempt += 1  # unshown: the reminder is still due, offered again as the next attempt
+            value = candidate.value
+            if value is None or not terminal(value.event_class):
+                continue  # ordinary action: its state is obsolete once the game has moved on
+            offered = self._offered[candidate.key]  # every scored candidate the broker holds was offered through here
+            if offered.card.kind is not CardKind.FINAL:  # a feat named on its final airs as that final's own result
+                self._stories[candidate.key] = ResultSummary(
+                    key=candidate.key,
+                    revision=candidate.revision,
+                    event=value.event_class,
+                    card=offered.card,
+                    until=self._broker.policy.hard_end_of(candidate) + self._broker.policy.remember_for,
+                )
+
+    def _revise_story(self, candidate: PromotionCandidate[DedupeKey], card: ScoreboardCard[Any]) -> None:
+        """A newer revision of an event whose promotion ran out replaces its kept story, on the same final's clock."""
+        story = self._stories.get(candidate.key)
+        if story is not None and candidate.revision > story.revision:
+            self._stories[candidate.key] = replace(story, revision=candidate.revision, card=card)
 
     # --- notes -----------------------------------------------------------------------------------------------
 
@@ -1256,6 +1407,12 @@ def _ended(card: ScoreboardCard[Any], scene: _Scene) -> float:
     """When a final's game ended, for the end order, as the queue orders finals."""
     instant = card.ended.at if card.ended is not None else card.timing.available_at
     return (instant - scene.at.utc).total_seconds()
+
+
+def _same_event(offered: ScoreboardCard[Any], card: ScoreboardCard[Any]) -> bool:
+    """Whether ``card`` still draws what ``offered`` drew: the same kind and payload (its timing or staleness may
+    differ)."""
+    return offered.kind is card.kind and offered.payload == card.payload
 
 
 def _caption(card: ScoreboardCard[Any]) -> PlaySummary | None:

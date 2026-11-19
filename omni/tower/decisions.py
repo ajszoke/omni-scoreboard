@@ -98,6 +98,7 @@ class OfferSkip(StrEnumMixin, str, Enum):
     NOT_DRAWABLE = "not_drawable"  # the card can't be drawn on this panel
     MUTED = "muted"  # its game is muted
     SET_ASIDE = "set_aside"  # chosen, but its card is set aside or out of its window now: it waits
+    CHANGED = "changed"  # the card it names no longer shows the event it was offered for: never promoted
 
 
 class LeaseEvent(StrEnumMixin, str, Enum):

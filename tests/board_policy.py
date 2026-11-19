@@ -270,6 +270,16 @@ class Run:
     def on(self, when: float, event: Callable[[], None]) -> None:
         self.events.setdefault(float(when), []).append(event)
 
+    def publish_at(self, when: float, *changes: Callable[[], object]) -> None:
+        """At ``when``, make ``changes`` in order, then publish the input, as a refresh does."""
+
+        def refresh() -> None:
+            for change in changes:
+                change()
+            self.publish()
+
+        self.on(when, refresh)
+
     # --- running ----------------------------------------------------------------------------------------------
 
     def step(self, seconds: float) -> BoardCue:
