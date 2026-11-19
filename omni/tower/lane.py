@@ -77,6 +77,7 @@ class EndReason(StrEnumMixin, str, Enum):
     LANDED_LATE = "accidental: landed after its latest start"  # its first frame reached the panel too late to count
     GRANT_LAPSED = "accidental: landed after its grant lapsed"  # its first frame landed once its grant no longer held
     UNCONFIRMED = "its display can't confirm it"  # a display that never says what it showed can't start it
+    INTERRUPTED = "interrupted"  # the host slept or stalled, or the display lost its panel
 
 
 class ChangeKind(StrEnumMixin, str, Enum):

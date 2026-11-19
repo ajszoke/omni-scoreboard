@@ -103,6 +103,7 @@ from omni.queue.delayed_event_stream import DelayedEventStream
 from omni.queue.delayed_feed import DelayedFeed
 from omni.queue.scheduler import InterleavedCardQueue
 from omni.renderers.live_football import NO_STRIP_NOTE
+from omni.tower.interruption import Interruption
 
 __all__ = ["LiveFootballPipeline", "NflCardPolicy"]
 
@@ -243,6 +244,8 @@ class LiveFootballPipeline:
         self._current_until: dict[LeagueScopedId, MonotonicTime] = {}  # when a game's newest answer stops being
         self._awaiting: AwaitingSuccessor[_ReleasedPlay] = AwaitingSuccessor()  # released plays: the state after?
         self._offers = StandingOffers()
+        self._woke: MonotonicTime = MonotonicTime(0.0)  # the last host interruption's end, on the monotonic clock
+        self._woken: dict[LeagueScopedId, Held[_Field] | None] = {}  # each game's field released before it
 
     def refresh(self, games: Iterable[TeamGame], *, at: ClockReading) -> PipelineResult:
         """Take each live or final game's new answers as of ``at``, surface its phase's card into the queue, and drop
@@ -556,6 +559,8 @@ class LiveFootballPipeline:
     def _enforce_staleness(self, game_id: LeagueScopedId, live: _Live, at: ClockReading) -> None:
         """A game whose live card isn't current: the card is marked stale, and comes down `stale_for` after."""
         since = self._stale.get(game_id)
+        if self._woken_field(game_id, live):  # its field is from before the host's gap: stale since the gap
+            since = self._stale[game_id] = self._woke if since is None else min(since, self._woke)
         if since is None or live.card is None:
             return
         if at.monotonic.since(since) >= self._policy.stale_for:
@@ -674,6 +679,33 @@ class LiveFootballPipeline:
             score=_FAVORITE_SCORE,
             reasons=(f"favorite #{rank} {leader.abbreviation}",),
         )
+
+    # --- a host's interruption ---------------------------------------------------------------------------------
+
+    def interrupted(self, interruption: Interruption) -> None:
+        """The host slept or stalled (`BOARD_POLICY.md` §6, "Wake or output loss"): what the pipeline held from before
+        the gap is history. Each live game's states, plays and break evidence still in the delay go, with its caption
+        and the offers waiting; its next answer's plays are set aside, as a first answer's are, so a batch the gap
+        held back can't caption or promote; and the field its card shows, released before the gap, is drawn stale
+        from the gap's end (coming down `stale_for` later) until a state answered after it clears the delay. A final
+        stands. (An output loss is the display's: the loop tells the pipelines only of a host's gap.)"""
+        self._woke = interruption.after.monotonic
+        for game_id, live in self._live.items():
+            live.states, live.plays = DelayedFeed(self._guard), DelayedEventStream(self._guard)
+            live.breaks = ReleasedBreaks(self._guard)
+            live.primed, live.last, live.caption = False, None, None
+            self._woken[game_id] = live.shown
+        self._awaiting = AwaitingSuccessor()
+        self._offers = StandingOffers()
+
+    def _woken_field(self, game_id: LeagueScopedId, live: _Live) -> bool:
+        """Whether a game's card still shows the field it showed when the host's gap ended."""
+        if game_id not in self._woken:
+            return False
+        if live.shown is self._woken[game_id]:
+            return True
+        del self._woken[game_id]  # a field released since: current again, as its answers say
+        return False
 
 
 def _field_of(state: FootballGameState) -> tuple[object, ...]:

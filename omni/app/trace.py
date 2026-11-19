@@ -28,6 +28,10 @@ One line per change, so a running board's log reads as a story rather than a hea
   came down before it ever drew. A **stale** line marks a card going up, or turning, stale. A **note**
   line is something else the board decided, such as finding no base card for the turn it owes one.
 - A paint failure is written once when it starts, and once when frames commit again.
+- An **interrupted** line is an interruption the board took in (`omni.tower.interruption`): a host suspend (and
+  whether its clock is trusted), a process stall or an output loss, how long the gap ran, the display's sessions
+  either side, its last confirmed frame and the frames in flight. A **resumed** line names the first frame up after
+  it (the up or frame line before it names what), and the display time unknown after output losses so far.
 
 Under `omni-board-policy/2` the board's decisions (`omni.tower.decisions`) are written too, one line each, with
 the policy's factors as fields and the "why this card" sentence last:
@@ -61,6 +65,7 @@ from omni.core.enum import League
 from omni.policy.ledger import DebtClamp
 from omni.renderers.visual_treatment import MarkTreatment
 from omni.tower.board import BoardFrame, BoardPayload
+from omni.tower.interruption import Interruption
 from omni.tower.decisions import (
     BaseTurnNote,
     CapNote,
@@ -135,6 +140,8 @@ class DecisionTracer:
             self._log(f"  unconfirmed: {game} (final on the schedule; its feed hasn't said so)")
 
     def painted(self, painted: Painted) -> None:
+        for interruption in painted.interrupted:
+            self._log(self._interruption(interruption))
         for change in painted.changes:
             self._changed(change, painted)
         for note in painted.notes:
@@ -151,6 +158,26 @@ class DecisionTracer:
         if painted.shown is not None and painted.stale and not self._stale:
             self._log(f"stale {self._clock(painted.at)}: {painted.shown.raw}")
         self._stale = painted.stale
+        resumed = painted.resumed
+        if resumed is not None:
+            unknown = painted.unknown_display.total_seconds()
+            self._log(
+                f"resumed {self._clock(painted.at)}: the first frame since {resumed.reason.value} {resumed.serial}"
+                f" | unknown display {unknown:.1f}s so far"
+            )
+
+    def _interruption(self, interruption: Interruption) -> str:
+        line = (
+            f"interrupted {self._clock(interruption.after.utc)}: {interruption.reason.value} {interruption.serial}"
+            f" ({interruption.gap.total_seconds():.1f}s"
+        )
+        if interruption.host:
+            line += ", clock trusted)" if interruption.clock_trusted else ", clock untrusted)"
+        else:
+            line += f" since its last word) | session {interruption.old_session}->{interruption.new_session}"
+        swap = interruption.last_swap
+        line += f" | last swap {self._clock(swap.utc) if swap is not None else '-'}"
+        return line + f" | {len(interruption.outstanding)} in flight"
 
     def failed(self, exc: Exception) -> None:
         self._log(f"refresh failed: {type(exc).__name__}: {exc}")

@@ -137,6 +137,7 @@ from omni.policy.pool import MatchupRecords, StartingRecords, TeamRecord
 from omni.policy.promotion import CandidateOrigin, PromotionCandidate, PromotionKey, PromotionKind
 from omni.policy.view import EMPTY_POLICY_VIEW, GameFacts, PolicyView
 from omni.providers.base import ProviderError
+from omni.tower.interruption import Interruption
 from omni.queue.delay_policy import Arrival, DelayPolicy, Held, ReleaseGuard
 from omni.queue.delayed_event_stream import DelayedEventStream
 from omni.queue.delayed_feed import DelayedFeed
@@ -434,6 +435,8 @@ class LiveBaseballPipeline:
         self._released: dict[tuple[LeagueScopedId, str], _ReleasedPlay] = {}  # big plays whose card is up, by play
         self._offers = StandingOffers()
         self._bids: dict[LeagueScopedId, _Bid] = {}
+        self._woke: MonotonicTime = MonotonicTime(0.0)  # the last host interruption's end, on the monotonic clock
+        self._woken: dict[LeagueScopedId, BaseballGameState | None] = {}  # each game's state released before it
 
     def refresh(
         self,
@@ -1003,6 +1006,8 @@ class LiveBaseballPipeline:
     def _enforce_staleness(self, game_id: LeagueScopedId, at: ClockReading) -> None:
         """A game whose live card isn't current: its cards are marked stale, and come down `STALE_FOR` after."""
         since = self._stale.get(game_id)
+        if self._woken_state(game_id):  # its state is from before the host's gap: stale since the gap
+            since = self._stale[game_id] = self._woke if since is None else min(since, self._woke)
         if since is None:
             return
         keys = [key for key in (self._card_keys.get(game_id), self._no_hitter_keys.get(game_id)) if key is not None]
@@ -1208,6 +1213,36 @@ class LiveBaseballPipeline:
             since + CONFIRM_WITHIN for game_id, since in self._unconfirmed.items() if game_id not in self._stale
         ]
         return min((instant for instant in instants if instant is not None and instant > at.monotonic), default=None)
+
+    # --- a host's interruption ---------------------------------------------------------------------------------
+
+    def interrupted(self, interruption: Interruption) -> None:
+        """The host slept or stalled (`BOARD_POLICY.md` §6, "Wake or output loss"): what the pipeline held from before
+        the gap is history. Each game's states, plays and break evidence still in the delay go, with the offers and
+        bids waiting; each game's next answer is a baseline, its plays set aside as a first answer's are, so a batch
+        the gap held back can't flash or promote; and a live card's state, released before the gap, is drawn stale
+        from the gap's end (coming down `STALE_FOR` later) until a state answered after it clears the delay. Finals
+        stand. (An output loss is the display's: the loop tells the pipelines only of a host's gap.)"""
+        self._woke = interruption.after.monotonic
+        self._feeds = {game_id: DelayedFeed(self._guard) for game_id in self._feeds}
+        self._event_streams.clear()
+        self._breaks = {game_id: ReleasedBreaks(self._guard) for game_id in self._breaks}
+        self._play_context.clear()
+        self._answered.clear()
+        self._baselined.clear()
+        self._bids.clear()
+        self._awaiting = AwaitingSuccessor()
+        self._offers = StandingOffers()
+        self._woken = {game_id: self._shown.get(game_id) for game_id in self._card_keys}
+
+    def _woken_state(self, game_id: LeagueScopedId) -> bool:
+        """Whether a game's live card still shows the state it showed when the host's gap ended."""
+        if game_id not in self._woken:
+            return False
+        if self._shown.get(game_id) is self._woken[game_id]:
+            return True
+        del self._woken[game_id]  # a state released since: current again, as its answers say
+        return False
 
 
 def _feat(state: BaseballGameState) -> InterruptClass:

@@ -12,7 +12,8 @@ Each runs through `AppLoop.refresh` and `paint` with the real pipelines over syn
   that ran out unseen unblocks its final, which says so; a correction updates the final and is no new game. (Marked:
   a big play retired unseen can't go on to the results queue, its card's window ending with its lifetime.)
 - **NFL's official timeout,** from the feed's own row: one 12 s guest, not a commercial lease.
-- **A 49-minute wake:** what holds, and (marked) what doesn't without a wake signal.
+- **A 49-minute wake:** the host's suspend-inclusive clock tells the board it slept; what it held from before is
+  history.
 - **Clock, scope, quota and partial faults:** a board booted 60 s fast; a raw id both leagues use, and a wall-clock
   backstep, in the v2 day; NFLMeta's Free month spent; an answer missing its score or hits.
 - **Standing offers:** each taken once, no refusal written twice.
@@ -393,10 +394,10 @@ def woken() -> _Woken:
 def test_after_a_49_minute_wake_nothing_old_is_promoted_or_spoiled_and_the_second_league_carries_on(
     woken: _Woken,
 ) -> None:
-    """The board has no wake signal: it notices only its wall clock jumping ahead of its monotonic clock, so
-    what it admits next waits the full delay. Of the 49 plays one read brings, none is promoted; nothing airs
-    before its release; the fresh score first shows when the read after the wake clears the delay; and MLB keeps
-    its turns."""
+    """The board notices the sleep (its suspend-inclusive clock ran 49 minutes while its monotonic clock stood
+    still), and what it admits next waits the full delay. Of the 49 plays one read brings, none is promoted; nothing
+    airs before its release; the fresh score first shows on the Panthers' first turn once the read after the wake
+    clears the delay; and MLB keeps its turns."""
     decided = woken.decided()
     assert not [at for at, kind, _ in decided if kind == "promote"]
     assert woken.run.early == ()
@@ -405,29 +406,23 @@ def test_after_a_49_minute_wake_nothing_old_is_promoted_or_spoiled_and_the_secon
         for step in woken.panthers(_ASLEEP, 600)
         if step.drawn is not None
     ]
-    assert min(at for at, away in scores if away == 7) == _FRESH
+    fresh = min(at for at, away in scores if away == 7)
+    assert _FRESH <= fresh < _FRESH + 12  # the Twins' turn running at 405 ends first
+    ups = [at for at in _when(decided, "up", "nfl:nflmeta:404:live") if at > _FRESH]
+    assert ups[0] == round(fresh, 1)  # it's the card's own first turn after the release: nothing held it back
     assert [at for at, kind, rest in decided if kind == "base" and "mlb:mlb_statsapi:1:live" in rest and at > _ASLEEP]
 
 
-@pytest.mark.xfail(
-    strict=True, reason="the board has no wake signal, so it draws the field it had before the sleep as current"
-)
 def test_after_a_wake_the_field_is_drawn_stale_until_a_fresh_reading_clears_the_delay(woken: _Woken) -> None:
     drawn = woken.panthers(_ASLEEP, _FRESH)
     assert drawn and all(step.painted.stale for step in drawn)
 
 
-@pytest.mark.xfail(
-    strict=True, reason="the board has no wake signal, so a caption from before the sleep keeps its monotonic hard end"
-)
 def test_after_a_wake_no_caption_from_before_the_sleep_is_drawn(woken: _Woken) -> None:
     captions = [step.drawn.payload.last_play for step in woken.panthers(_ASLEEP, _FRESH) if step.drawn is not None]
     assert all(caption is None or caption.headline != "OFFICIAL TIMEOUT" for caption in captions)
 
 
-@pytest.mark.xfail(
-    strict=True, reason="the board has no wake signal, so a lease from before the sleep is still open after it"
-)
 def test_after_a_wake_a_lease_from_before_the_sleep_is_void(woken: _Woken) -> None:
     decided = woken.decided()
     assert not [

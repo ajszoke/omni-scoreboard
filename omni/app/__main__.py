@@ -78,6 +78,7 @@ from omni.preferences.favorites import AppliedMigration, Favorites, parse_favori
 from omni.renderers.image import LogoStore
 from omni.renderers.text_lane import DEFAULT_MARQUEE, ScrollSpeed
 from omni.tower.board import BoardPolicy
+from omni.tower.interruption import InterruptionPolicy
 
 if TYPE_CHECKING:
     from omni.app.planned_mlb import OddsReader
@@ -386,6 +387,7 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
         marquee=DEFAULT_MARQUEE.at(ScrollSpeed(args.scroll_speed)),
         policy=_board_policy(args),
         settings=args.settings,
+        interruptions=InterruptionPolicy(),  # a sleep, a stall or a lost panel is noticed and taken in
     )
     on = ", ".join(league.value for league in League if league in leagues)
     target = f"the board's receiver ({args.sink_command})" if board is not None else "http://localhost:8888/"

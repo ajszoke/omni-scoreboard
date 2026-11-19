@@ -67,6 +67,7 @@ from omni.renderers.image import LogoStore
 from omni.renderers.registry import RendererRegistry, default_registry
 from omni.renderers.text_lane import DEFAULT_MARQUEE, MarqueeStyle
 from omni.tower.board import BoardPolicy
+from omni.tower.interruption import InterruptionPolicy
 from omni.policy.settings import PolicySettings
 
 __all__ = [
@@ -118,6 +119,7 @@ def build_loop(
     nfl: NflSource | None = None,
     nfl_delay: DurationSeconds = DurationSeconds(0),
     settings: PolicySettings | None = None,
+    interruptions: InterruptionPolicy | None = None,
 ) -> AppLoop:
     """Wire the standard spine into an `AppLoop` (deterministic; no I/O performed here).
 
@@ -141,7 +143,8 @@ def build_loop(
     `nfl`, when given, puts NFL on the board: its slate beside ``schedule``, and its games carded through the same
     queue, held back for `nfl_delay` (`broadcast_lag` is baseball's). Its favorites are ``favorites``' NFL clubs.
     With no ``schedule`` the board is NFL's alone. `settings` are the board policy's user settings (the defaults
-    when left out).
+    when left out). `interruptions`, when given, has the loop watch for its host sleeping or stalling, and wake at
+    least every health tick (`omni.tower.interruption`); the running board always does.
     """
     queue = InterleavedCardQueue()
     pipeline = LiveBaseballPipeline(
@@ -180,6 +183,7 @@ def build_loop(
         football=football,
         settings=settings,
         favorites=favorites,
+        interruptions=interruptions,
     )
 
 
@@ -208,13 +212,14 @@ def build_planned_loop(
     nfl: NflSource | None = None,
     nfl_delay: DurationSeconds = DurationSeconds(0),
     settings: PolicySettings | None = None,
+    interruptions: InterruptionPolicy | None = None,
 ) -> AppLoop:
     """The running MLB board: the slate, feeds, pregame details and odds all read from ``planned``'s plan.
 
     The live win meter (the market, then MLB's model) is on only with ``meter``. Each reading stands
     beside a score only if it arrived no later than that score's feed answer. ``nfl``, when given, puts NFL
     on the board beside it, held back for ``nfl_delay``; with no ``planned``, the board is NFL's alone.
-    ``settings`` are the board policy's user settings.
+    ``settings`` are the board policy's user settings, and ``interruptions`` as `build_loop` takes them.
     """
     if planned is None:
         return build_loop(
@@ -231,6 +236,7 @@ def build_planned_loop(
             nfl=nfl,
             nfl_delay=nfl_delay,
             settings=settings,
+            interruptions=interruptions,
         )
     return build_loop(
         planned,  # the slate, date by date, from the plan
@@ -251,6 +257,7 @@ def build_planned_loop(
         nfl=nfl,
         nfl_delay=nfl_delay,
         settings=settings,
+        interruptions=interruptions,
     )
 
 

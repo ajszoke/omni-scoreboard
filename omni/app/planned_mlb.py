@@ -50,12 +50,13 @@ from omni.app.pipeline import MeterReading
 from omni.app.poll_plan import AccountMap, PollKey, PollPlan, PollPolicy, PollPriority, PollSource
 from omni.app.quota import Meter, ProviderAccount
 from omni.core.enum import GameStatus, League
-from omni.core.ids import SourceRef
+from omni.core.ids import LeagueScopedId, SourceRef
 from omni.core.time import local_date
 from omni.domain.baseball import GameLines, PregameDetails, WinProbability
 from omni.domain.contest import TeamGame
 from omni.events.baseball import LiveBaseballFeed
 from omni.preferences.favorites import Favorites
+from omni.tower.interruption import Interruption
 from omni.providers.base import (
     ScopeSpan,
     LocalDate,
@@ -258,6 +259,22 @@ class PlannedMlb:
             return None
         key: PollKey[GameLines | None] = PollKey(PollSource.GAME_LINES, game.id)
         return self._optional(key, lambda asked: odds(game, asked))
+
+    def interrupted(
+        self, interruption: Interruption, *, held: Collection[PollScope], contests: Collection[LeagueScopedId]
+    ) -> None:
+        """The host slept or stalled: the answers held for MLB's slates and live games, and the meter's, are from
+        before the gap, and an ask out across it would bring one from before it. Each is dropped from the plan (what
+        an ask out for it brings back is ignored) and asked again, due at once, when the next pass wants it. A game's
+        feed then has no answer until a new one arrives, so its card is stale meanwhile. Pregame details and odds
+        stand."""
+        for scope in held:
+            if (scope.source, scope.league) == (self.source, self.league):
+                self._plan.drop(PollKey(PollSource.SLATE, scope))
+        for contest in contests:
+            if contest.league is self.league:
+                for kind in (PollSource.GAME_FEED, PollSource.MARKET_WIN_PROBABILITY, PollSource.MODEL_WIN_PROBABILITY):
+                    self._plan.drop(PollKey(kind, contest))
 
     def _scope(self, day: date) -> PollScope:
         return PollScope(self.source, self.league, LocalDate(day))

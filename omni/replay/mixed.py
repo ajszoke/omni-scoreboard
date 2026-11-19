@@ -17,8 +17,8 @@ A `MixedTimeline` is the world one board watches over a day, in its viewer's tim
   - `ClockStep`: the board's wall clock jumps back or ahead; one at the start is the wrong clock it booted with;
   - `Correction`: a final's score corrected by a later answer;
   - `Wake`: the board's host sleeps: the world runs on while the board does nothing and its monotonic clock stands
-    still, as a suspended host's does; on waking its wall clock has jumped ahead by the sleep. It has no other
-    sign of the sleep.
+    still, as a suspended host's does; on waking its wall clock and its suspend-inclusive clock have moved on by
+    the sleep, as a Linux host's do, and the board watches for that (`omni.tower.interruption`).
 
   Quota exhaustion joins these with the quota ledger.
 
@@ -78,6 +78,7 @@ from omni.cards.baseball import BigPlayCardPayload, FinalCardPayload, LiveBaseba
 from omni.cards.factory import CardFactory
 from omni.cards.football import LiveFootballCardPayload
 from omni.core.clock import ClockReading, FakeClock, MonotonicTime
+from omni.tower.interruption import InterruptionPolicy
 from omni.core.enum import GameStatus, League, PanelProfile
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.core.time import DurationSeconds, local_date
@@ -439,7 +440,7 @@ def run_mixed(
     board policy's user settings: without them the board decides by the queue's bands (`omni-board-policy/1`).
     ``watch`` hears every step. Pure and deterministic: no real time, no I/O.
     """
-    clock = FakeClock(timeline.start)
+    clock = FakeClock(timeline.start, suspend_inclusive=MonotonicTime(0.0))
     world = _World(timeline.start, clock)
     plan = PollPlan(MLB_POLICIES)
     mlb = _ReplayMlb(timeline, world)
@@ -473,6 +474,7 @@ def run_mixed(
         football=football,
         settings=settings,
         favorites=favorites,
+        interruptions=InterruptionPolicy(),
     )
     poller = Poller(plan, clock)
     steps = timeline.clock_steps()
@@ -492,7 +494,7 @@ def run_mixed(
         while wakes and wakes[0].at <= world.now():
             wake = wakes.pop(0)
             world.sleep(wake.slept)  # the world runs on; the board's monotonic clock stands still
-            clock.jump(wake.slept)
+            clock.suspend(wake.slept)
             end = _ticks_from(world.monotonic(timeline.end))
             ahead = (instant for instant in timeline.changes if instant > world.now())
             changes = sorted({_ticks_from(world.monotonic(instant)) for instant in ahead})

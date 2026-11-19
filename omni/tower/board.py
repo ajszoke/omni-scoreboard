@@ -46,6 +46,15 @@ credited only on its own say-so) can't give policy 2 its confirmed airtime: the 
 rotates by policy 1's bands, booking in the queue on the display's unconfirmed word, as policy 1 does on such a
 display; the director is told nothing, so it pays no debt, starts no cooldown and claims no first start.
 
+**An interruption** (`interrupted`, `omni.tower.interruption`) makes the presentation invalid (`BOARD_POLICY.md` §6,
+"Wake or output loss"). The card up comes down (`INTERRUPTED`), its time counted to the last moment its display is
+known to have shown it, and a cue waiting for its first frame is void, as is a card the board was about to hand off
+to; the director's turn ends with it. After a host's gap (a sleep, a stall), the board airs nothing from an input
+published before the gap: until a refresh after it publishes (`publish`'s ``after``), it shows the held frame. After
+the display lost its panel, what the board knew still stands, but the time from its display's last word to the next
+frame it confirms is unknown display time, kept apart from the airtime (`unknown_display`), and a new display may
+confirm what it shows, so policy 2 decides again.
+
 When no card should be up, the board says so with an explicit frame: *idle* (nothing to show), *held*
 (games are on, but nothing has cleared the TV delay yet) or *offline* (the source has gone quiet past
 its limit or never answered, or a game's feed has stopped answering and its card has come down). A card
@@ -85,6 +94,8 @@ from omni.preferences.favorites import Favorites
 from omni.queue.scheduler import CardView, InterleavedCardQueue, Pick, SelectionReason
 from omni.tower.lane import ChangeKind, EndReason, LaneChange, earliest
 from omni.tower.segment import Dwell, Provenance, Segment, SegmentKey, Surface
+
+from omni.tower.interruption import Interruption
 
 if TYPE_CHECKING:  # the policy's settings import the app, whose loop imports the board
     from omni.policy.settings import Mutes, PolicySettings
@@ -168,6 +179,7 @@ class BoardInput:
     cards: CardView
     health: BoardHealth
     policy: PolicyView = EMPTY_POLICY_VIEW  # what the policy reads about each game, from the same refresh
+    after: int = 0  # the newest host interruption the refresh had taken in before it published
 
 
 class BoardNote(StrEnumMixin, str, Enum):
@@ -254,21 +266,53 @@ class BoardSession:
         self._notes: list[BoardNote] = []
         self._undrawn: dict[str, tuple[ScoreboardCard[Any], MonotonicTime]] = {}  # set aside: the card, and until
         self._unconfirmed = False  # the display has been credited on its own say-so: policy 2 stands aside
+        self._awaiting = 0  # the newest host interruption: no input published before it airs
+        self._unknown = timedelta(0)  # display time unknown since an output loss, until the next confirmed frame
+        self._unknown_from: MonotonicTime | None = None  # the last moment the lost display was known to show its frame
 
     @property
     def health(self) -> BoardHealth:
         """The source's health, as last published."""
         return self._input.health
 
-    def publish(self, health: BoardHealth, policy: PolicyView = EMPTY_POLICY_VIEW) -> None:
+    @property
+    def unknown_display(self) -> timedelta:
+        """The display time unknown after output losses: from each lost display's last word to the next frame
+        confirmed. It's never airtime."""
+        return self._unknown
+
+    def publish(self, health: BoardHealth, policy: PolicyView = EMPTY_POLICY_VIEW, *, after: int = 0) -> None:
         """A refresh is done: the queue's staged cards, the source's ``health`` and what the ``policy`` reads
-        about each game become the board's input together, as one numbered view."""
-        self._input = BoardInput(self._queue.publish(), health, policy)
+        about each game become the board's input together, as one numbered view. ``after`` is the newest host
+        interruption the refresh had taken in."""
+        self._input = BoardInput(self._queue.publish(), health, policy, after)
+
+    def interrupted(self, interruption: Interruption) -> None:
+        """The board was interrupted: the card up comes down, counted to ``interruption.before`` (the last moment
+        its display is known to have shown it), and nothing cued or about to be handed off carries over."""
+        bound = interruption.before
+        on = self._on_air
+        if on is not None and on.since is not None and bound.monotonic < on.since:
+            bound = ClockReading(bound.project(on.since), on.since)  # never before it went up
+        if self._director is not None:
+            self._director.interrupted(interruption, bound)
+        if on is not None:
+            self._down(EndReason.INTERRUPTED, bound)
+        self._handoff = None
+        if interruption.host:
+            self._awaiting = max(self._awaiting, interruption.serial)
+        else:
+            self._unconfirmed = False  # a new display may confirm what it shows
+            if self._unknown_from is None:
+                self._unknown_from = bound.monotonic
 
     def cue(self, at: ClockReading) -> BoardCue:
         """What should be on the board at ``at``, once the rules have run: the card up, the next card, or
         an explicit frame."""
         board = self._input  # one input for the whole decision, whatever a refresh publishes meanwhile
+        if board.after < self._awaiting:  # published before a host's gap: none of it airs
+            self._air_frame(BoardFrame(FrameKind.HELD, "catching up after an interruption"), at)
+            return self._cue(board.health)
         if self._director is not None and not self._unconfirmed:
             return self._cue_policy(self._director, board, at)
         health = board.health
@@ -322,6 +366,9 @@ class BoardSession:
                 return False  # it changed or left while it was drawn
         on.since = at.monotonic
         self._changes.append(LaneChange(ChangeKind.UP, on.segment, at))
+        if confirmed and self._unknown_from is not None:  # the display's word again: the unknown time ends here
+            self._unknown += max(at.monotonic.since(self._unknown_from), timedelta(0))
+            self._unknown_from = None
         return True
 
     def _accident(self, on: _OnAir, at: ClockReading) -> EndReason | None:

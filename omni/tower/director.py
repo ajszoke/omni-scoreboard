@@ -114,6 +114,7 @@ from omni.tower.decisions import (
     status_words,
 )
 from omni.tower.board import muted
+from omni.tower.interruption import Interruption
 from omni.tower.lane import EndReason, earliest
 
 if TYPE_CHECKING:  # the settings' module imports the app's versions, whose package imports the board
@@ -1152,6 +1153,27 @@ class PolicyDirector:
             if refusal is not None:
                 return refusal
         return None
+
+    def interrupted(self, interruption: Interruption, at: ClockReading) -> None:
+        """The board was interrupted (`BOARD_POLICY.md` §6, "Wake or output loss"). The turn on air ends at ``at``,
+        the last moment its display is known to have shown it, credited to there; nothing queued carries over, nor
+        any caption that aired. After a host's gap (a sleep, a stall) what the policy read before it is history: its
+        leases close, its action markers go, and the promotions waiting are withdrawn. An output loss keeps them, and
+        keeps what the policy has decided: cooldowns, debt and an owed recovery."""
+        self._next = None
+        current = self._current
+        if current is not None:
+            started = current.started
+            assert started is not None  # a turn is current from its start
+            self._end(current, at if at.monotonic >= started else ClockReading(at.project(started), started))
+        self._captions.clear()
+        if not interruption.host:
+            return
+        self._leases = LeaseBook(self._policy.leases)
+        self._actions.clear()
+        self._lapsed.clear()
+        for contest in sorted({candidate.key.contest for candidate in self._broker.pending()}, key=str):
+            self._broker.withdraw(contest)
 
 
 _BASE_REASONS = MappingProxyType(

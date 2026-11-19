@@ -72,6 +72,7 @@ from omni.core.time import local_date
 from omni.domain.contest import TeamGame
 from omni.preferences.favorites import Favorites
 from omni.providers.base import LocalDate, PollScope, ProviderUpdate, ScopeObservation, ScopeReport, ScopeSpan
+from omni.tower.interruption import Interruption
 from omni.providers.nflmeta import (
     DEFAULT_POLL,
     NFLMETA_SOURCE,
@@ -199,6 +200,7 @@ class PlannedNfl:
         self._days: dict[date, _Day] = {}
         self._wanted: dict[PollKey[Any], _Want] = {}
         self._lock = threading.Lock()  # what's known, shared with the poller's workers as their reads return
+        self._epoch = 0  # host interruptions taken in: a read asked before the latest files nothing
         self._polling = threading.Lock()  # one followed-game poll at a time: the provider keeps each game's place
 
     @property
@@ -258,6 +260,21 @@ class PlannedNfl:
         with self._lock:
             known = self._games.get(game.id)
             return known.latest if known is not None else None
+
+    def interrupted(
+        self, interruption: Interruption, *, held: Collection[PollScope], contests: Collection[LeagueScopedId]
+    ) -> None:
+        """The host slept or stalled: every read NFL wants is dropped from the plan (what an ask out for it brings back
+        is ignored) and wanted afresh at the next pass, due at once, within the account's budget; an ask begun before
+        the gap files nothing when it returns; and the answers not yet taken go. Each game's newest answer stays
+        known, for its schedule; the pipeline judges its freshness."""
+        with self._lock:
+            self._epoch += 1
+            for key in self._wanted:
+                self._plan.drop(key)
+            self._wanted = {}
+            for game in self._games.values():
+                game.untaken.clear()
 
     # --- what to read --------------------------------------------------------------------------------------
 
@@ -410,10 +427,14 @@ class PlannedNfl:
     # --- the reads, filed as they return -------------------------------------------------------------------
 
     def _day_list(self, day: date, current_for: timedelta) -> Callable[[datetime], NflSlate]:
+        epoch = self._epoch
+
         def fetch(asked: datetime) -> NflSlate:
             slate = self._provider.day_list()
             arrived = self._clock.read()
             with self._lock:
+                if epoch != self._epoch:
+                    return slate  # asked before the host's gap: its answer is history
                 listing = self._days.setdefault(day, _Day())
                 listing.listed, listing.warnings = arrived, slate.warnings
                 listed: set[LeagueScopedId] = set()
@@ -439,11 +460,15 @@ class PlannedNfl:
         return fetch
 
     def _live(self, day: date, game_ids: tuple[int, ...], current_for: timedelta) -> Callable[[datetime], NflSlate]:
+        epoch = self._epoch
+
         def fetch(asked: datetime) -> NflSlate:
             slate = self._provider.live_scores(game_ids)
             arrived = self._clock.read()
             unlisted = set(game_ids) - slate.listed
             with self._lock:
+                if epoch != self._epoch:
+                    return slate  # asked before the host's gap: its answer is history
                 for snapshot in slate.snapshots:
                     self._update(snapshot, arrived, current_for)
                 for game in self._games.values():
@@ -454,19 +479,21 @@ class PlannedNfl:
         return fetch
 
     def _final(self, game: _Game, current_for: timedelta) -> Callable[[datetime], NflLiveSnapshot]:
-        game_id = int(game.contest.id.raw)
+        game_id, epoch = int(game.contest.id.raw), self._epoch
 
         def fetch(asked: datetime) -> NflLiveSnapshot:
             snapshot = self._provider.scoreboard(game_id)
             arrived = self._clock.read()
             with self._lock:
+                if epoch != self._epoch:
+                    return snapshot  # asked before the host's gap: its answer is history
                 self._update(snapshot, arrived, current_for)
             return snapshot
 
         return fetch
 
     def _followed(self, game: _Game, current_for: timedelta) -> Callable[[datetime], NflLiveSnapshot]:
-        game_id = int(game.contest.id.raw)
+        game_id, epoch = int(game.contest.id.raw), self._epoch
 
         def fetch(asked: datetime) -> NflLiveSnapshot:
             with self._polling:
@@ -474,6 +501,8 @@ class PlannedNfl:
                 hold_ends = self._provider.hold_ends(game_id)
             arrived = self._clock.read()
             with self._lock:
+                if epoch != self._epoch:
+                    return snapshot  # asked before the host's gap: its answer is history
                 followed = self._update(snapshot, arrived, current_for)
                 if followed is not None:
                     followed.hold_ends = hold_ends

@@ -878,7 +878,8 @@ def test_a_host_that_sleeps_takes_no_step_while_the_world_runs_on_and_wakes_with
     asked = [fetched.at for fetched in run.fetched]
     assert max(later - earlier for earlier, later in zip(asked, asked[1:])) < timedelta(minutes=1)
     assert run.spent(ProviderAccount.MLB_STATSAPI).requests == len(run.fetched)
-    assert (awake[0].store.contests[0].status, awake[-1].world) == (GameStatus.LIVE, SHORT + timedelta(minutes=55))
+    assert awake[0].store.contests[0].status is GameStatus.LIVE
+    assert timedelta(0) <= SHORT + timedelta(minutes=55) - awake[-1].world < timedelta(seconds=5)  # a health tick
 
 
 def _naive_start() -> MixedTimeline:

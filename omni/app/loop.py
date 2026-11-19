@@ -46,6 +46,21 @@ The board refreshes and paints on separate cadences:
     display credits only on its own say-so (an older receiver) doesn't count as confirmed (`BoardSession`).
   Painting runs at a frame rate, so scrolling lines, countdowns and blinks move, and never fetches.
 - **`run_once(at)`** is one refresh, then one paint: the single deterministic pass replay drives.
+- **Interruptions** (`omni.tower.interruption`, `BOARD_POLICY.md` §6 "Wake or output loss"). Given an
+  `InterruptionPolicy`, each pass hands its reading to an `InterruptionWatch` as it starts, which finds a host's
+  suspend (the suspend-inclusive clock running ahead of the monotonic one, or without it the wall clock, ambiguously)
+  or a stall (a pass long past its health tick); and the display's word that it lost its panel (`DisplayLost`) is an
+  output loss, with or without a policy. Each interruption is taken in before the pass applies any result or cues
+  anything:
+  - after a host's gap, the refresh tells the sources that hold answers (`InterruptibleSource`: the poll plan's) to
+    drop what they held from before it and ask again promptly, and each pipeline to drop what it held in the delay
+    and draw its live field stale until a state answered after the gap clears the delay; it publishes with the
+    interruption taken in, and the board airs nothing from an input published before it;
+  - the paint tells the board (`BoardSession.interrupted`): the card up comes down, counted to the last moment its
+    display is known to have shown it, and what was cued or in flight is void; after an output loss, the time until
+    the next confirmed frame is unknown display time.
+  The paint that puts up the first frame after an interruption says so (`Painted.resumed`), for the trace. With a
+  policy, the loop wakes at least every health tick (`next_deadline`), whatever its polls are doing.
 - **`refresh_deadline(at)`** says when a refresh next has something to do by itself (a play clearing
   the delay, the source going stale, a card running out of time to air); **`next_deadline(at)`** adds
   the board's own (a card's minimum, its turn, its expiry).
@@ -60,12 +75,13 @@ Each card that reaches the panel is traced at its first committed frame, with ho
 
 from __future__ import annotations
 
+import threading
 from collections import deque
-from collections.abc import Callable, Hashable, Sequence
+from collections.abc import Callable, Collection, Hashable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, tzinfo
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 from omni.app.contest_store import ContestStore, ProviderStatus, Reconciliation, ScopeHealth
 from omni.app.display import DisplaySink
@@ -82,6 +98,7 @@ from omni.app.pipeline import (
 from omni.cards.base import CardId, ScoreboardCard
 from omni.core.clock import Clock, ClockReading, MonotonicTime
 from omni.core.enum import League, Sport
+from omni.core.ids import LeagueScopedId
 from omni.domain.contest import TeamGame
 from omni.policy.view import EMPTY_POLICY_VIEW, PolicyView
 from omni.providers.base import PollScope, ScopeSource
@@ -104,6 +121,7 @@ from omni.tower.board import (
     FrameKind,
     SourceHealth,
 )
+from omni.tower.interruption import Interruption, InterruptionPolicy, InterruptionWatch
 from omni.tower.lane import ChangeKind, LaneChange, earliest
 from omni.tower.segment import Surface
 from omni.policy.names import PolicyName
@@ -116,6 +134,7 @@ __all__ = [
     "OFFLINE_AFTER",
     "UNSHOWN_AFTER",
     "AppLoop",
+    "InterruptibleSource",
     "LeagueHealth",
     "Painted",
     "Presentation",
@@ -194,6 +213,9 @@ class Painted:
     notes: tuple[BoardNote, ...] = ()  # what the board noted since the last paint
     decisions: tuple[PolicyDecision, ...] = ()  # what the board's policy decided since the last paint
     confirmed: tuple[int, ...] = ()  # frames sent that the display confirmed since the last paint, each matched once
+    interrupted: tuple[Interruption, ...] = ()  # interruptions the board took in this paint
+    resumed: Interruption | None = None  # the paint's first frame up is the first since this interruption
+    unknown_display: timedelta = timedelta(0)  # display time unknown after output losses, so far
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -206,6 +228,17 @@ class TickResult:
     shown: CardId | None  # the card committed to the display this tick
     frame: FrameKind | None  # the explicit frame committed this tick
     render_error: str | None  # an isolated render/display failure, if any
+
+
+@runtime_checkable
+class InterruptibleSource(Protocol):
+    """A schedule source that holds answers between passes (one on the poll plan): told of a host's interruption (a
+    suspend or a stall, never an output loss), it drops what it held from before the gap, so nothing asked before it
+    is admitted after, and asks again promptly."""
+
+    def interrupted(
+        self, interruption: Interruption, *, held: Collection[PollScope], contests: Collection[LeagueScopedId]
+    ) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -246,6 +279,7 @@ class AppLoop:
         settings: PolicySettings | None = None,
         favorites: Favorites = Favorites(),
         fresh_past_due: timedelta = FRESH_PAST_DUE,
+        interruptions: InterruptionPolicy | None = None,
     ) -> None:
         if not schedules:
             raise ValueError("a board needs at least one schedule source")
@@ -262,6 +296,17 @@ class AppLoop:
         self._sent: deque[_Sent] = deque()  # frames sent to it and not yet confirmed, oldest first
         self._presented: Presentation | None = None  # a card's first frame confirmed since the last paint
         self._confirmed: list[int] = []  # the frames confirmed since the last paint
+        self._last_swap: ClockReading | None = None  # the last frame the display confirmed
+        # A host's gaps are watched for only given a policy; every interruption, an output loss too, is numbered.
+        self._watching = interruptions is not None
+        self._watch = InterruptionWatch(interruptions if interruptions is not None else InterruptionPolicy())
+        self._lock = threading.Lock()
+        self._for_refresh: list[Interruption] = []  # host interruptions the next refresh takes in
+        self._for_paint: list[Interruption] = []  # interruptions the next paint takes in
+        self._taken = 0  # the newest host interruption a refresh has taken in
+        self._resuming: Interruption | None = None  # the newest interruption, until a frame goes up after it
+        self._resumed: Interruption | None = None
+        self._interrupted: list[Interruption] = []
         self._fetch_feed = fetch_feed
         self._fetch_win_probability = fetch_win_probability  # optional per-game win-prob fetch; None -> no meter
         self._fetch_fallback_win_probability = fetch_fallback_win_probability  # takes over when that goes quiet
@@ -286,6 +331,9 @@ class AppLoop:
     def refresh(self, at: ClockReading) -> Refresh:
         """One refresh as of ``at``: bring the cards up to date, and tell the board how its source stands."""
         now = at.utc
+        self._observe(at)
+        for interruption in self._take(self._for_refresh):
+            self._data_interrupted(interruption)
         held = self._store.scopes
         for schedule in self._schedules:
             self._store.take(schedule.observe(at, held))
@@ -310,7 +358,7 @@ class AppLoop:
         view = pipeline_result.policy
         offers = tuple(offer for offer in view.offers if self._queue.card(offer.card.raw) is not None)
         policy = PolicyView(view.games, offers)  # an offer whose card the prune just took has nothing to promote
-        self._board.publish(health, policy=policy)
+        self._board.publish(health, policy=policy, after=self._taken)
         return Refresh(
             at=now,
             provider_status=status,
@@ -330,7 +378,10 @@ class AppLoop:
         given, is read again once the commit returns, and that reading starts a card's dwell, books it and starts
         its lines. Without one (a replay, a test), no time passes between the two.
         """
+        self._observe(at)
+        self._interrupt_board()  # a host's gap first: a frame sent before it books nothing after it
         self._credit(at)
+        self._interrupt_board()  # then a loss the display just reported
         cue = self._board.cue(at)
         payload = cue.payload
         lanes = _ShownLines(self._lanes, (Surface.BOARD, cue.occurrence), at.monotonic)
@@ -387,6 +438,7 @@ class AppLoop:
             return
         for receipt in display.receipts():
             if isinstance(receipt, DisplayLost):
+                self._raise(self._output_lost(receipt, at))
                 self._sent.clear()  # what was in flight went to a panel that's gone
                 continue
             sent = self._match(receipt.frame)
@@ -396,6 +448,7 @@ class AppLoop:
             shown = ClockReading(at.project(heard), heard)
             sent.lanes.shown(heard)
             self._confirmed.append(sent.frame)
+            self._last_swap = shown
             self._commit(sent.cue, sent.context, shown, confirmed=receipt.confirmed)
         while self._sent and at.monotonic.since(self._sent[0].drawn.monotonic) >= UNSHOWN_AFTER:
             self._sent.popleft()
@@ -413,6 +466,8 @@ class AppLoop:
         payload = cue.payload
         if not self._board.committed(cue, shown, confirmed=confirmed):
             return
+        if self._resuming is not None:
+            self._resumed, self._resuming = self._resuming, None  # the first frame up since the interruption
         if cue.reason is not None and not isinstance(payload, BoardFrame):
             self._presented = Presentation(
                 at=shown.utc,
@@ -425,46 +480,87 @@ class AppLoop:
     def _painted(self, at: ClockReading, cue: BoardCue) -> Painted:
         """What this paint did: the frame or card it drew and handed over, and what the board did meanwhile."""
         payload = cue.payload
-        changes, notes, decisions = self._board_says()
-        confirmed, self._confirmed = tuple(self._confirmed), []
-        presented, self._presented = self._presented, None
+        said = self._said()
         if isinstance(payload, BoardFrame):
-            return Painted(
-                at=at.utc,
-                shown=None,
-                frame=payload.kind,
-                changes=changes,
-                notes=notes,
-                decisions=decisions,
-                presented=presented,
-                confirmed=confirmed,
-            )
-        return Painted(
-            at=at.utc,
-            shown=payload.id,
-            reason=cue.reason,
-            stale=cue.stale,
-            presented=presented,
-            changes=changes,
-            notes=notes,
-            decisions=decisions,
-            confirmed=confirmed,
-        )
+            return Painted(at=at.utc, shown=None, frame=payload.kind, **said)
+        return Painted(at=at.utc, shown=payload.id, reason=cue.reason, stale=cue.stale, **said)
+
+    def _said(self) -> dict[str, Any]:
+        """What the board did, noted and decided since the last paint, and what the display confirmed and the
+        interruptions taken in meanwhile: each is said once."""
+        changes, notes, decisions = self._board_says()
+        said: dict[str, Any] = {
+            "changes": changes,
+            "notes": notes,
+            "decisions": decisions,
+            "presented": self._presented,
+            "confirmed": tuple(self._confirmed),
+            "interrupted": tuple(self._interrupted),
+            "resumed": self._resumed,
+            "unknown_display": self._board.unknown_display,
+        }
+        self._presented, self._confirmed, self._interrupted, self._resumed = None, [], [], None
+        return said
 
     def _failed(self, at: ClockReading, exc: Exception) -> Painted:
-        changes, notes, decisions = self._board_says()
-        confirmed, self._confirmed = tuple(self._confirmed), []
-        presented, self._presented = self._presented, None
-        error = f"{type(exc).__name__}: {exc}"
-        return Painted(
-            at=at.utc,
-            shown=None,
-            render_error=error,
-            changes=changes,
-            notes=notes,
-            decisions=decisions,
-            presented=presented,
-            confirmed=confirmed,
+        return Painted(at=at.utc, shown=None, render_error=f"{type(exc).__name__}: {exc}", **self._said())
+
+    # --- interruptions -------------------------------------------------------------------------------------------
+
+    def _observe(self, at: ClockReading) -> None:
+        """A pass begins at ``at``: whether the gap since the last shows a host's interruption."""
+        if not self._watching:
+            return
+        interruption = self._watch.observe(at)
+        if interruption is not None:
+            self._raise(interruption)
+
+    def _raise(self, interruption: Interruption) -> None:
+        """An interruption, for the passes to take in: a host's gap for both, an output loss for the paint's."""
+        with self._lock:
+            if interruption.host:
+                self._for_refresh.append(interruption)
+            self._for_paint.append(interruption)
+
+    def _take(self, pending: list[Interruption]) -> list[Interruption]:
+        with self._lock:
+            taken = list(pending)
+            pending.clear()
+            return taken
+
+    def _interrupt_board(self) -> None:
+        """The interruptions raised for the paint, taken in before it cues: what was in flight is void, and the
+        board's presentation with it."""
+        for interruption in self._take(self._for_paint):
+            self._sent.clear()  # sent before the interruption: its word renews nothing
+            self._board.interrupted(interruption)
+            self._resuming = interruption
+            self._interrupted.append(interruption)
+
+    def _data_interrupted(self, interruption: Interruption) -> None:
+        """A host's gap, before this refresh takes in any answer: the sources that hold answers drop what they
+        held from before it, and the pipelines what they held in the delay."""
+        held = self._store.scopes
+        contests = [contest.id for contest in self._store.contests]
+        for schedule in self._schedules:
+            if isinstance(schedule, InterruptibleSource):
+                schedule.interrupted(interruption, held=held, contests=contests)
+        self._pipeline.interrupted(interruption)
+        if self._football is not None:
+            self._football.interrupted(interruption)
+        self._taken = interruption.serial
+
+    def _output_lost(self, lost: DisplayLost, at: ClockReading) -> Interruption:
+        """The display lost its panel: an output loss, from its last word (or the last frame it confirmed)."""
+        since = lost.since
+        before = ClockReading(at.project(since), since) if since is not None else self._last_swap or at
+        return self._watch.output_lost(
+            before=before,
+            after=at,
+            old_session=lost.session,
+            new_session=lost.session + 1,
+            last_swap=self._last_swap,
+            outstanding=tuple(sent.frame for sent in self._sent),
         )
 
     def _board_says(
@@ -496,8 +592,10 @@ class AppLoop:
         return earliest((self._pipeline.next_deadline(at), football, self._health_changes_at, missed))
 
     def next_deadline(self, at: ClockReading) -> MonotonicTime | None:
-        """When either pass next has something to do by itself, as of ``at``."""
-        return earliest((self.refresh_deadline(at), self._board.next_deadline(at)))
+        """When either pass next has something to do by itself, as of ``at``; watching for interruptions, at the
+        next health tick at the latest, whatever the polls are doing."""
+        tick = self._watch.next_tick() if self._watching else None
+        return earliest((self.refresh_deadline(at), self._board.next_deadline(at), tick))
 
     def _health(self, leagues: Sequence[LeagueHealth], result: PipelineResult) -> tuple[BoardHealth, ProviderStatus]:
         """The board's view of its source (its healthiest league's schedule) and that league's status, with how

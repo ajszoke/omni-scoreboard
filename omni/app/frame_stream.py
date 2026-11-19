@@ -195,6 +195,7 @@ class DisplayLost:
     session: int = field(default=0, compare=False)
     cause: LossCause = field(default=LossCause.ENDED, compare=False)
     heard: MonotonicTime | None = field(default=None, compare=False)
+    since: MonotonicTime | None = field(default=None, compare=False)  # its display's last word: shown until then
 
 
 DisplayReceipt = FrameShown | DisplayLost
@@ -259,6 +260,7 @@ class DisplayLink:
         self._boot: str | None = None  # the current generation's boot id, once announced
         self._session = 0  # the output session running now: each new one is numbered higher
         self._heard: float | None = None  # when the current session last heard from a receiver with sessions
+        self._word: float | None = None  # when the current session's display last said it showed its frame
         self._first_written: float | None = None  # when a frame first went to the current generation
         self._showing: FrameShown | None = None  # the newest frame the current session showed
         self._receipts: list[DisplayReceipt] = []
@@ -331,7 +333,7 @@ class DisplayLink:
         """The receiver of ``generation`` answered a heartbeat of ``session``."""
         with self._lock:
             if generation == self._current and session == self._session:
-                self._heard = self._monotonic()
+                self._heard = self._word = self._monotonic()
 
     def blanked(self, generation: int, session: int) -> None:
         """The receiver of ``generation`` blanked its panel in ``session``: the session is over."""
@@ -347,7 +349,7 @@ class DisplayLink:
             showing = self._showing
             if showing is None or showing.frame != like:
                 return False
-            self._show(dataclasses.replace(showing, frame=frame))
+            self._show(dataclasses.replace(showing, frame=frame), word=False)
             return True
 
     def receipts(self) -> list[DisplayReceipt]:
@@ -356,10 +358,14 @@ class DisplayLink:
             receipts, self._receipts = self._receipts, []
             return receipts
 
-    def _show(self, receipt: FrameShown) -> None:
-        receipt = dataclasses.replace(receipt, heard=MonotonicTime(self._monotonic()))
+    def _show(self, receipt: FrameShown, *, word: bool = True) -> None:
+        """A receipt, heard now; ``word`` when the display said so itself, rather than its frame being vouched for."""
+        now = self._monotonic()
+        receipt = dataclasses.replace(receipt, heard=MonotonicTime(now))
         self._showing = receipt
         self._receipts.append(receipt)
+        if word:
+            self._word = now
 
     def _check_silence(self) -> None:
         """A receiver that answers heartbeats and has been silent too long has lost its panel, as far as anyone
@@ -373,18 +379,23 @@ class DisplayLink:
         """The current session is over: what it showed is lost, and the next frames go to a new one."""
         showing = self._showing
         if showing is not None:
-            heard = MonotonicTime(self._monotonic())
-            self._receipts.append(DisplayLost(showing.generation, session=self._session, cause=cause, heard=heard))
-        self._showing = None
+            self._receipts.append(self._lost(showing, cause))
+        self._showing, self._word = None, None
         self._session += 1
         self._heard = self._monotonic() if self._heard is not None else None
 
     def _end(self, cause: LossCause) -> None:
         if self._showing is not None:
-            heard = MonotonicTime(self._monotonic())
-            lost = DisplayLost(self._showing.generation, session=self._session, cause=cause, heard=heard)
-            self._receipts.append(lost)
-        self._current, self._showing, self._heard = None, None, None
+            self._receipts.append(self._lost(self._showing, cause))
+        self._current, self._showing, self._heard, self._word = None, None, None, None
+
+    def _lost(self, showing: FrameShown, cause: LossCause) -> DisplayLost:
+        """The loss of what ``showing`` put up, heard now: shown, as far as anyone knows, until the display's last
+        word (or, for a frame credited on no word, until it was)."""
+        word = self._word if self._word is not None else showing.heard.seconds if showing.heard is not None else None
+        since = MonotonicTime(word) if word is not None else None
+        heard = MonotonicTime(self._monotonic())
+        return DisplayLost(showing.generation, session=self._session, cause=cause, heard=heard, since=since)
 
 
 class StreamDisplaySink:
