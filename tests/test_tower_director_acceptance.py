@@ -1,17 +1,21 @@
 """What the v2 acceptance replays found in the board's policy director, each pinned at `BoardSession`, in the synthetic
 time loop of `tests.board_policy`: a favorite's own play that never aired, a lone card written every turn, a final
-shown back to back, two games in one break starving each other, a favorite's final held behind another, and a no-hit
-bid reminded once however long it stood."""
+shown in 8 s turns long past its own, two games in one break starving each other, a favorite's final held behind
+another, and a no-hit bid reminded once however long it stood."""
 
 from __future__ import annotations
+
+import dataclasses
+from datetime import timedelta
 
 from omni.core.enum import League
 from omni.domain.breaks import BreakKind
 from omni.preferences.favorites import Favorites
 from omni.domain.contest import TeamGame
 from omni.policy.promotion import PromotionRefusal
+from omni.tower.board import BoardFrame, FrameKind
 from omni.tower.decisions import CardNote, CardRole, ClampNote, PromotionNote, WaitNote
-from tests.board_policy import Run, big_play, evidence, facts, final, games, live, major, reminder
+from tests.board_policy import Run, big_play, evidence, facts, final, games, live, major, pregame, reminder
 
 ATL_COL = Favorites({League.MLB: ["ATL", "COL"]})
 NO_FAVORITES = Favorites()
@@ -38,21 +42,37 @@ def test_a_favorite_s_own_play_waiting_on_a_bar_it_can_t_clear_airs_first_in_its
 
 
 def test_a_lone_card_rotating_at_neutral_weight_is_written_once_not_every_turn() -> None:
-    lone = final(games(2)[1], ended=-1)
+    game = games(2)[1]
+    lone = pregame(dataclasses.replace(game, scheduled_start=game.scheduled_start + timedelta(hours=2)))
     run = Run(favorites=NO_FAVORITES)
     run.stage(lone)
     run.publish()
     run.run(0, 60)
     assert run.shown(lone.dedupe_key.raw) == [(0.0, None)]
+    assert [(note.role, note.at.monotonic.seconds) for note in run.of(CardNote)] == [(CardRole.NEUTRAL, 0.0)]
+
+
+def test_a_lone_final_airs_its_turn_then_the_clock_then_its_repeats_5_and_15_minutes_after_it_first_went_up() -> None:
+    """With nothing live, the final has its one 8 s turn in end order; nothing else is due, so the board shows its
+    idle frame (the clock) until each repeat falls due, rather than the final in 8 s turns for half an hour."""
+    lone = final(games(2)[1], ended=-1)
+    run = Run(favorites=NO_FAVORITES)
+    run.stage(lone)
+    run.publish()
+    run.run(0, 1500)
+    assert run.shown(lone.dedupe_key.raw) == [(0.0, 8.0), (300.0, 308.0), (900.0, 908.0)]
     assert [(note.role, note.at.monotonic.seconds) for note in run.of(CardNote)] == [
         (CardRole.RESULT, 0.0),
-        (CardRole.NEUTRAL, 8.0),
+        (CardRole.REPEAT, 300.0),
+        (CardRole.REPEAT, 900.0),
     ]
+    idle = [cue.payload for when, cue in run.cues if 8 <= when < 300]
+    assert idle and all(isinstance(frame, BoardFrame) and frame.kind is FrameKind.IDLE for frame in idle)
 
 
-def test_a_final_shown_long_after_its_confirmation_repeats_at_most_twice_then_the_base_comes_back() -> None:
-    """A final confirmed 16 minutes ago is owed both its repeats at once; held up for them, each counts, so it
-    airs three turns (its result and two repeats) and the live game has the board back at 24."""
+def test_a_final_first_shown_long_after_its_confirmation_repeats_only_while_its_turn_ends_by_its_hard_end() -> None:
+    """Confirmed 1000 s before it first went up (held back by a favorite's action, say), its hard end is 800 s after
+    that: the repeat due at 300 fits; the one due at 900 doesn't, and the live game keeps the board."""
     slate = games(3)
     playing = slate[2]
     result = final(slate[1], ended=-1000, available=-1000)
@@ -60,14 +80,12 @@ def test_a_final_shown_long_after_its_confirmation_repeats_at_most_twice_then_th
     run.stage(live(playing), result, when=-1000)
     run.describe(facts(playing, 0.4))
     run.publish()
-    run.run(0, 60)
-    assert run.shown(result.dedupe_key.raw) == [(0.0, 24.0)]
+    run.run(0, 1000)
+    assert run.shown(result.dedupe_key.raw) == [(0.0, 8.0), (308.0, 316.0)]  # 300 fell inside a base turn
     assert [(note.role, note.at.monotonic.seconds) for note in run.of(CardNote)] == [
         (CardRole.RESULT, 0.0),
-        (CardRole.REPEAT, 8.0),
-        (CardRole.REPEAT, 16.0),
+        (CardRole.REPEAT, 308.0),
     ]
-    assert run.keys(since=24) == [live(playing).dedupe_key.raw]
 
 
 def test_two_games_in_one_league_both_in_a_break_share_the_league_s_turns_and_neither_starves() -> None:

@@ -208,8 +208,8 @@ class CardTimingPolicy:
     pregame: timedelta = timedelta(seconds=8)
     pregame_base_turns: int = 4  # with live games, at most one pregame per this many base turns
     final: timedelta = timedelta(seconds=8)  # an initial final's one turn, and each repeat
-    final_repeats: tuple[timedelta, ...] = (timedelta(minutes=5), timedelta(minutes=15))  # since confirmation
-    final_gone: timedelta = timedelta(minutes=30)  # since confirmation
+    final_repeats: tuple[timedelta, ...] = (timedelta(minutes=5), timedelta(minutes=15))  # since its first start
+    final_gone: timedelta = timedelta(minutes=30)  # since confirmation: every turn of it ends by then
     bid_innings: int = 6  # a no-hit or perfect bid's reminders start after this many completed innings
     bid_reminders: int = 3
     bid_every: timedelta = timedelta(seconds=60)  # open time between a bid's reminders
@@ -266,13 +266,18 @@ def initial_final_permitted(*, context: BarContext, related: bool) -> bool:
 
 
 def final_repeat_due(
-    *, since_confirmed: timedelta, repeats_shown: int, policy: CardTimingPolicy = CardTimingPolicy()
+    *,
+    since_first_start: timedelta,
+    since_confirmed: timedelta,
+    repeats_shown: int,
+    policy: CardTimingPolicy = CardTimingPolicy(),
 ) -> bool:
-    """Whether a final's next repeat is due: at most two, at 5 and at 15 minutes after it was confirmed, and none
-    once it's gone."""
-    if final_gone(since_confirmed, policy) or repeats_shown >= len(policy.final_repeats):
+    """Whether a final's next repeat is due now: at most two, the first once 5 minutes have passed since the final
+    first went up, the second once 15 have, each only if its whole turn ends by the final's hard end, 30 minutes after
+    it was confirmed. So a result first shown late may have no repeats left."""
+    if repeats_shown >= len(policy.final_repeats) or since_confirmed + policy.final > policy.final_gone:
         return False
-    return since_confirmed >= policy.final_repeats[repeats_shown]
+    return since_first_start >= policy.final_repeats[repeats_shown]
 
 
 def final_gone(since_confirmed: timedelta, policy: CardTimingPolicy = CardTimingPolicy()) -> bool:

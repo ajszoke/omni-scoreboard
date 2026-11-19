@@ -453,7 +453,8 @@ def test_with_nothing_live_to_weigh_the_cards_on_hand_rotate_longest_unseen_firs
     run.stage(late, early, soon, status(slate[3]))
     run.publish()
     run.run(0, 50)
-    assert run.keys(before=40) == [_key(early), _key(late), _key(soon), _key(status(slate[3])), _key(early)]
+    # Each final has had its turn; neither is due again before 5 minutes, so the pregame and the status rotate.
+    assert run.keys(before=40) == [_key(early), _key(late), _key(soon), _key(status(slate[3])), _key(soon)]
     assert [role for _, role, _ in run.cards()][:5] == ["result", "result", "neutral", "neutral", "neutral"]
     assert run.cards()[2][0] == 16.0 and run.cards()[3][0] == 24.0  # 8 s each: a pregame, then a status
 
@@ -470,7 +471,7 @@ def test_with_games_live_a_pregame_is_due_on_its_ramp_at_most_once_per_four_base
     assert [up for up, _ in run.shown(_key(starting))] == [0.0, 128.0, 256.0]
 
 
-def test_a_shown_final_repeats_at_5_and_15_minutes_and_an_unrelated_one_waits_while_a_favorite_acts() -> None:
+def test_a_shown_final_repeats_5_and_15_minutes_after_it_first_went_up_and_an_unrelated_one_waits_for_a_break() -> None:
     slate = games(3)
     atl, other = slate[0], slate[2]
     result = final(slate[1], ended=-1)
@@ -483,7 +484,8 @@ def test_a_shown_final_repeats_at_5_and_15_minutes_and_an_unrelated_one_waits_wh
     del run.facts[atl.id]
     run.publish()
     run.run(31, 16 * 60)
-    assert [up for up, _ in run.shown(_key(result))] == [36.0, 308.0, 904.0]  # the first decisions once due
+    # It first went up at 36: its repeats fall due at 336 and 936, and air at the first decisions after.
+    assert [up for up, _ in run.shown(_key(result))] == [36.0, 344.0, 940.0]
 
 
 def test_a_final_s_unseen_decisive_play_goes_first_unless_it_waits_on_its_promotion() -> None:

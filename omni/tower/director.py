@@ -22,6 +22,11 @@ follows an unpromoted big play within its turn inherits the turn's. At each:
   rescue, a promotion, an initial final in end order, a due pregame, status or repeat, then the weighted base.
   With nothing live to weigh, the cards on hand rotate at neutral weight, the longest unseen first.
 
+**A final's turns** follow one path with or without a live game: its initial turn in end order, then at most two
+repeats, at 5 and 15 minutes after its first physical start, each in a context that permits it and only if its whole
+turn ends by the final's hard end, 30 minutes after confirmation. Between them it isn't due: the board shows what is,
+or the clock.
+
 **Base turns** go by debt (`targets`, `AirtimeLedger.choose`), league first, then game; the same game winning again
 keeps its frame. When favorites are in breaks and none is in action, another game's card is their guest: it must
 fit what's left of each lease with the return margin, or the board goes back to the favorite. A base turn is
@@ -249,6 +254,14 @@ class _Bid:
 
 
 @dataclass(frozen=True, slots=True)
+class _Final:
+    """A final that has gone up: its first physical start, and when it was confirmed (its window opened)."""
+
+    first: MonotonicTime
+    confirmed: MonotonicTime
+
+
+@dataclass(frozen=True, slots=True)
 class _Offered:
     """A scored offer's card as it was first offered at its revision: the event the offer describes."""
 
@@ -322,6 +335,7 @@ class PolicyDirector:
         self._context = BarContext.OPEN  # the favorites' context at the last decision
         self._shown_at: dict[str, MonotonicTime] = {}  # when each card last went up
         self._repeats: dict[str, int] = {}  # each final's repeats shown
+        self._finals: dict[str, _Final] = {}  # each final that has gone up, from its first start
         self._open: dict[str, OpenTime] = {}  # each status card's open time since it last showed
         self._base_turns: int | None = None  # base turns started since the last pregame; None until one shows
         self._captions: dict[LeagueScopedId, PlaySummary] = {}  # each game's caption that has aired
@@ -525,7 +539,8 @@ class PolicyDirector:
         now = at.monotonic
         dues = (self._reminder_due(bid, now) for bid in self._bids.values())
         reminders = [due for due in dues if due is not None and due > now]  # one due now is offered, or waits to be
-        return earliest((self._broker.next_deadline(now), self._leases.next_deadline(now), *reminders))
+        repeats = [due for due in map(self._repeat_due, self._finals) if due is not None and due > now]
+        return earliest((self._broker.next_deadline(now), self._leases.next_deadline(now), *reminders, *repeats))
 
     def decisions(self) -> list[PolicyDecision]:
         """What the policy decided since the last ask, oldest first."""
@@ -808,7 +823,7 @@ class PolicyDirector:
         for key, card in scene.usable.items():
             if key in scene.reserved or key in base_keys:
                 continue
-            role = self._role(scene, card) if live else _neutral(card, self._aired(key))
+            role = self._role(scene, card) if live or card.kind is CardKind.FINAL else CardRole.NEUTRAL
             if role is not None:
                 options.append((role, card))
         if not options and not live:  # nothing fresh to show: a stale game's dim card is the last safe frame
@@ -820,7 +835,8 @@ class PolicyDirector:
         return self._ordinary(scene, card, role, Rung.AUXILIARY, nominal, self._ordinary_why(role, card))
 
     def _role(self, scene: _Scene, card: ScoreboardCard[Any]) -> CardRole | None:
-        """What a card is due as while games are live, or None when it isn't due or may not play here."""
+        """What a card is due as while games are live (a final, at any time), or None when it isn't due or may not
+        play here."""
         key = card.dedupe_key.raw
         now, context = scene.now, scene.moment.context
         shown = self._shown_at.get(key)
@@ -834,9 +850,13 @@ class PolicyDirector:
                 live_games=True, base_turns_since=self._base_turns, context=context, policy=self._policy.timing
             )
             return CardRole.PREGAME if due and permitted else None
-        if card.kind is CardKind.FINAL and self._aired(key):  # an unaired final waits for its turn in end order
+        if card.kind is CardKind.FINAL:
+            final = self._finals.get(key)
+            if final is None:
+                return None  # an unaired final waits for its turn in end order
             due = final_repeat_due(
-                since_confirmed=now.since(scene.view.windows[key].available),
+                since_first_start=now.since(final.first),
+                since_confirmed=now.since(final.confirmed),
                 repeats_shown=self._repeats.get(key, 0),
                 policy=self._policy.timing,
             )
@@ -941,6 +961,9 @@ class PolicyDirector:
         repeat counted."""
         key = air.card.dedupe_key.raw
         self._shown_at[key] = at
+        if air.card.kind is CardKind.FINAL and key not in self._finals:
+            assert self._cards is not None  # a card is up only from an input taken in
+            self._finals[key] = _Final(first=at, confirmed=self._cards.windows[key].available)
         if air.role is CardRole.STATUS:
             self._open[key] = OpenTime.mark(open_now=self._context is not BarContext.ACTION, at=at)
         if air.role is CardRole.REPEAT:
@@ -980,7 +1003,7 @@ class PolicyDirector:
 
     def _prune(self, cards: CardView, view: PolicyView, now: MonotonicTime) -> None:
         """Forget what's remembered of cards, games and candidates no longer in the input, so nothing slowly leaks."""
-        for memory in (self._shown_at, self._repeats, self._open, self._refused, self._drawn):
+        for memory in (self._shown_at, self._repeats, self._finals, self._open, self._refused, self._drawn):
             for key in [key for key in memory if key not in cards.cards]:
                 del memory[key]
         standing = {offer.key for offer in view.offers}
@@ -1055,6 +1078,16 @@ class PolicyDirector:
         if not open_now or self._reminder_due(bid, now) != now:
             return
         self._offer(replace(candidate, key=_reminder_key(contest, bid), eligible=now), cards, at)
+
+    def _repeat_due(self, key: str) -> MonotonicTime | None:
+        """When a final that has gone up is next due to repeat, if it has a repeat left whose whole turn would end by
+        its hard end."""
+        timing, final = self._policy.timing, self._finals[key]
+        shown = self._repeats.get(key, 0)
+        if shown >= len(timing.final_repeats):
+            return None
+        due = final.first + timing.final_repeats[shown]
+        return due if due.since(final.confirmed) + timing.final <= timing.final_gone else None
 
     def _reminder_due(self, bid: _Bid, now: MonotonicTime) -> MonotonicTime | None:
         """When a bid's next reminder falls due: now when it's due already, the instant its open time since the last
@@ -1397,11 +1430,6 @@ _ROTATING = frozenset({CardRole.NEUTRAL, CardRole.FALLBACK})  # roles a lone car
 def _reminder_key(contest: LeagueScopedId, bid: _Bid) -> PromotionKey:
     """The promotion a bid's next reminder is: one per attempt, so a shown or retired one is never offered again."""
     return PromotionKey(contest, f"bid reminder {bid.attempt}")
-
-
-def _neutral(card: ScoreboardCard[Any], aired: bool) -> CardRole | None:
-    """With nothing live to weigh every card on hand rotates, but a final still waiting for its turn in end order."""
-    return None if card.kind is CardKind.FINAL and not aired else CardRole.NEUTRAL
 
 
 def _clamped(nominal: timedelta, card: ScoreboardCard[Any]) -> timedelta:

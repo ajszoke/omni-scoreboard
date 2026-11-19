@@ -224,11 +224,24 @@ def test_while_a_favorite_acts_an_unrelated_final_waits_for_a_break() -> None:
         (timedelta(minutes=10), 1, False),
         (timedelta(minutes=15), 1, True),
         (timedelta(minutes=20), 2, False),
-        (timedelta(minutes=30), 1, False),  # gone 30 minutes after confirmation
     ],
 )
-def test_a_final_repeats_at_most_twice_at_5_and_15_minutes(since: timedelta, repeats: int, due: bool) -> None:
-    assert final_repeat_due(since_confirmed=since, repeats_shown=repeats) is due
+def test_a_final_repeats_at_most_twice_at_5_and_15_minutes_after_it_first_went_up(
+    since: timedelta, repeats: int, due: bool
+) -> None:
+    assert final_repeat_due(since_first_start=since, since_confirmed=since, repeats_shown=repeats) is due
+
+
+@pytest.mark.parametrize(
+    "confirmed, due",
+    [
+        (timedelta(minutes=29, seconds=52), True),  # its 8 s end exactly at the hard end
+        (timedelta(minutes=29, seconds=53), False),  # they would run past it
+        (timedelta(minutes=30), False),
+    ],
+)
+def test_a_final_s_repeat_is_due_only_if_its_whole_turn_ends_by_its_hard_end(confirmed: timedelta, due: bool) -> None:
+    assert final_repeat_due(since_first_start=timedelta(minutes=15), since_confirmed=confirmed, repeats_shown=1) is due
 
 
 def test_a_final_is_gone_30_minutes_after_confirmation() -> None:
