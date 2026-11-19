@@ -1,11 +1,11 @@
-"""Draw the NBA cards' fifth design pass: native mock cards on all three profiles, and contact sheets.
+"""Draw the NBA cards' sixth design pass: native mock cards on all three profiles, and contact sheets.
 
     python tools/nba_card_study.py --out <dir> [--sample <BALLDONTLIE sample json>]
 
 A design study, not a renderer. It draws with the repo's own drawing stack (`PillowCanvas`, the patched BDF
 faces, the matchup treatment and logo store, the win meter, text lanes) from the small typed mock inputs
 defined here, so what the sheets show is what the board's own pixels would be. It writes
-``native/<profile>/<card>.png`` (1 LED = 1 px) and ``nba-v5-contact-<profile>.png`` (enlarged, with a faint
+``native/<profile>/<card>.png`` (1 LED = 1 px) and ``nba-v6-contact-<profile>.png`` (enlarged, with a faint
 pixel grid, a title per card and whether the card's data is recorded or synthetic) under ``--out``.
 
 A live card's 12 s turn has two 6 s halves: the first names each team (its code over its record), the second
@@ -51,7 +51,7 @@ from omni.renderers.text_lane import LaneAnchor, TextLane, draw_text_lane  # noq
 from omni.renderers.visual_treatment import MatchupVisualTreatment, resolve_matchup_treatment  # noqa: E402
 from omni.renderers.win_meter import draw_win_meter  # noqa: E402
 
-_PASS = "v5"
+_PASS = "v6"
 
 # --- colors: the house set, the MLB pregame's odds and stats colors, and NFL's play tones ---------------
 
@@ -1112,13 +1112,13 @@ def _shows_counts(spec: Specimen) -> bool:
     return spec.half is Half.COUNTS and spec.game.phase in (Phase.LIVE, Phase.END_PERIOD)
 
 
-def _names(canvas: Canvas, game: Game, which: HomeAway, x: int, ys: tuple[int, int], font: str) -> None:
-    """A team's code (white) over its record (gold); a final's loser dimmed."""
+def _names(canvas: Canvas, game: Game, which: HomeAway, x: int, ys: tuple[int, int], fonts: tuple[str, str]) -> None:
+    """A team's code (white) over its record (gold), each at its own cell row and face; a final's loser dimmed."""
     side = game.side(which)
     lost = _lost(game, which)
-    canvas.text(x, ys[0], side.abbreviation, _LOSER if lost else _WHITE, font=font)
+    canvas.text(x, ys[0], side.abbreviation, _LOSER if lost else _WHITE, font=fonts[0])
     if side.record is not None:
-        canvas.text(x, ys[1], side.record.text(), _DIM_GOLD if lost else _GOLD, font=font)
+        canvas.text(x, ys[1], side.record.text(), _DIM_GOLD if lost else _GOLD, font=fonts[1])
 
 
 def _teams(game: Game) -> tuple[BasketballTeam, BasketballTeam]:
@@ -1175,11 +1175,12 @@ _Q_ROW = 20
 _Q_LANE_X = 23
 _Q_SCORE_RIGHT = 78
 _Q_MODULE = (80, 128)  # the clock, pips and break words center in what's right of the scores
-# The code over the record, and the timeouts: 6x10 while both scores have two digits, 5x7 once either reaches 100,
-# where a five-character record in 6x10 would reach the first digit of the score. BONUS keeps 5x7. Rows are cell
-# tops below the team row's top.
-_Q_NAMES = {False: ("6x10", (1, 10)), True: ("5x7", (3, 12))}
-_Q_COUNTS = {False: ("6x10", 1), True: ("5x7", 3)}
+# The code and the timeouts are 6x10 at any score. The record is 6x10 while both scores have two digits and 5x7
+# once either reaches 100, where a five-character record in 6x10 would reach the score's first column. BONUS keeps
+# 5x7. Each is (face, cell row below the team row's top).
+_Q_CODE = ("6x10", 1)
+_Q_RECORD = {False: ("6x10", 10), True: ("5x7", 11)}
+_Q_COUNTS = ("6x10", 1)
 _Q_BONUS_ROW = 11
 # The clock over the pips, centered in the 40 rows above the divider; raised to make room while a run is on.
 _Q_CLOCK_Y = {False: 8, True: 2}
@@ -1203,8 +1204,8 @@ def _quad_scored(canvas: Canvas, context: RenderContext, spec: Specimen) -> None
         away_top=0,
         home_top=_Q_ROW,
     )
-    names_font, names_rows = _Q_NAMES[_three_digits(game)]
-    counts_font, counts_row = _Q_COUNTS[_three_digits(game)]
+    (code_font, code_row), (record_font, record_row) = _Q_CODE, _Q_RECORD[_three_digits(game)]
+    counts_font, counts_row = _Q_COUNTS
     rows = ((HomeAway.AWAY, away, treatment.away, 0), (HomeAway.HOME, home, treatment.home, _Q_ROW))
     for which, team, mark, top in rows:
         side = game.side(which)
@@ -1214,8 +1215,8 @@ def _quad_scored(canvas: Canvas, context: RenderContext, spec: Specimen) -> None
             if game.phase is Phase.LIVE and side.in_bonus:
                 _draw_inverted(canvas, _Q_LANE_X, top + _Q_BONUS_ROW, "BONUS", "5x7")
         else:
-            ys = (top + names_rows[0], top + names_rows[1])
-            _names(canvas, game, which, _Q_LANE_X, ys, names_font)
+            ys = (top + code_row, top + record_row)
+            _names(canvas, game, which, _Q_LANE_X, ys, (code_font, record_font))
         draw_right_aligned(canvas, _Q_SCORE_RIGHT, top + 1, _score_text(side.score), _text_color(game, which), "9x18B")
     _meter_if_any(canvas, treatment, game)
     _quad_module(canvas, spec)
@@ -1265,9 +1266,9 @@ def _quad_module(canvas: Canvas, spec: Specimen) -> None:
     else:
         words = ("FINAL", _ot_label(game.period)) if game.period > _REGULATION else ("FINAL",)
     rows = [(words[0], sum(_Q_WORDS_Y) // 2)] if len(words) == 1 else list(zip(words, _Q_WORDS_Y))
-    font = "8x13B" if game.phase is Phase.FINAL else "8x13"  # a final in the bold face of the single's F
-    for word, y in rows:
-        draw_centered(canvas, left, right, y, word, _GOLD, font)
+    for i, (word, y) in enumerate(rows):
+        bold = game.phase is Phase.FINAL and i == 0  # FINAL in the bold face of the single's F; its OT regular
+        draw_centered(canvas, left, right, y, word, _GOLD, "8x13B" if bold else "8x13")
 
 
 def _quad_line_score(canvas: Canvas, game: Game) -> None:
@@ -1402,11 +1403,12 @@ def _quad_column(canvas: Canvas, y: int, text: str, color: RGBColor) -> None:
 
 _S_ROW = 20
 _S_LANE_X = 24  # the code, record, timeouts and bonus box all start here
-# The code over the record: 6x10 while both scores have two digits, 5x7 once either reaches 100, where a 6x10
-# code would touch the score's first digit. The code's ink ends on the score's bottom row; the record sits under
-# the score with a blank row between, so a five-character record may run beneath the score. Rows are cell tops
-# below the team row's top.
-_S_NAMES = {False: ("6x10", (4, 12)), True: ("5x7", (6, 13))}
+# The code is 6x10 while both scores have two digits and 5x7 once either reaches 100, where a 6x10 code would
+# touch the score's first column; its ink ends on the score's last row. The record is 4x6 at any score, with two
+# blank rows under the score: it clears a two-digit score, and passes under a 1xx's first two columns, since no
+# face fits a five-character record in the 16 columns left of one. Each is (face, cell row below the row's top).
+_S_CODE = {False: ("6x10", 4), True: ("5x7", 6)}
+_S_RECORD = ("4x6", 14)
 _S_COUNTS = {False: "5x7", True: "4x6"}  # the timeouts; BONUS keeps 4x6
 _S_COUNTS_ROW = 4
 _S_BONUS_ROW = 13
@@ -1429,7 +1431,7 @@ def _stack_scored(canvas: Canvas, context: RenderContext, spec: Specimen) -> Non
         away_top=0,
         home_top=_S_ROW,
     )
-    names_font, names_rows = _S_NAMES[_three_digits(game)]
+    (code_font, code_row), (record_font, record_row) = _S_CODE[_three_digits(game)], _S_RECORD
     rows = ((HomeAway.AWAY, away, treatment.away, 0), (HomeAway.HOME, home, treatment.home, _S_ROW))
     for which, team, mark, top in rows:
         side = game.side(which)
@@ -1440,8 +1442,8 @@ def _stack_scored(canvas: Canvas, context: RenderContext, spec: Specimen) -> Non
             if game.phase is Phase.LIVE and side.in_bonus:
                 _draw_inverted(canvas, _S_LANE_X, top + _S_BONUS_ROW, "BONUS", "4x6")
         else:
-            ys = (top + names_rows[0], top + names_rows[1])
-            _names(canvas, game, which, _S_LANE_X, ys, names_font)
+            ys = (top + code_row, top + record_row)
+            _names(canvas, game, which, _S_LANE_X, ys, (code_font, record_font))
         draw_right_aligned(canvas, 64, top + 1, _score_text(side.score), _text_color(game, which), "8x13B")
     _meter_if_any(canvas, treatment, game)
     _stack_clock_line(canvas, spec)
@@ -1484,7 +1486,7 @@ def _stack_clock_line(canvas: Canvas, spec: Specimen) -> None:
         ends = game.break_ends
         label = f"HALF {_countdown(ends - spec.now)}" if ends is not None else "HALFTIME"
     else:
-        label = f"FINAL {_ot_label(game.period)}" if game.period > _REGULATION else "FINAL"
+        label = f"FINAL/{_ot_label(game.period)}" if game.period > _REGULATION else "FINAL"
     draw_centered(canvas, 0, 64, y, label, _GOLD, font)
 
 
@@ -1591,12 +1593,17 @@ def _stack_line_score(canvas: Canvas, game: Game) -> None:
         _stack_labeled(canvas, y, label, _GOLD if live else _SECONDARY, f"{away}-{home}")
 
 
-def _stack_pregame(canvas: Canvas, context: RenderContext, spec: Specimen) -> None:
-    """Marks, each team's code over its record the same way; the odds row between; then the tip.
+_S_PREGAME_BIG_Y = 47  # cell tops under the home record: the big line's ink on rows 48-54
+_S_PREGAME_SMALL_Y = 57  # and the small line's on rows 57-61
 
-    Before a tip later today: ``TIPOFF 6:00 PM`` over the countdown. On another day the date takes the time's
-    place beside the label and the time takes the countdown's, so a postponed game reads ``POSTPONED 11/17`` over
-    ``12:00 PM``. (``POSTPONED`` and a time would be 70 px in 4x6, wider than the board.)
+
+def _stack_pregame(canvas: Canvas, context: RenderContext, spec: Specimen) -> None:
+    """Marks, each team's code over its record the same way; the odds row between; then the tip, in two lines.
+
+    What carries the news goes big (6x10): the tip time later today, the date on another day, or ``POSTPONED``.
+    The rest goes on a small line (4x6) under it: ``TIPOFF`` with the countdown, or with the time on another day;
+    a postponed game's new date and time; or ``TIP TBD``. A full line such as ``TIPOFF 6:00 PM`` would be 87 px in
+    6x10, wider than the board.
     """
     game = spec.game
     away, home = _teams(game)
@@ -1607,21 +1614,34 @@ def _stack_pregame(canvas: Canvas, context: RenderContext, spec: Specimen) -> No
             canvas.text(_S_LANE_X, top + 10, side.record.text(), _STATS_TEAL, font="6x10")
     if game.line is not None:
         draw_centered(canvas, 0, 64, 21, _odds_text(game, game.line), _ODDS_GREEN, "4x6")
+    small: list[tuple[str, RGBColor]]
+    clock = ""
     if game.tip is None:
-        draw_centered(canvas, 0, 64, 48, "POSTPONED", _GOLD, "4x6")
-        draw_centered(canvas, 0, 64, 53, "TIP TBD", _WHITE, "6x10")
-        return
-    small, big, clock = _tip_lines(spec.now, game.tip, context.timezone)
-    label = "TIPOFF" if game.phase is Phase.PREGAME else "POSTPONED"
-    label_w = text_width(f"{label} ", "4x6")
-    if label_w + _when_width(small, clock, "4x6") > 64:  # POSTPONED and a time: the time goes big, the countdown goes
-        draw_centered(canvas, 0, 64, 48, label, _GOLD, "4x6")
-        small, big = "", small
+        big, big_color = "POSTPONED", _GOLD
+        small = [("TIP TBD", _WHITE)]
     else:
-        x = (64 - label_w - _when_width(small, clock, "4x6")) // 2
-        canvas.text(x, 48, label, _GOLD, font="4x6")
-        _draw_when(canvas, x + label_w, 48, small, clock, _WHITE, "4x6")
-    _draw_when(canvas, (64 - _when_width(big, clock, "6x10")) // 2, 53, big, clock, _WHITE, "6x10")
+        upper, lower, clock = _tip_lines(spec.now, game.tip, context.timezone)
+        if game.phase is Phase.PREGAME:
+            big, big_color = upper, _WHITE
+            small = [("TIPOFF", _GOLD), (lower, _WHITE)]
+        else:  # a new tip later today shows its time alone: a postponed game's countdown matters less
+            big, big_color = "POSTPONED", _GOLD
+            small = [(upper, _WHITE), (lower, _WHITE)] if upper != clock else [(clock, _WHITE)]
+    big_x = (64 - _when_width(big, clock, "6x10")) // 2
+    _draw_when(canvas, big_x, _S_PREGAME_BIG_Y, big, clock, big_color, "6x10")
+    _draw_line_parts(canvas, 64, _S_PREGAME_SMALL_Y, small, clock, "4x6")
+
+
+def _draw_line_parts(
+    canvas: Canvas, width: int, y: int, parts: Sequence[tuple[str, RGBColor]], clock: str, font: str
+) -> None:
+    """One line's parts, a space apart and centered across ``width``, each in its own color."""
+    space = text_width(" ", font)
+    total = sum(_when_width(text, clock, font) for text, _ in parts) + space * (len(parts) - 1)
+    x = (width - total) // 2
+    for text, color in parts:
+        _draw_when(canvas, x, y, text, clock, color, font)
+        x += _when_width(text, clock, font) + space
 
 
 # --- single 64x32 -----------------------------------------------------------------------------------------
@@ -1816,15 +1836,15 @@ _SHEET_NAME = {
 }
 _LEGEND = {
     PanelProfile.QUAD_128X64: (
-        "Away top · home bottom    first 6 s: code over record    second 6 s: n×TO over BONUS    6x10 while both "
-        "scores have two digits, 5x7 once one reaches 100",
+        "Away top · home bottom    first 6 s: code over record    second 6 s: n×TO over BONUS    code and n×TO "
+        "6x10 at any score; the record 6x10, 5x7 once a score reaches 100",
         "i/N = play i of the N queued, in ingest order    TIMEOUT holds the timeout's first turn, then the stat "
         "panels rotate until play resumes",
         "Player lines walk each team's plus-minus order, one player per team per turn    +n / -n = plus-minus",
     ),
     PanelProfile.STACK_64X64: (
-        "Away top · home bottom    first 6 s: code over record (6x10; 5x7 once a score reaches 100), the record "
-        "under the score    second 6 s: n×TO over BONUS",
+        "Away top · home bottom    first 6 s: code (6x10; 5x7 once a score reaches 100) over record (4x6 at any "
+        "score)    second 6 s: n×TO over BONUS",
         "Segmented divider = play queue, in ingest order    TIMEOUT holds the timeout's first turn, then the stat "
         "panels rotate    a ruling splits across its halves",
         "Line score: Q1/Q2 to the half, H1/Q3, Q3/Q4    final: the winner's best player by plus-minus, then the "
@@ -1910,7 +1930,7 @@ def contact_sheet(profile: PanelProfile, cards: Sequence[tuple[Specimen, Image.I
     sheet_h = header_h + rows * card_h + (rows - 1) * _GAP + footer_h
     sheet = Image.new("RGB", (sheet_w, sheet_h), _SHEET_BG)
     draw = ImageDraw.Draw(sheet)
-    draw.text((_GAP + 4, 18), f"Omni · NBA cards, fifth pass   {_SHEET_NAME[profile]}", fill=_INK, font=head_font)
+    draw.text((_GAP + 4, 18), f"Omni · NBA cards, sixth pass   {_SHEET_NAME[profile]}", fill=_INK, font=head_font)
     draw.text(
         (_GAP + 4, 58),
         f"{scale}× pixel grid  ·  recorded BALLDONTLIE Free states and labeled synthetic specimens  ·  "
@@ -2029,20 +2049,20 @@ def lane_fits() -> list[LaneFit]:
     single = (PanelProfile.SINGLE_64X32, ("6x10", _I_SCORE_RIGHT, _I_SCORE_ROW))
     for three in (False, True):
         profile, score = quad
-        font, (code_row, record_row) = _Q_NAMES[three]
-        counts_font, counts_row = _Q_COUNTS[three]
+        (code_font, code_row), (record_font, record_row) = _Q_CODE, _Q_RECORD[three]
+        counts_font, counts_row = _Q_COUNTS
         fits += [
-            _fit(profile, three, "code", font, _widest_code(font), _Q_LANE_X, code_row, score),
-            _fit(profile, three, "record", font, _widest_record(font), _Q_LANE_X, record_row, score),
+            _fit(profile, three, "code", code_font, _widest_code(code_font), _Q_LANE_X, code_row, score),
+            _fit(profile, three, "record", record_font, _widest_record(record_font), _Q_LANE_X, record_row, score),
             _fit(profile, three, "timeouts", counts_font, f"7{_TIMES}TO", _Q_LANE_X, counts_row, score),
             _box_fit(profile, three, "BONUS", "5x7", _Q_LANE_X, _Q_BONUS_ROW, score),
         ]
         profile, score = stack
-        font, (code_row, record_row) = _S_NAMES[three]
+        (code_font, code_row), (record_font, record_row) = _S_CODE[three], _S_RECORD
         counts_font = _S_COUNTS[three]
         fits += [
-            _fit(profile, three, "code", font, _widest_code(font), _S_LANE_X, code_row, score),
-            _fit(profile, three, "record", font, _widest_record(font), _S_LANE_X, record_row, score),
+            _fit(profile, three, "code", code_font, _widest_code(code_font), _S_LANE_X, code_row, score),
+            _fit(profile, three, "record", record_font, _widest_record(record_font), _S_LANE_X, record_row, score),
             _fit(profile, three, "timeouts", counts_font, f"7{_TIMES}TO", _S_LANE_X, _S_COUNTS_ROW, score),
             _box_fit(profile, three, "BONUS", "4x6", _S_LANE_X, _S_BONUS_ROW, score),
         ]
@@ -2064,7 +2084,11 @@ def _lane_table(fits: Sequence[LaneFit]) -> str:
     lines = []
     for f in fits:
         digits = "1xx" if f.three_digits else "2-digit"
-        where = "below the score" if f.clear is None else f"{f.clear} blank before x{f.score_starts}"
+        if f.clear is None:
+            under = f.ends - f.score_starts + 1
+            where = "below the score" + (f", {under} columns under it" if under > 0 else "")
+        else:
+            where = f"{f.clear} blank before x{f.score_starts}"
         lines.append(
             f"{f.profile.value:13} {digits:7} {f.element:8} {f.font:5} {f.text:6} "
             f"ink x..{f.ends} rows {f.rows[0]}-{f.rows[1]}: {where}"
@@ -2122,7 +2146,7 @@ def check_sample(path: Path) -> list[str]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Draw the NBA cards' fifth design pass.")
+    parser = argparse.ArgumentParser(description="Draw the NBA cards' sixth design pass.")
     parser.add_argument("--out", type=Path, required=True, help="where native/ and the contact sheets go")
     parser.add_argument("--sample", type=Path, help="the BALLDONTLIE recording to check the recorded specimens against")
     parser.add_argument("--fits", action="store_true", help="print each team-lane element's room beside the score")
