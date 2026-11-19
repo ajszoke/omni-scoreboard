@@ -464,10 +464,10 @@ class AppLoop:
     def _commit(self, cue: BoardCue, context: RenderContext, shown: ClockReading, *, confirmed: bool) -> None:
         """``cue``'s frame is on the panel as of ``shown``: tell the board, and note a card's first frame."""
         payload = cue.payload
+        if self._football is not None and not isinstance(payload, BoardFrame):
+            self._football.presented(payload, shown)  # every shown frame: a caption it carried has gone up
         if not self._board.committed(cue, shown, confirmed=confirmed):
             return
-        if self._football is not None and not isinstance(payload, BoardFrame):
-            self._football.presented(payload, shown)  # a caption the frame carried first went up now
         if self._resuming is not None:
             self._resumed, self._resuming = self._resuming, None  # the first frame up since the interruption
         if cue.reason is not None and not isinstance(payload, BoardFrame):
