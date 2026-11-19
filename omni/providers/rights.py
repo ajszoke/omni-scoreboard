@@ -435,6 +435,7 @@ MANIFEST: Mapping[DataSource, SourceRights] = {entry.source: entry for entry in 
 # provider packages has an entry, an empty one when it reads none, so a new provider can't go unlisted.
 READS: Mapping[str, frozenset[DataSource]] = {
     "omni/providers/__init__.py": frozenset(),
+    "omni/providers/balldontlie.py": frozenset({DataSource.BALLDONTLIE}),
     "omni/providers/base.py": frozenset(),
     "omni/providers/bovada_odds.py": frozenset({DataSource.BOVADA}),
     "omni/providers/market_service.py": frozenset({DataSource.OMNI_MARKET_SERVICE}),
