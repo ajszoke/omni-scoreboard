@@ -443,6 +443,7 @@ READS: Mapping[str, frozenset[DataSource]] = {
     "omni/providers/mlb_statsapi.py": frozenset({DataSource.MLB_STATSAPI}),
     "omni/providers/mlb_teams.py": frozenset({DataSource.MLB_STATSAPI}),
     "omni/providers/nba_palette.py": frozenset({DataSource.WIKIPEDIA_COLORS}),
+    "omni/providers/nba_standings.py": frozenset(),  # counts the results a provider hands it
     "omni/providers/nba_teams.py": frozenset({DataSource.BALLDONTLIE}),  # names, conferences, divisions
     "omni/providers/nfl_palette.py": frozenset({DataSource.NFLVERSE}),
     "omni/providers/nfl_teams.py": frozenset({DataSource.NFLVERSE}),
