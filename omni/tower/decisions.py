@@ -6,9 +6,10 @@ The policy director (`omni.tower.director`) writes one record per decision that 
 - a promoted card's confirmed start (`PromotionNote`): its ``I``, the bar and its context, the hold and the cooldown;
   why a waiting candidate didn't start, each time that reason changes (`WaitNote`), and a cued promotion whose
   start was rejected at its first frame, so it spent nothing (`UnspentNote`);
-- each lease opened, revoked, ended or lapsed, or evidence that opened none and why (`LeaseNote`); each guest
-  admitted into a favorite's break or refused (`GuestNote`), and a guest that gave the board back when the break
-  closed (`YieldNote`);
+- each lease opened, revoked, ended, lapsed or superseded, or evidence that opened none and why, with the break's
+  age and how much of its ceiling had gone (`LeaseNote`); each guest admitted into a favorite's break or refused,
+  and where its permission was checked (`GuestNote`), and a guest that gave the board back when the break closed,
+  with how long it had aired (`YieldNote`);
 - an ordinary card's turn (`CardNote`), and the non-base cap binding (`CapNote`).
 
 Every turn's record carries the "why this card" sentence: one plain line from released facts only, such as
@@ -29,7 +30,7 @@ from omni.cards.base import CardId
 from omni.core.clock import ClockReading, MonotonicTime
 from omni.core.enum import GameStatus, StrEnumMixin
 from omni.core.ids import LeagueScopedId
-from omni.domain.breaks import BreakId, BreakKind
+from omni.domain.breaks import BreakAge, BreakId, BreakKind
 from omni.policy.allocation import GameWeight, Targets
 from omni.policy.interrupts import BarContext, InterruptClass, InterruptValue
 from omni.policy.ladder import Rung
@@ -48,6 +49,7 @@ __all__ = [
     "CardNote",
     "CardRole",
     "ClampNote",
+    "GrantBoundary",
     "GuestNote",
     "LeaseEvent",
     "LeaseNote",
@@ -57,8 +59,11 @@ __all__ = [
     "UnspentNote",
     "WaitNote",
     "YieldNote",
+    "aired_words",
     "event_words",
+    "judged_words",
     "rank_words",
+    "refused_guest",
     "status_words",
 ]
 
@@ -74,6 +79,7 @@ class CardRole(StrEnumMixin, str, Enum):
     PREGAME = "pregame"
     STATUS = "status"  # a delay or a suspension
     NEUTRAL = "neutral"  # nothing live to weigh: the cards on hand at neutral weight
+    FALLBACK = "fallback"  # nothing fresh to show: a stale game's dim card, the last safe frame, with no base turn
 
 
 class BaseReason(StrEnumMixin, str, Enum):
@@ -93,14 +99,23 @@ class OfferSkip(StrEnumMixin, str, Enum):
     NOT_DRAWABLE = "not_drawable"  # the card can't be drawn on this panel
     MUTED = "muted"  # its game is muted
     SET_ASIDE = "set_aside"  # chosen, but its card is set aside or out of its window now: it waits
+    CHANGED = "changed"  # the card it names no longer shows the event it was offered for: never promoted
 
 
 class LeaseEvent(StrEnumMixin, str, Enum):
     OPENED = "opened"
-    REVOKED = "revoked"  # later released action ended it
+    REVOKED = "revoked"  # released action after the break began ended it
     ENDED = "ended"  # the feed marked its end
     LAPSED = "lapsed"  # its ceiling ran out with no sign of play
+    SUPERSEDED = "superseded"  # a new independent interval replaced it
     REFUSED = "refused"  # the evidence opened no lease
+
+
+class GrantBoundary(StrEnumMixin, str, Enum):
+    """Where a guest's permission in a favorite's break was checked."""
+
+    DECISION = "decision"  # when the board chose what goes up next
+    SWAP = "swap"  # when the display confirmed its first frame
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -185,26 +200,30 @@ class LeaseNote:
     remaining: timedelta | None = None  # an opened lease: what's left of its ceiling (None: open-ended)
     provisional: bool = False  # the onset was uncertain, so one poll interval came off
     turns: int | None = None  # the guests it may host (None: as many as fit)
+    age: BreakAge | None = None  # evidence judged for a lease: its age at detection, and how that's known
+    elapsed: timedelta | None = None  # evidence judged for a lease: how much of its ceiling had gone at the decision
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class GuestNote:
-    """A card admitted into the favorites' break (``refusal`` None), or refused and why."""
+    """A card admitted into the favorites' break (``refusal`` None), or refused and why, and where."""
 
     at: ClockReading
     card: CardId
     hosts: tuple[LeagueScopedId, ...]
     refusal: LeaseRefusal | None = None
+    boundary: GrantBoundary = GrantBoundary.DECISION
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class YieldNote:
-    """A break's guest giving the board back: its host's break closed at ``closed``."""
+    """A break's guest giving the board back: its host's break closed at ``closed``, and it had aired ``aired``."""
 
     at: ClockReading
     card: CardId
     hosts: tuple[LeagueScopedId, ...]
     closed: MonotonicTime
+    aired: timedelta | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -299,3 +318,28 @@ def event_words(kind: PromotionKind, value: InterruptValue | None) -> str:
 def status_words(status: GameStatus) -> str:
     """A paused game's status in words."""
     return _STATUSES.get(status, "paused")
+
+
+def judged_words(note: LeaseNote) -> str:
+    """What a lease refusal weighed, for its line: the break's age at detection, how that's known and how much of it
+    is an allowance, and how much of its ceiling had gone at the decision; empty for one refused before it was
+    dated."""
+    age, elapsed = note.age, note.elapsed
+    if age is None or elapsed is None:
+        return ""
+    said = f" | age {age.age.total_seconds():.1f}s {age.basis.value}"
+    if age.provisional:
+        said += f", {age.uncertainty.total_seconds():.1f}s of it an allowance"
+    return said + f" | {elapsed.total_seconds():.1f}s of its ceiling gone"
+
+
+def refused_guest(note: GuestNote) -> str:
+    """Why a guest was refused, and where, when it wasn't at the decision."""
+    assert note.refusal is not None
+    said = f"{note.refusal.value}"
+    return said if note.boundary is GrantBoundary.DECISION else f"{said} at its first frame"
+
+
+def aired_words(note: YieldNote) -> str:
+    """How long a guest that gave the board back had aired, when that's known."""
+    return f"; aired {note.aired.total_seconds():.1f}s" if note.aired is not None else ""

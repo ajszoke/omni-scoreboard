@@ -99,6 +99,7 @@ class _NflMeta:
         self.plays: dict[int, list[dict[str, Any]]] = {}
         self.requests: list[tuple[datetime, str, dict[str, Any]]] = []
         self.hidden: set[int] = set()  # games a phase=in read leaves out, as if their rows went missing
+        self.unlisted: set[int] = set()  # games an unfiltered read leaves out, as when a game leaves the day
         self.down = False
         self.requests_left: int | None = None
 
@@ -121,6 +122,8 @@ class _NflMeta:
         if "game_ids" in query:
             named = {int(each) for each in str(query["game_ids"]).split(",")} - self.hidden
             rows = [row for row in rows if row["game_id"] in named and row["phase"] == query["phase"]]
+        if not query:
+            rows = [row for row in rows if row["game_id"] not in self.unlisted]
         billed = len(rows) + sum(len(row["injuries"]) for row in rows)
         return self._answer({"data": rows, "meta": {"recommended_poll_seconds": 10}}, billed)
 
@@ -277,6 +280,134 @@ def test_a_day_list_that_skips_a_row_is_partial() -> None:
     assert board.ids(SUNDAY) == ["101"]
 
 
+# --- the slate after its first listing ---------------------------------------------------------------------
+
+
+def _kickoff(board: _Board, game_id: int) -> datetime:
+    return _game(board, game_id).scheduled_start
+
+
+def test_over_the_three_hours_before_the_first_kickoff_the_day_is_listed_each_hour_and_an_added_game_joins() -> None:
+    board = _board(_et(SUNDAY, 7))
+    _sunday(board, CAR_ATL, PIT_CIN)
+    board.run(_et(SUNDAY, 10, 30))
+    board.nflmeta.rows[104] = _row(*LAC_BAL)  # a game added to the day
+    board.run(EARLY)
+    assert board.nflmeta.asked() == [_et(SUNDAY, hour) for hour in (7, 10, 11, 12)]  # none at the kickoff itself
+    assert board.ids(SUNDAY) == ["101", "102", "104"]
+    assert board.health() is ProviderStatus.FRESH
+
+
+def test_a_kickoff_moved_after_the_first_listing_is_seen_by_the_listing_after_the_early_window_s_kickoffs() -> None:
+    board = _board(_et(SUNDAY, 12))
+    _sunday(board, CAR_ATL, PIT_CIN, LAC_BAL)
+    board.run(_et(SUNDAY, 12, 30))
+    night = _et(SUNDAY, 20, 20)
+    board.nflmeta.set(104, kickoff_at=night.isoformat().replace("+00:00", "Z"))  # flexed to the night
+    _start(board, 101, 102)
+    board.run(_et(SUNDAY, 13, 31))
+    assert board.nflmeta.asked() == [_et(SUNDAY, 12), _et(SUNDAY, 13, 30)]  # half an hour past the window's kickoffs
+    assert _kickoff(board, 104) == night
+    board.run(_et(SUNDAY, 17))
+    assert board.nflmeta.asked()[2:] == []  # nothing kicked off since: nothing to list again
+    assert board.nflmeta.asked(phase="in", game_ids="104") == []  # not read at its old kickoff
+
+
+def test_kickoffs_close_together_are_one_window_listed_again_after_its_last_while_a_later_window_is_ahead() -> None:
+    board = _board(_et(SUNDAY, 15, 30))
+    night = (106, "DAL", "PHI", _et(SUNDAY, 20, 20))
+    _sunday(board, (104, "LAC", "BAL", _et(SUNDAY, 16, 5)), (105, "KC", "LV", LATE), night)
+    board.run(LATE)
+    _start(board, 104, 105)
+    board.run(_et(SUNDAY, 20, 20))
+    _start(board, 106)
+    board.run(_et(SUNDAY, 21))
+    assert board.nflmeta.asked() == [_et(SUNDAY, 15, 30), _et(SUNDAY, 16, 55)]  # every game started as listed
+
+
+def test_a_last_window_whose_game_hasn_t_started_is_listed_again_and_a_game_gone_from_it_is_read_no_more() -> None:
+    board = _board(_et(SUNDAY, 19, 30))
+    _sunday(board, (106, "DAL", "PHI", _et(SUNDAY, 20, 20)), (107, "KC", "LV", _et(SUNDAY, 20, 20)))
+    board.run(_et(SUNDAY, 20, 20))
+    _start(board, 107)
+    board.nflmeta.unlisted = {106}  # postponed at the last minute: no longer the day's
+    board.run(_et(SUNDAY, 21))
+    assert board.nflmeta.asked() == [_et(SUNDAY, 19, 30), _et(SUNDAY, 20, 50)]
+    assert board.ids(SUNDAY) == ["107"]
+    asked = board.nflmeta.asked(phase="in", game_ids="106,107")
+    assert asked and asked[-1] <= _et(SUNDAY, 20, 50) and board.nflmeta.asked(phase="in", game_ids="107")
+
+
+def test_a_game_the_next_listing_leaves_out_before_its_kickoff_leaves_the_date_without_a_final() -> None:
+    board = _board(_et(SUNDAY, 11, 30))
+    _sunday(board, CAR_ATL, PIT_CIN, LAC_BAL)
+    board.run(_et(SUNDAY, 12))
+    board.nflmeta.unlisted = {104}  # postponed: NFLMeta no longer lists it today
+    board.run(_et(SUNDAY, 12, 31))
+    assert board.nflmeta.asked() == [_et(SUNDAY, 11, 30), _et(SUNDAY, 12, 30)]
+    assert board.ids(SUNDAY) == ["101", "102"]
+    said = [
+        contest.status
+        for report in board.reports
+        for seen in report.observations
+        for contest in seen.contests
+        if contest.id.raw == "104"
+    ]
+    assert said and set(said) == {GameStatus.PREGAME}  # never called final: it left the date
+
+
+def test_a_game_in_progress_that_a_listing_leaves_out_isn_t_over_and_is_read_on() -> None:
+    board = _board(_et(SUNDAY, 12, 59))
+    _sunday(board, CAR_ATL, PIT_CIN, MIN_GB, LAC_BAL)
+    board.run(EARLY)
+    _start(board, 101, 102, 103)
+    board.run(_et(SUNDAY, 13, 20))
+    board.nflmeta.unlisted = {103}
+    board.run(_et(SUNDAY, 13, 32))
+    assert board.nflmeta.asked()[-1] == _et(SUNDAY, 13, 30)
+    assert board.status(SUNDAY, 103) is GameStatus.LIVE and board.nflmeta.asked(game_id=103) == []
+    assert board.nflmeta.asked(phase="in", game_ids="102,103")[-1] >= _et(SUNDAY, 13, 31)
+
+
+def test_a_listing_again_leaves_games_in_progress_as_their_own_reads_have_them() -> None:
+    board = _board(_et(SUNDAY, 12, 59))
+    _sunday(board, CAR_ATL, PIT_CIN, LAC_BAL)
+    board.run(EARLY)
+    _start(board, 101, 102)
+    board.run(_et(SUNDAY, 13, 29, 55))
+    taken = len(board.planned.take(_game(board, 102)))
+    board.run(_et(SUNDAY, 13, 30, 5))
+    assert board.nflmeta.asked()[-1] == _et(SUNDAY, 13, 30)
+    readings = board.planned.take(_game(board, 102))
+    assert taken > 0 and all(reading.current_for == 90 * S for reading in readings)  # the others' read alone
+
+
+def test_a_late_answer_about_a_game_that_has_left_its_date_doesnt_bring_it_back() -> None:
+    board = _board(_et(SUNDAY, 12, 59))
+    _sunday(board, CAR_ATL, LAC_BAL)
+    board.run(_et(SUNDAY, 13, 30))  # the favorite's kickoff has passed but it hasn't started: read each 10 s
+    car = _game(board, 101)
+    board.nflmeta.unlisted = {101}  # postponed
+    board.observe()
+    asks = sorted(board.plan.take_due(board.clock.read()), key=lambda ask: ask.priority)
+    assert [ask.key.source for ask in asks] == [PollSource.DAY_LIST, PollSource.FOLLOWED_GAME]
+    for ask in asks:  # the listing that leaves it out lands first, its own read after
+        ask.fetch(board.clock.now())
+    board.observe()
+    assert board.ids(SUNDAY) == ["104"] and board.planned.latest(car) is None
+
+
+def test_the_listing_again_is_background_held_back_low_in_the_month_without_aging_the_date() -> None:
+    usage = {NFL: MonthUsage(BillingMonth(2026, 11), requests=4_600)}  # 8% left: background is shed
+    board = _board(_et(SUNDAY, 9), ledger=QuotaLedger(account_limits(NflMetaPlan.FREE), usage=usage))
+    _sunday(board, CAR_ATL, PIT_CIN)
+    board.run(_et(SUNDAY, 12, 59))
+    assert board.nflmeta.asked() == [_et(SUNDAY, 9)]  # the first listing only: what the favorite's reads need
+    assert board.health() is ProviderStatus.FRESH
+    reason = board.planned.held_back(_scope(SUNDAY))
+    assert reason == "quota: NFLMeta requests 7% left, background held back"
+
+
 # --- a favorite's game ------------------------------------------------------------------------------------
 
 
@@ -360,6 +491,7 @@ def test_the_others_are_read_together_every_45_seconds_while_live_and_each_final
     assert board.nflmeta.asked(game_id=102) == board.nflmeta.asked(game_id=103) == [live[-1] + 5 * S]  # once each
     assert [board.status(SUNDAY, game_id) for game_id in (102, 103)] == [GameStatus.FINAL] * 2
     assert [path for _, path, query in board.nflmeta.requests if "game_ids" in query] == [SCORES] * 5  # none since
+    board.run(LATE)
     _start(board, 104)
     board.run(_et(SUNDAY, 16, 26))
     assert board.nflmeta.asked(phase="in", game_ids="104") == [LATE, LATE + 45 * S]
@@ -554,6 +686,6 @@ def test_a_plan_without_nfl_s_reads_or_their_account_doesn_t_build_the_nfl_board
         PlannedNfl(PollPlan(NFL_POLICIES, ledger=ledger, accounts=elsewhere), clock, provider)
     plain = PlannedNfl(PollPlan(NFL_POLICIES), clock, provider)  # a plan with no ledger counts nothing
     assert plain.source == NFLMETA_SOURCE and plain.league is League.NFL
-    for wrong in ({"fresh_for": timedelta(0)}, {"recheck_empty": -S}):
+    for wrong in ({"fresh_for": timedelta(0)}, {"recheck_empty": -S}, {"recheck_from": -S}, {"recheck_after": -S}):
         with pytest.raises(ValueError, match="must be positive"):
             NflSchedulePolicy(**wrong)

@@ -24,6 +24,7 @@ from omni.domain.baseball import (
     PitchingFeatKind,
     PitchSnapshot,
     PitchType,
+    PlayLogCoverage,
     PregameDetails,
     PregameSide,
     StartingPitcher,
@@ -174,8 +175,9 @@ def test_batting_walks_hbp_unknown_when_either_count_is_missing() -> None:
     assert _batting_walks_hbp(_boxscore({"away": {"hitByPitch": 0}}), "away") is None
 
 
-_CLEAN_LOG = _ReachLedger(reached=frozenset(), complete=frozenset(HomeAway))  # every play on record, no one reached
-_NO_LOG = _ReachLedger(reached=frozenset(), complete=frozenset())  # no play log to go by
+# Every play on record, no one reached; and no play log to go by.
+_CLEAN_LOG = _ReachLedger(reached=frozenset(), complete=frozenset(HomeAway), coverage=PlayLogCoverage.COMPLETE)
+_NO_LOG = _ReachLedger(reached=frozenset(), complete=frozenset(), coverage=PlayLogCoverage.UNVERIFIED)
 
 
 def test_reached_base_true_on_a_hit_or_a_defensive_error() -> None:
@@ -291,6 +293,17 @@ def test_a_complete_clean_play_log_with_every_count_zero_is_a_perfect_game() -> 
     assert feat is not None and feat.kind is PitchingFeatKind.PERFECT_GAME and feat.completed_innings == 6
 
 
+def test_a_play_log_cut_short_of_where_the_linescore_says_the_game_is_rules_out_no_reach() -> None:
+    # The dropped-third-strike log has 39 entries, through the top of the 7th. Its first 12 run contiguously from the
+    # first at-bat through the bottom of the 2nd, with no one reaching, while the linescore says the top of the 7th.
+    # The reach in the top of the 3rd is among the entries left out, so the prefix proves nothing.
+    feed = _no_hit_feed(_dropped_third_strike_log()[:12])
+    state = _read(feed)
+    assert state.away_reached_base is None
+    feat = pitching_feat_progress(state, min_completed_innings=6)
+    assert feat is not None and feat.kind is PitchingFeatKind.NO_HITTER
+
+
 def test_a_walk_in_the_counts_is_a_baserunner_whatever_the_play_log_says() -> None:
     state = _parse_game_state(_no_hit_feed(_clean_log(), away_walks=1))
     assert state.away_reached_base is True
@@ -380,6 +393,29 @@ def _swap(feed: dict[str, Any]) -> None:
             _put(TOP_OF_THE_3RD, value=_play(TOP_OF_THE_3RD, 3, "top", complete=False)),
             id="an at-bat before the last still in progress",
         ),
+        pytest.param(_drop(-1, "about", "isComplete"), id="the last at-bat not saying whether it is over"),
+        pytest.param(_drop(TOP_OF_THE_3RD, "about", "inning"), id="a play that names no inning"),
+        pytest.param(_put(20, "about", "inning", value=9), id="the halves out of game order"),
+        pytest.param(
+            _put(TOP_OF_THE_3RD, "runners", 0, "movement", "isOut", value="no"), id="an out that isn't a flag"
+        ),
+        pytest.param(_drop(TOP_OF_THE_3RD, "runners", 0, "movement", "isOut"), id="a runner not saying if he is out"),
+        pytest.param(_put(TOP_OF_THE_3RD, "runners", 0, "movement", "end", value="1B"), id="an out with an end"),
+        pytest.param(
+            _put(TOP_OF_THE_3RD, "runners", 0, "movement", value={"originBase": None, "end": None, "isOut": False}),
+            id="a batter neither out nor on base",
+        ),
+        pytest.param(
+            _put(TOP_OF_THE_3RD, "runners", 0, "movement", value={"originBase": None, "end": "4B", "isOut": False}),
+            id="a batter safe at no base",
+        ),
+        pytest.param(
+            _put(TOP_OF_THE_3RD + 1, "runners", value=[_runner("4B", out_at="2B", event="caught_stealing_2b")]),
+            id="a runner from no base",
+        ),
+        pytest.param(lambda feed: _log(feed).__delitem__(slice(36, None)), id="a log that stops at the end of the 6th"),
+        pytest.param(_put(-1, "about", "inning", value=8), id="a last at-bat in an inning the linescore isn't in"),
+        pytest.param(_put(-1, "about", "halfInning", value="bottom"), id="a last at-bat in the other half"),
     ],
 )
 def test_a_play_log_that_cant_rule_out_a_reach_leaves_a_plain_no_hitter(
@@ -387,10 +423,65 @@ def test_a_play_log_that_cant_rule_out_a_reach_leaves_a_plain_no_hitter(
 ) -> None:
     feed = _no_hit_feed(_clean_log())
     change(feed)
-    state = _parse_game_state(feed)
-    assert state.away_reached_base is None
+    state = _read(feed)
+    assert state.away_reached_base is None and state.play_log is PlayLogCoverage.UNVERIFIED
     feat = pitching_feat_progress(state, min_completed_innings=6)
     assert feat is not None and feat.kind is PitchingFeatKind.NO_HITTER
+
+
+def test_a_reach_counts_even_in_a_log_that_rules_nothing_out() -> None:
+    state = _read(_no_hit_feed(_dropped_third_strike_log()[: TOP_OF_THE_3RD + 1]))  # a prefix through the reach
+    assert state.away_reached_base is True and state.play_log is PlayLogCoverage.UNVERIFIED
+
+
+_HALVES = [(inning, half) for inning in range(1, 13) for half in ("top", "bottom")]
+
+
+def _halves_log(halves: int, *, batting: bool = False) -> list[dict[str, Any]]:
+    """``halves`` half-innings of three up, three down from the top of the 1st; with ``batting``, the next half's
+    first at-bat under way after them."""
+    places = [place for place in _HALVES[:halves] for _ in range(3)]
+    log = [_play(index, inning, half, _batter(None, "strikeout")) for index, (inning, half) in enumerate(places)]
+    if batting:
+        log.append(_play(len(log), *_HALVES[halves], complete=False))
+    return log
+
+
+def _at(log: list[dict[str, Any]], inning: int, inning_state: str, status: str = "In Progress") -> dict[str, Any]:
+    """A hitless, walkless, errorless feed over ``log``, its linescore at ``inning`` / ``inning_state``."""
+    feed = _no_hit_feed(log)
+    feed["liveData"]["linescore"].update(currentInning=inning, inningState=inning_state)
+    feed["gameData"] = {"status": {"detailedState": status}}
+    return feed
+
+
+@pytest.mark.parametrize(
+    ("feed", "covered"),
+    [
+        pytest.param(_at(_halves_log(12, batting=True), 7, "Top"), True, id="an at-bat under way in the top"),
+        pytest.param(_at(_halves_log(11, batting=True), 6, "Bottom"), True, id="an at-bat under way in the bottom"),
+        pytest.param(_at(_halves_log(13), 7, "Top"), True, id="the top just over, the linescore not yet moved on"),
+        pytest.param(_at(_halves_log(13), 7, "Middle"), True, id="the middle of an inning, after its top"),
+        pytest.param(_at(_halves_log(12), 6, "End"), True, id="the end of an inning, after its bottom"),
+        pytest.param(_at(_halves_log(17), 9, "Top", "Final"), True, id="a final after the top of the 9th"),
+        pytest.param(_at(_halves_log(18), 9, "End", "Final"), True, id="a final after the bottom of the 9th"),
+        pytest.param(_at(_halves_log(12), 7, "Top"), False, id="a half begun that the log hasn't reached"),
+        pytest.param(_at(_halves_log(12, batting=True), 7, "Middle"), False, id="a break with an at-bat under way"),
+        pytest.param(_at(_halves_log(13), 7, "End"), False, id="the end of an inning, the log still in its top"),
+        pytest.param(
+            _at(_halves_log(16, batting=True), 9, "Top", "Final"), False, id="a final with an at-bat under way"
+        ),
+        pytest.param(_at(_halves_log(12), 6, "Mid"), False, id="a linescore half it doesn't know"),
+        pytest.param(_at([], 6, "End"), False, id="no play log at all"),
+    ],
+)
+def test_a_play_log_rules_a_reach_out_only_through_where_the_linescore_says_the_game_is(
+    feed: dict[str, Any], covered: bool
+) -> None:
+    state = _read(feed)
+    expected = PlayLogCoverage.COMPLETE if covered else PlayLogCoverage.UNVERIFIED
+    assert state.play_log is expected
+    assert (state.away_reached_base, state.home_reached_base) == ((False, False) if covered else (None, None))
 
 
 def test_every_answer_reads_the_whole_play_log_afresh_so_a_rewritten_play_shows_at_once() -> None:

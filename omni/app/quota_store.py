@@ -12,14 +12,23 @@ its requests and rows, and whether the provider said nothing was left. Nothing e
 - **An unreadable file** is set aside (renamed with ``.unreadable``) with a warning, and the count starts
   from zero, until a provider's own count of what's left raises it.
 - **A new month starts at zero:** a saved month older than the current one is ignored.
+
+**One poller per account.** A count kept this way can't stop two processes from spending one account at once:
+each would admit against its own count. So an account that needs it (NFLMeta's) is held by one process at a time
+(`FileLocks`): an exclusive lock on ``<account>.lock`` beside the usage file, which the OS lets go of when the
+process ends, however it ends. The process that holds it writes its pid and name there, so another can say who
+does. The shared board and the NFL runner take it through their ledger (`open_ledger`), and the NFLMeta recorder
+(`tools/nflmeta_record.py`) takes it before its first request.
 """
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
+import sys
 import tempfile
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -32,12 +41,14 @@ from omni.app.quota import (
     QuotaPolicy,
     SHEDDING,
     account_limits,
+    larger_usage,
 )
 
-__all__ = ["SCHEMA", "USAGE_FILE", "UsageFile", "default_state_dir", "open_ledger"]
+__all__ = ["HELD_ONE_AT_A_TIME", "SCHEMA", "USAGE_FILE", "FileLocks", "UsageFile", "default_state_dir", "open_ledger"]
 
 SCHEMA = "omni-quota-usage/1"
 USAGE_FILE = "quota-usage.json"
+HELD_ONE_AT_A_TIME = frozenset({ProviderAccount.NFLMETA})  # the accounts one process at a time may poll
 
 
 def default_state_dir(environ: Mapping[str, str], home: Path) -> Path:
@@ -88,7 +99,7 @@ class UsageFile:
         """Write ``usage``, keeping any larger count the file already has for the same month; whether it was
         written. A failure is logged and leaves the old file as it was."""
         try:
-            merged = _merged(self._read(), usage)
+            merged = larger_usage(self._read(), usage)
         except (OSError, _Unreadable):
             merged = dict(usage)  # nothing readable to keep
         document = {
@@ -140,23 +151,65 @@ def _usage(entry: Any) -> MonthUsage:
     return MonthUsage(BillingMonth.parse(entry["month"]), requests=requests, rows=rows, exhausted=exhausted)
 
 
-def _merged(
-    saved: Mapping[ProviderAccount, MonthUsage], usage: Mapping[ProviderAccount, MonthUsage]
-) -> dict[ProviderAccount, MonthUsage]:
-    """Each account's later month, and in the same month the larger counts of the two."""
-    merged = dict(saved)
-    for account, ours in usage.items():
-        theirs = merged.get(account)
-        if theirs is None or ours.month > theirs.month:
-            merged[account] = ours
-        elif ours.month == theirs.month:
-            merged[account] = MonthUsage(
-                ours.month,
-                requests=max(ours.requests, theirs.requests),
-                rows=max(ours.rows, theirs.rows),
-                exhausted=ours.exhausted or theirs.exhausted,
-            )
-    return merged
+def _try_lock(fd: int) -> None:
+    """Take an exclusive lock on the open file ``fd`` without waiting: `BlockingIOError` when another holds it."""
+    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+class FileLocks:
+    """Each of ``accounts`` held by one process on the machine at a time, through an exclusive lock on
+    ``<account>.lock`` under ``state_dir``. ``who`` names this process to another that finds the lock held."""
+
+    def __init__(
+        self,
+        state_dir: Path,
+        accounts: Collection[ProviderAccount] = HELD_ONE_AT_A_TIME,
+        *,
+        who: str | None = None,
+        lock: Callable[[int], None] = _try_lock,
+    ) -> None:
+        self._dir = state_dir
+        self._accounts = frozenset(accounts)
+        self._who = who if who is not None else Path(sys.argv[0]).name
+        self._lock = lock
+        self._held: dict[ProviderAccount, int] = {}  # each account held, by its lock file's descriptor
+
+    def claim(self, account: ProviderAccount) -> str | None:
+        """Hold ``account`` for this process: None once held (or when it needs no holding), else who holds it."""
+        if account not in self._accounts or account in self._held:
+            return None
+        path = self._dir / f"{account.value}.lock"
+        try:
+            self._dir.mkdir(parents=True, exist_ok=True)
+            fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+        except OSError as exc:
+            return f"its lock {path} can't be opened: {exc}"  # a lock that can't be had is no proof no one holds it
+        try:
+            self._lock(fd)
+        except OSError as exc:
+            os.close(fd)
+            if isinstance(exc, BlockingIOError):
+                return _holder(path)
+            return f"its lock {path} can't be taken: {exc}"
+        os.ftruncate(fd, 0)
+        os.write(fd, f"{os.getpid()} {self._who}\n".encode())
+        self._held[account] = fd
+        return None
+
+    def release(self) -> None:
+        """Let go of every account held: closing a lock's file lets go of its lock."""
+        for fd in self._held.values():
+            os.close(fd)
+        self._held.clear()
+
+
+def _holder(path: Path) -> str:
+    """Who holds a lock, as its holder wrote it: "pid 4242, omni.app.football"."""
+    try:
+        pid, _, who = path.read_text(encoding="utf-8").strip().partition(" ")
+    except OSError:
+        return "another process"
+    return f"pid {pid}, {who}" if pid and who else f"pid {pid}" if pid else "another process"
 
 
 def open_ledger(
@@ -165,8 +218,16 @@ def open_ledger(
     *,
     policy: QuotaPolicy = SHEDDING,
     log: Callable[[str], None] = print,
+    who: str | None = None,
 ) -> QuotaLedger:
     """The board's ledger: every account at today's limits (NFLMeta's at ``nflmeta``), counting on from the
-    usage saved under ``state_dir``, and saving back there."""
+    usage saved under ``state_dir``, and saving back there. NFLMeta is polled by one process at a time: the ledger
+    holds it under ``state_dir`` (`FileLocks`, as ``who``, by default the program's name) from its first ask on."""
     usage = UsageFile(state_dir / USAGE_FILE, log=log)
-    return QuotaLedger(account_limits(nflmeta), policy=policy, usage=usage.load(), store=usage)
+    return QuotaLedger(
+        account_limits(nflmeta),
+        policy=policy,
+        usage=usage.load(),
+        store=usage,
+        locks=FileLocks(state_dir, who=who),
+    )

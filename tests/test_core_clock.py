@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from omni.core.clock import Clock, ClockReading, FakeClock, MonotonicTime, Pacer, SystemClock
+from omni.core.clock import Clock, ClockReading, FakeClock, MonotonicTime, Pacer, SystemClock, boottime
 from omni.core.time import DurationSeconds
 
 T = datetime(2026, 6, 17, 23, 30, tzinfo=timezone.utc)
@@ -111,3 +111,38 @@ def test_a_pacer_keeps_a_steady_beat_and_starts_over_when_behind() -> None:
 def test_a_pacer_needs_a_positive_beat() -> None:
     with pytest.raises(ValueError, match="positive beat"):
         Pacer(FakeClock(T), timedelta(0))
+
+
+def test_a_reading_carries_no_suspend_inclusive_clock_unless_the_host_has_one() -> None:
+    assert ClockReading(T, MonotonicTime(1.0)).suspend_inclusive is None
+    assert FakeClock(T).read().suspend_inclusive is None
+    assert SystemClock(suspend_inclusive=None).read().suspend_inclusive is None
+    assert SystemClock(suspend_inclusive=lambda: 42.5).read().suspend_inclusive == MonotonicTime(42.5)
+
+
+def test_the_platform_s_suspend_inclusive_clock_is_boottime_where_there_is_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    import time
+
+    if hasattr(time, "CLOCK_BOOTTIME"):
+        read = boottime()
+        assert read is not None and read() >= 0.0
+        monkeypatch.delattr(time, "CLOCK_BOOTTIME")
+    assert boottime() is None
+
+
+def test_a_faked_sleep_moves_the_wall_and_suspend_inclusive_clocks_and_leaves_the_monotonic_one() -> None:
+    clock = FakeClock(T, suspend_inclusive=MonotonicTime(100.0))
+    clock.advance(timedelta(seconds=10))
+    assert clock.read() == ClockReading(T + timedelta(seconds=10), MonotonicTime(10.0), MonotonicTime(110.0))
+    clock.suspend(timedelta(minutes=49))
+    woke = clock.read()
+    assert woke.monotonic == MonotonicTime(10.0)
+    assert woke.utc == T + timedelta(minutes=49, seconds=10)
+    assert woke.suspend_inclusive == MonotonicTime(110.0 + 49 * 60)
+    clock.jump(timedelta(seconds=-30))  # a wall-clock correction alone
+    assert clock.read().suspend_inclusive == woke.suspend_inclusive and clock.monotonic() == woke.monotonic
+    plain = FakeClock(T)
+    plain.suspend(DurationSeconds(60))  # a host without the clock: only the wall clock shows the sleep
+    assert plain.read() == ClockReading(T + timedelta(seconds=60), MonotonicTime(0.0))
+    with pytest.raises(ValueError, match="backward"):
+        plain.suspend(timedelta(seconds=-1))

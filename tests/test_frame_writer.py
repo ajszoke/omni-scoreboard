@@ -20,12 +20,15 @@ from omni.app.frame_stream import (
     DisplayLost,
     DisplayReceipt,
     FrameShown,
+    LinkProtocol,
+    LossCause,
     SinkProcess,
     StreamFrame,
     ack_line,
     encode_frame,
     encode_legacy_frame,
 )
+from omni.app.receiver import encode_heartbeat, encode_session_frame
 
 _SOON = 5.0  # seconds a test waits for the writer before calling it stuck
 
@@ -400,3 +403,115 @@ def test_closing_ends_the_display_process_input_and_waits_for_it() -> None:
     sink.close()
     assert bare.waited == 10
     bare.end()
+
+
+def test_a_heartbeat_asked_for_goes_out_on_the_writer_s_thread_unless_a_frame_is_waiting() -> None:
+    beats: list[int] = []
+    landed = threading.Event()
+    frames: list[int] = []
+
+    def heartbeat() -> bool:
+        beats.append(len(frames))
+        landed.set()
+        return True
+
+    def write(frame: int) -> bool:
+        frames.append(frame)
+        return True
+
+    writer = BackgroundFrameWriter(write, on_error=_never, heartbeat=heartbeat)
+    writer.start()
+    writer.beat()
+    assert landed.wait(_SOON) and beats == [0]
+    writer(1)
+    assert _until(lambda: frames == [1])
+    writer.stop(_SOON)
+    quiet = BackgroundFrameWriter(write, on_error=_never)  # nothing to beat with: asking does nothing
+    quiet.beat()
+    waiting = BackgroundFrameWriter(write, on_error=_never, heartbeat=heartbeat)
+    waiting(2)
+    waiting.beat()  # a frame is waiting to go out, which says as much
+    waiting.start()
+    assert _until(lambda: frames == [1, 2])
+    waiting.stop(_SOON)
+    assert beats == [0]
+
+
+def test_a_heartbeat_that_fails_is_reported_and_the_writer_keeps_going() -> None:
+    errors: list[str] = []
+    frames: list[int] = []
+
+    def heartbeat() -> bool:
+        raise BrokenPipeError("gone")
+
+    def write(frame: int) -> bool:
+        frames.append(frame)
+        return True
+
+    writer = BackgroundFrameWriter(write, on_error=lambda exc: errors.append(repr(exc)), heartbeat=heartbeat)
+    writer.start()
+    writer.beat()
+    assert _until(lambda: errors == ["BrokenPipeError('gone')"])
+    writer(1)
+    assert _until(lambda: frames == [1])
+    writer.stop(_SOON)
+
+
+def _announce(process: _Process, link: DisplayLink, boot: str = "boot-a") -> None:
+    process.reply(READY_LINE)
+    process.reply(b"OMN3 READY %s\n" % boot.encode())
+    assert _until(lambda: link.protocol(1)[0] is LinkProtocol.SESSIONS)
+
+
+def test_a_receiver_that_reads_sessions_gets_its_session_s_frames_and_heartbeats_and_its_replies_are_heard() -> None:
+    now = [0.0]
+    process = _Process()
+    link = DisplayLink(monotonic=lambda: now[0])
+    sink = SinkProcess(["show"], link, spawn=_Spawner(process), monotonic=lambda: now[0], log=lambda line: None)
+    assert sink.heartbeat() is True  # no display process yet: nothing to tell
+    assert sink.write(_frame(1))
+    assert sink.heartbeat() is True and process.sent == encode_legacy_frame(_frame(1))  # it hasn't said what it reads
+    _announce(process, link)
+    session = link.protocol(1)[1]
+    assert sink.write(_frame(2)) and sink.heartbeat()
+    assert process.sent == encode_legacy_frame(_frame(1)) + encode_session_frame(
+        session, 2, 2, 1, bytes(6)
+    ) + encode_heartbeat(session)
+    process.reply(b"SHOWN %d 2\n" % session)
+    assert _collect(link, 1) == [FrameShown(2, generation=1)]
+    now[0] = 7.0
+    process.reply(b"ALIVE %d\n" % session)
+    process.reply(b"BLANK %d\n" % session)
+    receipts = _collect(link, 1)
+    assert receipts == [DisplayLost(1)] and isinstance(receipts[0], DisplayLost)
+    assert receipts[0].cause is LossCause.BLANKED
+    assert sink.write(_frame(3))
+    assert process.sent.endswith(encode_session_frame(session + 1, 3, 2, 1, bytes(6)))  # a new session
+    process.end()
+
+
+def test_an_older_receiver_gets_no_heartbeat_it_would_read_as_a_broken_frame() -> None:
+    process = _Process()
+    link = DisplayLink()
+    sink = SinkProcess(["show"], link, spawn=_Spawner(process), log=lambda line: None)
+    sink.write(_frame(1))
+    process.reply(READY_LINE)
+    assert _until(lambda: link.acknowledges(1))
+    sent = process.sent
+    assert sink.heartbeat() is True and process.sent == sent
+    process.exit_code = 0
+    assert sink.heartbeat() is True  # the process is gone: the next frame starts a new one
+    process.end()
+
+
+def test_a_heartbeat_into_a_broken_pipe_drops_the_display_process() -> None:
+    process = _Process()
+    link = DisplayLink()
+    logs: list[str] = []
+    sink = SinkProcess(["show"], link, spawn=_Spawner(process), log=logs.append)
+    sink.write(_frame(1))
+    _announce(process, link)
+    process.stdin = _BrokenPipe()
+    assert sink.heartbeat() is False
+    assert logs[-1] == "display: lost the display process ([Errno 32] Broken pipe); restarting shortly"
+    process.end()

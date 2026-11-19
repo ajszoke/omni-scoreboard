@@ -36,7 +36,10 @@ from omni.tower.decisions import (
     UnspentNote,
     WaitNote,
     YieldNote,
+    aired_words,
     event_words,
+    judged_words,
+    refused_guest,
 )
 
 __all__ = ["policy_line"]
@@ -61,9 +64,9 @@ def policy_line(note: PolicyDecision) -> str:
         hosts = ", ".join(str(host) for host in note.hosts)
         if note.refusal is None:
             return f"guest   admitted {note.card.raw} in {hosts}"
-        return f"guest   refused {note.card.raw} in {hosts}  ({note.refusal.value})"
+        return f"guest   refused {note.card.raw} in {hosts}  ({refused_guest(note)})"
     if isinstance(note, YieldNote):
-        return f"yield   {note.card.raw}  (its host's break closed {_at(note.closed)})"
+        return f"yield   {note.card.raw}  (its host's break closed {_at(note.closed)}{aired_words(note)})"
     if isinstance(note, CapNote):
         return f"cap     refused {', '.join(rung.name.lower() for rung in note.refused)}"
     assert isinstance(note, ClampNote)
@@ -98,7 +101,7 @@ def _promotion(note: PromotionNote) -> str:
 def _lease(note: LeaseNote) -> str:
     line = f"lease   {note.event.value} {note.id}"
     if note.event is LeaseEvent.REFUSED and note.refusal is not None:
-        return line + f"  ({note.refusal.value})"
+        return line + f"  ({note.refusal.value})" + judged_words(note)
     if note.event is not LeaseEvent.OPENED:
         return line
     left = f"{note.remaining.total_seconds():.1f}s left" if note.remaining is not None else "open-ended"

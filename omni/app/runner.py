@@ -32,6 +32,7 @@ from datetime import datetime, timedelta, tzinfo
 from omni.app.background import Waking
 from omni.app.contest_store import ContestStore
 from omni.app.display import DisplaySink
+from omni.app.frame_stream import AcknowledgingSink
 from omni.app.loop import AppLoop, Painted, QuotaNote
 from omni.app.nfl_feeds import NflFeeds
 from omni.app.nfl_pipeline import LiveFootballPipeline
@@ -66,6 +67,7 @@ from omni.renderers.image import LogoStore
 from omni.renderers.registry import RendererRegistry, default_registry
 from omni.renderers.text_lane import DEFAULT_MARQUEE, MarqueeStyle
 from omni.tower.board import BoardPolicy
+from omni.tower.interruption import InterruptionPolicy
 from omni.policy.settings import PolicySettings
 
 __all__ = [
@@ -98,7 +100,7 @@ class NflSource:
 def build_loop(
     schedule: Provider | ScopeSource | None,
     fetch_feed: FeedFetcher,
-    sink: DisplaySink,
+    sink: DisplaySink | AcknowledgingSink,
     *,
     favorites: Favorites = Favorites(),
     broadcast_lag: DurationSeconds = DurationSeconds(45),
@@ -117,8 +119,12 @@ def build_loop(
     nfl: NflSource | None = None,
     nfl_delay: DurationSeconds = DurationSeconds(0),
     settings: PolicySettings | None = None,
+    interruptions: InterruptionPolicy | None = None,
 ) -> AppLoop:
     """Wire the standard spine into an `AppLoop` (deterministic; no I/O performed here).
+
+    ``sink`` is the display: one that shows a frame as it commits it (the emulator), or one that confirms what it
+    showed afterward (a board's receiver, `omni.app.frame_stream.StreamDisplaySink`), which books on its word.
 
     A plain `Provider` ``schedule`` is supervised: its answers count as fresh for `max_age`, and after a
     failure it's asked again only after `backoff`. A `ScopeSource` paces and ages its own scopes.
@@ -137,7 +143,8 @@ def build_loop(
     `nfl`, when given, puts NFL on the board: its slate beside ``schedule``, and its games carded through the same
     queue, held back for `nfl_delay` (`broadcast_lag` is baseball's). Its favorites are ``favorites``' NFL clubs.
     With no ``schedule`` the board is NFL's alone. `settings` are the board policy's user settings (the defaults
-    when left out).
+    when left out). `interruptions`, when given, has the loop watch for its host sleeping or stalling, and wake at
+    least every health tick (`omni.tower.interruption`); the running board always does.
     """
     queue = InterleavedCardQueue()
     pipeline = LiveBaseballPipeline(
@@ -176,6 +183,7 @@ def build_loop(
         football=football,
         settings=settings,
         favorites=favorites,
+        interruptions=interruptions,
     )
 
 
@@ -191,7 +199,7 @@ def _first_note(*notes: QuotaNote | None) -> QuotaNote:
 
 def build_planned_loop(
     planned: PlannedMlb | None,
-    sink: DisplaySink,
+    sink: DisplaySink | AcknowledgingSink,
     *,
     meter: bool = False,
     favorites: Favorites = Favorites(),
@@ -204,13 +212,14 @@ def build_planned_loop(
     nfl: NflSource | None = None,
     nfl_delay: DurationSeconds = DurationSeconds(0),
     settings: PolicySettings | None = None,
+    interruptions: InterruptionPolicy | None = None,
 ) -> AppLoop:
     """The running MLB board: the slate, feeds, pregame details and odds all read from ``planned``'s plan.
 
     The live win meter (the market, then MLB's model) is on only with ``meter``. Each reading stands
     beside a score only if it arrived no later than that score's feed answer. ``nfl``, when given, puts NFL
     on the board beside it, held back for ``nfl_delay``; with no ``planned``, the board is NFL's alone.
-    ``settings`` are the board policy's user settings.
+    ``settings`` are the board policy's user settings, and ``interruptions`` as `build_loop` takes them.
     """
     if planned is None:
         return build_loop(
@@ -227,6 +236,7 @@ def build_planned_loop(
             nfl=nfl,
             nfl_delay=nfl_delay,
             settings=settings,
+            interruptions=interruptions,
         )
     return build_loop(
         planned,  # the slate, date by date, from the plan
@@ -247,6 +257,7 @@ def build_planned_loop(
         nfl=nfl,
         nfl_delay=nfl_delay,
         settings=settings,
+        interruptions=interruptions,
     )
 
 

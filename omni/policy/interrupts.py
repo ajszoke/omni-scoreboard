@@ -19,7 +19,7 @@ The bar an event must clear depends on what the healthy live favorites are doing
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import timedelta
 from enum import Enum
 
@@ -243,15 +243,19 @@ def classify_baseball_final(
     """Whether a completed game is a confirmed perfect game or no-hitter.
 
     ``final`` says the feed itself called the game final. A feat needs that, reported hit totals, and nine
-    complete innings pitched by the side throwing it. When the final's last half reads as still in its top, the
-    home staff's last inning can't be counted as complete, so the game classifies lower rather than guess. A
-    perfect game needs the reach ledger's confirmed "no batter reached" (`BaseballGameState.away_reached_base`
-    and its twin are False only over a complete play log); an unknown reach leaves it a no-hitter.
+    complete innings pitched by the side throwing it. StatsAPI leaves a game the home side won without batting in
+    the ninth reading as the top of the ninth; with the home side ahead that top half is over, so the home staff's
+    ninth counts. A final in its top with no home lead can't vouch for that inning, so the game classifies lower
+    rather than guess. A perfect game needs the reach ledger's confirmed "no batter reached"
+    (`BaseballGameState.away_reached_base` and its twin are False only over a complete play log); an unknown
+    reach leaves it a no-hitter.
     """
     if not final:
         return Classification(InterruptClass.ROUTINE, ClassBasis.NOT_FINAL)
     if not state.known(BaseballField.HITS):
         return Classification(InterruptClass.ROUTINE, ClassBasis.HITS_UNVERIFIED)
+    if state.phase is InningPhase.TOP and _home_ahead(state):
+        state = replace(state, phase=InningPhase.MIDDLE)  # the home side didn't need its half: the top is over
     progress = pitching_feat_progress(state, min_completed_innings=policy.feat_innings)
     if progress is None:
         return Classification(InterruptClass.ROUTINE, ClassBasis.NO_FEAT)
@@ -261,6 +265,11 @@ def classify_baseball_final(
     return Classification(
         InterruptClass.NO_HITTER, ClassBasis.REACH_UNVERIFIED if reached is None else ClassBasis.NO_HITTER
     )
+
+
+def _home_ahead(state: BaseballGameState) -> bool:
+    """Whether the home side leads, by known scores."""
+    return state.home_score is not None and state.away_score is not None and state.home_score > state.away_score
 
 
 def _baseball_states_known(*states: BaseballGameState) -> bool:

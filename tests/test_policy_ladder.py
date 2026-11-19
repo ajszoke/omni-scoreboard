@@ -65,17 +65,17 @@ def test_four_initial_finals_in_a_row_are_capped_then_a_full_base_turn_is_reserv
     finals = 4
     while True:
         due = {Rung.BASE} | ({Rung.INITIAL_RESULT} if finals else set())
-        choice = choose_rung(due, run, _m(t))
+        choice = choose_rung(due, run)
         if choice.rung is not Rung.INITIAL_RESULT:
             break
         admitted.append(t)
-        run = run.after(Rung.INITIAL_RESULT, _m(t))
+        run = run.after(Rung.INITIAL_RESULT).aired(Rung.INITIAL_RESULT, 8 * S, live_base=True)
         finals -= 1
         t += 8
     assert admitted == [0, 8, 16, 24]
     assert t == 32  # the run ends when the last admitted final does
     assert choice == RungChoice(rung=Rung.BASE_RECOVERY, reserved=True)
-    run = run.after(Rung.BASE_RECOVERY, _m(32))
+    run = run.after(Rung.BASE_RECOVERY)
     assert run == NonBaseRun()
     reserved_until = _m(32) + LadderPolicy().base_turn
     assert reserved_until == _m(44)
@@ -93,18 +93,18 @@ def test_promotions_and_finals_share_the_cap_but_finals_never_wait_on_the_cooldo
     broker.offer(promotion("homer", 0), _m(0))
     decision = broker.decide(open_rotation, _m(0))
     assert decision.start is not None and broker.started(decision.start, open_rotation, _m(0)).confirmed
-    run = NonBaseRun().after(Rung.PROMOTION, _m(0))
+    run = NonBaseRun().aired(Rung.PROMOTION, 12 * S, live_base=True)
     broker.offer(promotion("double", 12), _m(12))
     for t in (12, 20, 28):  # the promotion ran 0-12; ordered finals follow while the cooldown holds the next one
         assert broker.decide(open_rotation, _m(t)).reason is PromotionRefusal.COOLDOWN
-        assert choose_rung({Rung.INITIAL_RESULT, Rung.BASE}, run, _m(t)).rung is Rung.INITIAL_RESULT
-        run = run.after(Rung.INITIAL_RESULT, _m(t))
-    assert choose_rung({Rung.INITIAL_RESULT, Rung.BASE}, run, _m(36)).rung is Rung.BASE_RECOVERY
+        assert choose_rung({Rung.INITIAL_RESULT, Rung.BASE}, run).rung is Rung.INITIAL_RESULT
+        run = run.aired(Rung.INITIAL_RESULT, 8 * S, live_base=True)
+    assert choose_rung({Rung.INITIAL_RESULT, Rung.BASE}, run).rung is Rung.BASE_RECOVERY
 
 
 def test_once_capped_no_non_base_card_is_admitted_while_a_base_card_waits() -> None:
-    run = NonBaseRun(_m(0))
-    choice = choose_rung({Rung.PROMOTION, Rung.AUXILIARY, Rung.RESCUE}, run, _m(30))
+    run = NonBaseRun(30 * S)
+    choice = choose_rung({Rung.PROMOTION, Rung.AUXILIARY, Rung.RESCUE}, run)
     assert choice.rung is Rung.BASE_RECOVERY and choice.reserved
     assert choice.refused == (
         RungRefusal(Rung.PROMOTION, LadderRefusal.NON_BASE_CAP),
@@ -113,35 +113,40 @@ def test_once_capped_no_non_base_card_is_admitted_while_a_base_card_waits() -> N
 
 
 def test_device_controls_go_first_even_past_the_cap() -> None:
-    run = NonBaseRun(_m(0))
-    choice = choose_rung({Rung.CONTROL, Rung.PROMOTION, Rung.BASE}, run, _m(40))
+    run = NonBaseRun(40 * S)
+    choice = choose_rung({Rung.CONTROL, Rung.PROMOTION, Rung.BASE}, run)
     assert choice.rung is Rung.CONTROL and not choice.reserved
     assert choice.refused == (
         RungRefusal(Rung.PROMOTION, LadderRefusal.NON_BASE_CAP),
         RungRefusal(Rung.BASE, LadderRefusal.OUTRANKED),
     )
-    assert run.after(Rung.CONTROL, _m(40)) == run  # a control neither ends nor extends the run
+    assert run.after(Rung.CONTROL) == run and run.aired(Rung.CONTROL, 8 * S, live_base=True) == run
 
 
 def test_with_no_base_card_waiting_the_cap_has_nothing_to_reserve() -> None:
-    choice = choose_rung({Rung.INITIAL_RESULT, Rung.AUXILIARY}, NonBaseRun(_m(0)), _m(90))
+    choice = choose_rung({Rung.INITIAL_RESULT, Rung.AUXILIARY}, NonBaseRun(90 * S))
     assert choice.rung is Rung.INITIAL_RESULT
     assert choice.refused == (RungRefusal(Rung.AUXILIARY, LadderRefusal.OUTRANKED),)
 
 
 def test_the_ladder_takes_the_first_rung_due_in_priority_order() -> None:
-    assert choose_rung([Rung.BASE, Rung.AUXILIARY, Rung.PROMOTION, Rung.RESCUE], NonBaseRun(), _m(0)).rung is (
-        Rung.RESCUE
-    )
-    assert choose_rung([Rung.BASE, Rung.PROMOTION], NonBaseRun(), _m(0)).rung is Rung.PROMOTION
-    assert choose_rung([], NonBaseRun(), _m(0)) == RungChoice(rung=None)
+    assert choose_rung([Rung.BASE, Rung.AUXILIARY, Rung.PROMOTION, Rung.RESCUE], NonBaseRun()).rung is Rung.RESCUE
+    assert choose_rung([Rung.BASE, Rung.PROMOTION], NonBaseRun()).rung is Rung.PROMOTION
+    assert choose_rung([], NonBaseRun()) == RungChoice(rung=None)
 
 
-def test_a_non_base_card_extends_a_run_without_restarting_it() -> None:
-    run = NonBaseRun().after(Rung.PROMOTION, _m(5)).after(Rung.AUXILIARY, _m(17))
-    assert run == NonBaseRun(_m(5))
-    assert not run.capped(_m(34)) and run.capped(_m(35))
-    assert run.capped(_m(25), LadderPolicy(non_base_cap=20 * S))
+def test_a_non_base_card_extends_the_run_by_its_confirmed_airtime_while_a_live_base_is_on_hand() -> None:
+    run = NonBaseRun().aired(Rung.PROMOTION, 12 * S, live_base=True).aired(Rung.AUXILIARY, 8 * S, live_base=True)
+    assert run == NonBaseRun(20 * S) and run.after(Rung.AUXILIARY) == run
+    assert not run.capped() and run.aired(Rung.INITIAL_RESULT, 10 * S, live_base=True).capped()
+    assert run.capped(LadderPolicy(non_base_cap=20 * S))
+
+
+def test_neutral_circulation_with_no_live_base_runs_up_nothing_and_a_base_card_ends_the_run() -> None:
+    capped = NonBaseRun(30 * S)
+    assert NonBaseRun().aired(Rung.AUXILIARY, 600 * S, live_base=False) == NonBaseRun()
+    assert capped.aired(Rung.AUXILIARY, 60 * S, live_base=False) == capped  # an owed recovery stays owed
+    assert capped.after(Rung.BASE) == NonBaseRun() and capped.after(Rung.BASE_RECOVERY) == NonBaseRun()
 
 
 def test_the_ladders_rungs_say_which_are_base() -> None:
@@ -224,11 +229,24 @@ def test_while_a_favorite_acts_an_unrelated_final_waits_for_a_break() -> None:
         (timedelta(minutes=10), 1, False),
         (timedelta(minutes=15), 1, True),
         (timedelta(minutes=20), 2, False),
-        (timedelta(minutes=30), 1, False),  # gone 30 minutes after confirmation
     ],
 )
-def test_a_final_repeats_at_most_twice_at_5_and_15_minutes(since: timedelta, repeats: int, due: bool) -> None:
-    assert final_repeat_due(since_confirmed=since, repeats_shown=repeats) is due
+def test_a_final_repeats_at_most_twice_at_5_and_15_minutes_after_it_first_went_up(
+    since: timedelta, repeats: int, due: bool
+) -> None:
+    assert final_repeat_due(since_first_start=since, since_confirmed=since, repeats_shown=repeats) is due
+
+
+@pytest.mark.parametrize(
+    "confirmed, due",
+    [
+        (timedelta(minutes=29, seconds=52), True),  # its 8 s end exactly at the hard end
+        (timedelta(minutes=29, seconds=53), False),  # they would run past it
+        (timedelta(minutes=30), False),
+    ],
+)
+def test_a_final_s_repeat_is_due_only_if_its_whole_turn_ends_by_its_hard_end(confirmed: timedelta, due: bool) -> None:
+    assert final_repeat_due(since_first_start=timedelta(minutes=15), since_confirmed=confirmed, repeats_shown=1) is due
 
 
 def test_a_final_is_gone_30_minutes_after_confirmation() -> None:

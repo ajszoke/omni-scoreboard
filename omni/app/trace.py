@@ -14,10 +14,13 @@ One line per change, so a running board's log reads as a story rather than a hea
   whenever that digest is new.
 - A **refresh** line is written when the source's health, the number of games held in the TV delay, or
   the games the schedule calls final that their feed doesn't yet change, and whenever a refresh drops a
-  game or a play, misses a card, reveals a final or corrects one. Each one names the next refresh due by
-  itself. Under it, a card that left without airing is named with why (`unseen`), a final with when its
-  game ended and what that rests on, which orders the finals, a final whose result a later answer changed
-  (`corrected`), and each game whose result waits for its feed to say final (`unconfirmed`).
+  game or a play, misses a card, reveals a final or corrects one, or a league's quota changes. Each one names the
+  next refresh due by itself. Under it, a league whose quota now holds its schedule back says why, on a line of
+  its own (``nfl quota: NFLMeta Free spent for 2026-11: switch to Builder``), as does one whose quota has let go
+  (``nfl quota: clear``): the board's health is its healthiest league's, so a spent account would otherwise sit
+  behind another league's healthy one. A card that left without airing is named with why (`unseen`), a final
+  with when its game ended and what that rests on, which orders the finals, a final whose result a later answer
+  changed (`corrected`), and each game whose result waits for its feed to say final (`unconfirmed`).
 - An **up** line is written at a card's first committed frame, with why the queue chose it and how its
   teams were drawn: logo variant, tile or color bar, meter color, and the contrast policy that chose
   them. A **frame** line is written when an explicit frame goes up, with why.
@@ -25,6 +28,10 @@ One line per change, so a running board's log reads as a story rather than a hea
   came down before it ever drew. A **stale** line marks a card going up, or turning, stale. A **note**
   line is something else the board decided, such as finding no base card for the turn it owes one.
 - A paint failure is written once when it starts, and once when frames commit again.
+- An **interrupted** line is an interruption the board took in (`omni.tower.interruption`): a host suspend (and
+  whether its clock is trusted), a process stall or an output loss, how long the gap ran, the display's sessions
+  either side, its last confirmed frame and the frames in flight. A **resumed** line names the first frame up after
+  it (the up or frame line before it names what), and the display time unknown after output losses so far.
 
 Under `omni-board-policy/2` the board's decisions (`omni.tower.decisions`) are written too, one line each, with
 the policy's factors as fields and the "why this card" sentence last:
@@ -54,9 +61,11 @@ from omni.app.loop import Painted, Presentation, Refresh
 from omni.app.versions import Versions
 from omni.core.clock import ClockReading, MonotonicTime
 from omni.core.colors import RGBColor
+from omni.core.enum import League
 from omni.policy.ledger import DebtClamp
 from omni.renderers.visual_treatment import MarkTreatment
 from omni.tower.board import BoardFrame, BoardPayload
+from omni.tower.interruption import Interruption
 from omni.tower.decisions import (
     BaseTurnNote,
     CapNote,
@@ -70,7 +79,10 @@ from omni.tower.decisions import (
     UnspentNote,
     WaitNote,
     YieldNote,
+    aired_words,
     event_words,
+    judged_words,
+    refused_guest,
 )
 from omni.tower.lane import ChangeKind, LaneChange
 
@@ -84,6 +96,7 @@ class DecisionTracer:
         self._log = log
         self._timezone = timezone
         self._last_refresh: tuple[object, ...] | None = None
+        self._quotas: dict[League, str | None] = {}  # each league's quota word, as last written
         self._stale: bool = False
         self._paint_error: str | None = None
         self._versions: Versions | None = None
@@ -103,7 +116,8 @@ class DecisionTracer:
         key = (health.source, health.reason, health.held, health.unfed, pipeline.unconfirmed)
         dropped = pipeline.skipped + pipeline.warnings
         news = dropped or refresh.unseen or pipeline.ends or pipeline.corrections
-        if key == self._last_refresh and not news:
+        quotas = [league for league in refresh.leagues if league.quota != self._quotas.get(league.league)]
+        if key == self._last_refresh and not news and not quotas:
             return
         self._last_refresh = key
         line = f"refresh {self._clock(refresh.at)} in {took.total_seconds():.1f}s: source {health.source.value}"
@@ -114,6 +128,9 @@ class DecisionTracer:
         if health.unfed:
             line += f" | unfed {health.unfed}"
         self._log(line + f" | next {self._clock(next_at) if next_at is not None else '-'}")
+        for league in quotas:
+            self._quotas[league.league] = league.quota
+            self._log(f"  {league.league.value} {league.quota or 'quota: clear'}")
         for note in dropped:
             self._log(f"  dropped: {note}")
         for missed in refresh.unseen:
@@ -126,6 +143,8 @@ class DecisionTracer:
             self._log(f"  unconfirmed: {game} (final on the schedule; its feed hasn't said so)")
 
     def painted(self, painted: Painted) -> None:
+        for interruption in painted.interrupted:
+            self._log(self._interruption(interruption))
         for change in painted.changes:
             self._changed(change, painted)
         for note in painted.notes:
@@ -142,6 +161,26 @@ class DecisionTracer:
         if painted.shown is not None and painted.stale and not self._stale:
             self._log(f"stale {self._clock(painted.at)}: {painted.shown.raw}")
         self._stale = painted.stale
+        resumed = painted.resumed
+        if resumed is not None:
+            unknown = painted.unknown_display.total_seconds()
+            self._log(
+                f"resumed {self._clock(painted.at)}: the first frame since {resumed.reason.value} {resumed.serial}"
+                f" | unknown display {unknown:.1f}s so far"
+            )
+
+    def _interruption(self, interruption: Interruption) -> str:
+        line = (
+            f"interrupted {self._clock(interruption.after.utc)}: {interruption.reason.value} {interruption.serial}"
+            f" ({interruption.gap.total_seconds():.1f}s"
+        )
+        if interruption.host:
+            line += ", clock trusted)" if interruption.clock_trusted else ", clock untrusted)"
+        else:
+            line += f" since its last word) | session {interruption.old_session}->{interruption.new_session}"
+        swap = interruption.last_swap
+        line += f" | last swap {self._clock(swap.utc) if swap is not None else '-'}"
+        return line + f" | {len(interruption.outstanding)} in flight"
 
     def failed(self, exc: Exception) -> None:
         self._log(f"refresh failed: {type(exc).__name__}: {exc}")
@@ -174,9 +213,10 @@ class DecisionTracer:
             hosts = ", ".join(str(host) for host in note.hosts)
             if note.refusal is None:
                 return f"guest {when}: admitted {note.card.raw} in {hosts}"
-            return f"guest {when}: refused {note.card.raw} in {hosts} ({note.refusal.value})"
+            return f"guest {when}: refused {note.card.raw} in {hosts} ({refused_guest(note)})"
         if isinstance(note, YieldNote):
-            return f"yield {when}: {note.card.raw} (its host's break closed {self._at(note.at, note.closed)})"
+            closed = self._at(note.at, note.closed)
+            return f"yield {when}: {note.card.raw} (its host's break closed {closed}{aired_words(note)})"
         if isinstance(note, CapNote):
             return f"cap {when}: the non-base cap is reached; refused {', '.join(rung.name.lower() for rung in note.refused)}"
         return f"clamp {when}: " + "; ".join(_clamp(clamp) for clamp in note.clamps)
@@ -210,7 +250,7 @@ class DecisionTracer:
     def _lease(self, when: str, note: LeaseNote) -> str:
         line = f"lease {when}: {note.event.value} {note.id}"
         if note.event is LeaseEvent.REFUSED and note.refusal is not None:
-            return line + f" ({note.refusal.value})"
+            return line + f" ({note.refusal.value})" + judged_words(note)
         if note.event is not LeaseEvent.OPENED:
             return line
         left = f"{note.remaining.total_seconds():.1f}s left" if note.remaining is not None else "open-ended"

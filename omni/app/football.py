@@ -25,7 +25,9 @@ Every NFLMeta request is counted against the month's quota (`omni.app.quota`), a
 restart doesn't forget it. The game is followed at its cadence until the month is exhausted; then the
 feed stops asking and the card goes stale, saying why. When Free's month is spent, the log says so once,
 with the next step: switch the account to Builder and restart with ``--nflmeta-plan builder``. The month's
-counts carry over, and Builder's limits judge them. At shutdown the runner prints the month's usage.
+counts carry over, and Builder's limits judge them. At shutdown the runner prints the month's usage. One process
+at a time polls NFLMeta on a machine (`omni.app.quota_store.FileLocks`): while the shared board or the recorder
+holds it under the same ``--state-dir``, the runner refuses to start, saying which process does.
 
 At start and at exit the runner runs the expiry sweep (`omni.app.expiry`) over ``build/recordings/`` and
 the log folder, deleting each stamped folder past its delete-by and logging a line for each.
@@ -221,7 +223,11 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
         record_dir = RECORDINGS / "nflmeta" / f"{day}-{away}-{home}"
         stamp_recording(record_dir, DataSource.NFLMETA, datetime.now(timezone.utc))
     state_dir = args.state_dir if args.state_dir is not None else default_state_dir(os.environ, Path.home())
-    ledger = open_ledger(state_dir, NflMetaPlan(args.nflmeta_plan), log=run_log)
+    ledger = open_ledger(state_dir, NflMetaPlan(args.nflmeta_plan), log=run_log, who="omni.app.football")
+    elsewhere = ledger.claim(ProviderAccount.NFLMETA)
+    if elsewhere is not None:
+        run_log.close()
+        raise SystemExit(f"omni.app.football: {elsewhere}")
     meter = Meter(ledger, ProviderAccount.NFLMETA, clock, billed=nflmeta_billed)
     provider = NflMetaLiveProvider(
         NflTeamRegistry.default(source=NFLMETA_SOURCE),
@@ -260,9 +266,11 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
         link = DisplayLink()
         pipe = SinkProcess(shlex.split(args.sink_command), link, log=log)
         writer = BackgroundFrameWriter(
-            pipe.write, on_error=lambda exc: log(f"display: a frame write failed: {type(exc).__name__}: {exc}")
+            pipe.write,
+            on_error=lambda exc: log(f"display: a frame write failed: {type(exc).__name__}: {exc}"),
+            heartbeat=pipe.heartbeat,
         )
-        sink = StreamDisplaySink(profile, writer, link)
+        sink = StreamDisplaySink(profile, writer, link, beat=writer.beat)  # heartbeats keep a held frame up
 
     market = PolymarketUsProvider().win_probability if args.odds else None
     feed = BackgroundFeed(GameFeed(provider, game_id, win_probability=market, ledger=ledger), clock)

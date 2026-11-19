@@ -1,47 +1,47 @@
 # The mixed day under omni-board-policy/2
 
-Confirmed base airtime: 16859.4 s.
+Confirmed base airtime: 16889.8 s.
 
 ## Leagues
 
 | League | Target | Actual |
 |---|---:|---:|
-| mlb | 6945.3 s (41.20%) | 7013.9 s (41.60%) |
-| nfl | 9914.1 s (58.80%) | 9845.5 s (58.40%) |
+| mlb | 7002.6 s (41.46%) | 7069.8 s (41.86%) |
+| nfl | 9887.2 s (58.54%) | 9819.9 s (58.14%) |
 
 ## Games
 
 | Game | Favorite | Target | Actual | Longest wait | Missed turns |
 |---|---|---:|---:|---:|---:|
-| mlb:mlb_statsapi:401 | - | 213.7 s (1.27%) | 216.2 s (1.28%) | 156.2 s | 0 |
-| mlb:mlb_statsapi:776102 | - | 1500.0 s (8.90%) | 1500.0 s (8.90%) | 0.0 s | 0 |
-| mlb:mlb_statsapi:776201 | - | 166.0 s (0.98%) | 156.2 s (0.93%) | 156.2 s | 0 |
-| mlb:mlb_statsapi:776203 | - | 553.7 s (3.28%) | 572.7 s (3.40%) | 60.1 s | 0 |
-| mlb:mlb_statsapi:776205 | 1 | 1945.2 s (11.54%) | 1942.4 s (11.52%) | 84.1 s | 0 |
-| mlb:mlb_statsapi:776206 | 2 | 2566.7 s (15.22%) | 2626.3 s (15.58%) | 108.1 s | 0 |
-| nfl:nflmeta:401 | - | 1664.5 s (9.87%) | 1622.0 s (9.62%) | 144.2 s | 3 |
-| nfl:nflmeta:402 | - | 1420.4 s (8.42%) | 1429.8 s (8.48%) | 156.2 s | 0 |
-| nfl:nflmeta:403 | - | 1854.9 s (11.00%) | 1855.1 s (11.00%) | 24.0 s | 0 |
-| nfl:nflmeta:404 | 1 | 4974.3 s (29.50%) | 4938.5 s (29.29%) | 60.1 s | 2 |
+| mlb:mlb_statsapi:401 | - | 240.5 s (1.42%) | 252.3 s (1.49%) | 192.2 s | 0 |
+| mlb:mlb_statsapi:776102 | - | 1500.0 s (8.88%) | 1500.0 s (8.88%) | 0.0 s | 0 |
+| mlb:mlb_statsapi:776201 | - | 166.0 s (0.98%) | 156.2 s (0.92%) | 156.2 s | 0 |
+| mlb:mlb_statsapi:776203 | - | 551.3 s (3.26%) | 564.7 s (3.34%) | 72.1 s | 0 |
+| mlb:mlb_statsapi:776205 | 1 | 1971.7 s (11.67%) | 1978.4 s (11.71%) | 72.1 s | 0 |
+| mlb:mlb_statsapi:776206 | 2 | 2573.0 s (15.23%) | 2618.3 s (15.50%) | 96.1 s | 0 |
+| nfl:nflmeta:401 | - | 1660.8 s (9.83%) | 1598.0 s (9.46%) | 144.2 s | 5 |
+| nfl:nflmeta:402 | - | 1409.9 s (8.35%) | 1417.8 s (8.39%) | 156.2 s | 0 |
+| nfl:nflmeta:403 | - | 1856.1 s (10.99%) | 1859.7 s (11.01%) | 24.0 s | 0 |
+| nfl:nflmeta:404 | 1 | 4960.4 s (29.37%) | 4944.3 s (29.27%) | 48.1 s | 1 |
 
 ## Whole board
 
 | Up | Seconds |
 |---|---:|
-| big_play | 18.0 |
-| final | 1968.3 |
+| big_play | 26.1 |
+| final | 168.3 |
 | frame held | 45.0 |
-| frame idle | 36863.2 |
-| live_game | 16841.3 |
-| pregame | 64.0 |
+| frame idle | 38631.2 |
+| live_game | 16863.7 |
+| pregame | 65.7 |
 
 ## Decisions
 
-- Base turns while the favorite floor bound: 14; debts clamped: 12; rescues: 9.
-- Promotions made: none. Held for a better moment: 0. Ran out of time: 4.
-- Candidates' reasons: below_bar 1, below_every_bar 3, expired 3, retired 1.
+- Base turns while the favorite floor bound: 4; debts clamped: 3; rescues: 8.
+- Promotions made: none. Held for a better moment: 0. Ran out of time: 3.
+- Candidates' reasons: already_shown 1, below_bar 1, below_every_bar 3, expired 3.
 - Leases: lapsed 32, opened 33, revoked 31; opened by kind: mlb inning break 25, mlb mound visit 1, nfl halftime 3, nfl official timeout 1, nfl quarter break 1, nfl team timeout 1, nfl two-minute warning 1; evidence refused: none.
-- Guests admitted: 21; refused: no_room 5.
+- Guests admitted: 19; refused: no_room 4.
 - Overruns: 0. Premature breaks: 0.
 
 ## Sources

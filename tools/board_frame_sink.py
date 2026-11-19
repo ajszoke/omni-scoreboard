@@ -1,60 +1,53 @@
 #!/usr/bin/env python3
-"""Show frames read from stdin on the LED matrix: the display end of `omni.app.frame_stream`.
+"""Show frames read from stdin on the LED matrix: the receiver at the display end of `omni.app.frame_stream`.
 
-Runs on the board, as root, under the system Python that has the rgbmatrix bindings, so it stays
-compatible with Python 3.9. Each frame is ``OMN2``, the frame's id as a little-endian 32-bit integer, the
-width and height as little-endian 16-bit integers, then width x height RGB pixels. Once the matrix is up
-it says ``OMN2 READY`` on stdout, and once each frame is on the panel, ``ACK <id>``. An older app sends
-``OMNF`` frames (no id), which are shown and not acknowledged. The panel blanks when the stream ends.
+Runs on the board, as root, under the system Python that has the rgbmatrix bindings, so it stays compatible with
+Python 3.9. The conversation (the wire, the replies, the watchdog) is `omni/app/receiver.py`, which this loads by
+its path: from ``omni/app/receiver.py`` beside this file (the board's ``~/omni`` holds a copy of the repo's
+``omni/``), else from the repo this file is in. It says it's ready, shows each frame and acknowledges it once it's
+on the panel, keeps at most one frame waiting (a newer one replaces it), ignores frames from a session older than
+the newest it has heard, and blanks the panel, saying so, once an app that sends heartbeats has sent neither a
+frame nor a heartbeat for 8 seconds, even while the frame is unchanged. An older app (``OMN2`` or ``OMNF`` frames,
+no heartbeats) is served as before, without the watchdog. The panel blanks when the stream ends.
 
-    python -m omni.app.football ... --sink-command "ssh omni-board sudo python3 omni/board_frame_sink.py"
+    python -m omni.app --profile quad_128x64 --sink-command "ssh omni-board sudo python3 omni/board_frame_sink.py"
 
 The matrix defaults match the reference 2x2 board (four 64x32 panels in a U, on an Adafruit HAT).
 """
 
 import argparse
-import struct
+import importlib.util
+import os
+import secrets
 import sys
+import threading
+import time
 
 from PIL import Image
 from rgbmatrix import RGBMatrix, RGBMatrixOptions
 
-MAGIC = b"OMN2"  # then the id, width and height: "<IHH"
-LEGACY_MAGIC = b"OMNF"  # then the width and height: "<HH"
-READY = b"OMN2 READY\n"
+
+def load_protocol():
+    """`omni/app/receiver.py`, loaded on its own: the ``omni`` package needs a newer Python than the board's."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    for path in (
+        os.path.join(here, "omni", "app", "receiver.py"),
+        os.path.join(here, "..", "omni", "app", "receiver.py"),
+    ):
+        if os.path.exists(path):
+            spec = importlib.util.spec_from_file_location("omni_receiver", path)
+            module = importlib.util.module_from_spec(spec)
+            sys.modules["omni_receiver"] = module  # its dataclasses look their module up
+            spec.loader.exec_module(module)
+            return module
+    raise SystemExit("board_frame_sink: omni/app/receiver.py isn't beside it; copy it from the repo")
 
 
-def read_exact(stream, size):
-    """Exactly ``size`` bytes, or None if the stream ends first."""
-    chunks = []
-    left = size
-    while left:
-        chunk = stream.read(left)
-        if not chunk:
-            return None
-        chunks.append(chunk)
-        left -= len(chunk)
-    return b"".join(chunks)
-
-
-def read_header(stream):
-    """The next frame's (id, width, height), id None for an ``OMNF`` frame; None at the end or out of sync."""
-    magic = read_exact(stream, 4)
-    if magic == MAGIC:
-        rest = read_exact(stream, 8)
-        return struct.unpack("<IHH", rest) if rest is not None else None
-    if magic == LEGACY_MAGIC:
-        rest = read_exact(stream, 4)
-        return (None,) + struct.unpack("<HH", rest) if rest is not None else None
-    if magic is not None:
-        sys.stderr.write("board_frame_sink: lost frame sync, stopping\n")
-    return None
-
-
-def reply(stream, line):
+def say(stream, replies):
     """Tell the app something. An app that isn't listening (an older one) doesn't stop the panel."""
     try:
-        stream.write(line)
+        for reply in replies:
+            stream.write(reply.line())
         stream.flush()
     except OSError:
         pass
@@ -89,24 +82,53 @@ def main():
     parser.add_argument("--limit-refresh", type=int, default=128)
     args = parser.parse_args()
 
+    protocol = load_protocol()
     matrix = RGBMatrix(options=matrix_options(args))
     canvas = matrix.CreateFrameCanvas()
-    stream = sys.stdin.buffer
+    receiver = protocol.Receiver(secrets.token_hex(8))
     replies = sys.stdout.buffer
-    reply(replies, READY)
+    changed = threading.Condition()
+    ended = []
+
+    def read():
+        """Read the app's messages on a thread of its own, so a frame waiting never holds up the panel."""
+        try:
+            while True:
+                message = protocol.read_message(sys.stdin.buffer)
+                if message is None:
+                    break
+                with changed:
+                    said = receiver.heard(message, time.monotonic())
+                    changed.notify()
+                say(replies, said)
+        except protocol.OutOfSync:
+            sys.stderr.write("board_frame_sink: lost frame sync, stopping\n")
+        finally:
+            with changed:
+                ended.append(True)
+                changed.notify()
+
+    say(replies, receiver.hello())
+    threading.Thread(target=read, name="frames", daemon=True).start()
     try:
         while True:
-            header = read_header(stream)
-            if header is None:
+            with changed:
+                deadline = receiver.deadline()
+                timeout = max(deadline - time.monotonic(), 0.0) if deadline is not None else None
+                changed.wait_for(lambda: receiver.waiting or ended, timeout)
+                frame = receiver.take()
+                blank = receiver.expired(time.monotonic())
+            if blank:
+                matrix.Clear()
+                say(replies, blank)
+            if frame is not None:
+                canvas.SetImage(Image.frombytes("RGB", (frame.width, frame.height), frame.pixels))
+                canvas = matrix.SwapOnVSync(canvas)
+                with changed:
+                    said = receiver.swapped(frame)
+                say(replies, said)
+            elif ended:
                 break
-            frame_id, width, height = header
-            pixels = read_exact(stream, width * height * 3)
-            if pixels is None:
-                break
-            canvas.SetImage(Image.frombytes("RGB", (width, height), pixels))
-            canvas = matrix.SwapOnVSync(canvas)
-            if frame_id is not None:
-                reply(replies, b"ACK %d\n" % frame_id)
     except KeyboardInterrupt:
         pass
     finally:

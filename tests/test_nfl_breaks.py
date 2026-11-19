@@ -8,9 +8,9 @@ import pytest
 
 from omni.core.clock import ClockReading, MonotonicTime
 from omni.core.time import DurationSeconds
-from omni.domain.breaks import BreakConfidence, BreakEvidence, BreakId, BreakKind
+from omni.domain.breaks import AgeBasis, BreakConfidence, BreakEvidence, BreakId, BreakKind, OnsetBasis
 from omni.domain.football import FootballGameState, FootballInterval, PlaySummary, PlayTone
-from omni.events.break_detection import ActionEvidence, onset_age
+from omni.events.break_detection import ActionEvidence, detection_age, onset_age
 from omni.events.football import FootballEvent, FootballEventKind
 from omni.events.nfl_breaks import nfl_break_evidence, nfl_latest_action
 from omni.providers.nflmeta import HALFTIME_HOLD, NflLiveSnapshot, NflPhase
@@ -71,6 +71,8 @@ def test_a_stoppage_row_is_evidenced_from_when_the_feed_wrote_it(kind: FootballE
             received=RECEIVED,
             confidence=BreakConfidence.EXPLICIT,
             onset=T - 6 * S,
+            as_of=T,
+            onset_basis=OnsetBasis.PUBLISHED,  # the row's write: the stoppage began no later
         ),
     )
 
@@ -126,6 +128,7 @@ def test_a_quarter_break_shows_on_every_look_as_the_same_break_with_no_onset() -
                 id=BreakId(GAME.id, BreakKind.NFL_QUARTER_BREAK, "end of period 1"),
                 received=RECEIVED,
                 confidence=BreakConfidence.EXPLICIT,
+                as_of=T,
             ),
         )
     )
@@ -137,6 +140,17 @@ def test_halftime_runs_from_when_the_provider_counts_it_to_the_end_of_its_hold()
     assert (evidence.onset, evidence.stated) == (T - 60 * S, HALFTIME_HOLD)
     assert evidence.onset is not None and evidence.stated is not None
     assert evidence.onset + evidence.stated == T + 12 * 60 * S
+    assert evidence.onset_basis is OnsetBasis.LOCAL_HOLD  # the hold runs on this board's clock
+
+
+def test_halftime_s_hold_is_aged_on_this_board_s_clock_whatever_the_scoreboard_s_says() -> None:
+    """The hold began 60 s before the look's observation by our clock; the look arrived 2 s after: 62 s old. A
+    scoreboard that doesn't say when it stood, or whose clock is well off ours, changes nothing."""
+    halftime = _state(interval=FootballInterval.HALFTIME)
+    for observed in (T, None, T + 10 * 60 * S):
+        (evidence,) = _breaks(_look(state=halftime, break_ends_at=T + 12 * 60 * S, observed=observed))
+        age = detection_age(evidence, poll_interval=10 * S)
+        assert (age.age, age.basis, age.provisional) == (62 * S, AgeBasis.LOCAL_HOLD, False)
 
 
 def test_halftime_is_timed_by_the_hold_the_provider_was_given() -> None:
@@ -145,18 +159,10 @@ def test_halftime_is_timed_by_the_hold_the_provider_was_given() -> None:
     assert (evidence.onset, evidence.stated) == (T - 60 * S, timedelta(minutes=10))
 
 
-@pytest.mark.parametrize(
-    ("break_ends_at", "observed"),
-    [
-        (None, T),  # joined mid-break, or the half's last plays still landing: the hold isn't timed
-        (T + 12 * 60 * S, None),  # the scoreboard doesn't say when it was observed: its clock can't be checked
-    ],
-)
-def test_halftime_that_cant_be_timed_has_no_onset_or_length(
-    break_ends_at: datetime | None, observed: datetime | None
-) -> None:
+def test_halftime_that_cant_be_timed_has_no_onset_or_length() -> None:
+    """Joined mid-break, or the half's last plays still landing: the hold isn't timed."""
     halftime = _state(interval=FootballInterval.HALFTIME)
-    (evidence,) = _breaks(_look(state=halftime, break_ends_at=break_ends_at, observed=observed))
+    (evidence,) = _breaks(_look(state=halftime, break_ends_at=None))
     assert (evidence.kind, evidence.onset, evidence.stated) == (BreakKind.NFL_HALFTIME, None, None)
 
 
@@ -174,8 +180,8 @@ def test_before_kickoff_and_after_the_final_there_are_no_breaks() -> None:
     [
         (T, T - 6 * S, True),
         (None, T - 6 * S, False),  # no observation time: the source's clock can't be checked
-        (T + 30 * S, T + 25 * S, False),  # the source's clock runs ahead of ours
-        (T, T + 9 * S, False),  # written after it reached us
+        (T + 30 * S, T + 25 * S, True),  # the source's clock runs ahead of ours: its own age is still told
+        (T, T + 9 * S, False),  # written after the look that brought it
         (T, None, False),  # the provider couldn't date the row
     ],
 )

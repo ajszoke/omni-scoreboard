@@ -12,7 +12,9 @@ At each legal decision the first rung with a card due wins:
 
 **The non-base cap:** after 30 s of consecutive non-base cards, admit no more; the one admitted finishes, then a full
 12 s base turn is reserved. It's independent of the promotion cooldown. Minimums are always protected: the board
-asks only at legal decisions.
+asks only at legal decisions. The run counts confirmed airtime only, and only while a live base card was on hand to
+give the board to: neutral circulation with no live game runs up nothing, and a run already at the cap stays there
+through a spell with no base card, so the turn it owes is still owed when one is back.
 
 The per-card rules are pure answers to "is this card due, and may it play here": a pregame's cadence by how near
 its start is, a final's turn and repeats, a no-hit bid's reminders, a favorite's status, a basketball highlight.
@@ -95,23 +97,25 @@ class LadderPolicy:
 
 @dataclass(frozen=True, slots=True)
 class NonBaseRun:
-    """The current run of consecutive non-base cards: when its first one started, or None while a base card holds
-    the board. A value the board carries from decision to decision."""
+    """The current run of consecutive non-base cards, as the confirmed airtime they had while a live base card was
+    on hand: zero while a base card holds the board. A value the board carries from decision to decision."""
 
-    began: MonotonicTime | None = None
+    accrued: timedelta = _ZERO
 
-    def capped(self, at: MonotonicTime, policy: LadderPolicy = LadderPolicy()) -> bool:
+    def capped(self, policy: LadderPolicy = LadderPolicy()) -> bool:
         """Whether the run has reached the cap: no more non-base cards until a full base turn."""
-        return self.began is not None and at.since(self.began) >= policy.non_base_cap
+        return self.accrued >= policy.non_base_cap
 
-    def after(self, rung: Rung, at: MonotonicTime) -> NonBaseRun:
-        """The run once a card of ``rung`` started at ``at``: a base card ends it, a non-base card starts or extends
-        it, and a control leaves it as it was."""
-        if rung.base:
-            return NonBaseRun()
-        if rung.non_base and self.began is None:
-            return NonBaseRun(at)
+    def aired(self, rung: Rung, airtime: timedelta, *, live_base: bool) -> NonBaseRun:
+        """The run once a card of ``rung`` had ``airtime`` of confirmed frames: a non-base card shown while a live base
+        card was on hand extends it; anything else (neutral circulation with no live game, a control) leaves it."""
+        if rung.non_base and live_base:
+            return NonBaseRun(self.accrued + airtime)
         return self
+
+    def after(self, rung: Rung) -> NonBaseRun:
+        """The run once a card of ``rung`` started: a base card ends it; any other leaves it as it was."""
+        return NonBaseRun() if rung.base else self
 
 
 class LadderRefusal(StrEnumMixin, str, Enum):
@@ -135,9 +139,7 @@ class RungChoice:
     refused: tuple[RungRefusal, ...] = ()
 
 
-def choose_rung(
-    due: Iterable[Rung], run: NonBaseRun, at: MonotonicTime, policy: LadderPolicy = LadderPolicy()
-) -> RungChoice:
+def choose_rung(due: Iterable[Rung], run: NonBaseRun, policy: LadderPolicy = LadderPolicy()) -> RungChoice:
     """The rung that goes at this legal decision, from the rungs with a card due.
 
     Once the run reaches the cap with a base card waiting, no non-base rung is admitted, and the base card that goes
@@ -145,7 +147,7 @@ def choose_rung(
     to reserve, so it doesn't bind.
     """
     ordered = sorted(set(due))
-    owed = run.capped(at, policy) and any(rung.base for rung in ordered)
+    owed = run.capped(policy) and any(rung.base for rung in ordered)
     chosen: Rung | None = None
     refused: list[RungRefusal] = []
     for rung in ordered:
@@ -208,8 +210,8 @@ class CardTimingPolicy:
     pregame: timedelta = timedelta(seconds=8)
     pregame_base_turns: int = 4  # with live games, at most one pregame per this many base turns
     final: timedelta = timedelta(seconds=8)  # an initial final's one turn, and each repeat
-    final_repeats: tuple[timedelta, ...] = (timedelta(minutes=5), timedelta(minutes=15))  # since confirmation
-    final_gone: timedelta = timedelta(minutes=30)  # since confirmation
+    final_repeats: tuple[timedelta, ...] = (timedelta(minutes=5), timedelta(minutes=15))  # since its first start
+    final_gone: timedelta = timedelta(minutes=30)  # since confirmation: every turn of it ends by then
     bid_innings: int = 6  # a no-hit or perfect bid's reminders start after this many completed innings
     bid_reminders: int = 3
     bid_every: timedelta = timedelta(seconds=60)  # open time between a bid's reminders
@@ -266,13 +268,18 @@ def initial_final_permitted(*, context: BarContext, related: bool) -> bool:
 
 
 def final_repeat_due(
-    *, since_confirmed: timedelta, repeats_shown: int, policy: CardTimingPolicy = CardTimingPolicy()
+    *,
+    since_first_start: timedelta,
+    since_confirmed: timedelta,
+    repeats_shown: int,
+    policy: CardTimingPolicy = CardTimingPolicy(),
 ) -> bool:
-    """Whether a final's next repeat is due: at most two, at 5 and at 15 minutes after it was confirmed, and none
-    once it's gone."""
-    if final_gone(since_confirmed, policy) or repeats_shown >= len(policy.final_repeats):
+    """Whether a final's next repeat is due now: at most two, the first once 5 minutes have passed since the final
+    first went up, the second once 15 have, each only if its whole turn ends by the final's hard end, 30 minutes after
+    it was confirmed. So a result first shown late may have no repeats left."""
+    if repeats_shown >= len(policy.final_repeats) or since_confirmed + policy.final > policy.final_gone:
         return False
-    return since_confirmed >= policy.final_repeats[repeats_shown]
+    return since_first_start >= policy.final_repeats[repeats_shown]
 
 
 def final_gone(since_confirmed: timedelta, policy: CardTimingPolicy = CardTimingPolicy()) -> bool:

@@ -15,9 +15,9 @@ last look, so the two sources of evidence differ in how often they show:
 - **A quarter break:** the scoreboard's "End of 1st" (or 3rd, or of regulation before overtime). The scoreboard
   doesn't say when the quarter ended, so its onset is unknown.
 - **Halftime:** the scoreboard's halftime, timed by the provider's polling hold. Its onset is when the provider
-  counts the break from and its stated length is the hold, so the two end at the snapshot's ``break_ends_at``.
-  While the hold isn't timed (the provider joined mid-break, or the half's last plays are still landing), both
-  are unknown.
+  counts the break from, on this board's own clock (a local hold, `OnsetBasis.LOCAL_HOLD`), and its stated length
+  is the hold, so the two end at the snapshot's ``break_ends_at``. While the hold isn't timed (the provider joined
+  mid-break, or the half's last plays are still landing), both are unknown.
 
 **What it can't detect:**
 - **An injury timeout:** the scoreboard's injury list can't tell an injury that stopped play now from one
@@ -26,7 +26,9 @@ last look, so the two sources of evidence differ in how often they show:
   lends nothing.
 
 A row's onset is when the feed wrote it, when that's credible (`credible_onset`, against the scoreboard's
-observation time). The provider announces no entry for a corrected stoppage row, and an entry doesn't carry its
+observation time): its publication (`OnsetBasis.PUBLISHED`), so the stoppage began no later. The ceilings of these
+stoppages are measured from the same write. Every piece of evidence carries when its look stood, so its age is told
+on NFLMeta's clock. The provider announces no entry for a corrected stoppage row, and an entry doesn't carry its
 row's revision, so every piece of evidence here is revision 0.
 """
 
@@ -36,7 +38,7 @@ from collections.abc import Iterable
 from datetime import datetime, timedelta
 
 from omni.core.clock import ClockReading
-from omni.domain.breaks import BreakConfidence, BreakEvidence, BreakId, BreakKind
+from omni.domain.breaks import BreakConfidence, BreakEvidence, BreakId, BreakKind, OnsetBasis
 from omni.domain.contest import TeamGame
 from omni.domain.football import FootballInterval
 from omni.events.break_detection import ActionEvidence, credible_onset
@@ -67,7 +69,8 @@ def nfl_break_evidence(
     if state.interval is FootballInterval.HALFTIME:
         return (_halftime(snapshot, received, halftime_hold),)
     if state.interval is FootballInterval.END_OF_QUARTER:
-        return (_evidence(game, BreakKind.NFL_QUARTER_BREAK, f"end of period {state.period}", received),)
+        marker = f"end of period {state.period}"
+        return (_evidence(game, BreakKind.NFL_QUARTER_BREAK, marker, received, as_of=snapshot.observed_at),)
     newest_snap = _newest_snap(snapshot.events)
     return tuple(
         _evidence(
@@ -75,7 +78,9 @@ def nfl_break_evidence(
             _ROW_BREAKS[event.kind],
             f"play {event.play}",
             received,
-            onset=credible_onset(event.written_at, as_of=snapshot.observed_at, received=received),
+            as_of=snapshot.observed_at,
+            onset=credible_onset(event.written_at, as_of=snapshot.observed_at),
+            basis=OnsetBasis.PUBLISHED,
         )
         for event in snapshot.events
         if event.kind in _ROW_BREAKS and event.play is not None and (newest_snap is None or event.play > newest_snap)
@@ -104,11 +109,21 @@ def _newest_snap(events: Iterable[FootballEvent]) -> int | None:
 
 
 def _halftime(snapshot: NflLiveSnapshot, received: ClockReading, hold: timedelta) -> BreakEvidence:
-    """Halftime, from when the provider counts it to the end of its hold; both unknown while it isn't timed."""
+    """Halftime, from when the provider counts it to the end of its hold; both unknown while it isn't timed. The
+    hold runs on this board's clock, so its start is a local anchor, never compared with the feed's clock."""
     ends = snapshot.break_ends_at
-    onset = credible_onset(ends - hold, as_of=snapshot.observed_at, received=received) if ends is not None else None
+    onset = ends - hold if ends is not None else None
     stated = hold if onset is not None else None
-    return _evidence(snapshot.game, BreakKind.NFL_HALFTIME, "halftime", received, onset=onset, stated=stated)
+    return _evidence(
+        snapshot.game,
+        BreakKind.NFL_HALFTIME,
+        "halftime",
+        received,
+        as_of=snapshot.observed_at,
+        onset=onset,
+        stated=stated,
+        basis=OnsetBasis.LOCAL_HOLD,
+    )
 
 
 def _evidence(
@@ -117,8 +132,10 @@ def _evidence(
     marker: str,
     received: ClockReading,
     *,
+    as_of: datetime | None,
     onset: datetime | None = None,
     stated: timedelta | None = None,
+    basis: OnsetBasis = OnsetBasis.EVENT,
 ) -> BreakEvidence:
     """Evidence the feed marks outright: every NFL break here is read off a row or a status that names it."""
     return BreakEvidence(
@@ -127,4 +144,6 @@ def _evidence(
         confidence=BreakConfidence.EXPLICIT,
         onset=onset,
         stated=stated,
+        as_of=as_of,
+        onset_basis=basis,
     )

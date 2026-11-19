@@ -12,7 +12,8 @@ Each runs through `AppLoop.refresh` and `paint` with the real pipelines over syn
   that ran out unseen unblocks its final, which says so; a correction updates the final and is no new game. (Marked:
   a big play retired unseen can't go on to the results queue, its card's window ending with its lifetime.)
 - **NFL's official timeout,** from the feed's own row: one 12 s guest, not a commercial lease.
-- **A 49-minute wake:** what holds, and (marked) what doesn't without a wake signal.
+- **A 49-minute wake:** the host's suspend-inclusive clock tells the board it slept; what it held from before is
+  history.
 - **Clock, scope, quota and partial faults:** a board booted 60 s fast; a raw id both leagues use, and a wall-clock
   backstep, in the v2 day; NFLMeta's Free month spent; an answer missing its score or hits.
 - **Standing offers:** each taken once, no refusal written twice.
@@ -193,9 +194,10 @@ def test_an_inning_break_the_feed_states_lends_its_guests_the_airtime_section_9_
 M = timedelta(minutes=1)
 
 
-def _finals(*, rockies: bool) -> MixedTimeline:
+def _finals(*, rockies: bool, rockies_end: timedelta = 10 * M) -> MixedTimeline:
     """A (MIN@CLE) ends first, on a walk-off homer at 12:04; B (BOS@NYY) ends at 12:04:30. With ``rockies``, COL@SF
-    (the Rockies a favorite) is in action until its final at 12:10. A's final is corrected at 12:12."""
+    (the Rockies a favorite) is in action until its final, at ``rockies_end`` past 12:00 (12:10 unless said). A's
+    final is corrected at 12:12."""
     a = _MixedGame("1", away=142, home=114, day=SUN, start=SHORT).live(SHORT, _MixedLine(9, _TOP, 1, 1, 6, 6))
     a.live(SHORT + 2 * M, _MixedLine(9, _BOTTOM, 1, 1, 6, 6, 1))
     a.home_run(SHORT + 4 * M, _MixedLine(9, _BOTTOM, 1, 2, 6, 7, 1))
@@ -206,7 +208,7 @@ def _finals(*, rockies: bool) -> MixedTimeline:
     if rockies:
         c = _MixedGame("3", away=115, home=137, day=SUN, start=SHORT).live(SHORT, _MixedLine(5, _TOP, 1, 1, 4, 4))
         c.live(SHORT + 5 * M, _MixedLine(6, _TOP, 1, 1, 5, 4))
-        c.final(SHORT + 10 * M, _MixedLine(9, _BOTTOM, 2, 1, 8, 7, 3))
+        c.final(SHORT + rockies_end, _MixedLine(9, _BOTTOM, 2, 1, 8, 7, 3))
         games.append(c)
     correction = Correction(at=SHORT + 12 * M, game=_mlb_id("1"), away=1, home=3)
     return _short(*games, end=20 * M, faults=(correction,))
@@ -253,8 +255,8 @@ def test_finals_air_in_end_order_after_the_unseen_play_that_decided_the_first_an
 
 def test_a_final_whose_decisive_play_ran_out_unseen_is_unblocked_and_says_so_and_the_end_order_holds() -> None:
     """The Rockies act: A's walk-off can't cut in, retires unseen and its card runs out, and A's final waits for a
-    break. When the Rockies' game ends, A's final goes first, saying its deciding play is gone, then B's, then the
-    Rockies'."""
+    break. When the Rockies' game ends, more than five minutes after A's final cleared the delay, A's final goes first,
+    saying its deciding play is gone (its story is too old to lead it), then B's, then the Rockies'."""
     decided = _mixed(_finals(rockies=True), favorites=Favorites({League.MLB: ["COL"]}))
     assert _when(decided, "unseen", "1:bigplay:1:ab:1", "(too late to start)")
     results = [rest for at, kind, rest in decided if kind == "card" and "(result)" in rest]
@@ -265,16 +267,28 @@ def test_a_final_whose_decisive_play_ran_out_unseen_is_unblocked_and_says_so_and
     ]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="a major's lifetime and its card's window end together, so one retired unseen has no time left to air as a result",
-)
-def test_a_big_play_whose_promotion_ran_out_still_airs_as_a_result() -> None:
+@pytest.mark.parametrize("profile", PROFILES)
+def test_a_big_play_whose_promotion_ran_out_still_airs_as_a_result(profile: PanelProfile) -> None:
     """§4: a candidate below the action bar stays break-only until its lifetime ends, then goes to the results queue.
-    The pipeline gives a big play's card a window as long as every promotion's lifetime (120 s), and a 12 s major must
-    start by +108 s, so the card has six seconds left when it retires: less than its minimum."""
-    decided = _mixed(_finals(rockies=True), favorites=Favorites({League.MLB: ["COL"]}))
-    assert [at for at, kind, rest in decided if kind == "up" and "1:bigplay:1:ab:1" in rest]
+    A's walk-off can't cut into the Rockies' action; its promotion and its card both run out unseen. The Rockies' game
+    ends at 12:07, inside five minutes of A's final clearing the delay, so A's final, first in end order, airs first
+    as the walk-off's still with the final score: one result, spending no promotion."""
+    decided = _mixed(
+        _finals(rockies=True, rockies_end=7 * M), favorites=Favorites({League.MLB: ["COL"]}), profile=profile
+    )
+    assert _when(decided, "unseen", "1:bigplay:1:ab:1", "(too late to start)")
+    [summary] = [at for at, kind, rest in decided if kind == "up" and "1:bigplay:1:ab:1:result" in rest]
+    results = [(at, rest) for at, kind, rest in decided if kind == "card" and "(result)" in rest]
+    assert results[0] == (
+        summary,
+        "mlb:mlb_statsapi:1:final  (result) | why: Twins at Guardians: final, with the play that decided it",
+    )
+    assert [rest.split()[0] for _, rest in results] == [
+        "mlb:mlb_statsapi:1:final",
+        "mlb:mlb_statsapi:2:final",
+        "mlb:mlb_statsapi:3:final",
+    ]
+    assert not [rest for at, kind, rest in decided if kind == "promote"]
 
 
 # --- NFL's official timeout -------------------------------------------------------------------------------------
@@ -393,10 +407,10 @@ def woken() -> _Woken:
 def test_after_a_49_minute_wake_nothing_old_is_promoted_or_spoiled_and_the_second_league_carries_on(
     woken: _Woken,
 ) -> None:
-    """The board has no wake signal: it notices only its wall clock jumping ahead of its monotonic clock, so
-    what it admits next waits the full delay. Of the 49 plays one read brings, none is promoted; nothing airs
-    before its release; the fresh score first shows when the read after the wake clears the delay; and MLB keeps
-    its turns."""
+    """The board notices the sleep (its suspend-inclusive clock ran 49 minutes while its monotonic clock stood
+    still), and what it admits next waits the full delay. Of the 49 plays one read brings, none is promoted; nothing
+    airs before its release; the fresh score first shows on the Panthers' first turn once the read after the wake
+    clears the delay; and MLB keeps its turns."""
     decided = woken.decided()
     assert not [at for at, kind, _ in decided if kind == "promote"]
     assert woken.run.early == ()
@@ -405,29 +419,23 @@ def test_after_a_49_minute_wake_nothing_old_is_promoted_or_spoiled_and_the_secon
         for step in woken.panthers(_ASLEEP, 600)
         if step.drawn is not None
     ]
-    assert min(at for at, away in scores if away == 7) == _FRESH
+    fresh = min(at for at, away in scores if away == 7)
+    assert _FRESH <= fresh < _FRESH + 12  # the Twins' turn running at 405 ends first
+    ups = [at for at in _when(decided, "up", "nfl:nflmeta:404:live") if at > _FRESH]
+    assert ups[0] == round(fresh, 1)  # it's the card's own first turn after the release: nothing held it back
     assert [at for at, kind, rest in decided if kind == "base" and "mlb:mlb_statsapi:1:live" in rest and at > _ASLEEP]
 
 
-@pytest.mark.xfail(
-    strict=True, reason="the board has no wake signal, so it draws the field it had before the sleep as current"
-)
 def test_after_a_wake_the_field_is_drawn_stale_until_a_fresh_reading_clears_the_delay(woken: _Woken) -> None:
     drawn = woken.panthers(_ASLEEP, _FRESH)
     assert drawn and all(step.painted.stale for step in drawn)
 
 
-@pytest.mark.xfail(
-    strict=True, reason="the board has no wake signal, so a caption from before the sleep keeps its monotonic hard end"
-)
 def test_after_a_wake_no_caption_from_before_the_sleep_is_drawn(woken: _Woken) -> None:
     captions = [step.drawn.payload.last_play for step in woken.panthers(_ASLEEP, _FRESH) if step.drawn is not None]
     assert all(caption is None or caption.headline != "OFFICIAL TIMEOUT" for caption in captions)
 
 
-@pytest.mark.xfail(
-    strict=True, reason="the board has no wake signal, so a lease from before the sleep is still open after it"
-)
 def test_after_a_wake_a_lease_from_before_the_sleep_is_void(woken: _Woken) -> None:
     decided = woken.decided()
     assert not [

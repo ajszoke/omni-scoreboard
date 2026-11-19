@@ -148,6 +148,18 @@ NBA providers (review round 4's research thread):
     - **Break lengths** (monotonic poll times, the sleep excluded): a timeout's decrement to the clock running again, 195 s median (p90 247 s, n 77), since most are TV timeouts; `END Q1`/`END Q3` to the next period's clock, 156 s (p90 209 s); `Half` to Q3's clock, 15:43.
     - `status_state` turns `final` 13-26 s after the clock reads Q4 :00.0, sometimes through "END Q4"; no score changed after a final.
     - The clock can step back: official corrections (Q2 2:12 to 2:13) and period-boundary transients ("Q4 :00.0" under period 4 before "Q4 11:45"; "Q2 12:00" under period 2 just before "Half"). Treat a boundary reading as provisional.
+  - **ALL-STAR since 2026-11-18** (the user's plan; $9.99 a month, 60 requests a minute). Probed that night
+    (`tools/balldontlie_record.py --probe`, `capabilities.json`), each documented endpoint asked once:
+    - answered: `/v1/stats` (live player lines: `min`, `pts`, `fgm`/`fga`, `fg3m`/`fg3a`, `ftm`/`fta`, `oreb`/`dreb`/`reb`,
+      `ast`, `stl`, `blk`, `turnover`, `pf`, `plus_minus`, with the player, team and game), `/v1/players/active`,
+      `/v1/player_injuries` (`status`, `return_date`, `description`), and Free's games, teams and players;
+    - 401 for every GOAT endpoint: play-by-play, box scores (live and by date), standings, leaders, season and team
+      averages, advanced stats, win probabilities, lineups, shot charts, odds, player props, DFS and contracts.
+    - So NBA captions can come only from changes in player lines between reads (a made 2- or 3-point basket, a free
+      throw, an assist in the same read, a foul with its count, a steal, a block, a turnover), not from plays; and
+      standings would have to be computed from results.
+    - The recorder reads the slate and every running game's player lines every ~6 s within 55 a minute: on 2026-11-18
+      (11 games) every answer was 200 with at least 3 requests left in each window.
   - Terms, last updated 2026-10-20:
     - §6 allows any lawful personal or commercial use, including "backend APIs that support those products, provided those APIs are not offered to third parties".
     - Copying, caching, storing and archiving are allowed, with no retention deadline.

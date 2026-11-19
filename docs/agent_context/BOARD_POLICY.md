@@ -13,7 +13,13 @@
   - **records:** MLB's come from the pregame details, frozen at the start; NFL's are unknown (§10);
   - **break signals the feeds lack:** NFL TV timeouts, injury timeouts and reviews in progress; MLB
     equipment and umpire stoppages. A break that can't be detected is never lent;
-  - **NBA** on the shared board, and a **wake signal** for "Wake or output loss" (§6).
+  - **NBA** on the shared board.
+- **Readings settled after review round 8 (2026-11-18)**, built in the closeout: leases anchored at the pinned
+  release less the age at detection, and a guest's grant checked again at its first frame (§5); a new
+  independent interval supersedes a shorter lease (§5); a promotion names a card fixed for its event's revision,
+  and a withdrawn offer never airs (§4); an unseen decisive event leads its final as a result summary (§4);
+  stale games out of the targets (§3.2); final repeats and the non-base cap on confirmed time (§6); and the
+  wake and output-loss contract (§6).
 - Every constant here is a policy default. Changing one bumps the version; it isn't a user setting unless
   §8 says so.
 
@@ -116,7 +122,8 @@ M_MLB = 1 + 2r      M_NFL = 3 + 11r      M_NBA = 3 + 15*sqrt(r)
 **The live pool:** fresh, released, unmuted games with a drawable card, each contest once.
 - A favorite in a confirmed break leaves the pool while alternatives exist.
 - A suspension or delay is a status card, not a weighted game.
-- A stale favorite loses its boost at once.
+- A stale favorite loses its boost at once. A stale game is out of the weighted targets entirely: it earns no
+  base credit, wait or floor, and its dim last-safe card airs only as a fallback when nothing fresh is usable.
 
 **Favorite rank.**
 - **Defaults:** MLB `[ATL, COL]`, NFL `[CAR]`, NBA `[CHA]`.
@@ -270,7 +277,14 @@ Its deadline is `first eligible + 24 s`, and later candidates don't extend it.
 - **Choosing:** the highest `I`, then the earliest expiry, then the oldest, then the typed ID. A better
   candidate can replace the choice.
 - **At expiry:** an action-qualified candidate starts at the next legal boundary if its lifetime still fits.
-  Below the action bar, it stays break-only until its own expiry, then goes to the results queue.
+  Below the action bar, it stays break-only until its own expiry, then goes to the results queue: a decisive
+  event or confirmed feat that expires unseen becomes a result summary (its still with the final's score) that
+  leads its own final in end order, spends no cooldown, and is fresh until the earlier of the final's expiry and
+  5 minutes after the final became eligible; past that, the final airs plain and says its decisive play is gone.
+- **An offer names its exact event:** a card fixed for that event's revision. A published view that no longer
+  carries an offer withdraws it; a revision replaces it without a fresh clock; a story that has aired (promoted,
+  in its own game's turn or as a result) is never promoted again. An unscored snapshot or reminder plays only in
+  an ordinary break or open rotation.
 - **The hold never forces a cut-in below the bar,** never overrides the cooldown, and never chains a
   second hold.
 
@@ -291,10 +305,18 @@ hard ends (`CLOCK_AND_SCHEDULING.md`).
 - Later released action revokes it.
 - A frozen clock alone grants nothing.
 
-**Leases are ceilings, not promises.** Each is anchored once on the delayed timeline:
-- the known age at detection is subtracted;
-- with the onset uncertain, one poll interval is subtracted and marked;
-- severe backfill gets no lease.
+**Leases are ceilings, not promises.** Each is anchored once on the delayed timeline, at its evidence's pinned
+release: `ends = pinned release + ceiling − age at detection`, however late the decision that reads it.
+- The age is the source's own `as_of − onset` plus a plausible transport; with the onset uncertain, one poll
+  interval is subtracted and marked. A local provider hold (NFL's halftime) is aged on our own clock.
+- Severe backfill gets no lease: more than half the ceiling gone at the decision. Stale or unsupported evidence
+  is refused at once. Each refusal records the age and the guard.
+- Only released action **after** the break began closes it.
+- No stacking: a nested event of the same or lower precedence adds nothing; a new independent interval of
+  higher precedence (a rain delay over a mound visit, an ordinary break over a micro one) supersedes the open
+  lease from its own onset.
+- A guest's grant names its exact leases and is checked again when its first frame is confirmed; one that no
+  longer fits is discarded unseen (booked as an accidental display if its pixels were up).
 
 **A guest needs its whole card plus a 6 s return margin** inside the remaining lease. Duplicates don't renew
 a lease.
@@ -344,7 +366,9 @@ from a median of a few gaps.
 Minimums are always protected.
 
 **The non-base cap:** after **30 s** of consecutive non-base cards, admit no more. Finish the admitted one,
-then reserve a full 12 s base turn. This is independent of the 60 s cooldown.
+then reserve a full 12 s base turn. This is independent of the 60 s cooldown. The run counts confirmed non-base
+airtime only while a live base is on hand (neutral circulation with no live game counts nothing); an owed
+recovery survives an outage, and a short or failed one stays owed.
 
 | Card | Behavior |
 |---|---|
@@ -353,14 +377,14 @@ then reserve a full 12 s base turn. This is independent of the 60 s cooldown.
 | NFL strip, focused | the current field plus the newest compatible major. At most three waiting routines. No backlog on return. A first start by +60/+120 s, gone by +90/+150 s |
 | Pregame | 8 s, from 90 min before the start. Due every 300/120/60/30 s across the ramps at 90–30/30–10/10–2/2–0 min. With live games, at most one per four base turns, in a break or open rotation |
 | Initial final | one 8 s turn, in confirmed end order. An unseen decisive predecessor goes first. While a favorite acts, unrelated finals wait for a break unless promoted |
-| Final repeats | at most two 8 s repeats, at ≥5 and ≥15 min. Gone 30 min after confirmation |
+| Final repeats | at most two 8 s repeats, at ≥5 and ≥15 min after its first physical start, each only if its whole turn ends by 30 min after confirmation; one path with or without a live base |
 | NBA Free highlights | a close-game snapshot (≤3 pts in the last 2 min), a new tie or lead change there, or a confirmed OT. Breaks and open rotation only, at most one per 90 s and two a game, and within the cooldown |
 | Reminders | an MLB no-hit or perfect bid after six completed innings: when new, then every 60 open seconds, three at most. An NFL late one-score red-zone drive: one. Never into favorite action |
 | Delay or suspension | a fresh explicit status opens rotation; a favorite's at most once per 120 open seconds |
 | No live base | pregame, results and statuses at neutral weight; else the clock and the next favorite start. A confirmed empty slate is offday, not offline |
 | Embargo or startup | the amber "Syncing..." frame. No speculative score, model value or early final |
 | Stale or offline | dim at 40%; a stale live card goes at 2 min; a source is offline at 10 min |
-| Wake or output loss | presentation state and old leases are invalid. A complete fresh reading is required, with at most one labeled recap |
+| Wake or output loss | presentation state and old leases are invalid. A complete fresh reading is required, with at most one labeled recap. A host gap (suspend, stall) voids pre-gap polls, held state, captions and offers, and distrusts the clock; an output loss stops accounting at the receiver's last word and keeps cooldowns and debt (`ARCHITECTURE_TYPED_DOMAIN.md`, "Output and interruptions") |
 
 ## 7. Panels
 

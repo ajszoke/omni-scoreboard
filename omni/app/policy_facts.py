@@ -5,14 +5,17 @@ promotion. All of it reads what has cleared the viewer's delay, never a raw rece
 
 - **Breaks and action** (`ReleasedBreaks`): a league's detector reads each answer as it arrives, and what it finds is
   held through the same `ReleaseGuard`, from the same arrival, as the state that answer brought. It's published only
-  once released: a break is something the viewer sees on the delayed broadcast, not on the raw feed.
+  once released: a break is something the viewer sees on the delayed broadcast, not on the raw feed. Each break
+  carries the release instant pinned for its answer, which is where its lease's anchor starts from: a refresh that
+  publishes it later doesn't move it.
   - Each break's newest revision is kept, the first copy of a revision winning (a re-read renews nothing).
   - A revision that marks the break over is published in the refresh it clears the delay, then dropped for good.
   - The newest action is the newest released: one with a new marker, unless the source's clock dates it before the
     one it would replace (a late row of an older snap).
-  - Later released action supersedes a break the same answer doesn't still show: action with a new marker that,
-    when both times are known, happened after the break began. A stoppage row NFL writes once is so remembered
-    across looks until a snap follows it.
+  - Later released action closes a break the same answer doesn't still show: action with a new marker that, when
+    both times are known on the source's clock, happened after the break began. A stoppage row NFL writes once is so
+    remembered across looks until a snap follows it. The action names every break it has closed (its ``closes``),
+    so the board ends a lease only for the break the action came after, never for a newer marker alone.
 - **Plays waiting on their successor** (`AwaitingSuccessor`): a play's class reads the released states on either side
   of it, and the state after it clears the delay from its answer's receipt, at or after the play itself. So a play's
   offer waits until both have.
@@ -26,14 +29,14 @@ promotion. All of it reads what has cleared the viewer's delay, never a raw rece
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import timedelta
 from typing import Generic, TypeVar
 
 from omni.cards.base import DedupeKey
 from omni.core.clock import ClockReading, MonotonicTime
 from omni.core.enum import SeasonStage
-from omni.domain.breaks import BreakEvidence, BreakId
+from omni.domain.breaks import BreakEvidence, BreakId, OnsetBasis
 from omni.domain.contest import TeamGame
 from omni.events.break_detection import ActionEvidence
 from omni.policy.allocation import interrupt_quality
@@ -80,6 +83,7 @@ class ReleasedBreaks:
         self._open: dict[BreakId, BreakEvidence] = {}  # released breaks still standing, each its newest revision
         self._ending: list[BreakEvidence] = []  # revisions marking a break over, released in the latest release
         self._over: set[BreakId] = set()  # breaks whose end has been published
+        self._closed: set[BreakId] = set()  # breaks released action has closed
         self._action: ActionEvidence | None = None
 
     def push(
@@ -105,9 +109,12 @@ class ReleasedBreaks:
         ready = [held for held in self._held if held.release <= at.monotonic]
         self._held = [held for held in self._held if held.release > at.monotonic]
         for held in ready:
-            self._take(held.value)
+            self._take(held.value, held.release)
+        action = self._action
+        if action is not None and action.closes != self._closed:
+            self._action = replace(action, closes=frozenset(self._closed))
 
-    def _take(self, seen: _Seen) -> None:
+    def _take(self, seen: _Seen, released: MonotonicTime) -> None:
         shown = {evidence.id for evidence in seen.breaks}
         action = seen.action
         if action is not None and _later(action, self._action):
@@ -115,10 +122,12 @@ class ReleasedBreaks:
             for break_id, evidence in list(self._open.items()):
                 if break_id not in shown and _after(action, evidence):
                     del self._open[break_id]  # play went on since it began
+                    self._closed.add(break_id)
         for evidence in seen.breaks:
             kept = self._open.get(evidence.id)
             if evidence.id in self._over or (kept is not None and not _newer(evidence, kept)):
                 continue
+            evidence = replace(evidence, released=released)
             if evidence.ended:
                 self._open.pop(evidence.id, None)
                 self._over.add(evidence.id)
@@ -152,8 +161,9 @@ def _later(action: ActionEvidence, current: ActionEvidence | None) -> bool:
 
 
 def _after(action: ActionEvidence, evidence: BreakEvidence) -> bool:
-    """Whether ``action`` came after the break began: by the source's clock when both say, else by its new marker."""
-    if action.at is None or evidence.onset is None:
+    """Whether ``action`` came after the break began: by the source's clock when both say, else by its new marker. A
+    local hold's start is on this board's clock, never compared with the source's."""
+    if action.at is None or evidence.onset is None or evidence.onset_basis is OnsetBasis.LOCAL_HOLD:
         return True
     return action.at > evidence.onset
 

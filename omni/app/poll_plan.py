@@ -23,7 +23,9 @@ rules in one place:
   account share its limits, while each source's own quota still paces its endpoint. A refused ask stays
   due, and the ledger's answer is kept on the key (`held_back`) for health to read. An ask admitted at a
   slower cadence is next due that many cadences after its answer. Each answer brings what the ask was
-  billed, so the next ask of that key is expected to cost the same.
+  billed, so the next ask of that key is expected to cost the same. An admitted ask's fetch makes its
+  requests as that admission's (`omni.app.quota.Admission.asking`): its first takes the place the admission
+  holds in the minute, and each one after (a page, a retry) is admitted on its own.
 - **Bounded retries.** After a failure a key is retried on a short schedule a few times. After that it
   waits its normal cadence, so a source that is down isn't hammered. While a key is failing, its latest
   failure says why and when it was filed.
@@ -378,13 +380,15 @@ class PollPlan:
                     continue  # no worker free for its source: it stays due
                 if not self._ready(key.source, now):
                     continue  # over its source's quota: it stays due, and goes first when a token frees up
-                if not self._admit(key, entry, running, at):
+                admitted, admission = self._admit(key, entry, running, at)
+                if not admitted:
                     continue  # its account is busy or held back: it stays due
                 self._take(key.source)
                 handed[key.source] = handed.get(key.source, 0) + 1
                 self._asks += 1
                 entry.out = _Out(number=self._asks, leased=now)
-                asks.append(Ask(key=key, fetch=entry.fetch, priority=entry.priority, number=self._asks))
+                fetch = entry.fetch if admission is None else _bound(entry.fetch, admission)
+                asks.append(Ask(key=key, fetch=fetch, priority=entry.priority, number=self._asks))
             return asks
 
     def begin(self, ask: Ask, at: ClockReading) -> bool:
@@ -473,23 +477,25 @@ class PollPlan:
                 running[entry.account] = running.get(entry.account, 0) + 1
         return running
 
-    def _admit(self, key: PollKey[Any], entry: _Entry, running: dict[ProviderAccount, int], at: ClockReading) -> bool:
-        """Whether the key's account lets its ask go now; the ledger's answer is kept on the key while it holds
-        the key back. Without a ledger, every ask goes."""
+    def _admit(
+        self, key: PollKey[Any], entry: _Entry, running: dict[ProviderAccount, int], at: ClockReading
+    ) -> tuple[bool, Admission | None]:
+        """Whether the key's account lets its ask go now, and the ledger's admission its requests are made under;
+        the ledger's answer is kept on the key while it holds the key back. Without a ledger, every ask goes."""
         ledger, account = self._ledger, entry.account
         if ledger is None or account is None:
-            return True
+            return True, None
         at_once = ledger.limits(account).at_once
         if at_once is not None and running.get(account, 0) >= at_once:
-            return False  # the account's asks at once are all out: it stays due
+            return False, None  # the account's asks at once are all out: it stays due
         rows = entry.rows if entry.rows is not None else self._policy(key).rows
         admission = ledger.admit(account, Demand(entry.priority, rows), at)
         entry.held = admission if admission.held_back else None
         if not admission.admitted:
-            return False
+            return False, admission
         entry.slowed_by = admission.slowed_by
         running[account] = running.get(account, 0) + 1
-        return True
+        return True, admission
 
     def _standing(self, key: PollKey[Any], answer: Answer[Any], at: ClockReading) -> bool:
         return at.monotonic.since(answer.received.monotonic) <= self._policy(key).keep_for
@@ -519,3 +525,13 @@ class PollPlan:
 def _answers(entry: _Entry, number: int) -> bool:
     """Whether the ask numbered ``number`` is the one out for this key."""
     return entry.out is not None and entry.out.number == number
+
+
+def _bound(fetch: Callable[[datetime], Any], admission: Admission) -> Callable[[datetime], Any]:
+    """``fetch``, its requests made as ``admission``'s ask."""
+
+    def run(asked: datetime) -> Any:
+        with admission.asking():
+            return fetch(asked)
+
+    return run

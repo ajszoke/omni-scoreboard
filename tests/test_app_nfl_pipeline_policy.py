@@ -17,10 +17,10 @@ from omni.domain.football import FootballGameState, FootballInterval, PlaySummar
 from omni.events.football import FootballEvent, FootballEventKind
 from omni.policy.interrupts import InterruptClass, Stakes, interrupt_value
 from omni.policy.leverage import football_proxy
-from omni.policy.promotion import CandidateOrigin, PromotionCandidate, PromotionKey, PromotionKind
+from omni.policy.promotion import PromotionCandidate, PromotionKey, PromotionKind
 from omni.policy.view import GameFacts, PolicyView
 from omni.providers.nflmeta import NflPhase
-from tests.test_app_nfl_pipeline import LIVE_KEY, T, Board, drive, nfl_game
+from tests.test_app_nfl_pipeline import T, Board, drive, nfl_game
 
 GAME = nfl_game()
 
@@ -131,7 +131,7 @@ def test_a_quarter_break_whose_onset_is_unknown_stands_while_shown_and_goes_at_t
 # --- offers -----------------------------------------------------------------------------------------------------------
 
 
-def test_a_scoring_play_offers_the_live_card_once_the_state_after_it_clears_and_a_ruling_offers_its_next_revision() -> (
+def test_a_scoring_play_offers_its_own_card_once_the_state_after_it_clears_and_a_ruling_offers_its_next_revision() -> (
     None
 ):
     board = Board()
@@ -148,14 +148,16 @@ def test_a_scoring_play_offers_the_live_card_once_the_state_after_it_clears_and_
         key=PromotionKey(GAME.id, "57"),
         kind=PromotionKind.MAJOR,
         eligible=MonotonicTime(53.0),  # the play's release
-        card=DedupeKey(LIVE_KEY),
+        card=DedupeKey(f"{GAME.id}:play:57:r0"),  # the play's own card
         value=interrupt_value(InterruptClass.MAJOR, predecessor=football_proxy(late), stakes=Stakes()),
     )
     assert _view(board, 55).offers == (score,)
     assert _view(board, 60).offers == (score,)  # the try merges into its touchdown
-    assert _view(board, 64).offers == (score,)  # the ruling is out; the state after it isn't
-    [ruling] = _view(board, 65).offers  # overturned on review: the same moment's next revision, in its place
+    assert _view(board, 62.9).offers == (score,)
+    assert _view(board, 63).offers == ()  # the ruling is out: what stood for the play is withdrawn
+    [ruling] = _view(board, 65).offers  # overturned on review: the same moment's next revision, the state after it out
     assert ruling.key == score.key and ruling.revision == 1 and ruling.eligible == MonotonicTime(63.0)
+    assert ruling.card == DedupeKey(f"{GAME.id}:play:57:r1")
     assert ruling.value == interrupt_value(
         InterruptClass.DECISIVE_LATE_WINNER, predecessor=football_proxy(kicked), stakes=Stakes()
     )
@@ -163,13 +165,12 @@ def test_a_scoring_play_offers_the_live_card_once_the_state_after_it_clears_and_
     assert _view(board, 182.9).offers == (ruling,) and _view(board, 183).offers == ()  # gone with every promotion
 
 
-def test_a_scoring_play_an_outage_s_catch_up_brings_is_offered_flagged_so() -> None:
+def test_what_an_outage_s_catch_up_brings_is_never_offered() -> None:
     board = Board(lag=0)
     _answer(board, 0, drive(away=10, home=14, period=4, clock=300), current_for=timedelta(seconds=5))
     board.at(10, GAME)  # stale from 5 s
     _answer(board, 20, drive(away=17, home=14, period=4, clock=270), _row(57, 15, major=True))
-    [offer] = _view(board, 20).offers
-    assert offer.origin is CandidateOrigin.CATCH_UP
+    assert _view(board, 20).offers == ()
 
 
 def test_a_game_whose_final_has_revealed_is_no_longer_carded_live() -> None:

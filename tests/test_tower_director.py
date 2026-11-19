@@ -5,6 +5,7 @@ views and commits every frame at once."""
 from __future__ import annotations
 
 import dataclasses
+from datetime import timedelta
 
 import pytest
 
@@ -36,6 +37,7 @@ from tests.board_policy import (
     Run,
     action,
     at,
+    break_id,
     big_play,
     evidence,
     facts,
@@ -195,7 +197,13 @@ def test_when_a_break_closes_at_104_its_guest_begun_at_100_yields_at_108() -> No
         run.publish()
 
     def resumed() -> None:
-        run.describe(facts(atl, 0.4, action=action(atl, "ab 41 p1", received=104 - 45)))
+        run.describe(
+            facts(
+                atl,
+                0.4,
+                action=action(atl, "ab 41 p1", received=104 - 45, closes=(break_id(atl, BreakKind.MLB_INNING_BREAK),)),
+            )
+        )
         run.publish()
 
     run.on(90, inning_break)
@@ -219,7 +227,13 @@ def test_a_reserved_recovery_begun_at_100_in_a_break_runs_to_112_when_the_break_
     run.publish()
 
     def resumed() -> None:
-        run.describe(facts(atl, 0.4, action=action(atl, "ab 41 p1", received=104 - 45)))
+        run.describe(
+            facts(
+                atl,
+                0.4,
+                action=action(atl, "ab 41 p1", received=104 - 45, closes=(break_id(atl, BreakKind.MLB_INNING_BREAK),)),
+            )
+        )
         run.publish()
 
     run.on(104, resumed)
@@ -264,7 +278,11 @@ def test_a_promotion_whose_break_ended_before_its_first_frame_comes_down_unspent
     run.publish()
     cue = run.board.cue(at(0))
     assert cue.reason is SelectionReason.TAKEOVER
-    run.describe(facts(atl, 0.4, action=action(atl, "ab 41 p2", received=-44)))
+    run.describe(
+        facts(
+            atl, 0.4, action=action(atl, "ab 41 p2", received=-44, closes=(break_id(atl, BreakKind.MLB_MOUND_VISIT),))
+        )
+    )
     run.publish()  # play resumed before the promotion's first frame
     run.board.committed(cue, at(0.1))
     [dropped] = run.board.changes()
@@ -329,7 +347,7 @@ def test_an_outage_clears_the_board_and_starts_the_leases_and_the_ledger_over() 
     atl, other = games(2)
     run = Run()
     run.stage(live(atl), live(other))
-    in_break = evidence(atl, BreakKind.MLB_INNING_BREAK, received=-45)
+    in_break = evidence(atl, BreakKind.MLB_INNING_BREAK, received=-45, stated=175)  # a 160 s ceiling from 0
     run.describe(facts(atl, 0.4, breaks=(in_break,)), facts(other, 0.4))
     run.publish()
     run.run(0, 30)
@@ -344,6 +362,7 @@ def test_an_outage_clears_the_board_and_starts_the_leases_and_the_ledger_over() 
     run.step(40)
     opened = [note for note in run.of(LeaseNote) if note.event is LeaseEvent.OPENED]
     assert [note.at.monotonic.seconds for note in opened] == [0.0, 40.0]
+    assert opened[1].remaining == timedelta(seconds=120)  # still from its release at 0: the outage restores nothing
     first = [note for note in run.of(BaseTurnNote) if note.at.monotonic.seconds == 40.0]
     assert first[0].debt == 0.0 and first[0].actual is None  # its account started over at zero
 
@@ -352,13 +371,14 @@ def test_a_game_that_leaves_the_facts_has_its_leases_forgotten_and_its_account_r
     atl, other = games(2)
     run = Run()
     run.stage(live(atl), live(other))
-    run.describe(facts(atl, 0.4, breaks=(evidence(atl, BreakKind.MLB_INNING_BREAK, received=-45),)), facts(other, 0.4))
+    in_break = evidence(atl, BreakKind.MLB_INNING_BREAK, received=-45, stated=175)  # a 160 s ceiling from 0
+    run.describe(facts(atl, 0.4, breaks=(in_break,)), facts(other, 0.4))
     run.publish()
     run.run(0, 30)
     del run.facts[atl.id]
     run.publish()
     run.run(31, 60)
-    run.describe(facts(atl, 0.4, breaks=(evidence(atl, BreakKind.MLB_INNING_BREAK, received=-45),)))
+    run.describe(facts(atl, 0.4, breaks=(in_break,)))
     run.publish()  # back: the same break is new to the lease book again
     run.step(61)
     opened = [note.at.monotonic.seconds for note in run.of(LeaseNote) if note.event is LeaseEvent.OPENED]
@@ -433,7 +453,8 @@ def test_with_nothing_live_to_weigh_the_cards_on_hand_rotate_longest_unseen_firs
     run.stage(late, early, soon, status(slate[3]))
     run.publish()
     run.run(0, 50)
-    assert run.keys(before=40) == [_key(early), _key(late), _key(soon), _key(status(slate[3])), _key(early)]
+    # Each final has had its turn; neither is due again before 5 minutes, so the pregame and the status rotate.
+    assert run.keys(before=40) == [_key(early), _key(late), _key(soon), _key(status(slate[3])), _key(soon)]
     assert [role for _, role, _ in run.cards()][:5] == ["result", "result", "neutral", "neutral", "neutral"]
     assert run.cards()[2][0] == 16.0 and run.cards()[3][0] == 24.0  # 8 s each: a pregame, then a status
 
@@ -450,7 +471,7 @@ def test_with_games_live_a_pregame_is_due_on_its_ramp_at_most_once_per_four_base
     assert [up for up, _ in run.shown(_key(starting))] == [0.0, 128.0, 256.0]
 
 
-def test_a_shown_final_repeats_at_5_and_15_minutes_and_an_unrelated_one_waits_while_a_favorite_acts() -> None:
+def test_a_shown_final_repeats_5_and_15_minutes_after_it_first_went_up_and_an_unrelated_one_waits_for_a_break() -> None:
     slate = games(3)
     atl, other = slate[0], slate[2]
     result = final(slate[1], ended=-1)
@@ -463,7 +484,8 @@ def test_a_shown_final_repeats_at_5_and_15_minutes_and_an_unrelated_one_waits_wh
     del run.facts[atl.id]
     run.publish()
     run.run(31, 16 * 60)
-    assert [up for up, _ in run.shown(_key(result))] == [36.0, 308.0, 904.0]  # the first decisions once due
+    # It first went up at 36: its repeats fall due at 336 and 936, and air at the first decisions after.
+    assert [up for up, _ in run.shown(_key(result))] == [36.0, 344.0, 940.0]
 
 
 def test_a_final_s_unseen_decisive_play_goes_first_unless_it_waits_on_its_promotion() -> None:

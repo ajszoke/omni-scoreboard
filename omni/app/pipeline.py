@@ -65,9 +65,15 @@ released state only (`omni.app.policy_facts`):
   detectors (`omni.events.mlb_breaks`) found in each answer, held through the delay with that answer's state;
 - **offers:** a released big play whose class scores (`classify_baseball_play`, on the released states either side
   of it) offers its big-play card, once the state after it has cleared the delay too; a confirmed feat at the final
-  (`classify_baseball_final`) offers the final card, and a correction offers it again under its next revision; an
-  active no-hit or perfect bid offers its no-hitter card as a reminder, a new moment each inning it carries deeper.
+  (`classify_baseball_final`) offers the final card; an active no-hit or perfect bid offers its no-hitter card as a
+  reminder, a new moment each time its staff, its kind or its depth changes. A rare feat, as a reminder or at the
+  final, is offered only over a play log that covers the game (`PlayLogCoverage.COMPLETE`).
   What a game's first look or an outage's catch-up brings is offered flagged so (`CandidateOrigin`), never as live.
+- **corrections:** an offer names a card whose content is fixed for the offer's key and revision. A later answer that
+  changes a big play withdraws its offer at once and, once that answer clears the delay, revises the card in place
+  and offers it again under its next revision; one that shows the play gone takes the offer and the card down. A
+  later final answer that changes the result or the feat offers the final again under its next revision, or
+  withdraws it when no feat is left. A withdrawn offer is simply missing from the next view.
 
 **Staleness.** A live card is current while its feed's newest answer is: for that answer's
 `current_for` from its receipt when the source says how long that is, and otherwise until a read
@@ -113,21 +119,25 @@ from omni.core.enum import DisplayPriority, GameStatus
 from omni.core.ids import LeagueScopedId
 from omni.domain.baseball import (
     BaseballGameState,
+    BaseballScoringImpact,
     GameLines,
+    InningPhase,
+    PlayLogCoverage,
     PregameDetails,
     PregameSide,
     WinProbability,
     pitching_feat_progress,
 )
 from omni.domain.contest import TeamGame
-from omni.events.baseball import BaseballGameEvent, LiveBaseballFeed
+from omni.events.baseball import BaseballGameEvent, BaseballGameEventType, LiveBaseballFeed
 from omni.events.mlb_breaks import mlb_break_evidence, mlb_latest_action
-from omni.policy.interrupts import classify_baseball_final, classify_baseball_play
+from omni.policy.interrupts import InterruptClass, classify_baseball_final, classify_baseball_play
 from omni.policy.leverage import baseball_proxy
 from omni.policy.pool import MatchupRecords, StartingRecords, TeamRecord
 from omni.policy.promotion import CandidateOrigin, PromotionCandidate, PromotionKey, PromotionKind
 from omni.policy.view import EMPTY_POLICY_VIEW, GameFacts, PolicyView
 from omni.providers.base import ProviderError
+from omni.tower.interruption import Interruption
 from omni.queue.delay_policy import Arrival, DelayPolicy, Held, ReleaseGuard
 from omni.queue.delayed_event_stream import DelayedEventStream
 from omni.queue.delayed_feed import DelayedFeed
@@ -251,7 +261,8 @@ class _Final:
     shown: Held[LiveBaseballFeed] | None = None  # the newest final answer to have cleared the delay
     key: str | None = None  # its card's dedupe key, once revealed
     origin: CandidateOrigin = CandidateOrigin.LIVE  # where that first answer came from, for a feat's offer
-    corrections: int = 0  # how many times a later answer has corrected the card
+    feat: InterruptClass = InterruptClass.ROUTINE  # the feat its offer stands for, once revealed: routine for none
+    revision: int = 0  # how many times a later answer has revised the card or its feat
 
 
 @dataclass(frozen=True, slots=True)
@@ -274,14 +285,63 @@ class _Answered:
 
 
 @dataclass(frozen=True, slots=True)
+class _PlayVersion:
+    """What a big play's card shows and its offer reads. A later answer's copy of the play that differs in any of it
+    is a revision of the play; one that differs only in what neither reads (its count, its pitch) is the same play."""
+
+    event_type: BaseballGameEventType
+    description: str
+    inning: int
+    phase: InningPhase
+    away_score: int | None
+    home_score: int | None
+    impact: BaseballScoringImpact | None
+
+    @classmethod
+    def of(cls, event: BaseballGameEvent | None) -> _PlayVersion | None:
+        if event is None:
+            return None
+        play = event.payload
+        return cls(
+            event.event_type,
+            play.description,
+            play.inning,
+            play.phase,
+            play.away_score,
+            play.home_score,
+            play.scoring_impact,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class _Revision:
+    """A later answer's copy of a big play whose card is up, held through the delay from that answer's receipt: None
+    when the answer shows the play gone."""
+
+    event: BaseballGameEvent | None
+    release: MonotonicTime
+
+
+@dataclass(slots=True)
 class _ReleasedPlay:
-    """A big play whose card is up: the play, its card, when it cleared the delay, and its place in the game."""
+    """A big play whose card is up: the play as its card shows it, its card, when that cleared the delay, its place in
+    the game, and the receipt of the newest answer read for it. ``revision`` counts the revisions its card has taken;
+    ``settled`` says the state after it has cleared the delay too, so it may be offered; ``held`` are the revisions
+    later answers brought that are still inside the delay, oldest first."""
 
     game: TeamGame
     event: BaseballGameEvent
     card: DedupeKey
     eligible: MonotonicTime
     context: PlayContext[BaseballGameState]
+    read: MonotonicTime
+    revision: int = 0
+    settled: bool = False
+    held: list[_Revision] = field(default_factory=list)
+
+    @property
+    def key(self) -> PromotionKey:
+        return PromotionKey(self.game.id, self.event.id.raw)
 
 
 @dataclass(frozen=True, slots=True)
@@ -365,15 +425,18 @@ class LiveBaseballPipeline:
         # What the board's policy reads, from released state only.
         self._games: dict[LeagueScopedId, TeamGame] = {}  # each game on the slate, as it last listed it
         self._shown: dict[LeagueScopedId, BaseballGameState] = {}  # the newest state to have cleared the delay
-        self._baselined: set[LeagueScopedId] = set()  # games a state has cleared the delay for: the first is a baseline
+        self._baselined: set[LeagueScopedId] = set()  # games a covered state has cleared for: the first is a baseline
         self._answered: dict[LeagueScopedId, _Answered] = {}  # each game's newest answer, for its plays' context
         self._breaks: dict[LeagueScopedId, ReleasedBreaks] = {}
         self._pregame_records: dict[LeagueScopedId, MatchupRecords] = {}  # the records an upcoming game's card has
         self._records = StartingRecords()
         self._play_context: dict[tuple[LeagueScopedId, str], PlayContext[BaseballGameState]] = {}  # big plays held
         self._awaiting: AwaitingSuccessor[_ReleasedPlay] = AwaitingSuccessor()
+        self._released: dict[tuple[LeagueScopedId, str], _ReleasedPlay] = {}  # big plays whose card is up, by play
         self._offers = StandingOffers()
         self._bids: dict[LeagueScopedId, _Bid] = {}
+        self._woke: MonotonicTime = MonotonicTime(0.0)  # the last host interruption's end, on the monotonic clock
+        self._woken: dict[LeagueScopedId, BaseballGameState | None] = {}  # each game's state released before it
 
     def refresh(
         self,
@@ -434,7 +497,7 @@ class LiveBaseballPipeline:
             if feed is not None:
                 arrival = Arrival(received=feed.received or at, as_of=feed.as_of)
                 context = self._admit(game, feed, arrival, at, origin)
-                out.big_plays.extend(self._surface_big_plays(game, feed.events, arrival, at, context))
+                out.big_plays.extend(self._surface_big_plays(game, feed, arrival, at, context))
                 self._surface_state(game, feed, arrival, at, out, meters, origin, no_hitter=True)
             self._enforce_staleness(game.id, at)
 
@@ -511,7 +574,7 @@ class LiveBaseballPipeline:
             context = self._admit(game, feed, arrival, at, origin)
             # Drain any walk-off held from the live passes: it clears the delay at its own play time, which
             # is at or before the final's reveal, so it flashes, then the final confirms it.
-            out.big_plays.extend(self._surface_big_plays(game, feed.events, arrival, at, context))
+            out.big_plays.extend(self._surface_big_plays(game, feed, arrival, at, context))
             if feed.status is GameStatus.FINAL:
                 final = self._confirm_final(game, feed, arrival, at, context)
             elif final is None:
@@ -588,7 +651,7 @@ class LiveBaseballPipeline:
         )
         self._queue.ingest(card, at)
         final.key = card.dedupe_key.raw
-        self._offer_feat(game, result.state, card.dedupe_key, final.reveal, final)
+        self._offer_feat(game, _feat(result.state), card.dedupe_key, final.reveal, final)
         # By the reveal, any walk-off has cleared the same delay and fired, so the stream is drained.
         self._event_streams.pop(game.id, None)
         out.finals.append(card.id)
@@ -597,40 +660,47 @@ class LiveBaseballPipeline:
     def _correct_final(
         self, game: TeamGame, final: _Final, feed: LiveBaseballFeed | None, at: ClockReading, out: _Pass
     ) -> None:
-        """A revealed final: a later final answer with a different result corrects the card, once it clears the
-        delay and while the card's own window lasts. No answer changes nothing."""
+        """A revealed final: a later final answer with a different result corrects the card, and one with a different
+        feat revises the feat's offer, once it clears the delay and while the card's own window lasts. No answer
+        changes nothing."""
         assert final.key is not None
         card = self._queue.card(final.key)
         if card is None:
             return  # its window is over: a correction doesn't bring it back
         if feed is not None and feed.status is GameStatus.FINAL:
-            final.answers.push(feed, Arrival(received=feed.received or at, as_of=feed.as_of), at)
+            arrival = Arrival(received=feed.received or at, as_of=feed.as_of)
+            final.answers.push(feed, arrival, at)
+            self._note_revisions(game, feed, arrival, at)
         newest = final.answers.latest_eligible(at)
         if newest is None:
             return
         final.shown = newest
         result = newest.value
         rebuilt = self._factory.final(game, result.state, decisions=result.decisions, now=card.timing.available_at)
-        if rebuilt.payload != card.payload:
+        corrected = rebuilt.payload != card.payload
+        if corrected:
             self._queue.ingest(replace(card, payload=rebuilt.payload), at)
             out.corrections.append(card.id)
-            final.corrections += 1
-            self._offer_feat(game, result.state, card.dedupe_key, newest.release, final)
+        feat = _feat(result.state)
+        if corrected or feat is not final.feat:
+            final.revision += 1
+            self._offer_feat(game, feat, card.dedupe_key, newest.release, final)
 
     def _offer_feat(
-        self, game: TeamGame, state: BaseballGameState, card: DedupeKey, eligible: MonotonicTime, final: _Final
+        self, game: TeamGame, feat: InterruptClass, card: DedupeKey, eligible: MonotonicTime, final: _Final
     ) -> None:
-        """A final the feed confirms as a perfect game or a no-hitter offers its card, under the revision of the
-        correction it comes from; a correction that leaves no feat withdraws the offer."""
+        """A final that is a perfect game or a no-hitter (`_feat`) offers its card, under the final's revision; one
+        that leaves no feat withdraws the offer, so the next view no longer carries it."""
+        final.feat = feat
         key = PromotionKey(game.id, "final")
         offer = major_offer(
-            classify_baseball_final(state, final=True).event_class,
+            feat,
             key=key,
             card=card,
             eligible=eligible,
             predecessor=None,  # a feat's value doesn't rest on leverage
             stakes=interrupt_stakes(game, self._starting_records(game.id)),
-            revision=final.corrections,
+            revision=final.revision,
             origin=final.origin,
         )
         if offer is None:
@@ -714,8 +784,12 @@ class LiveBaseballPipeline:
         if since is not None and at.monotonic.since(since) >= STALE_FOR:
             return  # its cards are down for staleness: nothing goes back up until its feed is current again
         state = safe.value.state
-        baseline = game.id not in self._baselined  # the first state to clear for a game is what the board tuned in to
-        self._baselined.add(game.id)
+        # The first state to clear for a game is what the board tuned in to. A bid is read only over a play log that
+        # covers the game, so for a bid that is the first such state.
+        covered = state.play_log is PlayLogCoverage.COMPLETE
+        baseline = covered and game.id not in self._baselined
+        if covered:
+            self._baselined.add(game.id)
         # The meter takes the newest reading that arrived no later than the state now on the card.
         win_prob, wp_warnings = self._safe_win_probability(game, *meters, visible=safe.arrival.received, at=at)
         out.warnings.extend(f"{game.id}: {warning}" for warning in wp_warnings)
@@ -769,23 +843,24 @@ class LiveBaseballPipeline:
     def _surface_big_plays(
         self,
         game: TeamGame,
-        events: tuple[BaseballGameEvent, ...],
+        feed: LiveBaseballFeed,
         arrival: Arrival,
         at: ClockReading,
         context: PlayContext[BaseballGameState],
     ) -> list[CardId]:
         """Flash notable events as big-play cards once they clear the TV delay (once each). Each new one keeps
-        ``context``, its answer's place in the game, so its card can be offered for promotion once released."""
+        ``context``, its answer's place in the game, so its card can be offered for promotion once released. The
+        answer's copy of each play whose card is up is checked for a correction (`_note_revisions`)."""
         stream = self._event_streams.get(game.id)
         if stream is None:
             # First sight of this game: prime the backlog so plays from before we tuned
             # in don't all flush at once — only events seen on later polls surface.
             stream = DelayedEventStream(self._guard)
             self._event_streams[game.id] = stream
-            for event in events:
+            for event in feed.events:
                 stream.mark_seen(event.id.raw)
         else:
-            for event in events:
+            for event in feed.events:
                 if event.importance.priority >= _BIG_PLAY_MIN_BAND:
                     if stream.push(event, replace(arrival, occurred=event.source_time), at, key=event.id.raw):
                         self._play_context[(game.id, event.id.raw)] = context
@@ -795,8 +870,65 @@ class LiveBaseballPipeline:
             self._queue.ingest(card, at)
             surfaced.append(card.id)
             played = self._play_context.pop((game.id, held.value.id.raw))
-            self._awaiting.add(played.settled, _ReleasedPlay(game, held.value, card.dedupe_key, held.release, played))
+            released = _ReleasedPlay(
+                game, held.value, card.dedupe_key, held.release, played, read=held.arrival.received.monotonic
+            )
+            self._released[(game.id, held.value.id.raw)] = released
+            self._awaiting.add(played.settled, released)
+        self._note_revisions(game, feed, arrival, at)
         return surfaced
+
+    def _note_revisions(self, game: TeamGame, feed: LiveBaseballFeed, arrival: Arrival, at: ClockReading) -> None:
+        """Read a newer answer's copy of each of ``game``'s big plays whose card is up: one that differs from the
+        newest copy known is a revision, held through the delay from the answer's receipt, and the play's offer is
+        withdrawn at once, since what it names is now known to be out of date.
+
+        The answer shows a play gone when it carries the play below the big-play band, or doesn't carry it at all
+        over a play log that covers the game and was parsed whole. Not carrying it otherwise says nothing: the log may
+        stop short of it, or the parse may have dropped it (`LiveBaseballFeed.warnings`)."""
+        received = arrival.received.monotonic
+        copies = {event.id.raw: event for event in feed.events}
+        for (game_id, play), released in self._released.items():
+            if game_id != game.id or received <= released.read:
+                continue  # another game's, or an answer already read for it
+            released.read = received
+            copy = copies.get(play)
+            if copy is None and (feed.state.play_log is not PlayLogCoverage.COMPLETE or feed.warnings):
+                continue
+            revised = copy if copy is not None and copy.importance.priority >= _BIG_PLAY_MIN_BAND else None
+            newest = released.held[-1].event if released.held else released.event
+            if _PlayVersion.of(revised) == _PlayVersion.of(newest):
+                continue
+            # Held to its answer's release, as that answer's state is: the pipeline's next deadline covers it.
+            released.held.append(_Revision(revised, self._guard.pin(arrival, at)))
+            self._offers.withdraw(released.key)
+
+    def _apply_revisions(self, at: ClockReading) -> None:
+        """Bring each big play whose card is up to the newest revision that has cleared the delay: a play shown gone
+        takes its card down and its offer with it; a changed one revises its card in place and is offered again
+        under its next revision, eligible from the revision's release. A play whose card's window is over is
+        forgotten."""
+        for found, released in list(self._released.items()):
+            card = self._queue.card(released.card.raw)
+            if card is None:
+                del self._released[found]
+                continue
+            due = [revision for revision in released.held if revision.release <= at.monotonic]
+            if not due:
+                continue
+            released.held = released.held[len(due) :]
+            newest = due[-1].event
+            if newest is None:
+                self._queue.remove(released.card.raw)
+                self._offers.withdraw(released.key)
+                del self._released[found]
+                continue
+            if _PlayVersion.of(newest) != _PlayVersion.of(released.event):
+                rebuilt = self._factory.big_play(released.game, newest, now=card.timing.available_at)
+                self._queue.ingest(replace(card, payload=rebuilt.payload), at)
+                released.event, released.eligible = newest, due[-1].release
+                released.revision += 1
+            self._offer_play(released)
 
     def _surface_no_hitter(
         self,
@@ -812,8 +944,10 @@ class LiveBaseballPipeline:
         The depth shown is the pitching side's *finished* innings (not the raw current inning),
         and a confirmed clean sheet promotes the card to a perfect game — both off the same
         delay-safe state, so the feat is revealed and un-revealed only as the broadcast would show.
-        Each depth (and a perfect bid turning into a plain no-hitter) is a moment of its own for a reminder,
-        eligible from the ``release`` of the state that first showed it; ``origin`` is that state's.
+        Each staff, kind and depth is a moment of its own for a reminder, so the moment says exactly what the card
+        shows, eligible from the ``release`` of the state that first showed it; ``origin`` is that state's. Only a
+        state whose play log covers the game moves the moment: one that doesn't still shows the card, but its bid
+        isn't offered while it is the newest.
         """
         feat = pitching_feat_progress(state, min_completed_innings=_NO_HITTER_MIN_COMPLETED_INNINGS)
         if feat is None:
@@ -827,7 +961,9 @@ class LiveBaseballPipeline:
         )
         self._queue.ingest(card, at)
         self._no_hitter_keys[game.id] = card.dedupe_key.raw
-        moment = PromotionKey(game.id, f"{feat.kind.value} through {feat.completed_innings}")
+        if state.play_log is not PlayLogCoverage.COMPLETE:
+            return card.id  # the bid isn't offered meanwhile, and the moment it was stays until a covering log moves it
+        moment = PromotionKey(game.id, f"{feat.side.value} {feat.kind.value} through {feat.completed_innings}")
         bid = self._bids.get(game.id)
         if bid is None or bid.key != moment:
             self._bids[game.id] = _Bid(moment, release, origin)
@@ -870,6 +1006,8 @@ class LiveBaseballPipeline:
     def _enforce_staleness(self, game_id: LeagueScopedId, at: ClockReading) -> None:
         """A game whose live card isn't current: its cards are marked stale, and come down `STALE_FOR` after."""
         since = self._stale.get(game_id)
+        if self._woken_state(game_id):  # its state is from before the host's gap: stale since the gap
+            since = self._stale[game_id] = self._woke if since is None else min(since, self._woke)
         if since is None:
             return
         keys = [key for key in (self._card_keys.get(game_id), self._no_hitter_keys.get(game_id)) if key is not None]
@@ -991,6 +1129,7 @@ class LiveBaseballPipeline:
         self._answered.pop(game_id, None)
         self._play_context = {key: played for key, played in self._play_context.items() if key[0] != game_id}
         self._awaiting.forget(lambda released: released.game.id != game_id)
+        self._released = {found: released for found, released in self._released.items() if found[0] != game_id}
 
     def _policy_view(self, at: ClockReading) -> PolicyView:
         """What the board's policy may read after this pass: each game carded live, from its newest released state,
@@ -998,7 +1137,9 @@ class LiveBaseballPipeline:
         for track in self._breaks.values():
             track.release(at)
         for released in self._awaiting.ready(at.monotonic):
+            released.settled = True
             self._offer_play(released)
+        self._apply_revisions(at)
         games: dict[LeagueScopedId, GameFacts] = {}
         for game_id in self._card_keys:
             track = self._breaks[game_id]
@@ -1020,24 +1161,33 @@ class LiveBaseballPipeline:
                 origin=bid.origin,
             )
             for game_id, bid in self._bids.items()
+            if self._shown[game_id].play_log is PlayLogCoverage.COMPLETE  # a bid is offered only over a covering log
         ]
         offers: tuple[Offer, ...] = (*self._offers.current(at.monotonic, self._staged), *reminders)
         return PolicyView(MappingProxyType(games), offers)
 
     def _offer_play(self, released: _ReleasedPlay) -> None:
-        """A released big play whose class scores offers its card, valued on the released state before it."""
+        """A released big play whose class scores offers its card, under its revision, valued on the released state
+        before it, once the state after it has cleared the delay. One with a revision still inside the delay, or that
+        no longer scores, offers nothing."""
+        if not released.settled or released.held:
+            self._offers.withdraw(released.key)
+            return
         context, game = released.context, released.game
         classification = classify_baseball_play(released.event, before=context.before, after=context.after)
         offer = major_offer(
             classification.event_class,
-            key=PromotionKey(game.id, released.event.id.raw),
+            key=released.key,
             card=released.card,
             eligible=released.eligible,
             predecessor=baseball_proxy(context.before) if context.before is not None else None,
             stakes=interrupt_stakes(game, self._starting_records(game.id)),
+            revision=released.revision,
             origin=context.origin,
         )
-        if offer is not None:
+        if offer is None:
+            self._offers.withdraw(released.key)
+        else:
             self._offers.add(offer)
 
     def _staged(self, card: DedupeKey) -> bool:
@@ -1063,6 +1213,45 @@ class LiveBaseballPipeline:
             since + CONFIRM_WITHIN for game_id, since in self._unconfirmed.items() if game_id not in self._stale
         ]
         return min((instant for instant in instants if instant is not None and instant > at.monotonic), default=None)
+
+    # --- a host's interruption ---------------------------------------------------------------------------------
+
+    def interrupted(self, interruption: Interruption) -> None:
+        """The host slept or stalled (`BOARD_POLICY.md` §6, "Wake or output loss"): what the pipeline held from before
+        the gap is history. Each game's states, plays and break evidence still in the delay go, with the offers and
+        bids waiting; each game's next answer is a baseline, its plays set aside as a first answer's are, so a batch
+        the gap held back can't flash or promote; and a live card's state, released before the gap, is drawn stale
+        from the gap's end (coming down `STALE_FOR` later) until a state answered after it clears the delay. Finals
+        stand. (An output loss is the display's: the loop tells the pipelines only of a host's gap.)"""
+        self._guard.distrust(interruption.after)  # what a wake admits waits its full delay until the clock settles
+        self._woke = interruption.after.monotonic
+        self._feeds = {game_id: DelayedFeed(self._guard) for game_id in self._feeds}
+        self._event_streams.clear()
+        self._breaks = {game_id: ReleasedBreaks(self._guard) for game_id in self._breaks}
+        self._play_context.clear()
+        self._answered.clear()
+        self._baselined.clear()
+        self._bids.clear()
+        self._awaiting = AwaitingSuccessor()
+        self._offers = StandingOffers()
+        self._woken = {game_id: self._shown.get(game_id) for game_id in self._card_keys}
+
+    def _woken_state(self, game_id: LeagueScopedId) -> bool:
+        """Whether a game's live card still shows the state it showed when the host's gap ended."""
+        if game_id not in self._woken:
+            return False
+        if self._shown.get(game_id) is self._woken[game_id]:
+            return True
+        del self._woken[game_id]  # a state released since: current again, as its answers say
+        return False
+
+
+def _feat(state: BaseballGameState) -> InterruptClass:
+    """The rare feat a final's state confirms (`classify_baseball_final`), or ROUTINE for none. A feat needs a play log
+    that covers the game: short of that, the state's counts alone promote nothing."""
+    if state.play_log is not PlayLogCoverage.COMPLETE:
+        return InterruptClass.ROUTINE
+    return classify_baseball_final(state, final=True).event_class
 
 
 def _game_end(decisive: list[BaseballGameEvent], seen_at: datetime) -> GameEnd:

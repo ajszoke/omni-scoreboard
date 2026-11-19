@@ -1,9 +1,13 @@
-"""``python -m omni.app`` — run the live scoreboard on the RGBMatrixEmulator.
+"""``python -m omni.app`` — run the live scoreboard on the RGBMatrixEmulator, or on a board.
 
     python -m omni.app --emulated --profile quad_128x64 --favorite mlb:ATL --favorite mlb:COL --favorite nfl:CAR
+    python -m omni.app --profile quad_128x64 --sink-command "ssh omni-board sudo python3 omni/board_frame_sink.py"
 
 Polls the MLB StatsAPI and NFLMeta, runs each league's delay-safe pipeline, and rotates both leagues' cards on
-the emulator (browser at http://localhost:8888/). This is the thin I/O shell around the
+the emulator (browser at http://localhost:8888/), the default. With ``--sink-command`` it drives a board's
+receiver instead (`tools/board_frame_sink.py`, started by the command, restarted if it drops): frames go to it off
+the frame loop with a heartbeat at least every 2 s, and a card's time on the board counts only from the receiver's
+word that its first frame is on the panel (`omni.app.frame_stream`). This is the thin I/O shell around the
 deterministic `AppLoop`; everything testable lives in `runner.py` / `loop.py`.
 
 ``--leagues`` names the leagues that run, ``mlb`` unless you say otherwise: NFL on the shared board is opt-in
@@ -48,6 +52,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import shlex
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import timedelta
@@ -58,6 +63,7 @@ from zoneinfo import ZoneInfo
 
 from omni.core.clock import SystemClock
 from omni.app.display import MatrixDevice, MatrixDisplaySink
+from omni.app.frame_stream import StreamDisplay, StreamDisplaySink, stream_display
 from omni.app.planned_mlb import MarketReader
 from omni.app.quota import Meter, NflMetaPlan, ProviderAccount
 from omni.app.runner import build_planned_loop, run_forever
@@ -72,6 +78,7 @@ from omni.preferences.favorites import AppliedMigration, Favorites, parse_favori
 from omni.renderers.image import LogoStore
 from omni.renderers.text_lane import DEFAULT_MARQUEE, ScrollSpeed
 from omni.tower.board import BoardPolicy
+from omni.tower.interruption import InterruptionPolicy
 
 if TYPE_CHECKING:
     from omni.app.planned_mlb import OddsReader
@@ -91,8 +98,13 @@ _NO_KEY = "omni.app: NFL is off: set NFLMETA_API_KEY in the environment or .env 
 def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="omni.app", description="Run the Omni scoreboard loop.")
     parser.add_argument("--profile", required=True, choices=[profile.value for profile in PanelProfile])
-    parser.add_argument(
-        "--emulated", action="store_true", help="render on the RGBMatrixEmulator (the only target today)"
+    display = parser.add_mutually_exclusive_group()
+    display.add_argument("--emulated", action="store_true", help="render on the RGBMatrixEmulator (the default)")
+    display.add_argument(
+        "--sink-command",
+        metavar="COMMAND",
+        help="drive a board's receiver: the command whose stdin takes the frames, e.g. \"ssh omni-board sudo"
+        ' python3 omni/board_frame_sink.py" (see tools/board_frame_sink.py)',
     )
     parser.add_argument(
         "--favorite",
@@ -321,7 +333,9 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
 
     clock = SystemClock()
     state_dir = args.state_dir if args.state_dir is not None else default_state_dir(os.environ, Path.home())
-    ledger = open_ledger(state_dir, NflMetaPlan(args.nflmeta_plan), log=lambda line: print(line, flush=True))
+    ledger = open_ledger(
+        state_dir, NflMetaPlan(args.nflmeta_plan), log=lambda line: print(line, flush=True), who="omni.app"
+    )
     zone = ZoneInfo(args.timezone)
     source = read_source_revision(_REPO_ROOT)
 
@@ -343,19 +357,25 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
         assert key is not None  # NFL runs only with a key
         nfl = planned_nfl_source(plan, clock, NflMetaHttp(key, None).get, ledger=ledger, favorites=args.favorites)
 
-    from RGBMatrixEmulator import RGBMatrix, RGBMatrixOptions
+    board: StreamDisplay | None = None
+    sink: MatrixDisplaySink | StreamDisplaySink
+    if args.sink_command:
+        board = stream_display(shlex.split(args.sink_command), profile, log=lambda line: print(line, flush=True))
+        sink = board.sink
+    else:
+        from RGBMatrixEmulator import RGBMatrix, RGBMatrixOptions
 
-    options = RGBMatrixOptions()
-    width, height = geometry_for(profile).size
-    options.cols, options.rows = width, height
-    options.chain_length = 1
-    options.parallel = 1
-    matrix = RGBMatrix(options=options)
+        options = RGBMatrixOptions()
+        width, height = geometry_for(profile).size
+        options.cols, options.rows = width, height
+        options.chain_length = 1
+        options.parallel = 1
+        matrix = RGBMatrix(options=options)
 
-    # The emulator's RGBMatrix is the matrix API at runtime, but its SwapOnVSync is typed with
-    # the emulator's own canvas type and extra args — broader than our minimal MatrixDevice
-    # protocol. Assert the boundary match precisely instead of blanket-ignoring the whole call.
-    sink = MatrixDisplaySink(cast(MatrixDevice, matrix), profile)
+        # The emulator's RGBMatrix is the matrix API at runtime, but its SwapOnVSync is typed with
+        # the emulator's own canvas type and extra args — broader than our minimal MatrixDevice
+        # protocol. Assert the boundary match precisely instead of blanket-ignoring the whole call.
+        sink = MatrixDisplaySink(cast(MatrixDevice, matrix), profile)
     loop = build_planned_loop(
         planned,
         sink,
@@ -369,12 +389,16 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
         marquee=DEFAULT_MARQUEE.at(ScrollSpeed(args.scroll_speed)),
         policy=_board_policy(args),
         settings=args.settings,
+        interruptions=InterruptionPolicy(),  # a sleep, a stall or a lost panel is noticed and taken in
     )
     on = ", ".join(league.value for league in League if league in leagues)
+    target = f"the board's receiver ({args.sink_command})" if board is not None else "http://localhost:8888/"
     print(
         f"omni.app: {profile.value}, leagues {on}, delay {args.delay}s (nfl {args.nfl_delay}s), favorites"
-        f" {args.favorites}, meter {mlb.meter if mlb is not None else 'off'} — http://localhost:8888/"
+        f" {args.favorites}, meter {mlb.meter if mlb is not None else 'off'} — {target}"
     )
+    if board is not None:
+        board.start()
     try:
         run_forever(
             loop,
@@ -388,6 +412,8 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
     except KeyboardInterrupt:
         pass
     finally:
+        if board is not None:
+            board.stop()  # the receiver blanks the panel as its input ends
         ledger.save(clock.read(), force=True)  # the month's usage, for the next run
     return 0
 

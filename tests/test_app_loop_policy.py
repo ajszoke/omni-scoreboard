@@ -53,9 +53,9 @@ class _RecordingBoard(BoardSession):
 
     published: list[PolicyView] = []
 
-    def publish(self, health: BoardHealth, policy: PolicyView = PolicyView()) -> None:
+    def publish(self, health: BoardHealth, policy: PolicyView = PolicyView(), *, after: int = 0) -> None:
         _RecordingBoard.published.append(policy)
-        super().publish(health, policy)
+        super().publish(health, policy, after=after)
 
 
 @pytest.fixture

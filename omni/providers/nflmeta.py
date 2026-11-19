@@ -34,9 +34,12 @@ A read of the feed keeps what it got: each page that arrives is kept, the place 
 past what was kept, and a read that fails partway carries on from there at the next poll. Only plays
 that were read and kept count toward being caught up.
 
-Each entry a play brings is dated by when the feed wrote it (`FootballEvent.written_at`): the earliest
-change to that play in the read that brought it. A correction (a ruling, a try) is dated by the change
-that carried it, not by the play it corrects. That's how a board tells a play that reached it late.
+Each entry a play brings is dated by when the feed wrote it (`FootballEvent.written_at`): the one change to that
+play in the read that brought it, which is the revision the entry announces. A correction (a ruling, a try) is
+dated by the change that carried it, not by the play it corrects. A play the read brings more than one change of (a
+snap and its try, or a score revision, read together) can't say which write the entry stands for: it stays undated,
+and waits the full delay from its receipt. That's how a board tells a play that reached it late, and never releases
+a later revision early on its snap's time.
 
 **Slate reads** list several games in one live-scores request, with no plays (`NflSlate`):
 - `day_list`, unfiltered: every game NFLMeta lists for the day, finals and games not yet started included. It
@@ -78,6 +81,7 @@ from omni.domain.football import (
 )
 from omni.events.football import (
     ConversionResult,
+    EntryLabel,
     FieldGoalResult,
     FootballEvent,
     FootballEventKind,
@@ -181,8 +185,30 @@ class FeedNoteKind(StrEnumMixin, str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class FeedNote:
+    """A note about a poll. Our own parts may go anywhere: its kind, what happens next (``detail``), and the entry
+    it's about by our own label (``entry``). ``quoting`` is the feed's own words (a play's text, a failure's message),
+    which only a log stamped to expire may keep (`omni.app.run_log`)."""
+
     kind: FeedNoteKind
-    detail: str
+    detail: str | None = None
+    entry: EntryLabel | None = None
+    quoting: str | None = None
+
+    @property
+    def ours(self) -> tuple[str, ...]:
+        """What the note says in our own words, past its kind: the entry it's about, then what happens next."""
+        entry = str(self.entry) if self.entry is not None else None
+        return tuple(part for part in (entry, self.detail) if part is not None)
+
+    @property
+    def told(self) -> str:
+        """The note in our own words: its kind, the entry it's about, and what happens next."""
+        return ": ".join((self.kind.value, *self.ours))
+
+    @property
+    def quoted(self) -> str:
+        """The note as a stamped log keeps it: in the feed's words, when it quotes the feed."""
+        return f"{self.kind.value}: {self.quoting}" if self.quoting is not None else self.told
 
 
 class InjuryStatus(StrEnumMixin, str, Enum):
@@ -302,7 +328,8 @@ class _PlayBatch:
     cursor: str | None
     plays: list[FootballPlay] = field(default_factory=list)
     kept_ids: set[str] = field(default_factory=set)
-    written_at: dict[int, datetime] = field(default_factory=dict)
+    written_at: dict[int, datetime] = field(default_factory=dict)  # each play's first change in the read
+    dated: dict[int, datetime | None] = field(default_factory=dict)  # its one change's write; None: several, or none
     complete: bool = False  # read through to the feed's end
     restarted: bool = False  # the feed refused the cursor: the next read starts over from its start
     notes: list[FeedNote] = field(default_factory=list)
@@ -483,7 +510,7 @@ class NflMetaLiveProvider:
         events = ledger.absorb(batch.plays, announce=announce)
         if not announce and not batch.complete:
             events = []  # still catching up on the game: nothing is news until all of it is in
-        events = [_dated(event, batch.written_at) for event in events]
+        events = [_dated(event, batch.dated) for event in events]
         tracked.cursor = batch.cursor
         tracked.play_ids |= batch.kept_ids
         for number, written in batch.written_at.items():
@@ -498,7 +525,7 @@ class NflMetaLiveProvider:
         if any(event.kind in _CORRECTIONS for event in events):
             tracked.watch_until = None
         notes += batch.notes
-        notes += [FeedNote(FeedNoteKind.LATE_PLAY, _event_words(event)) for event in ledger.held_back]
+        notes += [_late(event) for event in ledger.held_back]
         return events
 
     def _read_plays(self, game_id: int, tracked: _TrackedGame) -> _PlayBatch:
@@ -517,9 +544,9 @@ class NflMetaLiveProvider:
             except ProviderError as exc:
                 if batch.cursor is not None and getattr(exc.__cause__, "code", None) in _REJECTED_CURSOR:
                     batch.cursor, batch.restarted = None, True
-                    batch.notes.append(FeedNote(FeedNoteKind.CURSOR_RESET, str(exc)))
+                    batch.notes.append(FeedNote(FeedNoteKind.CURSOR_RESET, quoting=str(exc)))
                 else:
-                    batch.notes.append(FeedNote(FeedNoteKind.PLAY_READ_FAILED, str(exc)))
+                    batch.notes.append(FeedNote(FeedNoteKind.PLAY_READ_FAILED, quoting=str(exc)))
                 return batch
             for change in _rows(body):
                 if (play := _play(change)) is None:
@@ -529,6 +556,10 @@ class NflMetaLiveProvider:
                     batch.kept_ids.add(change["source_play_id"])
                 if (written := _instant(change.get("changed_at"))) is not None:
                     batch.written_at[play.number] = min(written, batch.written_at.get(play.number, written))
+                if play.number in batch.dated and batch.dated[play.number] != written:
+                    batch.dated[play.number] = None  # written more than once in the read: which write is whose?
+                else:
+                    batch.dated[play.number] = written
             meta = (body or {}).get("meta") or {}
             batch.cursor = meta.get("next_cursor") or batch.cursor
             if not meta.get("has_more"):
@@ -605,11 +636,12 @@ def _read_through(tracked: _TrackedGame, play_id: str | None, now: MonotonicTime
         notes.append(FeedNote(FeedNoteKind.PLAY_MISSING, "still not in the feed: waiting for the next play"))
 
 
-def _dated(event: FootballEvent, written: Mapping[int, datetime]) -> FootballEvent:
-    """``event``, dated by when the feed wrote its play in the read that brought it, if the feed said."""
-    if event.play is None or event.play not in written:
-        return event
-    return dataclasses.replace(event, written_at=written[event.play])
+def _dated(event: FootballEvent, dated: Mapping[int, datetime | None]) -> FootballEvent:
+    """``event``, dated by when the feed wrote its play's one change in the read that brought it: the revision it
+    announces. Undated when the read brought several changes of that play (a try, a score revision or a ruling read
+    with its snap), or didn't say: then it waits the full delay from its receipt."""
+    written = dated.get(event.play) if event.play is not None else None
+    return dataclasses.replace(event, written_at=written)
 
 
 def _drain_half(
@@ -825,9 +857,11 @@ def _without_plays(state: FootballGameState) -> FootballGameState:
     return state
 
 
-def _event_words(event: FootballEvent) -> str:
+def _late(event: FootballEvent) -> FeedNote:
+    """A late play's note: the entry by our own label, and its words for a stamped log only."""
     summary = event.summary
-    return summary.headline + (f" | {summary.detail}" if summary.detail else "")
+    words = summary.headline + (f" | {summary.detail}" if summary.detail else "")
+    return FeedNote(FeedNoteKind.LATE_PLAY, entry=event.label, quoting=words)
 
 
 def _board_key(row: Mapping[str, Any]) -> tuple[Any, ...]:

@@ -296,7 +296,7 @@ def test_watches_the_feed_for_a_correction_when_the_scoreboard_moves_on_its_own(
     assert feed.play_reads() == reads
 
 
-def test_each_play_entry_carries_when_the_feed_wrote_it_and_a_correction_when_the_correction_was() -> None:
+def test_each_play_entry_carries_when_the_feed_wrote_its_one_change_and_a_correction_when_the_correction_was() -> None:
     feed = FakeFeed()
     touchdown = "C.Brown up the middle for 2 yards, TOUCHDOWN."
     hurt = {"player_name": "Dalton Risner", "team_abbr": "CIN", "state": "out"}
@@ -329,7 +329,7 @@ def test_each_play_entry_carries_when_the_feed_wrote_it_and_a_correction_when_th
     plays = provider.poll(GAME, _at(T0 + timedelta(seconds=10))).events
     dates = [(event.play, event.written_at) for event in plays]
     assert dates == [
-        (1, T0 - timedelta(seconds=200)),  # the earliest change to the play in the read
+        (1, None),  # two changes in the read, at -200 and -150: which one the entry stands for can't be told
         (2, T0 + timedelta(seconds=5)),
         (3, None),  # the feed didn't say
         (None, None),  # an injury: no play row is behind it
@@ -337,7 +337,7 @@ def test_each_play_entry_carries_when_the_feed_wrote_it_and_a_correction_when_th
     later = provider.poll(GAME, _at(T0 + timedelta(seconds=20))).events
     assert [(event.kind, event.play, event.written_at) for event in later] == [
         (FootballEventKind.CONVERSION, 1, T0 + timedelta(seconds=14)),  # the try, dated by its own change
-        (FootballEventKind.PLAY, 4, T0 + timedelta(seconds=15)),
+        (FootballEventKind.PLAY, 4, None),  # written at 15, then corrected at 18, in the same read
     ]
 
 
@@ -720,7 +720,13 @@ def test_a_failed_play_read_is_retried_for_the_same_play() -> None:
     provider.poll(GAME, _at(T0))
     failed = provider.poll(GAME, _at(T0 + S10))
     assert failed.state is not None and failed.events == () and not failed.caught_up  # the scoreboard still came
-    assert [note.kind for note in failed.notes] == [FeedNoteKind.PLAY_READ_FAILED]
+    assert [(note.kind, note.told, note.quoting) for note in failed.notes] == [
+        (
+            FeedNoteKind.PLAY_READ_FAILED,
+            "play read failed",  # a failure's message may quote the feed: only a stamped log keeps it
+            "NFLMeta fetch failed for /api/v1/games/22920/play-changes: timed out",
+        )
+    ]
     retried = provider.poll(GAME, _at(T0 + S20))
     assert [event.summary.headline for event in retried.events] == ["2 YARD RUN"] and retried.caught_up
     provider.poll(GAME, _at(T0 + S30))  # read through for p1 now: not again
@@ -804,7 +810,10 @@ def test_a_cursor_the_feed_refuses_starts_the_reading_over_without_replaying_the
     provider = _provider(feed)
     provider.poll(GAME, _at(T0))
     refused = provider.poll(GAME, _at(T0 + S10))
-    assert refused.events == () and [note.kind for note in refused.notes] == [FeedNoteKind.CURSOR_RESET]
+    assert refused.events == () and [(note.kind, note.told) for note in refused.notes] == [
+        (FeedNoteKind.CURSOR_RESET, "cursor reset")
+    ]
+    assert refused.notes[0].quoted.startswith("cursor reset: NFLMeta fetch failed")
     again = provider.poll(GAME, _at(T0 + S20))
     assert [event.summary.headline for event in again.events] == ["INCOMPLETE"]  # the latest only
     assert _reads(feed) == [{"limit": 100}, {"limit": 100, "cursor": "c1"}, {"limit": 100}]
@@ -891,9 +900,11 @@ def test_a_play_first_seen_after_a_later_one_is_counted_but_not_shown() -> None:
     late = provider.poll(GAME, _at(T0 + S20))
     # The touchdown turns up behind the kickoff: its points are the scoreboard's to show, not its words.
     assert [event.summary.headline for event in late.events] == ["CIN +7", "INCOMPLETE"]
-    assert [(note.kind, note.detail.split(" | ")[0]) for note in late.notes] == [
-        (FeedNoteKind.LATE_PLAY, "TOUCHDOWN CIN")
+    # Its note names it by our own label; its words are quoted only for a stamped log.
+    assert [(note.kind, note.told, (note.quoting or "").split(" | ")[0]) for note in late.notes] == [
+        (FeedNoteKind.LATE_PLAY, "late play: major play #200", "TOUCHDOWN CIN")
     ]
+    assert late.notes[0].quoted.startswith("late play: TOUCHDOWN CIN | ")
     fixed = provider.poll(GAME, _at(T0 + S30))
     assert [event.summary.headline for event in fixed.events] == ["3 YARD RUN"]  # no score again, and no try:
     assert [note.kind for note in fixed.notes] == [FeedNoteKind.LATE_PLAY]  # its try stays as unseen as it

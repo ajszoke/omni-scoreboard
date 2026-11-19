@@ -132,7 +132,11 @@ def _offers(*batches: tuple[int, PromotionCandidate[str]], broker: PromotionBrok
 def _break(kind: BreakKind, contest: LeagueScopedId, at: float) -> BreakEvidence:
     received = ClockReading(T0 + at * S, _m(at))
     return BreakEvidence(
-        id=BreakId(contest, kind, f"@{at}"), received=received, confidence=BreakConfidence.EXPLICIT, onset=received.utc
+        id=BreakId(contest, kind, f"@{at}"),
+        received=received,
+        confidence=BreakConfidence.EXPLICIT,
+        onset=received.utc,
+        as_of=received.utc,
     )
 
 
@@ -147,7 +151,7 @@ def test_a_mound_visit_releasing_at_18_takes_an_action_qualified_cut_in_at_18_to
         if t == 0:
             broker.offer(_major("walk-off", 1.2), _m(0))
         if t == 18:
-            book.observe(_break(BreakKind.MLB_MOUND_VISIT, FAVORITE, 18), released=_m(18), poll_interval=15 * S)
+            book.observe(_break(BreakKind.MLB_MOUND_VISIT, FAVORITE, 18), at=_m(18), poll_interval=15 * S)
 
     def hosted(t: int) -> None:
         book.hosted(FAVORITE, _m(t))
@@ -232,7 +236,7 @@ def _cued_into_a_timeout() -> tuple[PromotionBroker[str], LeaseBook, PromotionCa
     broker = PromotionBroker[str]()
     book = LeaseBook()
     broker.offer(_major("pick six", 0.9, eligible=95, action=False), _m(95))
-    book.observe(_break(BreakKind.NFL_TEAM_TIMEOUT, NFL_FAVORITE, 100), released=_m(100), poll_interval=10 * S)
+    book.observe(_break(BreakKind.NFL_TEAM_TIMEOUT, NFL_FAVORITE, 100), at=_m(100), poll_interval=10 * S)
     decision = broker.decide(PromotionMoment((book.favorite(NFL_FAVORITE, _m(100)),)), _m(100))
     assert decision.start is not None
     return broker, book, decision.start
@@ -240,7 +244,9 @@ def _cued_into_a_timeout() -> tuple[PromotionBroker[str], LeaseBook, PromotionCa
 
 def test_a_break_that_ends_before_the_cued_cards_first_frame_rejects_it_and_spends_nothing() -> None:
     broker, book, cued = _cued_into_a_timeout()
-    book.action(NFL_FAVORITE, _m(100.5))
+    timeout = book.lease(NFL_FAVORITE)
+    assert timeout is not None
+    book.resumed(NFL_FAVORITE, {timeout.id}, _m(100.5))
     moment = PromotionMoment((book.favorite(NFL_FAVORITE, _m(101)),))
     assert broker.started(cued, moment, _m(101)).refusal is PromotionRefusal.BREAK_OVER
     assert broker.cooldown == PromotionCooldown()
@@ -359,14 +365,23 @@ def test_a_muted_contests_waiting_candidates_leave_at_once() -> None:
 # --- Snapshots and reminders ---------------------------------------------------------------------------------------
 
 
-def test_a_snapshot_never_plays_into_action_and_waits_for_room_in_a_break() -> None:
+def test_a_snapshot_never_plays_into_action_or_a_micro_break_and_waits_for_room_in_an_ordinary_one() -> None:
     broker = PromotionBroker[str]()
     broker.offer(_unscored("close game"), _m(0))
     assert broker.hold(_m(0)) is None  # an unscored card holds nothing
     assert broker.decide(IN_ACTION, _m(1)).reason is PromotionRefusal.BREAK_ONLY
-    tight = PromotionMoment((FavoriteMoment(activity=FavoriteActivity.MICRO_BREAK, room=7 * S),))
+    micro = PromotionMoment((FavoriteMoment(activity=FavoriteActivity.MICRO_BREAK, room=60 * S),))
+    assert broker.decide(micro, _m(2)).reason is PromotionRefusal.ORDINARY_BREAK_ONLY  # however much room it has
+    mixed = PromotionMoment(
+        (
+            FavoriteMoment(activity=FavoriteActivity.ORDINARY_BREAK, room=60 * S),
+            FavoriteMoment(activity=FavoriteActivity.MICRO_BREAK, room=60 * S),
+        )
+    )
+    assert broker.decide(mixed, _m(2)).reason is PromotionRefusal.ORDINARY_BREAK_ONLY  # every favorite's break counts
+    tight = PromotionMoment((FavoriteMoment(activity=FavoriteActivity.ORDINARY_BREAK, room=7 * S),))
     assert broker.decide(tight, _m(2)).reason is PromotionRefusal.NO_ROOM
-    roomy = PromotionMoment((FavoriteMoment(activity=FavoriteActivity.MICRO_BREAK, room=8 * S),))
+    roomy = PromotionMoment((FavoriteMoment(activity=FavoriteActivity.ORDINARY_BREAK, room=8 * S),))
     decision = broker.decide(roomy, _m(3))
     assert decision.start is not None and decision.start.card == "close game"
 

@@ -421,3 +421,15 @@ def test_a_board_without_mlb_runs_nfl_alone_and_never_reads_a_baseball_feed() ->
         _no_baseball(_game(), T)  # what its baseball pipeline would read, if a baseball game ever reached it
     with pytest.raises(ValueError, match="at least one league"):
         board_plan(ledger=ledger, mlb=None, nfl=False)
+
+
+def test_the_board_s_receiver_is_driven_by_a_sink_command_and_the_emulator_stays_the_default(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    command = "ssh omni-board sudo python3 omni/board_frame_sink.py"
+    ns = _parse_args(["--profile", "quad_128x64", "--sink-command", command])
+    assert ns.sink_command == command and ns.emulated is False
+    assert _parse_args(["--profile", "quad_128x64"]).sink_command is None  # the emulator, by default
+    with pytest.raises(SystemExit):
+        _parse_args(["--profile", "quad_128x64", "--emulated", "--sink-command", command])
+    assert "not allowed with argument" in capsys.readouterr().err
