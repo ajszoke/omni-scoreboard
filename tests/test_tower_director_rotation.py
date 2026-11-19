@@ -150,7 +150,8 @@ def _braves_break(opens: float, ends: float) -> Run:
     run.describe(facts(braves, 0.5), facts(angels, 0.6), facts(other, 0.3))
     in_break = evidence(braves, BreakKind.MLB_INNING_BREAK, received=opens, stated=175)
     run.publish_at(opens, lambda: run.describe(facts(braves, 0.5, breaks=(in_break,))))
-    run.publish_at(ends, lambda: run.describe(facts(braves, 0.5, action=action(braves, "ab 12 p1", received=ends))))
+    resumed = action(braves, "ab 12 p1", received=ends, closes=(in_break.id,))  # play after the break
+    run.publish_at(ends, lambda: run.describe(facts(braves, 0.5, action=resumed)))
     run.publish()
     run.run(0, ends + 20)
     return run

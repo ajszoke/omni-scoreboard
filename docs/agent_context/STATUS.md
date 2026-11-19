@@ -4,6 +4,34 @@ _Living status doc. Keep it short; update whenever project state changes (branch
 
 ## Now (2026-11-18)
 
+- **2026-11-18, round 8's closeout (this PR).** Every finding the review gated shared live on is fixed, each opened by a test that reproduced it through a production entry point. All four strict xfails now pass. As built: `ARCHITECTURE_TYPED_DOMAIN.md`, "Output and interruptions" and the quota section; `BOARD_POLICY.md`, "Readings settled after review round 8".
+  - **Output:**
+    - `--sink-command` on the shared app; a card is booked on the receiver's confirmed first frame.
+    - The receiver gets sessions, heartbeats and an 8 s blanking watchdog (`omni/app/receiver.py`), compatible with older ends.
+    - Typed interruptions: a host suspend, a process stall, an output loss.
+  - **Board:**
+    - Leases are anchored at the pinned release, checked again at the first frame, and closed only by action after the break; a higher-precedence interval supersedes a shorter one.
+    - Promotions name a card fixed for their event, and a withdrawn offer never airs.
+    - An unseen decisive event leads its final as a result summary.
+    - Stale games are out of the targets.
+    - Final repeats run from the first physical start.
+    - The non-base cap counts confirmed time with a live base on hand.
+  - **Shared NFL:**
+    - A caption starts at its confirmed frame, beside a field that agrees with it.
+    - Catch-up history never captions.
+    - Per-play promotion cards.
+    - The final's drain can update it once with a late decisive play.
+    - Feed text never reaches the trace.
+  - **MLB:**
+    - A play log proves "no batter reached" only through the linescore's own boundary.
+    - Corrections withdraw or revise feat and big-play offers.
+    - A home win without the bottom of the ninth counts the home staff's ninth (StatsAPI reads it "Top").
+  - **Quota:**
+    - Every wire request is admitted against its account.
+    - One process at a time polls NFLMeta (a file lock).
+    - NFL's day list survives a cold start near the month's end and is rechecked before and between windows.
+    - Each league's quota reason has its own trace line.
+  - **Still opt-in:** `--board-policy 2 --leagues mlb,nfl`. Next is the staffed one-board shared NFL Sunday on the Pi. That needs the new receiver deployed (`tools/board_frame_sink.py` with `omni/app/receiver.py`), with A1b in parallel. NBA v1 follows from the card design now in review.
 - **2026-11-18, review round 8** (`~/omni-review/rounds/round-8-verdict.md`): keep H5 and policy v2, but not as the default shared live path until its closeout passes:
   - physical swap receipts and a wake contract;
   - lease admission rechecked at the swap;

@@ -568,11 +568,25 @@ Provider modules own raw API shape. The rest of the system never sees raw JSON. 
   - **Charging:** `QuotaLedger` counts every HTTP response where it's made (`Meter`, `MeteredHttp`), from
     the rows header when there is one. The provider's own "remaining" can raise the count, never lower it.
   - **Admission:** `PollPlan` asks the ledger before each ask goes out. A key's account comes from an
-    explicit `AccountMap`, so an NFL slate in MLB's plan charges NFLMeta.
+    explicit `AccountMap`, so an NFL slate in MLB's plan charges NFLMeta. Every wire request is admitted too
+    (`QuotaLedger.admit_request`): an ask's first request uses its admission's place, and each later page or
+    retry is admitted on its own, in the ask's class; a refused one is never sent (`QuotaRefused`). A request
+    that got no answer is charged as one. Both NFL entry points (`PlannedNfl`, the solo runner's `GameFeed`) fetch
+    inside `Admission.asking()`.
+  - **One process per account:** NFLMeta takes an exclusive file lock (`nflmeta.lock` under `--state-dir`,
+    `quota_store.FileLocks`), so a second process sharing the state dir refuses to poll it
+    (`Refusal.ELSEWHERE`, naming the holder); the solo runner exits saying so, and `tools/nflmeta_record.py`
+    takes the same lock.
   - **Shedding:** as an account runs down, it sheds by class (`SHEDDING`). Backfill goes above 50% left.
     Background goes above 25%, then at double cadence to 10%. Normal goes above 5%, and focus until the
     month is out. The last 20% of each minute is held for normal and focus.
-  - **What a refusal says:** a refused ask stays due, and its reason reaches the league's health.
+  - **What a refusal says:** a refused ask stays due, and its reason reaches the league's health, which
+    carries each league's quota reason apart (`LeagueHealth.quota`); the trace writes it on a line of its own
+    when it changes, so NFL's stays visible beside a healthy MLB.
+  - **NFL's day list:** goes as focus on a board with an NFL favorite (so a cold start near the month's end
+    still finds its games), and is rechecked as background: hourly in the 3 hours before the first kickoff,
+    and 30 minutes after each window's kickoffs while a later one is ahead (`NflSchedulePolicy`). A game a
+    recheck drops before kickoff leaves its date; one dropped after kickoff is still read.
   - **Persistence:** monthly usage persists under `--state-dir`, written atomically at most once a minute
     and at shutdown.
 - **Versions** (`omni/app/versions.py`): every run names its policy (`omni-board-policy/1` for the shared
@@ -616,6 +630,35 @@ Plays travel with each game's feed, not in `ProviderUpdate`.
   factors and a plain "why this card" line (`omni/app/trace.py`).
 - **Settings** (`omni/policy/settings.py`): `--board-policy 1|2`, `--mute`, `--league-weight`,
   `--no-promotions`, `--slot`. A loop built without settings keeps the old bands, as the older replays do.
+- **Promotions name their event:** every scored offer names a card fixed for that event's revision (an MLB
+  big-play card; NFL's per-play card, `<game>:play:<moment>:r<revision>`, the field its answer showed with the
+  play as caption). A view that no longer carries an offer withdraws it; a story that aired is never promoted
+  again. An unseen decisive event or feat is kept as a `ResultSummary` (`omni/tower/summary.py`) and leads its
+  final as an 8 s still, fresh for 5 minutes after the final is eligible.
+- **Leases at the physical start:** a lease is anchored at its evidence's pinned release less the age the break
+  had when it was detected; a guest's grant (`LeaseGrant`) is stamped at hand-off and checked again when its
+  first frame lands (`PolicyDirector.grant_refusal`); a lapsed one is booked as an accidental display.
+
+## Output and interruptions
+
+- **Receipts:** a synchronous sink (the emulator) books a frame when its commit returns. A sink that
+  acknowledges frames (`StreamDisplaySink`, `--sink-command` on both apps) books a card's first frame only on
+  the receiver's matching `SHOWN`, at the time it was heard; a frame replaced before it was confirmed is never
+  credited, and one landing after its latest start or its grant is an accidental display (`LANDED_LATE`,
+  `GRANT_LAPSED`). An unacknowledging (older) receiver is noted once; policy 2's choices then count for nothing
+  and policy 1's bands rotate.
+- **The receiver** (`tools/board_frame_sink.py`, logic in `omni/app/receiver.py`): announces a boot id; takes
+  sessioned frames and heartbeats (`OMN3`, `OMNH`), keeps one waiting frame, rejects an older session, and
+  blanks the panel 8 s after the host's last word, even on an unchanged frame. An older end on either side
+  falls back to `OMN2` without the watchdog.
+- **Interruptions** (`omni/tower/interruption.py`): a host suspend (suspend-inclusive clock minus monotonic
+  over 5 s; without that clock, wall minus monotonic over 30 s, clock untrusted), a process stall (over 30 s
+  past the 5 s health tick) or an output loss (a new receiver session, a `BLANK`, 8 s of silence). On a host
+  gap, polls asked before it file nothing, the pipelines drop what they held (states, plays, breaks, captions,
+  offers, per-play cards), draw the field stale until a state answered after it clears the delay, and
+  distrust the clock so the next reads wait their full delay; the director closes its leases and withdraws
+  pending promotions. On an output loss, accounting stops at the receiver's last word and the unknown time is
+  recorded; cooldowns, debt and an owed recovery stand.
 
 ## Queue responsibilities
 
