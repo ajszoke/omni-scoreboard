@@ -125,10 +125,10 @@ NBA providers (review round 4's research thread):
     - GOAT, $39.99 a month: adds box scores (`GET /v1/box_scores/live` among them), plays, lineups and odds, at 600 a minute. A 7-day GOAT trial runs at 5 a minute.
   - The game object (the games endpoint is on every tier):
     - `status_state`: `scheduled`, `in_progress`, `final`, `postponed`, `canceled`, `delayed`, `suspended`, `abandoned` or `unknown`.
-    - `status`: "1st Qtr" through "Halftime" to "Final", or a start time before tip-off.
+    - `status`: "1st Qtr" through "Halftime" to "Final", or a start time before tip-off. At the half it can stay "2nd Qtr" while `time` reads "Half" (2026-11-18).
     - `period`: 0 before tip-off and 5+ in overtime. Some old overtime finals read 4.
     - `time`: the game clock with its period, "Q2 1:17", with tenths under a minute ("Q1 :50.9"); "END Q1", "Half", "END Q3" and "END Q4" at breaks (seen live, 2026-11-16).
-    - Scores by quarter and overtime.
+    - Scores by quarter and overtime: a regulation quarter not yet played reads 0, and there are only three overtime columns (`ot1`–`ot3`), so a fourth overtime's points show only in the total.
     - `home_`/`visitor_timeouts_remaining` and `home_`/`visitor_in_bonus`. Quarter, bonus and timeout data start with the 2023 season.
     - No possession, team fouls or running flag.
   - "Game data is realtime for in-progress games"; no refresh interval is published. One `/games?dates[]=` request covers a slate, so the Free tier's 5 a minute allows a full-slate read every 12 seconds.
@@ -168,10 +168,14 @@ NBA providers (review round 4's research thread):
       timeouts to a team, so a team's own and a mandatory one look alike): play resumed 220 s after the clock stopped
       (median; p5 182 s, p90 252 s; n 150), or 204 s after the decrement was received (p10 173 s).
     - **A third or later decrement in the quarter, or any in overtime,** is a team's own timeout: play resumed 113 s
-      after receipt (median; p25 91 s, p90 207 s; n 78). About one in six resumed within 60 s of receipt, for
-      reasons the data doesn't show.
-    - Four decrements came at a period's full clock (12:00), during the break, and 8 fell by two at once
-      (corrections).
+      after receipt (median; p25 91 s, p90 207 s; n 78). About one in six resumed within 60 s of receipt: most
+      of those were the caps below.
+    - **20 drops were the league's caps, not timeouts.** A team may hold at most four timeouts for the fourth
+      quarter and two after its 3:00 mark, and the feed lowers the count to match. It drops to exactly 4 at Q4's
+      full clock (4 drops), and to exactly 2 at the first stoppage at or under 3:00 (16 drops, 4 of them by two at
+      once, often both teams' in the same stoppage). Play resumed a median 23 s after a cap's drop. The other drops by
+      two at once were corrections. The counts above include the caps. Without them, the short class resumed a
+      median 117 s after receipt, and 6 of 66 within 60 s, so the caps were most of that fast tail.
   - **Challenges:**
     - A won challenge keeps its timeout: the count falls, then comes back with the clock still stopped. NOP and OKC
       on 2026-11-18 got theirs back 108 s and 78 s after the decrement, and play resumed 19 s and 43 s after that;

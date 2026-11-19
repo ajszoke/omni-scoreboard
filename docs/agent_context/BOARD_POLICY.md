@@ -344,6 +344,7 @@ a lease.
 | NBA | a one-team timeout decrement, coherent, that is the first or second of a regulation quarter (the TV timeouts) | **165 s from inferred onset** (twelve 12 s turns after 15 s detection and the margin). Cancel when the clock runs again. Measured: play resumed 220 s after the clock stopped (median; p5 182 s, n 150) |
 | NBA | a later decrement in the quarter, or one in overtime | **60 s from inferred onset** (three 12 s turns after 15 s detection and the margin). Cancel when the clock runs again. Measured: 113 s from the decrement's receipt (median), with a tail that resumes inside 30 s |
 | NBA | a decrement at a period's full clock (taken in the break) | none of its own: the break's ceiling holds |
+| NBA | a drop the league's caps make: to 4 at Q4's full clock, to 2 at Q4's first stoppage at or under 3:00 | none: it isn't a timeout, and it doesn't count toward the quarter's order |
 | NBA | a coach's challenge | none of its own. It begins as a decrement and gets that ceiling; a won challenge's restored count arrives 1–2 minutes later, with play resuming soon after |
 | NBA | END Q1, END Q3 | **135 s** local or unknown; **195 s** verified national (the rule is 150/210 s) |
 | NBA | halftime | **840 s** (the rule is 900 s) |
