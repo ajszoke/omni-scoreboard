@@ -216,8 +216,22 @@ def _state(
         (_state(inning=9, phase=InningPhase.MIDDLE, away_hits=0), False, ClassBasis.NOT_FINAL),
         (_state(away_hits=0, unknown=(BaseballField.HITS,)), True, ClassBasis.HITS_UNVERIFIED),
         (_state(inning=9, phase=InningPhase.END), True, ClassBasis.NO_FEAT),
-        # A final that still reads as the top of the ninth can't vouch for the home staff's ninth inning.
+        # A home win without the bottom of the ninth stays "Top" in StatsAPI's final: with the home side ahead, the
+        # top is over and the home staff threw nine.
+        (
+            _state(inning=9, phase=InningPhase.TOP, home=2, away_hits=0, away_reached=False),
+            True,
+            ClassBasis.PERFECT_GAME,
+        ),
+        (
+            _state(inning=9, phase=InningPhase.TOP, home=1, away_hits=0, away_reached=None),
+            True,
+            ClassBasis.REACH_UNVERIFIED,
+        ),
+        # A final that reads as the top of the ninth with no home lead can't vouch for the home staff's ninth inning.
         (_state(inning=9, phase=InningPhase.TOP, away_hits=0, away_reached=False), True, ClassBasis.NO_FEAT),
+        # The visitors' staff in that game threw eight: no feat for them.
+        (_state(inning=9, phase=InningPhase.TOP, home=2, home_hits=0, home_reached=False), True, ClassBasis.NO_FEAT),
         # A visiting staff that lost without pitching the bottom of the ninth threw eight innings.
         (_state(inning=9, phase=InningPhase.MIDDLE, home_hits=0, home_reached=False), True, ClassBasis.NO_FEAT),
         # A game called after seven.
