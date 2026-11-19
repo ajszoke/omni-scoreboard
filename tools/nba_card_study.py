@@ -268,7 +268,7 @@ def _q3(bottom: Bottom) -> Game:
 _COMBO_AWAY = Side("POR", 68, 3, False, (26, 25, 17))
 _COMBO_HOME = Side("MIN", 79, 4, True, (26, 33, 20))
 _COMBO_PLAYS = (
-    Caption(Tone.SCORE, "LAYUP GOOD", "A.Edwards (N.Reid asst.)", HomeAway.HOME),
+    Caption(Tone.SCORE, "2-POINT FG GOOD", "A.Edwards (N.Reid asst.)", HomeAway.HOME),
     Caption(Tone.SCORE, "3-POINT FG GOOD", "J.Grant (J.Holiday asst.)", HomeAway.AWAY),
 )
 
@@ -384,7 +384,7 @@ SPECIMENS: tuple[Specimen, ...] = (
             GameClock(1400),
             home_win_pct=63.0,
             bottom=Bottom.CAPTION,
-            caption=Caption(Tone.ALERT, "SHOOTING FOUL", "D.Clingan (3rd foul)", HomeAway.AWAY),
+            caption=Caption(Tone.ALERT, "PERSONAL FOUL", "D.Clingan (3rd foul)", HomeAway.AWAY),
         ),
         now=_utc("2026-11-17T02:08:09Z"),
         source=StateRef(0, 119),
