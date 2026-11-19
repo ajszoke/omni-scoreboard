@@ -1140,6 +1140,19 @@ class PolicyDirector:
             return f"{subject}: {status_words(card.payload.status)}"
         return f"{subject}: {_ROLE_WORDS[role]}"
 
+    def held(self, air: Air, at: ClockReading) -> LeaseRefusal | None:
+        """Whether the grant ``air`` was cued under still held at ``at``, as its first frame landed: each host whose
+        break it's a guest of must still have room for its turn. None when it held, or when ``air`` carries on a turn
+        already running; else why not, and the board books the frame as an accidental display."""
+        turn = air.turn
+        if turn.started is not None:
+            return None
+        for host in turn.hosts:
+            refusal = self._leases.guest_refusal(host, turn.length, at.monotonic)
+            if refusal is not None:
+                return refusal
+        return None
+
 
 _BASE_REASONS = MappingProxyType(
     {

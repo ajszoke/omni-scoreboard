@@ -29,12 +29,22 @@ The board refreshes and paints on separate cadences:
      is never offline, and one that missed its due read goes offline `offline_after` later.
 - **`paint(at)`** asks the board (`BoardSession`) what should be up: a card, chosen by the queue and
   held by its dwell, or an explicit frame (idle, held, offline). It draws that through the
-  `RendererRegistry`, a stale card dimmed, and commits it to the `DisplaySink`. The commit starts a
-  card's dwell, books its turn in the queue and starts its lines scrolling (each line's start is kept
-  by the card's time on the board and its lane), so a card that never reached the panel spends none of
-  its turn. All three count from when the display took the frame: given the clock, the paint reads it
-  again once the commit returns, so a slow draw or swap doesn't eat into the card's time. Painting runs
-  at a frame rate, so scrolling lines, countdowns and blinks move, and never fetches.
+  `RendererRegistry`, a stale card dimmed, and hands it to the display. The display's word that the frame is
+  on the panel starts a card's dwell, books its turn in the queue and starts its lines scrolling (each line's
+  start is kept by the card's time on the board and its lane), so a card that never reached the panel spends
+  none of its turn. All three count from when the display showed the frame:
+  - a display whose commit puts the frame up before it returns (the emulator's `MatrixDisplaySink`): given the
+    clock, the paint reads it again once the commit returns, so a slow draw or swap doesn't eat into the card's
+    time;
+  - a display across a link that says which frames it showed (an `AcknowledgingSink`: the board's receiver,
+    through `omni.app.frame_stream.StreamDisplaySink`): the frame is sent with an id, and nothing is booked until
+    the display confirms that id, at the instant the app heard so (`FrameShown`). Each paint first takes in what
+    the display said since the last. A frame sent before one the display confirmed, and not confirmed itself, was
+    replaced: it's never credited. Word that the display lost its panel (`DisplayLost`) clears every frame in
+    flight, and a frame unconfirmed `UNSHOWN_AFTER` after it was sent is given up on. The board judges each
+    landing against the cue's latest start and grant (an accidental display counts for nothing), and a frame the
+    display credits only on its own say-so (an older receiver) doesn't count as confirmed (`BoardSession`).
+  Painting runs at a frame rate, so scrolling lines, countdowns and blinks move, and never fetches.
 - **`run_once(at)`** is one refresh, then one paint: the single deterministic pass replay drives.
 - **`refresh_deadline(at)`** says when a refresh next has something to do by itself (a play clearing
   the delay, the source going stale, a card running out of time to air); **`next_deadline(at)`** adds
@@ -50,6 +60,7 @@ Each card that reaches the panel is traced at its first committed frame, with ho
 
 from __future__ import annotations
 
+from collections import deque
 from collections.abc import Callable, Hashable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, tzinfo
@@ -58,6 +69,7 @@ from typing import Any
 
 from omni.app.contest_store import ContestStore, ProviderStatus, Reconciliation, ScopeHealth
 from omni.app.display import DisplaySink
+from omni.app.frame_stream import AcknowledgingSink, DisplayLost
 from omni.app.nfl_pipeline import LiveFootballPipeline
 from omni.app.pipeline import (
     FeedFetcher,
@@ -82,6 +94,7 @@ from omni.renderers.registry import RendererRegistry
 from omni.renderers.text_lane import DEFAULT_MARQUEE, LaneClock, LaneFrame, Marquee, MarqueeStyle, TextLane
 from omni.renderers.visual_treatment import MatchupVisualTreatment, VisualContrastPolicy, resolve_matchup_treatment
 from omni.tower.board import (
+    BoardCue,
     BoardFrame,
     BoardHealth,
     BoardNote,
@@ -101,6 +114,7 @@ from omni.tower.decisions import PolicyDecision
 __all__ = [
     "FRESH_PAST_DUE",
     "OFFLINE_AFTER",
+    "UNSHOWN_AFTER",
     "AppLoop",
     "LeagueHealth",
     "Painted",
@@ -117,6 +131,9 @@ OFFLINE_AFTER = timedelta(minutes=10)
 # How long past when its next read falls due a scope's answer counts as fresh: every source's today (MLB's slate,
 # NFL's scopes, a supervised provider's). A scope's `max_age` is that much past its due read.
 FRESH_PAST_DUE = timedelta(minutes=2)
+
+# A frame sent to a display that confirms what it shows, unconfirmed this long after it was sent, is given up on.
+UNSHOWN_AFTER = timedelta(seconds=30)
 
 # Why a quota is holding a scope's asks back, while it is: e.g. "quota: NFLMeta rows 8% left, background slowed".
 QuotaNote = Callable[[PollScope], str | None]
@@ -176,6 +193,7 @@ class Painted:
     changes: tuple[LaneChange[BoardPayload], ...] = ()  # what the board did since the last paint
     notes: tuple[BoardNote, ...] = ()  # what the board noted since the last paint
     decisions: tuple[PolicyDecision, ...] = ()  # what the board's policy decided since the last paint
+    confirmed: tuple[int, ...] = ()  # frames sent that the display confirmed since the last paint, each matched once
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -190,6 +208,17 @@ class TickResult:
     render_error: str | None  # an isolated render/display failure, if any
 
 
+@dataclass(frozen=True, slots=True)
+class _Sent:
+    """A frame sent to a display that confirms what it shows, and what to book once it does."""
+
+    frame: int  # its id
+    cue: BoardCue
+    lanes: _ShownLines  # its lines' starts
+    context: RenderContext  # how it was drawn
+    drawn: ClockReading
+
+
 class AppLoop:
     """Holds the spine's collaborators; refreshes and paints one pass at a time."""
 
@@ -201,7 +230,7 @@ class AppLoop:
         pipeline: LiveBaseballPipeline,
         queue: InterleavedCardQueue,
         registry: RendererRegistry,
-        sink: DisplaySink,
+        sink: DisplaySink | AcknowledgingSink,
         fetch_feed: FeedFetcher,
         fetch_win_probability: WinProbFetcher | None = None,
         fetch_fallback_win_probability: WinProbFetcher | None = None,
@@ -230,6 +259,9 @@ class AppLoop:
         self._queue = queue
         self._registry = registry
         self._sink = sink
+        self._sent: deque[_Sent] = deque()  # frames sent to it and not yet confirmed, oldest first
+        self._presented: Presentation | None = None  # a card's first frame confirmed since the last paint
+        self._confirmed: list[int] = []  # the frames confirmed since the last paint
         self._fetch_feed = fetch_feed
         self._fetch_win_probability = fetch_win_probability  # optional per-game win-prob fetch; None -> no meter
         self._fetch_fallback_win_probability = fetch_fallback_win_probability  # takes over when that goes quiet
@@ -291,12 +323,14 @@ class AppLoop:
         )
 
     def paint(self, at: ClockReading, *, clock: Clock | None = None) -> Painted:
-        """Draw what the board says should be up at ``at``, and commit it.
+        """Draw what the board says should be up at ``at``, and hand it to the display.
 
-        The frame counts from when the display took it: ``clock``, when given, is read again once the commit
-        returns, and that reading starts a card's dwell, books it and starts its lines. Without one (a replay,
-        a test), no time passes between the two.
+        The frame counts from when the display showed it. A display that confirms what it shows books each frame
+        when its word arrives, at the instant it was heard. Otherwise the commit shows the frame: ``clock``, when
+        given, is read again once the commit returns, and that reading starts a card's dwell, books it and starts
+        its lines. Without one (a replay, a test), no time passes between the two.
         """
+        self._credit(at)
         cue = self._board.cue(at)
         payload = cue.payload
         lanes = _ShownLines(self._lanes, (Surface.BOARD, cue.occurrence), at.monotonic)
@@ -307,8 +341,8 @@ class AppLoop:
             timezone=self._display_timezone,
             marquee=Marquee(style=self._marquee, clock=lanes),
         )
-        # Isolate render and display failures: never crash the loop. A card that can't be drawn is set
-        # aside so the board moves on; a display that fails spends no airtime, and the cue is tried again.
+        # Isolate render and display failures: never crash the loop. A card that can't be drawn is set aside
+        # so the board moves on; a display that fails spends no airtime, and the cue is tried again.
         try:
             frame = self._sink.new_frame()
         except Exception as exc:
@@ -322,8 +356,17 @@ class AppLoop:
         except Exception as exc:
             self._board.failed(cue, at)
             return self._failed(at, exc)
+        sink = self._sink
+        if isinstance(sink, AcknowledgingSink):  # a display that confirms what it shows
+            try:
+                sent = sink.send(frame)
+            except Exception as exc:
+                return self._failed(at, exc)
+            self._sent.append(_Sent(sent, cue, lanes, context, at))
+            self._credit(at)  # a frame the display shows already is confirmed at once
+            return self._painted(at, cue)
         try:
-            self._sink.commit(frame)
+            sink.commit(frame)  # it shows the frame as it commits it
         except Exception as exc:
             return self._failed(at, exc)
         shown = at
@@ -332,23 +375,72 @@ class AppLoop:
         else:
             shown = clock.read()
             lanes.shown(shown.monotonic)
-        self._board.committed(cue, shown)
-        changes, notes, decisions = self._board_says()
-        if isinstance(payload, BoardFrame):
-            return Painted(
-                at=shown.utc, shown=None, frame=payload.kind, changes=changes, notes=notes, decisions=decisions
-            )
-        presented = None
-        if cue.reason is not None and any(change.kind is ChangeKind.UP for change in changes):
-            presented = Presentation(
+        self._commit(cue, context, shown, confirmed=True)
+        return self._painted(shown, cue)
+
+    def _credit(self, at: ClockReading) -> None:
+        """Book what the display confirmed since it was last asked, as of ``at``: each confirmed frame's cue, at the
+        instant its word was heard. Frames sent before a confirmed one, and not confirmed themselves, were replaced:
+        they're never credited. A lost panel clears every frame in flight."""
+        display = self._sink
+        if not isinstance(display, AcknowledgingSink):
+            return
+        for receipt in display.receipts():
+            if isinstance(receipt, DisplayLost):
+                self._sent.clear()  # what was in flight went to a panel that's gone
+                continue
+            sent = self._match(receipt.frame)
+            if sent is None:
+                continue  # not one in flight: replaced, given up on, or sent to a panel since lost
+            heard = receipt.heard if receipt.heard is not None else at.monotonic
+            shown = ClockReading(at.project(heard), heard)
+            sent.lanes.shown(heard)
+            self._confirmed.append(sent.frame)
+            self._commit(sent.cue, sent.context, shown, confirmed=receipt.confirmed)
+        while self._sent and at.monotonic.since(self._sent[0].drawn.monotonic) >= UNSHOWN_AFTER:
+            self._sent.popleft()
+
+    def _match(self, frame: int) -> _Sent | None:
+        """The frame in flight with id ``frame``, once confirmed; any sent before it are dropped as replaced."""
+        if all(sent.frame != frame for sent in self._sent):
+            return None
+        while self._sent[0].frame != frame:
+            self._sent.popleft()
+        return self._sent.popleft()
+
+    def _commit(self, cue: BoardCue, context: RenderContext, shown: ClockReading, *, confirmed: bool) -> None:
+        """``cue``'s frame is on the panel as of ``shown``: tell the board, and note a card's first frame."""
+        payload = cue.payload
+        if not self._board.committed(cue, shown, confirmed=confirmed):
+            return
+        if cue.reason is not None and not isinstance(payload, BoardFrame):
+            self._presented = Presentation(
                 at=shown.utc,
                 card=payload.id,
                 reason=cue.reason,
                 treatment=_treatment(payload, context),
                 contrast=context.contrast,
             )
+
+    def _painted(self, at: ClockReading, cue: BoardCue) -> Painted:
+        """What this paint did: the frame or card it drew and handed over, and what the board did meanwhile."""
+        payload = cue.payload
+        changes, notes, decisions = self._board_says()
+        confirmed, self._confirmed = tuple(self._confirmed), []
+        presented, self._presented = self._presented, None
+        if isinstance(payload, BoardFrame):
+            return Painted(
+                at=at.utc,
+                shown=None,
+                frame=payload.kind,
+                changes=changes,
+                notes=notes,
+                decisions=decisions,
+                presented=presented,
+                confirmed=confirmed,
+            )
         return Painted(
-            at=shown.utc,
+            at=at.utc,
             shown=payload.id,
             reason=cue.reason,
             stale=cue.stale,
@@ -356,12 +448,24 @@ class AppLoop:
             changes=changes,
             notes=notes,
             decisions=decisions,
+            confirmed=confirmed,
         )
 
     def _failed(self, at: ClockReading, exc: Exception) -> Painted:
         changes, notes, decisions = self._board_says()
+        confirmed, self._confirmed = tuple(self._confirmed), []
+        presented, self._presented = self._presented, None
         error = f"{type(exc).__name__}: {exc}"
-        return Painted(at=at.utc, shown=None, render_error=error, changes=changes, notes=notes, decisions=decisions)
+        return Painted(
+            at=at.utc,
+            shown=None,
+            render_error=error,
+            changes=changes,
+            notes=notes,
+            decisions=decisions,
+            presented=presented,
+            confirmed=confirmed,
+        )
 
     def _board_says(
         self,

@@ -32,6 +32,7 @@ from datetime import datetime, timedelta, tzinfo
 from omni.app.background import Waking
 from omni.app.contest_store import ContestStore
 from omni.app.display import DisplaySink
+from omni.app.frame_stream import AcknowledgingSink
 from omni.app.loop import AppLoop, Painted, QuotaNote
 from omni.app.nfl_feeds import NflFeeds
 from omni.app.nfl_pipeline import LiveFootballPipeline
@@ -98,7 +99,7 @@ class NflSource:
 def build_loop(
     schedule: Provider | ScopeSource | None,
     fetch_feed: FeedFetcher,
-    sink: DisplaySink,
+    sink: DisplaySink | AcknowledgingSink,
     *,
     favorites: Favorites = Favorites(),
     broadcast_lag: DurationSeconds = DurationSeconds(45),
@@ -119,6 +120,9 @@ def build_loop(
     settings: PolicySettings | None = None,
 ) -> AppLoop:
     """Wire the standard spine into an `AppLoop` (deterministic; no I/O performed here).
+
+    ``sink`` is the display: one that shows a frame as it commits it (the emulator), or one that confirms what it
+    showed afterward (a board's receiver, `omni.app.frame_stream.StreamDisplaySink`), which books on its word.
 
     A plain `Provider` ``schedule`` is supervised: its answers count as fresh for `max_age`, and after a
     failure it's asked again only after `backoff`. A `ScopeSource` paces and ages its own scopes.
@@ -191,7 +195,7 @@ def _first_note(*notes: QuotaNote | None) -> QuotaNote:
 
 def build_planned_loop(
     planned: PlannedMlb | None,
-    sink: DisplaySink,
+    sink: DisplaySink | AcknowledgingSink,
     *,
     meter: bool = False,
     favorites: Favorites = Favorites(),

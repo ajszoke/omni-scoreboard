@@ -74,6 +74,9 @@ class EndReason(StrEnumMixin, str, Enum):
     SOURCE_STALE = "its source went stale"  # what it came from stopped answering
     ARRIVED_LATE = "arrived late"  # it reached the board long after its source wrote it
     BACKLOG = "backlog"  # too many like it were waiting: the oldest go
+    LANDED_LATE = "accidental: landed after its latest start"  # its first frame reached the panel too late to count
+    GRANT_LAPSED = "accidental: landed after its grant lapsed"  # its first frame landed once its grant no longer held
+    UNCONFIRMED = "its display can't confirm it"  # a display that never says what it showed can't start it
 
 
 class ChangeKind(StrEnumMixin, str, Enum):

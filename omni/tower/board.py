@@ -35,6 +35,17 @@ A card the display can't draw comes down unseen (or at once, if it was already u
 until it changes or a minute passes, so one bad payload never holds the board. A display that fails
 outright spends nothing: the card stays cued, and its dwell starts at the first frame that lands.
 
+**The first frame's landing** (`committed`) is when the display confirmed it, which for a display across a link
+can be well after it was sent. The cue is judged again at that instant: a card whose first frame landed after its
+latest start (the last moment it could start and still have its minimum before it expires), or, under policy 2,
+after the grant it was cued under stopped holding (a guest whose host's lease no longer fits it), is an
+*accidental display*: its pixels were up, but it's booked as nothing, comes down at once (`LANDED_LATE`,
+`GRANT_LAPSED`), and the board chooses again. A display that never confirms what it shows (an older receiver,
+credited only on its own say-so) can't give policy 2 its confirmed airtime: the board says so once
+(`BoardNote.UNCONFIRMED_DISPLAY`), a policy-2 cue it put up is void (`UNCONFIRMED`), and from then on the board
+rotates by policy 1's bands, booking in the queue on the display's unconfirmed word, as policy 1 does on such a
+display; the director is told nothing, so it pays no debt, starts no cooldown and claims no first start.
+
 When no card should be up, the board says so with an explicit frame: *idle* (nothing to show), *held*
 (games are on, but nothing has cleared the TV delay yet) or *offline* (the source has gone quiet past
 its limit or never answered, or a game's feed has stopped answering and its card has come down). A card
@@ -163,6 +174,9 @@ class BoardNote(StrEnumMixin, str, Enum):
     """Something the board decided that isn't a card or a frame going up or down, for the trace."""
 
     NO_BASE_CARD = "no base card for the recovery turn"  # takeovers ran their cap, but only transients can air
+    UNCONFIRMED_DISPLAY = (  # its frames are credited on its say-so: policy 2 can count none of it
+        "the display doesn't confirm what it shows: policy 2 counts none of it, and the board rotates by policy 1"
+    )
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -203,6 +217,7 @@ class _OnAir:
     since: MonotonicTime | None = None  # when its first frame was committed
     expires: MonotonicTime | None = None  # a card: its expiry, as the queue pinned it; None if it never expires
     air: Air | None = None  # a card the policy director put up
+    latest: MonotonicTime | None = None  # a card: the last moment its first frame may land; None if it never expires
 
 
 class BoardSession:
@@ -238,6 +253,7 @@ class BoardSession:
         self._changes: list[LaneChange[BoardPayload]] = []
         self._notes: list[BoardNote] = []
         self._undrawn: dict[str, tuple[ScoreboardCard[Any], MonotonicTime]] = {}  # set aside: the card, and until
+        self._unconfirmed = False  # the display has been credited on its own say-so: policy 2 stands aside
 
     @property
     def health(self) -> BoardHealth:
@@ -253,7 +269,7 @@ class BoardSession:
         """What should be on the board at ``at``, once the rules have run: the card up, the next card, or
         an explicit frame."""
         board = self._input  # one input for the whole decision, whatever a refresh publishes meanwhile
-        if self._director is not None:
+        if self._director is not None and not self._unconfirmed:
             return self._cue_policy(self._director, board, at)
         health = board.health
         on = self._on_air
@@ -274,25 +290,64 @@ class BoardSession:
         """What the policy decided since the last ask, oldest first, for the trace; nothing under policy v1."""
         return self._director.decisions() if self._director is not None else []
 
-    def committed(self, cue: BoardCue, at: ClockReading) -> None:
-        """The display drew ``cue`` at ``at``. A card's first commit starts its dwell and books it, if the
-        latest published view still holds the card as drawn; otherwise it counts for nothing, and the next
-        cue takes up the change."""
+    def committed(self, cue: BoardCue, at: ClockReading, *, confirmed: bool = True) -> bool:
+        """The display showed ``cue`` at ``at``: by its own word, or, not ``confirmed``, credited on its say-so. A
+        card's first commit starts its dwell and books it, if the latest published view still holds the card as
+        drawn and it landed within its latest start and its grant; otherwise it counts for nothing (a landing too
+        late is an accidental display), and the next cue takes up the change. Returns whether this commit put
+        ``cue`` up."""
         on = self._on_air
         if on is None or cue.occurrence != on.occurrence or on.since is not None:
-            return  # no longer on air, or its dwell already runs
+            return False  # no longer on air, or its dwell already runs
+        if not confirmed:
+            if not self._unconfirmed:
+                self._notes.append(BoardNote.UNCONFIRMED_DISPLAY)
+            self._unconfirmed = True
+            if on.air is not None:  # the director's cue: it counts for nothing, and policy 1 rotates from here
+                self._void(on, on.air, EndReason.UNCONFIRMED, at, aired=None)
+                return False
+        accident = self._accident(on, at)
+        if accident is not None:
+            self._void(on, on.air, accident, at, aired=timedelta(0))
+            return False
         if on.pick is None:
             self._takeover_run = timedelta(0)  # a quiet board: takeovers before it weren't back to back
         elif on.air is not None:
             if not self._started(on.air, at):
-                return
+                return False
         else:
             drawn = cue.payload
             assert not isinstance(drawn, BoardFrame)
             if not self._queue.book(Pick(drawn, on.pick.reason), at):
-                return  # it changed or left while it was drawn
+                return False  # it changed or left while it was drawn
         on.since = at.monotonic
         self._changes.append(LaneChange(ChangeKind.UP, on.segment, at))
+        return True
+
+    def _accident(self, on: _OnAir, at: ClockReading) -> EndReason | None:
+        """Why a card's first frame, landing at ``at``, is an accidental display: too late to start, or its grant
+        lapsed before it landed; None when it counts."""
+        if on.pick is None:
+            return None
+        if on.latest is not None and at.monotonic > on.latest:
+            return EndReason.LANDED_LATE
+        if on.air is not None:
+            assert self._director is not None
+            if self._director.held(on.air, at) is not None:
+                return EndReason.GRANT_LAPSED
+        return None
+
+    def _void(
+        self, on: _OnAir, air: Air | None, reason: EndReason, at: ClockReading, *, aired: timedelta | None
+    ) -> None:
+        """A cue that landed but counts for nothing comes down at once, its turn unstarted, so nothing is credited.
+        ``aired`` says whether its pixels were up (an accidental display) or not known to be."""
+        if air is not None:
+            assert self._director is not None
+            self._director.down(air, at)
+        kind = ChangeKind.DOWN if aired is not None else ChangeKind.DROPPED
+        self._changes.append(LaneChange(kind, on.segment, at, reason=reason, aired=aired))
+        self._on_air = None
 
     def failed(self, cue: BoardCue, at: ClockReading) -> None:
         """The display couldn't draw ``cue``'s card at ``at``: take it down, and set it aside until it changes
@@ -353,7 +408,8 @@ class BoardSession:
         if latest is not on.segment.frames[0]:
             on.segment = _card_segment(latest, revision=on.segment.revision + 1)  # same dwell: a cosmetic edit
             on.pick = Pick(latest, on.pick.reason)
-            on.expires = board.cards.windows[key].expires
+            window = board.cards.windows[key]
+            on.expires, on.latest = window.expires, window.latest_start
         if on.since is None:
             return  # not drawn yet: no time has run
         up = at.monotonic.since(on.since)
@@ -425,8 +481,15 @@ class BoardSession:
         turn = pick.card.attention.takeover_for.as_timedelta() if pick.reason is SelectionReason.TAKEOVER else None
         slot = min(max(turn if turn is not None else self._policy.slot, dwell.minimum), dwell.maximum)
         self._occurrences += 1
-        expires = view.windows[pick.card.dedupe_key.raw].expires
-        self._on_air = _OnAir(segment=segment, occurrence=self._occurrences, pick=pick, slot=slot, expires=expires)
+        window = view.windows[pick.card.dedupe_key.raw]
+        self._on_air = _OnAir(
+            segment=segment,
+            occurrence=self._occurrences,
+            pick=pick,
+            slot=slot,
+            expires=window.expires,
+            latest=window.latest_start,
+        )
 
     def _waiting_since(self, at: ClockReading) -> datetime:
         """When the held frame up began waiting; now, if none is up."""
@@ -537,7 +600,8 @@ class BoardSession:
         if latest is not air.card:
             director.revised(air, latest, at)
             on.pick = Pick(latest, air.reason)
-            on.expires = board.cards.windows[key].expires
+            window = board.cards.windows[key]
+            on.expires, on.latest = window.expires, window.latest_start
         if on.since is not None:
             reason = director.review(air, board.cards, at, skip=frozenset(self._set_aside(board.cards, at)))
             if reason is not None:
@@ -550,13 +614,15 @@ class BoardSession:
         if self._on_air is not None:
             self._down(EndReason.NEXT_WAITING, at)  # a frame gives way to a card at once
         self._occurrences += 1
+        window = view.windows[air.card.dedupe_key.raw]
         self._on_air = _OnAir(
             segment=_card_segment(air.shown, revision=0),
             occurrence=self._occurrences,
             pick=Pick(air.card, air.reason),
             slot=air.turn.length,
-            expires=view.windows[air.card.dedupe_key.raw].expires,
+            expires=window.expires,
             air=air,
+            latest=window.latest_start,
         )
 
     def _started(self, air: Air, at: ClockReading) -> bool:

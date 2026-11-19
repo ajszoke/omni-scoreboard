@@ -83,12 +83,14 @@ __all__ = [
     "LinkProtocol",
     "LossCause",
     "SinkProcess",
+    "StreamDisplay",
     "StreamDisplaySink",
     "StreamFrame",
     "ack_line",
     "encode_frame",
     "encode_legacy_frame",
     "read_replies",
+    "stream_display",
 ]
 
 RESPAWN_AFTER = timedelta(seconds=5)  # before starting a display process again, after one dropped
@@ -716,3 +718,43 @@ class SinkProcess:
         self._link.ended(child.generation)
         self._child = None
         self._retry_at = self._monotonic() + self._respawn_after
+
+
+@dataclass(frozen=True, slots=True)
+class StreamDisplay:
+    """A board's receiver, driven: its process, the writer that feeds it off the frame loop, and the sink the loop
+    draws to. `start` before the first frame; `stop` at the end, which closes the receiver's input."""
+
+    process: SinkProcess
+    writer: BackgroundFrameWriter[StreamFrame]
+    sink: StreamDisplaySink
+
+    def start(self) -> None:
+        self.writer.start()
+
+    def stop(self, timeout: float = 5.0) -> None:
+        self.writer.stop(timeout)
+        self.process.close()
+
+
+def stream_display(
+    command: Sequence[str],
+    profile: PanelProfile,
+    *,
+    log: Callable[[str], None],
+    spawn: Callable[[list[str]], ChildProcess] = _spawn,
+    monotonic: Callable[[], float] = time.monotonic,
+) -> StreamDisplay:
+    """The receiver ``command`` starts, wired as a board drives it: frames written off the frame loop, heartbeats
+    asked for by it, and the receiver's word gathered for the sink's receipts. ``log`` hears about the process."""
+    link = DisplayLink(monotonic=monotonic)
+    process = SinkProcess(command, link, spawn=spawn, monotonic=monotonic, log=log)
+    writer = BackgroundFrameWriter(
+        process.write,
+        on_error=lambda exc: log(f"display: a frame write failed: {type(exc).__name__}: {exc}"),
+        heartbeat=process.heartbeat,
+        monotonic=monotonic,
+    )
+    return StreamDisplay(
+        process, writer, StreamDisplaySink(profile, writer, link, beat=writer.beat, monotonic=monotonic)
+    )
