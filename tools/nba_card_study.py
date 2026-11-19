@@ -1358,11 +1358,26 @@ def _quad_player_lines(canvas: Canvas, spec: Specimen) -> None:
         draw_text_lane(canvas, lane, player.stats(), _STATS_TEAL, now=now)
 
 
+# The tip column's three lines, as (face, cell top). The label and what it's about are the large pair; the line
+# under them stays 6x10. Their ink sits on rows 16-25, 28-36 (a colon's tail on 37) and 40-46, two blank rows
+# apart, with three between the top standing's ink and the label.
+_Q_TIP_LABEL = ("9x18B", 12)  # TIP or PPD, its ink's top level with the top record's
+_Q_TIP_WHEN = ("6x13", 26)  # the time, or the date on another day, beside the odds
+_Q_TIP_UNDER = ("6x10", 39)  # the countdown, or the time under a date, on the bottom record's line
+
+
 def _quad_pregame(canvas: Canvas, context: RenderContext, spec: Specimen) -> None:
     """Marks with records and standings, the records mirrored about the odds row; the tip column at right.
 
     The top team's standing sits over its record, the bottom team's under it, so the two records flank the
     odds. The tip label rides on the top record's line, directly over the time.
+
+    The label is ``TIP``, or ``PPD`` for a postponed game: 27 px in 9x18B, the largest face whose capitals (10
+    rows) fit between the top standing and the time with at least two blank rows each side; 10x20's 13 leave one.
+    The time keeps six pixels a character: ``12:00 PM`` is 45 px in any 6-wide face, so right-aligned it leaves
+    one blank column after an odds line like ``MIN -265 (-6.5)``, and 7x13 would need 52. 6x13 is the tallest
+    6-wide face whose digits keep a blank column between them (6x13B's run together). The countdown under it, or
+    the time under a date, stays 6x10, as does ``TIP TBD`` in the time's place when there's no new tip.
     """
     game = spec.game
     away, home = _teams(game)
@@ -1377,14 +1392,15 @@ def _quad_pregame(canvas: Canvas, context: RenderContext, spec: Specimen) -> Non
             canvas.text(24, standing_y, full, _STATS_TEAL, font=font)
     if game.line is not None:
         canvas.text(24, 29, _odds_text(game, game.line), _ODDS_GREEN, font="4x6")
-    label = "TIPOFF" if game.phase is Phase.PREGAME else "POSTPONED"
-    _quad_column(canvas, 15, label, _GOLD)
+    label = "TIP" if game.phase is Phase.PREGAME else "PPD"
+    label_font, label_y = _Q_TIP_LABEL
+    canvas.text(_quad_column_x(text_width(label, label_font)), label_y, label, _GOLD, font=label_font)
     if game.tip is None:
         _quad_column(canvas, 27, "TIP TBD", _WHITE)
         return
     upper, lower, clock = _tip_lines(spec.now, game.tip, context.timezone)
-    for text, y in ((upper, 27), (lower, 39)):
-        _draw_when(canvas, _quad_column_x(_when_width(text, clock, "6x10")), y, text, clock, _WHITE, "6x10")
+    for text, (font, y) in ((upper, _Q_TIP_WHEN), (lower, _Q_TIP_UNDER)):
+        _draw_when(canvas, _quad_column_x(_when_width(text, clock, font)), y, text, clock, _WHITE, font)
 
 
 _Q_COLUMN_CENTER = 107
@@ -1768,7 +1784,8 @@ def _single_pregame(canvas: Canvas, context: RenderContext, spec: Specimen) -> N
     The code is 6x10, as on the live cards. The record is 4x6 here: the right column needs the columns a 5x7
     record would take (a five-character one ends at x28). The column is 38 wide, so the tip can't take 6x10
     (``6:00 PM`` needs 39 and ``12:00 PM`` 45); the tip and the countdown share 5x7. A tip on another day shows
-    its date over its time in their place; a postponed game puts ``POSTPONED`` first and moves those two down one.
+    its date over its time in their place. A postponed game puts ``PPD`` in the tip's slot and face (15 px in 5x7)
+    and moves those two down one.
     """
     game = spec.game
     away, home = _teams(game)
@@ -1780,13 +1797,13 @@ def _single_pregame(canvas: Canvas, context: RenderContext, spec: Specimen) -> N
     left, right = _I_PREGAME_COLUMN
     tip_y, countdown_y, line_y = _I_PREGAME_ROWS
     if game.tip is None:
-        draw_centered(canvas, left, right, tip_y + 1, "POSTPONED", _GOLD, "4x6")
+        draw_centered(canvas, left, right, tip_y, "PPD", _GOLD, "5x7")
         draw_centered(canvas, left, right, countdown_y, "TIP TBD", _WHITE, "5x7")
         return
     upper, lower, clock = _tip_lines(spec.now, game.tip, context.timezone)
     slots: tuple[tuple[str, int, RGBColor, str], ...]
     if game.phase is Phase.POSTPONED:  # the status takes the tip's slot, so the tip's two lines move down one
-        draw_centered(canvas, left, right, tip_y + 1, "POSTPONED", _GOLD, "4x6")
+        draw_centered(canvas, left, right, tip_y, "PPD", _GOLD, "5x7")
         slots = ((upper, countdown_y, _WHITE, "5x7"), (lower, line_y, _WHITE, "4x6"))
     else:
         slots = ((upper, tip_y, _GOLD, "5x7"), (lower, countdown_y, _WHITE, "5x7"))
