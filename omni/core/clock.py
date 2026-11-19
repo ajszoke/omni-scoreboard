@@ -11,8 +11,15 @@ Each clock gives two readings, for two different jobs:
 - **Monotonic** (`monotonic`) measures spans: dwell, time since receipt, backoff, animation phase,
   pacing. It never jumps, so a wall-clock change can't stretch or cut a span.
 
-`FakeClock.advance` moves both readings together; `FakeClock.set` and `FakeClock.jump` move the wall clock
-alone, the way an NTP correction or a DST mistake would, so tests can check that spans don't follow it.
+A reading may also carry a third, **suspend-inclusive** elapsed clock (`suspend_inclusive`), where the platform
+has one: Linux's ``CLOCK_BOOTTIME``, which, unlike the monotonic clock, keeps counting while the host sleeps. Set
+against the monotonic clock it tells a sleep from a wall-clock correction: across a sleep it runs ahead of the
+monotonic clock, and across a correction it doesn't. It is None where the platform has no such clock.
+
+`FakeClock.advance` moves both readings together (and the suspend-inclusive one, if it has one); `FakeClock.set`
+and `FakeClock.jump` move the wall clock alone, the way an NTP correction or a DST mistake would, so tests can check
+that spans don't follow it; `FakeClock.suspend` fakes a host's sleep: the wall clock and the suspend-inclusive clock
+move on while the monotonic clock stands still.
 """
 
 from __future__ import annotations
@@ -25,7 +32,7 @@ from typing import Protocol, runtime_checkable
 
 from omni.core.time import DurationSeconds
 
-__all__ = ["Clock", "ClockReading", "FakeClock", "MonotonicTime", "Pacer", "SystemClock"]
+__all__ = ["Clock", "ClockReading", "FakeClock", "MonotonicTime", "Pacer", "SystemClock", "boottime"]
 
 
 @dataclass(frozen=True, slots=True, order=True)
@@ -44,10 +51,12 @@ class MonotonicTime:
 
 @dataclass(frozen=True, slots=True)
 class ClockReading:
-    """One moment, read both ways: UTC to date it, monotonic to measure from it."""
+    """One moment, read both ways: UTC to date it, monotonic to measure from it. Where the platform has one, a
+    suspend-inclusive elapsed reading too, which keeps counting while the host sleeps; None where it hasn't."""
 
     utc: datetime
     monotonic: MonotonicTime
+    suspend_inclusive: MonotonicTime | None = None
 
     def __post_init__(self) -> None:
         if self.utc.tzinfo is None:
@@ -75,8 +84,22 @@ class Clock(Protocol):
         ...
 
 
+def boottime() -> Callable[[], float] | None:
+    """The platform's suspend-inclusive elapsed clock, in seconds: ``CLOCK_BOOTTIME`` where it has one (Linux); None
+    elsewhere."""
+    clock_id = getattr(time, "CLOCK_BOOTTIME", None)
+    if clock_id is None:
+        return None
+    return lambda: time.clock_gettime(clock_id)
+
+
 class SystemClock:
-    """The machine's clocks: wall time in UTC, and `time.monotonic`."""
+    """The machine's clocks: wall time in UTC, `time.monotonic`, and the suspend-inclusive clock where there is one.
+
+    ``suspend_inclusive`` reads that clock, in seconds: the platform's (`boottime`) unless given; None for none."""
+
+    def __init__(self, *, suspend_inclusive: Callable[[], float] | None = boottime()) -> None:
+        self._suspend_inclusive = suspend_inclusive
 
     def now(self) -> datetime:
         return datetime.now(timezone.utc)
@@ -85,7 +108,8 @@ class SystemClock:
         return MonotonicTime(time.monotonic())
 
     def read(self) -> ClockReading:
-        return ClockReading(self.now(), self.monotonic())
+        elapsed = self._suspend_inclusive
+        return ClockReading(self.now(), self.monotonic(), MonotonicTime(elapsed()) if elapsed is not None else None)
 
 
 @dataclass(slots=True)
@@ -94,6 +118,7 @@ class FakeClock:
 
     current: datetime
     elapsed: MonotonicTime = field(default_factory=lambda: MonotonicTime(0.0))
+    suspend_inclusive: MonotonicTime | None = None  # a host with a suspend-inclusive clock: where it starts
 
     def __post_init__(self) -> None:
         if self.current.tzinfo is None:
@@ -106,15 +131,23 @@ class FakeClock:
         return self.elapsed
 
     def read(self) -> ClockReading:
-        return ClockReading(self.current, self.elapsed)
+        return ClockReading(self.current, self.elapsed, self.suspend_inclusive)
 
     def advance(self, by: DurationSeconds | timedelta) -> None:
-        """Let time pass: both readings move forward together."""
-        span = by.as_timedelta() if isinstance(by, DurationSeconds) else by
-        if span < timedelta(0):
-            raise ValueError("time can't pass backward; use set() to jump the wall clock")
+        """Let time pass: every reading moves forward together."""
+        span = _span(by)
         self.current = self.current + span
         self.elapsed = self.elapsed + span
+        if self.suspend_inclusive is not None:
+            self.suspend_inclusive = self.suspend_inclusive + span
+
+    def suspend(self, by: DurationSeconds | timedelta) -> None:
+        """The host sleeps for ``by``: the wall clock and the suspend-inclusive clock move on, the monotonic clock
+        stands still."""
+        span = _span(by)
+        self.current = self.current + span
+        if self.suspend_inclusive is not None:
+            self.suspend_inclusive = self.suspend_inclusive + span
 
     def set(self, to: datetime) -> None:
         """Jump the wall clock to ``to``; monotonic time doesn't move."""
@@ -126,6 +159,13 @@ class FakeClock:
         """Jump the wall clock by ``by``, forward or back, the way a clock correction does; monotonic time
         doesn't move."""
         self.current = self.current + by
+
+
+def _span(by: DurationSeconds | timedelta) -> timedelta:
+    span = by.as_timedelta() if isinstance(by, DurationSeconds) else by
+    if span < timedelta(0):
+        raise ValueError("time can't pass backward; use set() to jump the wall clock")
+    return span
 
 
 class Pacer:
