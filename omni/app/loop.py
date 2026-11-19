@@ -20,7 +20,9 @@ The board refreshes and paints on separate cadences:
      numbered input, so a paint on the frame thread sees all of a refresh or none of it.
      Each league's health is its current scope's, judged on the monotonic clock. The board's is its
      healthiest league's, so one league going offline doesn't take another's cards down; with one league
-     it is that league's. While a quota holds a league's current scope back, its reason says so.
+     it is that league's. While a quota holds a league's current scope back, its reason says so, and the
+     league's own health carries the quota's word apart (`LeagueHealth.quota`), so a spent account stays in view
+     while another league keeps the board healthy.
      A league is offline once `offline_after` has passed since a read of its scope was due. A scope's answer
      counts as fresh for its `max_age`, which runs `FRESH_PAST_DUE` past when its next read falls due, so a
      scope that is quiet by plan (NFL before kickoff, through a lone game's halftime hold, after the last final)
@@ -132,6 +134,7 @@ class LeagueHealth:
     scope: ScopeHealth  # the league's current scope, as the store has it
     reason: str = ""  # why it's stale or offline, or that a quota is holding its schedule back
     changes_at: MonotonicTime | None = None  # when this next changes by itself
+    quota: str | None = None  # why a quota is holding its schedule back, while one is, healthy or not
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -415,21 +418,20 @@ class AppLoop:
         held = self._quota(scope.scope) if self._quota is not None else None
         error = held or scope.error or "no answer"
         if scope.fresh_from is None or scope.age is None:
-            return LeagueHealth(
-                league=league, source=SourceHealth.OFFLINE, scope=scope, reason=f"no schedule yet: {error}"
-            )
+            reason = f"no schedule yet: {error}"
+            return LeagueHealth(league=league, source=SourceHealth.OFFLINE, scope=scope, reason=reason, quota=held)
         # Ages are whole seconds, and a limit is passed only once a full second over it.
         second = timedelta(seconds=1)
         since = scope.fresh_from.monotonic
         offline = max(scope.max_age - self._fresh_past_due, timedelta(0)) + self._offline_after
         if scope.age > offline:
             reason = f"no schedule for over {_span(self._offline_after)}: {error}"
-            return LeagueHealth(league=league, source=SourceHealth.OFFLINE, scope=scope, reason=reason)
+            return LeagueHealth(league=league, source=SourceHealth.OFFLINE, scope=scope, reason=reason, quota=held)
         if scope.status is ProviderStatus.STALE:
             reason = f"no schedule for over {_span(scope.max_age)}: {error}"
             changes_at = since + offline + second
             return LeagueHealth(
-                league=league, source=SourceHealth.STALE, scope=scope, reason=reason, changes_at=changes_at
+                league=league, source=SourceHealth.STALE, scope=scope, reason=reason, changes_at=changes_at, quota=held
             )
         return LeagueHealth(
             league=league,
@@ -437,6 +439,7 @@ class AppLoop:
             scope=scope,
             reason=held or "",
             changes_at=since + scope.max_age + second,
+            quota=held,
         )
 
 

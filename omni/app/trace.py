@@ -14,10 +14,13 @@ One line per change, so a running board's log reads as a story rather than a hea
   whenever that digest is new.
 - A **refresh** line is written when the source's health, the number of games held in the TV delay, or
   the games the schedule calls final that their feed doesn't yet change, and whenever a refresh drops a
-  game or a play, misses a card, reveals a final or corrects one. Each one names the next refresh due by
-  itself. Under it, a card that left without airing is named with why (`unseen`), a final with when its
-  game ended and what that rests on, which orders the finals, a final whose result a later answer changed
-  (`corrected`), and each game whose result waits for its feed to say final (`unconfirmed`).
+  game or a play, misses a card, reveals a final or corrects one, or a league's quota changes. Each one names the
+  next refresh due by itself. Under it, a league whose quota now holds its schedule back says why, on a line of
+  its own (``nfl quota: NFLMeta Free spent for 2026-11: switch to Builder``), as does one whose quota has let go
+  (``nfl quota: clear``): the board's health is its healthiest league's, so a spent account would otherwise sit
+  behind another league's healthy one. A card that left without airing is named with why (`unseen`), a final
+  with when its game ended and what that rests on, which orders the finals, a final whose result a later answer
+  changed (`corrected`), and each game whose result waits for its feed to say final (`unconfirmed`).
 - An **up** line is written at a card's first committed frame, with why the queue chose it and how its
   teams were drawn: logo variant, tile or color bar, meter color, and the contrast policy that chose
   them. A **frame** line is written when an explicit frame goes up, with why.
@@ -54,6 +57,7 @@ from omni.app.loop import Painted, Presentation, Refresh
 from omni.app.versions import Versions
 from omni.core.clock import ClockReading, MonotonicTime
 from omni.core.colors import RGBColor
+from omni.core.enum import League
 from omni.policy.ledger import DebtClamp
 from omni.renderers.visual_treatment import MarkTreatment
 from omni.tower.board import BoardFrame, BoardPayload
@@ -84,6 +88,7 @@ class DecisionTracer:
         self._log = log
         self._timezone = timezone
         self._last_refresh: tuple[object, ...] | None = None
+        self._quotas: dict[League, str | None] = {}  # each league's quota word, as last written
         self._stale: bool = False
         self._paint_error: str | None = None
         self._versions: Versions | None = None
@@ -103,7 +108,8 @@ class DecisionTracer:
         key = (health.source, health.reason, health.held, health.unfed, pipeline.unconfirmed)
         dropped = pipeline.skipped + pipeline.warnings
         news = dropped or refresh.unseen or pipeline.ends or pipeline.corrections
-        if key == self._last_refresh and not news:
+        quotas = [league for league in refresh.leagues if league.quota != self._quotas.get(league.league)]
+        if key == self._last_refresh and not news and not quotas:
             return
         self._last_refresh = key
         line = f"refresh {self._clock(refresh.at)} in {took.total_seconds():.1f}s: source {health.source.value}"
@@ -114,6 +120,9 @@ class DecisionTracer:
         if health.unfed:
             line += f" | unfed {health.unfed}"
         self._log(line + f" | next {self._clock(next_at) if next_at is not None else '-'}")
+        for league in quotas:
+            self._quotas[league.league] = league.quota
+            self._log(f"  {league.league.value} {league.quota or 'quota: clear'}")
         for note in dropped:
             self._log(f"  dropped: {note}")
         for missed in refresh.unseen:
