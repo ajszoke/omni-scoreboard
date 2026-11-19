@@ -1138,10 +1138,11 @@ def _standing_text(team: BasketballTeam, ranks: Ranks, *, division: bool) -> str
     return text
 
 
-def _odds_text(game: Game, line: BettingLine) -> str:
+def _odds_text(game: Game, line: BettingLine, *, spread: bool = True) -> str:
     """The favorite's line the way the MLB pregame writes one: moneyline, then the spread in parentheses."""
     favorite = game.side(line.favorite).abbreviation
-    return f"{favorite} {line.moneyline:+d} ({line.spread:+g})"
+    moneyline = f"{favorite} {line.moneyline:+d}"
+    return f"{moneyline} ({line.spread:+g})" if spread else moneyline
 
 
 def _draw_time(canvas: Canvas, x: int, y: int, label: str, color: RGBColor, font: str) -> int:
@@ -1390,17 +1391,39 @@ def _quad_pregame(canvas: Canvas, context: RenderContext, spec: Specimen) -> Non
             full = _standing_text(team, side.ranks, division=True)
             font = "5x7" if 24 + text_width(full, "5x7") <= 128 else "4x6"
             canvas.text(24, standing_y, full, _STATS_TEAL, font=font)
-    if game.line is not None:
-        canvas.text(24, 29, _odds_text(game, game.line), _ODDS_GREEN, font="4x6")
     label = "TIP" if game.phase is Phase.PREGAME else "PPD"
     label_font, label_y = _Q_TIP_LABEL
     canvas.text(_quad_column_x(text_width(label, label_font)), label_y, label, _GOLD, font=label_font)
     if game.tip is None:
+        if game.line is not None:
+            tbd_ink = _quad_column_x(text_width("TIP TBD", "6x10")) + _ink_extent("6x10", "TIP TBD")[0]
+            _quad_odds(canvas, game, game.line, tbd_ink)
         _quad_column(canvas, 27, "TIP TBD", _WHITE)
         return
     upper, lower, clock = _tip_lines(spec.now, game.tip, context.timezone)
+    font, _ = _Q_TIP_WHEN
+    upper_x = _quad_column_x(_when_width(upper, clock, font))
+    if game.line is not None:
+        first = upper.partition(" ")[0] if upper == clock else upper  # a time draws its clock part first
+        _quad_odds(canvas, game, game.line, upper_x + _ink_extent(font, first)[0])
     for text, (font, y) in ((upper, _Q_TIP_WHEN), (lower, _Q_TIP_UNDER)):
         _draw_when(canvas, _quad_column_x(_when_width(text, clock, font)), y, text, clock, _WHITE, font)
+
+
+_Q_ODDS_X = 24
+
+
+def _quad_odds(canvas: Canvas, game: Game, line: BettingLine, beside: int) -> None:
+    """The odds row, without its spread when the spread would leave no blank column before ``beside``.
+
+    ``beside`` is the first inked column of what shares the row at right: the tip time, a date, or ``TIP TBD``.
+    A long line (``MIN -650 (-12.5)``) against a two-digit-hour time is the case this drops; the moneyline alone
+    always fits.
+    """
+    full = _odds_text(game, line)
+    fits = _Q_ODDS_X + _ink_extent("4x6", full)[1] + 1 < beside
+    text = full if fits else _odds_text(game, line, spread=False)
+    canvas.text(_Q_ODDS_X, 29, text, _ODDS_GREEN, font="4x6")
 
 
 _Q_COLUMN_CENTER = 107
