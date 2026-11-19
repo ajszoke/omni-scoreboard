@@ -5,7 +5,7 @@ versions: policy omni-board-policy/2 | config omni-config/1 8aca364038f9 | rules
     45.0  wait    mlb:mlb_statsapi:sf-sd bid reminder 1 r0  (baseline)
     48.0  down    mlb:mlb_statsapi:bos-nyy:pregame  (ran its time, 48.0s)
     48.0  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
-    48.0  base    mlb:mlb_statsapi:atl-nym:live  (recovery) | G 0.723 proxy F 4.00 T 1.000 Q 0.500 | target 47.92% (league 100.00%, 47.92% within) | actual - | debt +0.00s (league +0.00s) | why: Braves: favorite, close late game, a full turn after the alerts
+    48.0  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.723 proxy F 4.00 T 1.000 Q 0.500 | target 47.92% (league 100.00%, 47.92% within) | actual - | debt +0.00s (league +0.00s) | why: Braves: favorite, close late game
     60.0  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
     60.0  up      mlb:mlb_statsapi:col-lad:live  (rotation)
     60.0  base    mlb:mlb_statsapi:col-lad:live  (weighted) | G 0.611 proxy F 2.50 T 1.000 Q 0.500 | target 27.53% (league 100.00%, 27.53% within) | actual 0.00% | debt +3.30s (league +0.00s) | why: Rockies: second favorite, close late game

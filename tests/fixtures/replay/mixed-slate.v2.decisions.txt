@@ -32,7 +32,7 @@ versions: policy omni-board-policy/2 | config omni-config/1 209d2047f82a | rules
  40200.2  card    mlb:mlb_statsapi:776201:pregame  (neutral) | why: Twins at Guardians: no live game to weigh
  40248.3  down    mlb:mlb_statsapi:776201:pregame  (ran its time, 48.0s)
  40248.3  up      nfl:nflmeta:404:live  (rotation)
- 40248.3  base    nfl:nflmeta:404:live  (recovery) | G 0.300 proxy F 4.00 T 1.000 Q 0.500 | target 66.67% (league 100.00%, 66.67% within) | actual - | debt +0.00s (league +0.00s) | why: Panthers: favorite, a full turn after the alerts
+ 40248.3  base    nfl:nflmeta:404:live  (weighted) | G 0.300 proxy F 4.00 T 1.000 Q 0.500 | target 66.67% (league 100.00%, 66.67% within) | actual - | debt +0.00s (league +0.00s) | why: Panthers: favorite
  40260.3  down    nfl:nflmeta:404:live  (ran its time, 12.0s)
  40260.3  up      nfl:nflmeta:401:live  (rotation)
  40260.3  base    nfl:nflmeta:401:live  (weighted) | G 0.300 proxy F 1.00 T 1.000 Q 0.500 | target 16.67% (league 100.00%, 16.67% within) | actual 0.00% | debt +2.00s (league +0.00s) | why: Cowboys at Eagles: in rotation

@@ -211,6 +211,7 @@ class Turn:
     candidate: PromotionCandidate[DedupeKey] | None = None
     why: str = ""
     started: MonotonicTime | None = None
+    live_base: bool = False  # a live base card was on hand when it was chosen: its airtime runs up the non-base cap
     ended: bool = False
     captioned: bool = False  # a caption has aired in it
     yield_at: MonotonicTime | None = None  # a guest whose host's break closed: when it gives the board back
@@ -362,7 +363,7 @@ class PolicyDirector:
         """Take in a published input, once: its break evidence and action into the lease book, its offers into the
         broker. An outage starts the lease book and the ledger over."""
         if offline and not self._offline:
-            self._restart()
+            self._restart(at)
         self._offline = offline
         if offline or (cards is self._cards and view is self._view):
             return
@@ -650,7 +651,7 @@ class PolicyDirector:
         for option in (self._base(scene), self._promotion(scene), self._result(scene), self._auxiliary(scene)):
             if option is not None:
                 options[option.rung] = option
-        verdict = choose_rung(options, self._run, scene.now, self._policy.ladder)
+        verdict = choose_rung(options, self._run, self._policy.ladder)
         if verdict.rung is None:
             return None
         capped = tuple(refusal.rung for refusal in verdict.refused if refusal.reason is LadderRefusal.NON_BASE_CAP)
@@ -749,6 +750,7 @@ class PolicyDirector:
             contest=card.contest.id,
             hosts=scene.hosts,
             candidate=start,
+            live_base=bool(scene.pool.games),
         )
         turn.why = self._promotion_why(scene, turn, card)
         return _Option(
@@ -896,6 +898,7 @@ class PolicyDirector:
             contest=card.contest.id,
             hosts=hosts,
             why=why + self._breaks(hosts),
+            live_base=bool(scene.pool.games),
         )
         return _Option(rung, self._air(card, role, turn, scene.now))
 
@@ -936,7 +939,7 @@ class PolicyDirector:
         rotating on its own at neutral weight (``again``) isn't written again."""
         turn.started = start
         self._current = turn
-        self._run = self._run.after(turn.rung, start)
+        self._run = self._run.after(turn.rung)
         if turn.rung.base:
             self._capped = False
         self._grant(turn)
@@ -977,7 +980,10 @@ class PolicyDirector:
         turn.ended = True
         if self._current is turn:
             self._current = None
-        if turn.started is None or turn.targets is None:
+        if turn.started is None:
+            return
+        self._run = self._run.aired(turn.rung, at.monotonic.since(turn.started), live_base=turn.live_base)
+        if turn.targets is None:
             return
         aired = at.monotonic.since(turn.started)
         completed = aired >= turn.length
@@ -988,18 +994,23 @@ class PolicyDirector:
         if completed:
             self._recovery_owed = False
 
-    def _restart(self) -> None:
-        """An outage: old leases and every ledger account are void, and the turn on air isn't credited."""
+    def _restart(self, at: ClockReading) -> None:
+        """An outage: old leases and every ledger account are void, and the turn on air isn't credited (a non-base
+        card's airtime up to the outage still counts toward the cap). The non-base run and an owed recovery carry over:
+        the board still owes that full base turn when it has games again."""
+        current = self._current
+        if current is not None:
+            assert current.started is not None  # a turn is current from its first frame
+            current.ended = True
+            self._run = self._run.aired(current.rung, at.monotonic.since(current.started), live_base=current.live_base)
         self._leases = LeaseBook(self._policy.leases)
         for contest in sorted(self._accounts, key=str):
             self._ledger.retire(contest)
-        if self._current is not None:
-            self._current.ended = True
         self._accounts.clear()
         self._frozen.clear()
         self._games.clear()
         self._cards = None
-        self._run, self._recovery_owed, self._next, self._current = NonBaseRun(), False, None, None
+        self._next, self._current = None, None
 
     def _prune(self, cards: CardView, view: PolicyView, now: MonotonicTime) -> None:
         """Forget what's remembered of cards, games and candidates no longer in the input, so nothing slowly leaks."""

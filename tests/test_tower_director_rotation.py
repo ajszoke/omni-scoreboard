@@ -91,3 +91,48 @@ def test_a_stale_game_is_set_aside_from_the_weighted_targets() -> None:
     [note] = run.of(BaseTurnNote)[:1]
     assert note.targets is not None and [game.contest for game in note.targets.games] == [angels.id]
     assert [(aside.contest, aside.reason) for aside in note.targets.set_aside] == [(other.id, SetAsideReason.STALE)]
+
+
+# --- the non-base cap ------------------------------------------------------------------------------------------------
+
+
+def test_neutral_rotation_before_any_live_game_counts_nothing_toward_the_cap() -> None:
+    """A pregame rotates alone for 40 s; when a game goes live, its first turn is weighed as usual, not a recovery owed
+    to a cap that neutral circulation never ran up."""
+    slate = games(3)
+    soon = pregame(dataclasses.replace(slate[2], scheduled_start=T0 + timedelta(minutes=80)))
+    run = Run(favorites=NO_FAVORITES)
+    run.stage(soon)
+    run.publish()
+    run.publish_at(40, lambda: run.stage(live(slate[1]), when=40), lambda: run.describe(facts(slate[1], 0.4)))
+    run.run(0, 70)
+    first = run.of(BaseTurnNote)[0]
+    assert first.at.monotonic.seconds == 40.0 and first.reason is BaseReason.ONLY_CANDIDATE
+    assert run.of(CapNote) == []
+
+
+def test_an_owed_recovery_cut_short_by_an_outage_is_still_owed_when_the_source_returns() -> None:
+    """Four finals run the cap up by 32, and the recovery it reserves is cut short at 36 when the source goes quiet.
+    Back at 60, with two finals still due, the board first finishes the full base turn it owes."""
+    slate = games(8)
+    base = slate[1]
+    finals = [final(each, ended=-60 + 10 * index) for index, each in enumerate(slate[2:])]
+    run = Run(favorites=NO_FAVORITES)
+    run.stage(live(base), *finals)
+    run.describe(facts(base, 0.4))
+    run.publish()
+
+    def quiet() -> None:
+        run.health = offline()
+
+    def back() -> None:
+        run.health = BoardHealth()
+
+    run.publish_at(36, quiet)
+    run.publish_at(60, back)
+    run.run(0, 90)
+    after = [(up.at, up.key) for up in run.ups if up.at >= 60]
+    assert after[0] == (60.0, _key(live(base)))
+    [recovery] = [note for note in run.of(BaseTurnNote) if note.at.monotonic.seconds == 60.0]
+    assert recovery.reason is BaseReason.RECOVERY
+    assert run.shown(_key(live(base)))[1] == (60.0, 72.0)  # the full turn, through its completion
