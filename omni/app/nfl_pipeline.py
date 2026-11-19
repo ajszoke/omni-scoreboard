@@ -29,6 +29,10 @@ the game for its phase:
   corrects the card in place, within the card's own window; a final whose window is over stays gone. While the
   schedule calls a game final and its feed doesn't yet, the live card carries on, and goes stale `confirm_within`
   after the schedule first said so.
+  - **The drain.** The feed is read for a while after the final, for late plays and fixes. A play it brings that
+    decided the game (`InterruptClass.DECISIVE_LATE_WINNER`, read against the last live state) updates the revealed
+    final once, as its caption and the play that decided it; one that can't (the final's window is over, or it
+    already names one) is dropped, and the pass says why. Nothing the drain brings is offered for promotion.
 
 **Release.** Every hold (a state, a play, a result) is pinned when it is admitted, on the monotonic clock, by the
 board's `ReleaseGuard` for NFL's own delay: a play whose write time is credible at receipt + the delay less its age,
@@ -131,6 +135,8 @@ class CaptionMiss(StrEnumMixin, str, Enum):
     """Why an entry staged to caption a card never did."""
 
     TOO_LATE = "too late to start"  # no confirmed frame carried it by its latest start
+    FINAL_OVER = "its final's window is over"  # the drain brought the deciding play after its final had gone
+    FINAL_DECIDED = "its final already names the play that decided it"
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -222,14 +228,15 @@ class _PlayCard:
 
 @dataclass(slots=True)
 class _Live:
-    """What the pipeline keeps of one NFL game's plays and field, while it cards the game live."""
+    """What the pipeline keeps of one NFL game's plays and field, while it cards the game live and through its final's
+    drain."""
 
     game: TeamGame  # as the slate last listed it
     states: DelayedFeed[_Field]
     plays: DelayedEventStream[_Play]
     breaks: ReleasedBreaks  # its break and action evidence, held with the states
     primed: bool = False  # its first answer's plays were set aside as from before the board tuned in
-    last: FootballGameState | None = None  # the newest answer's state: the one before the next answer's plays
+    last: FootballGameState | None = None  # the newest live answer's state: the one before the next answer's plays
     rulings: dict[str, int] = field(default_factory=dict)  # each play's rulings so far, by the play it's about
     offered: int = 0  # plays offered so far: each one's place in the feed
     shown: Held[_Field] | None = None  # the newest state to have cleared the delay
@@ -249,7 +256,9 @@ class _Final:
     seen: datetime  # when the first answer that said so arrived: the end, as far as the board can tell
     reveal: MonotonicTime  # when that answer clears the delay
     key: str | None = None  # its card's dedupe key, once revealed
-    live: _Live | None = None  # the game's plays, kept with it once revealed: their own cards go with it
+    live: _Live | None = None  # the game's plays, kept for the drain once revealed
+    caption: _Caption | None = None  # a deciding play the drain brought, captioning the card
+    decided: bool = False  # it names the play that decided it
 
 
 @dataclass(slots=True)
@@ -348,7 +357,10 @@ class LiveFootballPipeline:
         instants: list[MonotonicTime | None] = []
         for live in self._live.values():
             instants += [live.states.next_eligible(at), live.plays.next_eligible(), *_bounds(live.caption)]
-        instants += [final.answers.next_eligible(at) for final in self._finals.values()]
+        for final in self._finals.values():
+            instants += [final.answers.next_eligible(at), *_bounds(final.caption)]
+            if final.live is not None:
+                instants.append(final.live.plays.next_eligible())
         instants += [since + self._policy.stale_for for since in self._stale.values()]
         instants += [until for game_id, until in self._current_until.items() if game_id not in self._stale]
         instants += [
@@ -363,10 +375,10 @@ class LiveFootballPipeline:
         with self._lock:
             presented, self._presented = self._presented, {}
         for (game_id, play), shown in presented.items():
-            live = self._live.get(game_id)
-            caption = live.caption if live is not None else None
-            if caption is not None and caption.staged.play == play and shown < caption.staged.latest_start:
-                caption.started = True
+            for kept in (self._live.get(game_id), self._finals.get(game_id)):
+                caption = kept.caption if kept is not None else None
+                if caption is not None and caption.staged.play == play and shown < caption.staged.latest_start:
+                    caption.started = True
 
     # --- one game -----------------------------------------------------------------------------------------------
 
@@ -375,7 +387,7 @@ class LiveFootballPipeline:
         final = self._finals.get(game.id)
         if final is not None and final.key is not None:
             out.over.add(game.id)
-            self._correct_final(final, readings, at, out)
+            self._drain(game, final, readings, at, out)
             return
         live = self._live.get(game.id)
         if live is None:
@@ -419,10 +431,10 @@ class LiveFootballPipeline:
         )
         if state is None:
             return  # before kickoff: nothing to show
-        live.last = state
         if snapshot.phase is NflPhase.POST:
             self._confirm_final(game, state, arrival, at)
         elif game.id not in self._finals:
+            live.last = state  # a final's plays are read against the last live state
             live.states.push(_Field(state, snapshot.break_ends_at), arrival, at)
             evidence = nfl_break_evidence(snapshot, reading.arrived)
             live.breaks.push(evidence, nfl_latest_action(snapshot, reading.arrived), arrival, at)
@@ -629,21 +641,62 @@ class LiveFootballPipeline:
             after=(DedupeKey(decided.key),) if decided is not None else (),
         )
         self._queue.ingest(card, at)
-        final.key, final.live = card.dedupe_key.raw, live
+        final.key, final.live, final.decided = card.dedupe_key.raw, live, decided is not None
         out.finals.append(card.id)
         out.ends.append((card.id, ended))
 
-    def _correct_final(self, final: _Final, readings: list[NflReading], at: ClockReading, out: _Pass) -> None:
+    def _drain(self, game: TeamGame, final: _Final, readings: list[NflReading], at: ClockReading, out: _Pass) -> None:
+        """A revealed final, while its feed drains: each later final answer, and the plays it brings, through the
+        delay. A deciding play updates the final; a different result corrects it."""
+        live = final.live
+        assert live is not None  # a revealed final keeps its game's plays
+        for reading in readings:
+            snapshot = reading.snapshot
+            out.warnings.extend(_noted(game.id, snapshot.notes))
+            state = snapshot.state
+            if snapshot.phase is not NflPhase.POST or state is None:
+                continue  # a live answer after the final changes nothing
+            arrival = Arrival(received=reading.arrived, as_of=snapshot.observed_at)
+            final.answers.push(state, arrival, at)
+            context = PlayContext(live.last, state, self._guard.pin(arrival, at))
+            self._offer_plays(game, live, snapshot.events, _field_of(state), arrival, at, context)
+        for held in live.plays.release(at):
+            live.awaiting.add(held.value.context.settled, _ReleasedPlay(game, held.value, held.release))
+        for released in live.awaiting.ready(at.monotonic):
+            self._decided(game, final, released, at, out)
+        self._correct_final(final, at, out)
+        self._final_caption(game, final, at, out)
+
+    def _decided(self, game: TeamGame, final: _Final, released: _ReleasedPlay, at: ClockReading, out: _Pass) -> None:
+        """A play the drain brought, once the answer after it has cleared too: if it decided the game, it updates the
+        revealed final once, as its caption and the play that decided it; one that can't is dropped, said so. Nothing
+        else the drain brings is told: the game is over, and none of it is offered."""
+        play = released.play
+        context = play.context
+        classification = classify_football_event(play.event, before=context.before, after=context.after)
+        if classification.event_class is not InterruptClass.DECISIVE_LATE_WINNER:
+            return
+        assert final.key is not None
+        card = self._queue.card(final.key)
+        if card is None:
+            self._missed(game, play, CaptionMiss.FINAL_OVER, out)
+            return
+        if final.decided:
+            self._missed(game, play, CaptionMiss.FINAL_DECIDED, out)
+            return
+        caption = self._caption_of(play, released.eligible)
+        final.caption, final.decided = caption, True
+        payload = replace(card.payload, last_play=play.event.summary, caption=caption.staged, decided_by=play.ref)
+        self._queue.ingest(replace(card, payload=payload), at)
+        out.ingested.append(card.id)
+
+    def _correct_final(self, final: _Final, at: ClockReading, out: _Pass) -> None:
         """A revealed final: a later final answer with a different result corrects the card once it clears the
         delay, while the card's own window lasts."""
         assert final.key is not None
         card = self._queue.card(final.key)
         if card is None:
             return  # its window is over: a correction doesn't bring it back
-        for reading in readings:
-            snapshot = reading.snapshot
-            if snapshot.phase is NflPhase.POST and snapshot.state is not None:
-                final.answers.push(snapshot.state, Arrival(received=reading.arrived, as_of=snapshot.observed_at), at)
         newest = final.answers.latest_eligible(at)
         if newest is None:
             return
@@ -651,6 +704,26 @@ class LiveFootballPipeline:
         if _result(newest.value) != _result(shown):
             self._queue.ingest(replace(card, payload=replace(card.payload, state=newest.value)), at)
             out.corrections.append(card.id)
+
+    def _final_caption(self, game: TeamGame, final: _Final, at: ClockReading, out: _Pass) -> None:
+        """A revealed final's caption, from the drain: gone at its hard end, once a correction leaves its score
+        behind, or at its latest start (said so) when no confirmed frame has carried it."""
+        caption = final.caption
+        if caption is None:
+            return
+        assert final.key is not None
+        card = self._queue.card(final.key)
+        now = at.monotonic
+        late = not caption.started and now >= caption.staged.latest_start
+        if card is None:
+            final.caption = None
+            return
+        if not late and now < caption.staged.hard_end and _score(card.payload.state) == caption.play.score:
+            return
+        final.caption = None
+        if late:
+            self._missed(game, caption.play, CaptionMiss.TOO_LATE, out)
+        self._queue.ingest(replace(card, payload=replace(card.payload, last_play=None, caption=None)), at)
 
     # --- staleness ------------------------------------------------------------------------------------------
 
