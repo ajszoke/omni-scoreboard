@@ -2,16 +2,26 @@
 
 _Living status doc. Keep it short; update whenever project state changes (branch, PR, milestone). This is the first thing an agent should read after `AGENTS.md`._
 
-## Now (2026-11-17)
+## Now (2026-11-18)
 
+- **2026-11-18, review round 8** (`~/omni-review/rounds/round-8-verdict.md`): keep H5 and policy v2, but not as the default shared live path until its closeout passes:
+  - physical swap receipts and a wake contract;
+  - lease admission rechecked at the swap;
+  - promotions bound to their exact event;
+  - NFL's late-result drain and caption freshness on the shared path;
+  - per-HTTP quota admission;
+  - provider text kept out of stdout;
+  - the false-feat guard on a play-log prefix.
+
+  So v2 and shared NFL are opt-in (`--board-policy 2`, `--leagues mlb,nfl`). Next: that closeout, with A1b in parallel. Then a staffed one-board shared NFL Sunday, then NBA v1. The user's NBA card notes start design v2; BALLDONTLIE NBA is now ALL-STAR (player game stats). Whether a feed says the clock is running, per league: `SOURCES.md`.
 - **2026-11-17, board policy v2 and NFL on the shared board (this PR).** As built: `ARCHITECTURE_TYPED_DOMAIN.md`, "The board policy"; `BOARD_POLICY.md` says what isn't built yet.
-  - **The board decides with `omni-board-policy/2` by default** (`--board-policy 1` keeps the old bands):
+  - **The board decides with `omni-board-policy/2` under `--board-policy 2`.** Since #116 merged (2026-11-18) it is opt-in, and the app's default stays `--board-policy 1`, the old bands, until v2's live path passes the gates review round 8 set:
     - base turns by debt toward leverage-weighted targets, with ranked favorites and the scaled floor;
     - promotions against the favorites' bar, with the 24 s hold and the 60 s cooldown;
     - a favorite's breaks lent to other games under leases from typed break evidence;
     - the card ladder and the 30 s non-base cap.
     It reads released state only, through a `PolicyView` the pipelines publish with the cards. Leverage is the labeled proxy in every league until a model passes validation, so only verified feats can cut into a favorite's action. The trace writes each decision's factors and a "why this card" line.
-  - **NFL on the shared board:** `PlannedNfl` reads every game of the day on the shared plan and quota ledger: the day's list once, each favorite's game at 10 s with its plays, the others every 45 s, and one read per other final (requests and rows within 1% of the budget replay's strategy E). `LiveFootballPipeline` cards them on NFL's own delay (`--nfl-delay`). `--leagues mlb,nfl` is the default; NFL needs `NFLMETA_API_KEY`. The single-game runner stays as the rollback. No NFL pregame card yet (no approved visual).
+  - **NFL on the shared board:** `PlannedNfl` reads every game of the day on the shared plan and quota ledger: the day's list once, each favorite's game at 10 s with its plays, the others every 45 s, and one read per other final (requests and rows within 1% of the budget replay's strategy E). `LiveFootballPipeline` cards them on NFL's own delay (`--nfl-delay`). Opt-in with `--leagues mlb,nfl` (the default is `mlb`) until the shared NFL path passes round 8's gates; NFL needs `NFLMETA_API_KEY`. The single-game runner stays as the rollback. No NFL pregame card yet (no approved visual).
   - **Settings:** `--mute LEAGUE[:TEAM]`, `--league-weight LEAGUE=W`, `--no-promotions`, `--slot` (8–30 s); each is in the config digest.
   - **Acceptance** (`tests/test_policy_v2_scenarios.py`; `mlb-slate.v2` and `mixed-slate.v2` fixtures, all three profiles):
     - §9's numbers are reproduced exactly through the board.

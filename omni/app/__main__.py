@@ -6,13 +6,15 @@ Polls the MLB StatsAPI and NFLMeta, runs each league's delay-safe pipeline, and 
 the emulator (browser at http://localhost:8888/). This is the thin I/O shell around the
 deterministic `AppLoop`; everything testable lives in `runner.py` / `loop.py`.
 
-``--leagues`` names the leagues that run, ``mlb,nfl`` unless you say otherwise. NFL reads NFLMeta with
-``NFLMETA_API_KEY`` from the environment or the git-ignored ``.env``; without one, the app says once that NFL is
-off and why, and runs MLB alone. NFL's games are held back by ``--nfl-delay``, MLB's by ``--delay``. Both leagues
+``--leagues`` names the leagues that run, ``mlb`` unless you say otherwise: NFL on the shared board is opt-in
+(``--leagues mlb,nfl``) until its live path has passed a staffed dogfood, and the NFL runner (`omni.app.football`)
+stays its fallback. NFL reads NFLMeta with ``NFLMETA_API_KEY`` from the environment or the git-ignored ``.env``;
+without one, the app says once that NFL is off and why, and runs MLB alone. NFL's games are held back by ``--nfl-delay``, MLB's by ``--delay``. Both leagues
 ask through one poll plan, each ask spending its own provider's account.
 
 The board policy's settings (`omni.policy.settings.PolicySettings`): ``--board-policy`` picks the policy
-(``2``, `omni-board-policy/2`, unless you say ``1``); ``--mute LEAGUE`` or ``--mute LEAGUE:TEAM`` keeps a league or a
+(``1``, `omni-board-policy/1`, unless you say ``2``: policy 2 is opt-in until its live path has passed a staffed
+dogfood); ``--mute LEAGUE`` or ``--mute LEAGUE:TEAM`` keeps a league or a
 team off the board (repeatable; a team is checked as a favorite is); ``--league-weight LEAGUE=W`` weighs a league's
 share, from 0.5 to 2 (repeatable); ``--no-promotions`` keeps big moments elsewhere from cutting in; and ``--slot`` is
 the turn, from 8 to 30 seconds. A setting out of bounds stops the app with a usage error that names it.
@@ -101,9 +103,9 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--leagues",
-        default="mlb,nfl",
+        default="mlb",
         metavar="LEAGUE,...",
-        help="the leagues on the board, of mlb and nfl (default both; NFL needs NFLMETA_API_KEY)",
+        help="the leagues on the board, of mlb and nfl (default mlb; NFL is opt-in and needs NFLMETA_API_KEY)",
     )
     parser.add_argument("--delay", type=int, default=45, help="TV broadcast delay in seconds (default 45)")
     parser.add_argument(
@@ -124,8 +126,9 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--board-policy",
         choices=sorted(_POLICIES),
-        default="2",
-        help="the board policy that shares the airtime: 2 (leverage, ranked favorites, promotions) or 1 (default 2)",
+        default="1",
+        help="the board policy that shares the airtime: 1, or 2 (leverage, ranked favorites, promotions; opt-in)"
+        " (default 1)",
     )
     parser.add_argument(
         "--mute",

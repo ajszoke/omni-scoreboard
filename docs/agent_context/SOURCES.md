@@ -179,3 +179,16 @@ NBA providers (review round 4's research thread):
   - lead changes missed between samples;
   - clock nulls and placeholders;
   - when the last play arrives relative to the final.
+
+A running game clock, by league (checked 2026-11-18; nothing is built on it):
+
+Whether a feed can say, without guessing, that a game clock is running right now. Without that, a board shows the
+clock as sampled: no blinking colon, no countdown between reads.
+
+| League | Our source | A running flag? | What can be known instead | Feasible? |
+|---|---|---|---|---|
+| MLB | StatsAPI | No game clock. We found no pitch-timer state in the live feed (unverified: a field search wasn't possible) | Nothing to tick | Not applicable |
+| NFL | NFLMeta | No: each play row has the period and the clock, no running state | NFL Rule 4 fixes whether the clock stops after a play (an incompletion, out of bounds, a score, a change of possession, a timeout, a penalty, an injury, the two-minute warning, a period's end) and whether it restarts at the snap or at the referee's ready-for-play signal (out of bounds restarts on the signal, except late in a half). So "stopped" can be derived from the last released play, and "stopped until the snap" for most stoppages. The ready-for-play signal and any 10-second runoff aren't in the feed. Sportradar's NFL push feeds show no running field in their samples | Partial, from the rules: stopped can be known; running, and from when, can't |
+| NBA | BALLDONTLIE (ALL-STAR) | No, on any tier: `/v1/games` has a sampled `time`; GOAT's `/v1/plays` gives each play's `clock` | Two reads with a moving clock show it ran between them. Stoppages could be read from GOAT's play types (fouls, timeouts, violations, free throws, a made basket in the last 2:00), but the restart (the inbound touch) is no event. Sportradar's Push Game Clock has `clocks.running` (Realtime customers only, by contract) | No, at our tiers |
+| NHL | Not chosen | **Yes, in the NHL's own web API:** `api-web.nhle.com/v1/gamecenter/{id}/play-by-play` carries `clock.running` and `clock.inIntermission`. Seen only on a finished game, so a live `true` is unverified; the terms for automated use are unverified. Sportradar's NHL Push Clock has `clocks.running` (contract) | Hockey's clock stops on every whistle, which the flag reports directly | Likely, if the NHL's API terms allow it |
+| PGA | Not chosen | No game clock | Tee times and holes | Not applicable |

@@ -84,7 +84,7 @@ def test_a_setting_a_runner_doesn_t_have_is_left_out_and_no_favorites_reads_none
         ["--no-odds"],
         ["--scroll-speed", "medium"],
         ["--favorite", "nfl:CAR"],
-        ["--board-policy", "1"],
+        ["--board-policy", "2"],
         ["--mute", "nba"],
         ["--mute", "nfl:DAL"],
         ["--league-weight", "nfl=1.5"],
@@ -150,12 +150,12 @@ def test_the_nfl_runner_s_digest_is_of_the_settings_in_effect() -> None:
 
 def test_the_mlb_board_names_its_policy_rules_commit_and_settings() -> None:
     versions = _mlb()
-    assert versions.policy is PolicyName.BOARD_V2 and versions.rules is RULES and versions.schema is CONFIG_SCHEMA
+    assert versions.policy is PolicyName.BOARD_V1 and versions.rules is RULES and versions.schema is CONFIG_SCHEMA
     assert versions.line() == (
-        f"versions: policy omni-board-policy/2 | config omni-config/1 {versions.config.digest}"
+        f"versions: policy omni-board-policy/1 | config omni-config/1 {versions.config.digest}"
         " | rules omni-rules/2026.1 | models none | source 7518dd6 | migrations none"
     )
-    assert _mlb("--board-policy", "1").policy is PolicyName.BOARD_V1  # the run's policy is the one its settings chose
+    assert _mlb("--board-policy", "2").policy is PolicyName.BOARD_V2  # the run's policy is the one its settings chose
 
 
 def test_the_mlb_board_s_settings_render_the_board_policy_s_own() -> None:
@@ -163,14 +163,14 @@ def test_the_mlb_board_s_settings_render_the_board_policy_s_own() -> None:
     canonical = _mlb(*flags).config.canonical()
     assert canonical == (
         "delay=45s;favorites=mlb:ATL,mlb:COL;league_weights=nfl=1.5;meter=off;mutes=nba,nfl:DAL;nfl_delay=30s;odds=on;"
-        "policy=omni-board-policy/2;profile=quad_128x64;promotions=off;scroll_speed=slow;takeover_cap=30s;"
+        "policy=omni-board-policy/1;profile=quad_128x64;promotions=off;scroll_speed=slow;takeover_cap=30s;"
         "timezone=America/New_York;turn=12s"
     )
     assert "league_weights=none;" in _mlb().config.canonical() and "mutes=none;" in _mlb().config.canonical()
 
 
 def test_a_board_policy_setting_given_as_its_default_is_the_default() -> None:
-    assert _mlb("--board-policy", "2", "--league-weight", "mlb=1").config == _mlb().config
+    assert _mlb("--board-policy", "1", "--league-weight", "mlb=1").config == _mlb().config
 
 
 def test_a_bare_favorite_is_the_same_setting_and_its_migration_is_recorded_with_the_entry_as_given(
