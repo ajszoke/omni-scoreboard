@@ -41,6 +41,7 @@ __all__ = [
     "BaseballAction",
     "BaseballBreakSignals",
     "BaseballField",
+    "PlayLogCoverage",
     "BaseballGameState",
     "PitchingFeatKind",
     "PitchingFeatProgress",
@@ -576,6 +577,18 @@ class BaseballField(StrEnumMixin, str, Enum):
     BASES = "bases"
 
 
+class PlayLogCoverage(StrEnumMixin, str, Enum):
+    """How much of the game a state's play log is a record of: what its reached-base reads rest on, and what a rare
+    feat needs before it is promoted."""
+
+    # Every plate appearance from the game's first, in order and each readable, through the point the linescore
+    # describes: its last entry is in the linescore's inning and half, and is finished at a break or a final.
+    COMPLETE = "complete"
+    # A prefix, an entry that can't be read, or a log whose end the linescore doesn't bear out: no proof of anything
+    # the log leaves out.
+    UNVERIFIED = "unverified"
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class BaseballGameState:
     """A live baseball game's observed state: score/inning/phase/count/bases.
@@ -604,6 +617,8 @@ class BaseballGameState:
     # a plain no-hitter; None keeps the safe default of never claiming perfection unproven.
     away_reached_base: bool | None = None
     home_reached_base: bool | None = None
+    # What the play log behind those reads covers. Like the coverage map's, the default says it covers the game.
+    play_log: PlayLogCoverage = PlayLogCoverage.COMPLETE
     # Who is at the plate / on the mound right now, with their game line; None when the feed
     # does not name one (between innings, or a payload without the boxscore detail).
     batter: BatterGameLine | None = None
