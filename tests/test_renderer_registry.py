@@ -176,3 +176,26 @@ def test_default_registry_routes_a_football_final_to_the_live_football_renderer_
     canvas = RecordingCanvas(128, 64)
     default_registry().render(card, CTX, canvas)
     assert "FINAL" in {t.text for t in canvas.texts()}
+
+
+@pytest.mark.parametrize("profile", list(PanelProfile))
+def test_default_registry_draws_basketball_live_final_and_pregame_cards_on_every_board(profile: PanelProfile) -> None:
+    from omni.panels.geometry import geometry_for
+    from omni.renderers.basketball_pregame import BasketballPregameRenderer
+    from omni.renderers.live_basketball import LiveBasketballRenderer
+    from tests.basketball_fixtures import SPECIMENS
+
+    cards = {spec.key: spec.card for spec in SPECIMENS}
+    expected = {
+        "live-line-score": (CardKind.LIVE_GAME, LiveBasketballRenderer, "6:07"),
+        "final": (CardKind.FINAL, LiveBasketballRenderer, None),
+        "pregame": (CardKind.PREGAME, BasketballPregameRenderer, "6-8"),
+    }
+    registry = default_registry()
+    for key, (kind, renderer, shown) in expected.items():
+        card = cards[key]
+        assert card.kind is kind and isinstance(registry.renderer_for(card), renderer)
+        width, height = geometry_for(profile).size
+        canvas = RecordingCanvas(width, height)
+        registry.render(card, RenderContext(profile=profile, now=T), canvas)  # the card's layout takes every board
+        assert shown is None or shown in {op.text for op in canvas.texts()}
