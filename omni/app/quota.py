@@ -23,6 +23,11 @@ Three calls keep it:
   the ledger takes it if it shows more spent than its own count, never less, and a provider that says nothing
   is left has exhausted the account.
 
+One process at a time polls an account whose counts the ledger can't share with another process (NFLMeta's): given
+`AccountLocks`, the ledger holds the account for its process before it admits the first ask, and while another
+process holds it, refuses every ask with that reason (`Refusal.ELSEWHERE`). Taking it over, it first counts on from
+what the other process saved.
+
 What is admitted as the month runs down is one declared table (`QuotaPolicy`, by default `SHEDDING`), read
 against the tighter of the month's requests and rows, as a share of each left once the ask is spent:
 backfill goes first, then background slows to half its pace and then stops, then normal, and focus runs
@@ -54,6 +59,7 @@ from omni.core.enum import StrEnumMixin
 from omni.providers.base import ProviderError
 
 __all__ = [
+    "AccountLocks",
     "BALLDONTLIE_FREE",
     "NFLMETA_BUILDER",
     "NFLMETA_FREE",
@@ -82,7 +88,9 @@ __all__ = [
     "Tally",
     "UsageStore",
     "account_limits",
+    "larger_usage",
     "nflmeta_billed",
+    "polled_elsewhere",
     "spent_notice",
     "tallying",
     "usage_line",
@@ -207,6 +215,7 @@ class Refusal(StrEnumMixin, str, Enum):
     REQUESTS_RESERVE = "requests_reserve"  # the month's requests left are held for more important asks
     ROWS_RESERVE = "rows_reserve"  # the month's rows left are held for more important asks
     EXHAUSTED = "exhausted"  # nothing is left this month
+    ELSEWHERE = "elsewhere"  # another process on this machine is polling the account
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -289,6 +298,7 @@ class Admission:
     retry_at: MonotonicTime | None = None  # when the minute has room again, when the minute refused it
     plan: NflMetaPlan | None = None  # NFLMeta's plan, when the month is spent on it
     month: BillingMonth | None = None  # the month that's spent
+    holder: str | None = None  # the process polling the account, when it's another
     permit: Permit | None = field(default=None, compare=False, repr=False)  # an admitted ask's, for its requests
 
     @property
@@ -327,6 +337,8 @@ class Admission:
     def reason(self) -> str:
         """A short phrase for a log or a health line, e.g. "quota: NFLMeta rows 8% left, background slowed"."""
         name, kind = self.account.label, self.priority.name.lower()
+        if self.refusal is Refusal.ELSEWHERE:
+            return polled_elsewhere(self.account, self.holder or "another process")
         if self.refusal is Refusal.PER_MINUTE:
             return f"quota: {name} {self.used} of {self.per_minute} a minute used, {kind} waiting"
         if self.refusal is Refusal.EXHAUSTED:
@@ -391,9 +403,51 @@ class ProviderBalance:
 class UsageStore(Protocol):
     """Where the month's usage is kept between runs."""
 
+    def load(self) -> dict[ProviderAccount, MonthUsage]:
+        """What was last written; nothing when nothing can be read."""
+        ...
+
     def save(self, usage: Mapping[ProviderAccount, MonthUsage]) -> bool:
         """Write ``usage``; whether it was written."""
         ...
+
+
+class AccountLocks(Protocol):
+    """Which accounts this process holds, so that one process at a time polls each account that needs it."""
+
+    def claim(self, account: ProviderAccount) -> str | None:
+        """Hold ``account`` for this process, if it needs holding: None once it's held (or needs no holding), else
+        which process holds it, e.g. "pid 4242, omni.app.football"."""
+        ...
+
+    def release(self) -> None:
+        """Let go of every account this process holds."""
+        ...
+
+
+def larger_usage(
+    saved: Mapping[ProviderAccount, MonthUsage], usage: Mapping[ProviderAccount, MonthUsage]
+) -> dict[ProviderAccount, MonthUsage]:
+    """Each account's later month of the two, and in the same month the larger counts: what two counts of one month
+    agree was spent at least."""
+    merged = dict(saved)
+    for account, ours in usage.items():
+        theirs = merged.get(account)
+        if theirs is None or ours.month > theirs.month:
+            merged[account] = ours
+        elif ours.month == theirs.month:
+            merged[account] = MonthUsage(
+                ours.month,
+                requests=max(ours.requests, theirs.requests),
+                rows=max(ours.rows, theirs.rows),
+                exhausted=ours.exhausted or theirs.exhausted,
+            )
+    return merged
+
+
+def polled_elsewhere(account: ProviderAccount, holder: str) -> str:
+    """Why this process doesn't ask ``account``: ``holder`` polls it."""
+    return f"quota: {account.label} is polled by another process ({holder}); not asking here"
 
 
 @dataclass(slots=True)
@@ -468,12 +522,15 @@ class QuotaLedger:
         usage: Mapping[ProviderAccount, MonthUsage] | None = None,
         store: UsageStore | None = None,
         save_every: timedelta = SAVE_EVERY,
+        locks: AccountLocks | None = None,
     ) -> None:
         self._limits = dict(limits)
         self._policy = policy
         self._usage = dict(usage or {})
         self._accounts: dict[ProviderAccount, _Account] = {}
         self._store = store
+        self._locks = locks
+        self._claimed: set[ProviderAccount] = set()
         self._save_every = save_every
         self._saved_at: MonotonicTime | None = None
         self._dirty = False
@@ -497,6 +554,20 @@ class QuotaLedger:
         with self._lock:
             held = self._account(account, at)
             return _exhausted(held, self._left(held, Demand(PollPriority.FOCUS))) is not None
+
+    def claim(self, account: ProviderAccount) -> str | None:
+        """Hold ``account`` for this process, as its first admission would: None once held, else why not (another
+        process polls it). Taking it over, the ledger counts on from what was saved since this run began."""
+        with self._lock:
+            refused = self._claim(account)
+        return refused.reason if refused is not None else None
+
+    def close(self) -> None:
+        """Let go of the accounts this process holds, as its end would."""
+        with self._lock:
+            if self._locks is not None:
+                self._locks.release()
+            self._claimed.clear()
 
     def admit(self, account: ProviderAccount, demand: Demand, at: ClockReading) -> Admission:
         """Whether an ask of ``demand``'s class may go out now. An admitted one holds its place in the minute for its
@@ -528,6 +599,9 @@ class QuotaLedger:
             return self._admit(account, Demand(priority, own.unbilled if own is not None else 1), at)
 
     def _admit(self, account: ProviderAccount, demand: Demand, at: ClockReading) -> Admission:
+        elsewhere = self._claim(account, demand.priority)
+        if elsewhere is not None:
+            return elsewhere
         rule = self._policy.rules[demand.priority]
         held = self._account(account, at)
         lefts = self._left(held, demand)
@@ -577,6 +651,27 @@ class QuotaLedger:
             left=left,
             permit=Permit(account, demand.priority, demand.rows),
         )
+
+    def _claim(self, account: ProviderAccount, priority: PollPriority = PollPriority.FOCUS) -> Admission | None:
+        """Hold ``account`` for this process if it isn't yet; the refusal when another process holds it."""
+        if self._locks is None or account in self._claimed:
+            return None
+        holder = self._locks.claim(account)
+        if holder is not None:
+            return Admission(account=account, priority=priority, refusal=Refusal.ELSEWHERE, holder=holder)
+        self._claimed.add(account)
+        saved = self._store.load().get(account) if self._store is not None else None
+        if saved is not None:
+            self._count_on(account, saved)
+        return None
+
+    def _count_on(self, account: ProviderAccount, saved: MonthUsage) -> None:
+        """Take what another process saved of ``account``'s month, where it counted more than this one has."""
+        held = self._accounts.get(account)
+        if held is None:
+            self._usage = larger_usage(self._usage, {account: saved})
+        elif saved.month == held.month:
+            held.requests, held.rows = max(held.requests, saved.requests), max(held.rows, saved.rows)
 
     @staticmethod
     def _spent(account: ProviderAccount, held: _Account, priority: PollPriority, refused: _Exhausted) -> Admission:

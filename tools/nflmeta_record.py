@@ -3,7 +3,9 @@
     .venv/bin/python tools/nflmeta_record.py --list
     .venv/bin/python tools/nflmeta_record.py --teams PIT,CIN [--lead-minutes 10] [--max-requests 2000]
 
-Reads ``NFLMETA_API_KEY`` from the environment or the repo's git-ignored ``.env``. ``--list`` makes one
+Reads ``NFLMETA_API_KEY`` from the environment or the repo's git-ignored ``.env``. One process at a time polls
+NFLMeta on a machine: this takes the account's lock under ``--state-dir`` first (`omni.app.quota_store.FileLocks`),
+and refuses with one line naming the process that holds it, the board or the NFL runner. ``--list`` makes one
 request and prints the current slate. Otherwise it finds the game, makes no requests until shortly
 before kickoff, then polls the scoreboard at the pace the API recommends and pulls only new or
 corrected plays through the game's change cursor. It stops a few polls after the final score, or at
@@ -33,6 +35,8 @@ from urllib.request import Request, urlopen
 _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT))  # so `omni` resolves when this script is run directly
 
+from omni.app.quota import ProviderAccount, polled_elsewhere
+from omni.app.quota_store import FileLocks, default_state_dir
 from omni.core.env import read_env_file
 from omni.providers.rights import DataSource, stamp_recording
 
@@ -245,7 +249,19 @@ def main() -> int:
     parser.add_argument("--teams", help="the two teams, e.g. PIT,CIN")
     parser.add_argument("--lead-minutes", type=float, default=10.0, help="start polling this long before kickoff")
     parser.add_argument("--max-requests", type=int, default=2000)
+    parser.add_argument(
+        "--state-dir",
+        type=Path,
+        default=None,
+        help="where the account's lock is (default $XDG_STATE_HOME/omni, else ~/.local/state/omni)",
+    )
     args = parser.parse_args()
+    import os
+
+    locks = FileLocks(args.state_dir or default_state_dir(os.environ, Path.home()), who="nflmeta_record")
+    holder = locks.claim(ProviderAccount.NFLMETA)  # held until this process ends
+    if holder is not None:
+        raise SystemExit(f"nflmeta_record: {polled_elsewhere(ProviderAccount.NFLMETA, holder)}")
     client = Client(_key(), max_requests=args.max_requests)
     try:
         if args.list:

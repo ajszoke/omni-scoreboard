@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -16,10 +18,11 @@ from omni.app.quota import (
     ProviderAccount,
     ProviderBalance,
     QuotaLedger,
+    Refusal,
     account_limits,
     spent_notice,
 )
-from omni.app.quota_store import SCHEMA, USAGE_FILE, UsageFile, default_state_dir, open_ledger
+from omni.app.quota_store import SCHEMA, USAGE_FILE, FileLocks, UsageFile, default_state_dir, open_ledger
 from omni.core.clock import FakeClock
 
 T0 = datetime(2026, 11, 15, 18, 0, tzinfo=timezone.utc)
@@ -237,3 +240,107 @@ def test_a_month_spent_on_free_has_room_again_after_a_restart_on_builder_and_its
     again = open_ledger(tmp_path, NflMetaPlan.BUILDER, log=_quiet)
     assert not again.exhausted(NFL, clock.read())  # the old word in the file doesn't spend Builder's month
     assert again.usage(NFL, clock.read()) == MonthUsage(NOVEMBER, requests=5_010, rows=2_000)
+
+
+# --- one poller per account ---------------------------------------------------------------------------------
+
+
+def test_one_process_at_a_time_holds_nflmeta_and_another_is_told_who_does(tmp_path: Path) -> None:
+    board, recorder = FileLocks(tmp_path, who="omni.app"), FileLocks(tmp_path, who="nflmeta_record")
+    assert board.claim(NFL) is None and board.claim(NFL) is None  # held, and held again at no cost
+    assert (tmp_path / "nflmeta.lock").read_text() == f"{os.getpid()} omni.app\n"
+    assert recorder.claim(NFL) == f"pid {os.getpid()}, omni.app"
+    assert recorder.claim(ProviderAccount.MLB_STATSAPI) is None  # StatsAPI needs no holding
+    board.release()
+    assert recorder.claim(NFL) is None  # let go of at the holder's end, however it ends
+    assert board.claim(NFL) == f"pid {os.getpid()}, nflmeta_record"
+    recorder.release()
+
+
+@pytest.mark.parametrize(
+    ("written", "holder"),
+    [("4242 omni.app.football\n", "pid 4242, omni.app.football"), ("4242", "pid 4242"), ("", "another process")],
+)
+def test_a_holder_is_named_as_far_as_its_lock_file_says(tmp_path: Path, written: str, holder: str) -> None:
+    held = FileLocks(tmp_path)
+    assert held.claim(NFL) is None
+    (tmp_path / "nflmeta.lock").write_text(written)
+    assert FileLocks(tmp_path).claim(NFL) == holder
+    held.release()
+
+
+def test_a_lock_file_that_can_t_be_read_names_no_holder(tmp_path: Path) -> None:
+    def held(fd: int) -> None:
+        os.unlink(tmp_path / "nflmeta.lock")  # gone before its holder could be read
+        raise BlockingIOError("held")
+
+    assert FileLocks(tmp_path, lock=held).claim(NFL) == "another process"
+
+
+def test_a_lock_that_can_t_be_had_refuses_the_account_with_why(tmp_path: Path) -> None:
+    (tmp_path / "state").write_text("a file where the state directory goes")
+    assert FileLocks(tmp_path / "state").claim(NFL) == (
+        f"its lock {tmp_path / 'state' / 'nflmeta.lock'} can't be opened: [Errno 17] File exists:"
+        f" '{tmp_path / 'state'}'"
+    )
+
+    def broken(fd: int) -> None:
+        raise OSError(37, "No locks available")
+
+    assert FileLocks(tmp_path, lock=broken).claim(NFL) == (
+        f"its lock {tmp_path / 'nflmeta.lock'} can't be taken: [Errno 37] No locks available"
+    )
+
+
+def test_a_program_unnamed_is_named_by_how_it_was_started(tmp_path: Path) -> None:
+    locks = FileLocks(tmp_path)
+    assert locks.claim(NFL) is None
+    assert (tmp_path / "nflmeta.lock").read_text() == f"{os.getpid()} {Path(sys.argv[0]).name}\n"
+    locks.release()
+
+
+def test_the_ledger_holds_nflmeta_from_its_first_ask_and_refuses_every_ask_while_another_holds_it(
+    tmp_path: Path,
+) -> None:
+    clock = FakeClock(T0)
+    board = open_ledger(tmp_path, NflMetaPlan.FREE, log=_quiet, who="omni.app")
+    runner = open_ledger(tmp_path, NflMetaPlan.FREE, log=_quiet, who="omni.app.football")
+    assert runner.admit(ProviderAccount.MLB_STATSAPI, Demand(PollPriority.FOCUS), clock.read()).admitted  # no lock
+    assert board.admit(NFL, Demand(PollPriority.NORMAL), clock.read()).admitted
+    refused = runner.admit(NFL, Demand(PollPriority.FOCUS), clock.read())
+    assert refused.refusal is Refusal.ELSEWHERE and refused.held_back
+    reason = f"quota: NFLMeta is polled by another process (pid {os.getpid()}, omni.app); not asking here"
+    assert refused.reason == reason and runner.claim(NFL) == reason
+    assert runner.admit_request(NFL, clock.read()).refusal is Refusal.ELSEWHERE
+    board.close()
+    assert runner.claim(NFL) is None and runner.admit(NFL, Demand(PollPriority.FOCUS), clock.read()).admitted
+    runner.close()
+
+
+def test_taking_nflmeta_over_counts_on_from_what_its_last_holder_saved(tmp_path: Path) -> None:
+    clock = FakeClock(T0)
+    waiting = open_ledger(tmp_path, NflMetaPlan.FREE, log=_quiet)  # started while the runner polled
+    counted = open_ledger(tmp_path, NflMetaPlan.FREE, log=_quiet)  # has counted the month already
+    assert counted.usage(NFL, clock.read()).requests == 0
+    runner = open_ledger(tmp_path, NflMetaPlan.FREE, log=_quiet)
+    assert runner.claim(NFL) is None
+    runner.charge(NFL, at=clock.read(), requests=40, rows=90)
+    runner.save(clock.read(), force=True)
+    runner.close()
+    for ledger in (waiting, counted):
+        assert ledger.claim(NFL) is None
+        assert ledger.usage(NFL, clock.read()) == MonthUsage(NOVEMBER, requests=40, rows=90)
+        ledger.close()
+
+
+def test_a_holder_s_save_from_another_month_is_left_as_it_is(tmp_path: Path) -> None:
+    clock = FakeClock(T0)
+    later = open_ledger(tmp_path, NflMetaPlan.FREE, log=_quiet)
+    assert later.usage(NFL, clock.read()).month == NOVEMBER  # this one counts November
+    _file(tmp_path).save({NFL: MonthUsage(BillingMonth(2026, 10), requests=4_000)})  # October's, from a stale clock
+    assert later.claim(NFL) is None
+    assert later.usage(NFL, clock.read()) == MonthUsage(NOVEMBER)
+    later.close()
+    unlocked = QuotaLedger(account_limits())
+    assert unlocked.claim(NFL) is None  # a ledger without locks holds nothing, and has nothing to let go of
+    unlocked.close()

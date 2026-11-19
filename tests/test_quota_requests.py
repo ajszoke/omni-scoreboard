@@ -1,14 +1,16 @@
 """Every NFLMeta request admitted against its account: a followed poll's pages and a failed attempt's retry each
-take their own place in the minute and the month, the ask's own place is its first request's, and both NFL entry
-points share the one admission."""
+take their own place in the minute and the month, the ask's own place is its first request's, both NFL entry
+points share the one admission, and one process at a time polls the account."""
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from omni.app.football_feed import GameFeed
 from omni.app.poll_plan import Demand, PollPriority
 from omni.app.quota import AccountLimits, MeteredHttp, Meter, NflMetaPlan, QuotaLedger, account_limits, nflmeta_billed
+from omni.app.quota_store import open_ledger
 from omni.core.clock import FakeClock
 from omni.providers.nfl_teams import NflTeamRegistry
 from omni.providers.nflmeta import NFLMETA_SOURCE, NflMetaLiveProvider
@@ -79,3 +81,16 @@ def test_the_solo_runner_s_feed_takes_a_place_for_each_page_on_the_account_it_sh
     assert answer.snapshot is not None  # the scores came back; the plays' second page didn't fit the minute
     assert len(board.nflmeta.requests) == 2 and board.nflmeta.play_reads(101) == [EARLY]
     assert not board.ledger.admit(NFL, Demand(PollPriority.FOCUS), board.clock.read()).admitted
+
+
+def test_a_second_process_on_the_same_state_directory_never_polls_nflmeta_and_says_why(tmp_path: Path) -> None:
+    first = _board(EARLY, ledger=open_ledger(tmp_path, NflMetaPlan.FREE, log=lambda line: None, who="omni.app"))
+    second = _board(EARLY, ledger=open_ledger(tmp_path, NflMetaPlan.FREE, log=lambda line: None))
+    for board in (first, second):
+        board.nflmeta.rows[101] = _row(*CAR_ATL)
+        board.step()
+    assert len(first.nflmeta.requests) == 1 and second.nflmeta.requests == []
+    reason = second.planned.held_back(second.reports[-1].span.current)
+    assert reason is not None and reason.startswith("quota: NFLMeta is polled by another process (pid ")
+    assert reason.endswith(", omni.app); not asking here")
+    first.ledger.close()
