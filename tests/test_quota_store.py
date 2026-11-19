@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from omni.app.poll_plan import Demand, PollPriority
 from omni.app.quota import (
     BillingMonth,
     MonthUsage,
@@ -16,6 +17,7 @@ from omni.app.quota import (
     ProviderBalance,
     QuotaLedger,
     account_limits,
+    spent_notice,
 )
 from omni.app.quota_store import SCHEMA, USAGE_FILE, UsageFile, default_state_dir, open_ledger
 from omni.core.clock import FakeClock
@@ -207,3 +209,31 @@ def test_two_boards_sharing_the_file_never_lower_each_other_s_counts(tmp_path: P
         ProviderAccount.BOVADA: MonthUsage(BillingMonth(2026, 12), requests=2),
         ProviderAccount.MLB_STATSAPI: MonthUsage(NOVEMBER, requests=40),
     }
+
+
+def test_a_month_spent_on_free_has_room_again_after_a_restart_on_builder_and_its_first_answer_reconciles(
+    tmp_path: Path,
+) -> None:
+    clock = FakeClock(T0)
+    free = open_ledger(tmp_path, NflMetaPlan.FREE, log=_quiet)
+    free.charge(NFL, at=clock.read(), rows=3, balance=ProviderBalance(requests_left=0, rows_left=24_000))
+    assert free.exhausted(NFL, clock.read())  # NFLMeta says Free's month is spent
+    assert spent_notice(free, clock.read()) == (
+        "NFLMeta Free is spent for 2026-11: switch the account to Builder and restart with --nflmeta-plan builder"
+    )
+    free.save(clock.read(), force=True)
+    saved = json.loads((tmp_path / USAGE_FILE).read_text())["accounts"]["nflmeta"]
+    assert saved == {"month": "2026-11", "requests": 5_000, "rows": 1_000, "exhausted": True}
+    assert open_ledger(tmp_path, NflMetaPlan.FREE, log=_quiet).exhausted(NFL, clock.read())  # still spent on Free
+    clock.advance(timedelta(hours=1))
+    builder = open_ledger(tmp_path, NflMetaPlan.BUILDER, log=_quiet)
+    assert builder.usage(NFL, clock.read()) == MonthUsage(NOVEMBER, requests=5_000, rows=1_000)  # what NFLMeta bills
+    assert not builder.exhausted(NFL, clock.read()) and spent_notice(builder, clock.read()) is None
+    first = builder.admit(NFL, Demand(PollPriority.FOCUS, 1), clock.read())
+    assert first.admitted and first.reason == "quota: NFLMeta focus admitted"
+    builder.charge(NFL, at=clock.read(), rows=2, balance=ProviderBalance(requests_left=69_990, rows_left=248_000))
+    assert builder.usage(NFL, clock.read()) == MonthUsage(NOVEMBER, requests=5_010, rows=2_000)  # NFLMeta's count
+    builder.save(clock.read(), force=True)
+    again = open_ledger(tmp_path, NflMetaPlan.BUILDER, log=_quiet)
+    assert not again.exhausted(NFL, clock.read())  # the old word in the file doesn't spend Builder's month
+    assert again.usage(NFL, clock.read()) == MonthUsage(NOVEMBER, requests=5_010, rows=2_000)

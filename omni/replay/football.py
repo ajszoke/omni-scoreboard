@@ -15,6 +15,11 @@ under a header naming what it decided with (`football_versions`), a line each:
 Two boards that decide alike on a trace give the same lines, so a change to the board is checked on
 them. The clock alone, the meter and the pixels (a stale feed's dimming among them) are not decisions.
 The replay's display shows each frame the moment it's handed over, and says so at once.
+
+A full trace holds the feed's own words, which may be kept only in its stamped recording folder. So the
+replay names each strip entry by its kind and its order (`EntryLabels`: "PLAY 17 | detail 17", then
+"PLAY 17 | players 17") before the board sees it, and no decision it returns quotes the feed. A board
+decides alike on the labels, since nothing it decides reads a caption's words.
 """
 
 from __future__ import annotations
@@ -30,6 +35,7 @@ from omni.core.clock import ClockReading, FakeClock
 from omni.app.football_board import METER_LAG, FootballBoard
 from omni.app.football_feed import FeedResult
 from omni.app.frame_stream import DisplayReceipt, FrameShown
+from omni.app.run_log import LogLine
 from omni.app.versions import DecisionConfig, PolicyName, Versions
 from omni.cards.base import ScoreboardCard
 from omni.cards.football import LiveFootballCardPayload
@@ -58,6 +64,7 @@ from omni.renderers.text_lane import ScrollSpeed
 __all__ = [
     "REPLAY_SOURCE",
     "TRACE_VERSION",
+    "EntryLabels",
     "FootballTrace",
     "ReplayFeed",
     "answer_record",
@@ -148,6 +155,36 @@ def load_trace(lines: Iterable[str], *, registry: NflTeamRegistry | None = None)
     return FootballTrace(start=start, game=game, answers=tuple(_answer(record, start, game) for record in records[1:]))
 
 
+class EntryLabels:
+    """Names each strip entry by its kind and the order it first appeared in ("PLAY 17"), in place of the
+    feed's words: its description becomes "detail 17" and its players' line "players 17"."""
+
+    def __init__(self) -> None:
+        self._numbers: dict[str, int] = {}
+
+    def number(self, event: FootballEvent) -> int:
+        """The entry's place in the order entries first appeared, from 1."""
+        return self._numbers.setdefault(event.key, len(self._numbers) + 1)
+
+    def event(self, event: FootballEvent) -> FootballEvent:
+        number = self.number(event)
+        summary = dataclasses.replace(
+            event.summary,
+            headline=f"{event.kind.value.upper().replace('_', ' ')} {number}",
+            detail=f"detail {number}" if event.summary.detail else None,
+        )
+        return dataclasses.replace(
+            event, summary=summary, players_line=f"players {number}" if event.players_line else None
+        )
+
+    def answer(self, result: FeedResult) -> FeedResult:
+        snapshot = result.snapshot
+        if snapshot is None:
+            return result
+        events = tuple(self.event(event) for event in snapshot.events)
+        return dataclasses.replace(result, snapshot=dataclasses.replace(snapshot, events=events))
+
+
 class ReplayFeed:
     """A `FeedSource` that hands over a trace's answers as the clock passes their arrival.
 
@@ -189,8 +226,9 @@ def replay_board(
     """
     clock = FakeClock(trace.start)
     cards = _Cards(profile)
-    logs: list[str] = []
-    feed = ReplayFeed(trace.answers)
+    logs: list[LogLine] = []
+    labels = EntryLabels()
+    feed = ReplayFeed([labels.answer(answer) for answer in trace.answers])
     board = FootballBoard(feed, _NullSink(profile), delay=delay, renderer=cards, log=logs.append)
     decisions = _Decisions(trace.start, football_versions(profile, delay=delay))
     end = (trace.answers[-1].received_at if trace.answers else trace.start) + delay + tail
@@ -233,10 +271,10 @@ class _Decisions:
         self._field: str | None = None
         self.lines: list[str] = [versions.header()]
 
-    def take(self, now: datetime, card: ScoreboardCard[LiveFootballCardPayload] | None, logs: list[str]) -> None:
-        for line in logs:
-            if line.startswith("  - "):
-                self._add(now, "drop", line[4:])
+    def take(self, now: datetime, card: ScoreboardCard[LiveFootballCardPayload] | None, logs: list[LogLine]) -> None:
+        for line in logs:  # what a drop quotes is its entry's label: the replay labeled every entry
+            if line.full.startswith("  - "):
+                self._add(now, "drop", line.full[4:])
         if card is None:
             return
         field = _field_label(card.payload.state)

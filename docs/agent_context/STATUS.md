@@ -4,7 +4,27 @@ _Living status doc. Keep it short; update whenever project state changes (branch
 
 ## Now (2026-11-17)
 
-- **2026-11-17, H5 steps 4–5, the rest of the data boundary (this PR).** As built: `ARCHITECTURE_TYPED_DOMAIN.md`, "Provider boundaries".
+- **2026-11-17, board policy v2 and NFL on the shared board (this PR).** As built: `ARCHITECTURE_TYPED_DOMAIN.md`, "The board policy"; `BOARD_POLICY.md` says what isn't built yet.
+  - **The board decides with `omni-board-policy/2` by default** (`--board-policy 1` keeps the old bands):
+    - base turns by debt toward leverage-weighted targets, with ranked favorites and the scaled floor;
+    - promotions against the favorites' bar, with the 24 s hold and the 60 s cooldown;
+    - a favorite's breaks lent to other games under leases from typed break evidence;
+    - the card ladder and the 30 s non-base cap.
+    It reads released state only, through a `PolicyView` the pipelines publish with the cards. Leverage is the labeled proxy in every league until a model passes validation, so only verified feats can cut into a favorite's action. The trace writes each decision's factors and a "why this card" line.
+  - **NFL on the shared board:** `PlannedNfl` reads every game of the day on the shared plan and quota ledger: the day's list once, each favorite's game at 10 s with its plays, the others every 45 s, and one read per other final (requests and rows within 1% of the budget replay's strategy E). `LiveFootballPipeline` cards them on NFL's own delay (`--nfl-delay`). `--leagues mlb,nfl` is the default; NFL needs `NFLMETA_API_KEY`. The single-game runner stays as the rollback. No NFL pregame card yet (no approved visual).
+  - **Settings:** `--mute LEAGUE[:TEAM]`, `--league-weight LEAGUE=W`, `--no-promotions`, `--slot` (8–30 s); each is in the config digest.
+  - **Acceptance** (`tests/test_policy_v2_scenarios.py`; `mlb-slate.v2` and `mixed-slate.v2` fixtures, all three profiles):
+    - §9's numbers are reproduced exactly through the board.
+    - The mixed v2 day's scorecard (`mixed-slate.v2.scorecard.md`): MLB 41.6% of base airtime against a 41.2% target, NFL 58.4% against 58.8%; longest wait 156 s; no overruns, premature breaks or spoilers.
+    - The replays found seven defects in the director, all fixed. Examples: a favorite's own big play never aired; two NFL games in one break starved each other; a favorite's final waited behind an unrelated one; a bid was reminded only once.
+  - **Open, as expected failures:**
+    - the board has no wake signal, so after a host sleep the old field, caption and lease carry on;
+    - a promoted major that retires unseen can't reach the results queue.
+  - **The user's rulings (2026-11-17):**
+    - **Display:** showing data on the family's boards from a short-lived copy that expires is display, not redistribution (`omni/providers/rights.py`). The market service's S3 archive now expires in a day (deployed); the old archive was copied out and stamped for a week, for round 8.
+    - **NFLMeta:** Free until its month is spent, then Builder. The board says when to switch, and a restart carries the month's counts.
+  - **NFLMeta's wording expires everywhere:** the runner's stdout is our own telemetry; its full log goes to a stamped folder. The expiry sweep mines each overdue folder into `build/telemetry/` and deletes it. PIT@CIN's recording and the old runner log are mined and stamped to go on 2026-11-23. What they measured is in `SOURCES.md`.
+- **2026-11-17, H5 steps 4–5, the rest of the data boundary (PR #115, merged with #114).** As built: `ARCHITECTURE_TYPED_DOMAIN.md`, "Provider boundaries".
   - **Quota:**
     - Every provider account's requests and rows are counted per minute and per UTC month, and kept under `--state-dir`.
     - As the month runs down, it sheds backfill, then background, then normal; focus goes last.
@@ -25,7 +45,7 @@ _Living status doc. Keep it short; update whenever project state changes (branch
     - the NFL runner's log, and the football replay's strip lines from a full trace, carry NFLMeta's wording outside a stamped recording;
     - Polymarket's terms bar redistribution, and the cloud market service relays its prices to the family's boards (the user's call);
     - a persisted NFL play cursor would save a full re-read, about 280 rows a game, at each restart.
-- **2026-11-17, H5 steps 1–3, the data boundary (PR #114).** As built: `ARCHITECTURE_TYPED_DOMAIN.md`, "Provider boundaries".
+- **2026-11-17, H5 steps 1–3, the data boundary (PR #114, merged).** As built: `ARCHITECTURE_TYPED_DOMAIN.md`, "Provider boundaries".
   - **Scopes:** each league's slate is kept scope by scope (source, league, date), complete, partial or failed, ordered by monotonic receipt, with health per scope and per league. A UTC backstep no longer freezes membership, and a skipped row no longer drops its game.
   - **Identity:** full game ids in every key. Favorites are typed and ranked per league: `--favorite mlb:ATL --favorite mlb:COL --favorite nfl:CAR`, and a bare abbreviation still means MLB.
   - **Field coverage:** each game-state field says whether it was reported, inferred, defaulted, unavailable or not applicable. The schedule carries stage, doubleheader number, TBD start, national TV (MLB), provider date and resumed-from.
@@ -34,7 +54,7 @@ _Living status doc. Keep it short; update whenever project state changes (branch
     - one schedule source per league;
     - a slate that always skips a row stays partial and never removes a game until its date retires;
     - the cloud meter names NFL and NBA games by market slug, so their readings can't reach a board until the cloud maps them to the board's schedule ids. Its `_MAX_GAMES` (30) may also refuse a large mixed slate.
-- **2026-11-17, external review round 7: policy v2 ratified, and two fixes (this PR).** Details: `~/omni-review/plans/omni-build-fidelity-REVIEWS.md` (round 7).
+- **2026-11-17, external review round 7: policy v2 ratified, and two fixes (PR #113, merged).** Details: `~/omni-review/plans/omni-build-fidelity-REVIEWS.md` (round 7).
   - **The board policy is `BOARD_POLICY.md`**, `omni-board-policy/2`:
     - leverage (LI) per league on offline-built models, with a labeled proxy until each passes validation;
     - ranked favorites as weights (×4, ×2.5) with a combined floor that scales with leverage: 30% in a blowout to 70% close and late (the user's pick);
@@ -173,10 +193,9 @@ _Living status doc. Keep it short; update whenever project state changes (branch
 ## Next — round-7 sequence (2026-11-17): H5 → NFL onto the shared board with policy v2, A1b alongside → NBA → A1c
 
 - **A1a closeout: C1–C4 built** (PR #109). **D1–D4 merged** (PR #112). The defaults stand: the 12 s turn, the 30 s takeover threshold, 40% stale dimming, 2-minute stale live removal and the 10-minute source offline limit.
-- **The board policy:** `BOARD_POLICY.md` (v2, ratified 2026-11-17). It's built with NFL onto the shared board, on H5's types, with proxies for leverage until the MLB and NFL models pass validation in shadow.
-- **H5, the data boundary: done** (steps 1–3 in PR #114; 4–5 in this PR). Next, an external review of H5 as a whole (round 8), if the user wants one before the shared board.
-- **NFLMeta's plan before the shared NFL board:** the budget replay says Free can't carry a month (`SOURCES.md`). Builder is the user's call.
-- **NFL onto the shared board:** league producers over the common scheduler and release policy, with a per-board, per-league viewer delay. Round 5's R5-3, R5-4 and R5-8 land here, along with a mixed MLB/NFL replay that measures committed airtime and waits. The single-game runner stays as the rollback.
+- **The board policy:** `BOARD_POLICY.md` (v2, ratified 2026-11-17), built with NFL on the shared board, with proxies for leverage until the MLB and NFL models pass validation in shadow. The models are the next policy work.
+- **H5 and policy v2 with NFL on the shared board: built** (PRs #114, #115 and this PR). Next: external review round 8 on the whole slate, with an NBA card-design ask (from the 2026-11-16 BALLDONTLIE recording: which components fit each card per profile, and a first contact sheet).
+- **NFL on the shared board: built** (this PR), on its own viewer delay, with a mixed MLB/NFL replay that measures committed airtime and waits. The single-game runner stays as the rollback. Still to come: an NFL pregame card (needs a design), NFL records, and a dogfood Sunday on the board.
 - **A1b, alongside:** typed topology, a native smoke run on the Pi, and the frame-acknowledgement contract with the local driver; the receiver enforces each frame's generation and expiry, and its ACK carries the swap time. Then p50/p95/p99 costs, a canary with sink and feed interruptions, and bounded shutdown.
 - **NBA, once mixed MLB/NFL passes:** the Free `/games` capability first, keeping unknown apart from zero and provisional apart from final. The 2026-11-16 slate recording is analyzed in `SOURCES.md`. Poll about every 15 s, and parse the clock with a typed parser ("Q2 1:17", "Q1 :50.9"). There's no visible NBA probability in v1.
 - **A1c, deferred:** a guarded cutover of one board, and a soak.

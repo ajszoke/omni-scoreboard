@@ -178,7 +178,7 @@ def test_an_nfl_slate_in_the_same_plan_spends_nflmeta_not_statsapi() -> None:
     clock.advance(15 * S)
     assert Poller(plan, clock).run_due() == 1
     held = plan.held_back(nfl_slate)
-    assert held is not None and held.reason == "quota: NFLMeta requests exhausted"
+    assert held is not None and held.reason == "quota: NFLMeta Free spent for 2026-11: switch to Builder"
     assert plan.held_back(mlb_slate) is None
 
 

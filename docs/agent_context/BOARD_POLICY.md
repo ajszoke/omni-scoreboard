@@ -3,9 +3,16 @@
 **Version:** `omni-board-policy/2`.
 - **Ratified by the user** 2026-11-17, from the design in review round 7. The favorite floor scales with
   leverage (§3.4); the rest is as designed.
-- **Not built yet.** It lands with NFL on the shared board, on H5's types (`STATUS.md`, "Next").
-- Today's MLB board still runs the scheduler's bands (`omni/queue/scheduler.py`). The NFL runner runs its
-  own focus.
+- **Built** with NFL on the shared board (2026-11-17), on H5's types: `ARCHITECTURE_TYPED_DOMAIN.md`, "The
+  board policy". The app decides with it by default; `--board-policy 1` keeps the scheduler's old bands
+  (`omni/queue/scheduler.py`), and the NFL single-game runner keeps its own focus as the rollback.
+- **Not yet built:**
+  - **leverage models:** every league runs the labeled proxy (§3.1), so no action interrupt can qualify
+    from leverage; only verified feats do (§4);
+  - **records:** MLB's come from the pregame details, frozen at the start; NFL's are unknown (§10);
+  - **break signals the feeds lack:** NFL TV timeouts, injury timeouts and reviews in progress; MLB
+    equipment and umpire stoppages. A break that can't be detected is never lent;
+  - **NBA** on the shared board, and a **wake signal** for "Wake or output loss" (§6).
 - Every constant here is a policy default. Changing one bumps the version; it isn't a user setting unless
   §8 says so.
 

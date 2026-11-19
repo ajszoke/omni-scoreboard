@@ -7,17 +7,24 @@ The board refreshes and paints on separate cadences:
      each one it asked last answered, or why it failed;
   2. take each answer into its scope and reconcile the board's contests across scopes (`ContestStore`), so a
      scope that fails keeps what it had and another league's scopes carry on regardless;
-  3. run the live-card pipeline (`LiveBaseballPipeline`, delay-safe, no spoilers) over the baseball games, which
-     stages the card queue's changes, and drop what can no longer air. Another league's games stay members, and
-     count toward its health, but have no cards until a pipeline of their own joins the board. The pipeline gets
-     the whole clock reading: its holds are pinned, and released, on the monotonic clock, so a wall-clock jump
-     can't release one early;
-  4. publish the staged cards to the board together with how far their source can be trusted, and how
+  3. run each league's card pipeline (delay-safe, no spoilers) over its own games, both staging into the one card
+     queue, and drop what can no longer air: `LiveBaseballPipeline` over the baseball games, and, when the board
+     has NFL, `LiveFootballPipeline` over the NFL games. No game reaches a pipeline that can't draw it: another
+     league's games stay members, and count toward its health, but have no cards until a pipeline of their own
+     joins the board. Each pipeline gets the whole clock reading: its holds are pinned, and released, on the
+     monotonic clock, so a wall-clock jump can't release one early. What they did is reported as one result;
+  4. publish the staged cards to the board together with how far their source can be trusted, how
      many games have nothing to show because they wait out the TV delay or their feed has stopped
-     answering: one numbered input, so a paint on the frame thread sees all of a refresh or none of it.
+     answering, and what the board's policy reads (`omni.policy.view.PolicyView`: both leagues' games
+     carded live and their offers, from released state only, each offer naming a card still staged): one
+     numbered input, so a paint on the frame thread sees all of a refresh or none of it.
      Each league's health is its current scope's, judged on the monotonic clock. The board's is its
      healthiest league's, so one league going offline doesn't take another's cards down; with one league
      it is that league's. While a quota holds a league's current scope back, its reason says so.
+     A league is offline once `offline_after` has passed since a read of its scope was due. A scope's answer
+     counts as fresh for its `max_age`, which runs `FRESH_PAST_DUE` past when its next read falls due, so a
+     scope that is quiet by plan (NFL before kickoff, through a lone game's halftime hold, after the last final)
+     is never offline, and one that missed its due read goes offline `offline_after` later.
 - **`paint(at)`** asks the board (`BoardSession`) what should be up: a card, chosen by the queue and
   held by its dwell, or an explicit frame (idle, held, offline). It draws that through the
   `RendererRegistry`, a stale card dimmed, and commits it to the `DisplaySink`. The commit starts a
@@ -44,10 +51,12 @@ from __future__ import annotations
 from collections.abc import Callable, Hashable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, tzinfo
+from types import MappingProxyType
 from typing import Any
 
 from omni.app.contest_store import ContestStore, ProviderStatus, Reconciliation, ScopeHealth
 from omni.app.display import DisplaySink
+from omni.app.nfl_pipeline import LiveFootballPipeline
 from omni.app.pipeline import (
     FeedFetcher,
     GameLinesFetcher,
@@ -60,6 +69,7 @@ from omni.cards.base import CardId, ScoreboardCard
 from omni.core.clock import Clock, ClockReading, MonotonicTime
 from omni.core.enum import League, Sport
 from omni.domain.contest import TeamGame
+from omni.policy.view import EMPTY_POLICY_VIEW, PolicyView
 from omni.providers.base import PollScope, ScopeSource
 from omni.queue.scheduler import InterleavedCardQueue, Missed, SelectionReason
 from omni.renderers.board_frame import BoardFrameRenderer
@@ -81,8 +91,13 @@ from omni.tower.board import (
 )
 from omni.tower.lane import ChangeKind, LaneChange, earliest
 from omni.tower.segment import Surface
+from omni.policy.names import PolicyName
+from omni.policy.settings import PolicySettings
+from omni.preferences.favorites import Favorites
+from omni.tower.decisions import PolicyDecision
 
 __all__ = [
+    "FRESH_PAST_DUE",
     "OFFLINE_AFTER",
     "AppLoop",
     "LeagueHealth",
@@ -93,8 +108,13 @@ __all__ = [
     "TickResult",
 ]
 
-# How long the schedule may go unanswered before the board takes its cards down and says it's offline.
+# How long past when a read of the schedule was due the board waits for an answer before it takes its cards down
+# and says it's offline.
 OFFLINE_AFTER = timedelta(minutes=10)
+
+# How long past when its next read falls due a scope's answer counts as fresh: every source's today (MLB's slate,
+# NFL's scopes, a supervised provider's). A scope's `max_age` is that much past its due read.
+FRESH_PAST_DUE = timedelta(minutes=2)
 
 # Why a quota is holding a scope's asks back, while it is: e.g. "quota: NFLMeta rows 8% left, background slowed".
 QuotaNote = Callable[[PollScope], str | None]
@@ -122,9 +142,10 @@ class Refresh:
     provider_status: ProviderStatus  # the status of the league whose health the board was told
     health: BoardHealth  # what the board was told: its source's health, and games held in the TV delay
     reconciliation: Reconciliation  # what changed in the board's contests
-    pipeline: PipelineResult
+    pipeline: PipelineResult  # what every league's pipeline did, together
     unseen: tuple[Missed, ...] = ()  # cards that left before they ever aired, and why
     leagues: tuple[LeagueHealth, ...] = ()  # each covered league's health, in the order first covered
+    policy: PolicyView = EMPTY_POLICY_VIEW  # what the board's policy was told: both leagues', its offers' cards staged
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -151,6 +172,7 @@ class Painted:
     presented: Presentation | None = None  # set on a card's first committed frame
     changes: tuple[LaneChange[BoardPayload], ...] = ()  # what the board did since the last paint
     notes: tuple[BoardNote, ...] = ()  # what the board noted since the last paint
+    decisions: tuple[PolicyDecision, ...] = ()  # what the board's policy decided since the last paint
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -188,12 +210,20 @@ class AppLoop:
         policy: BoardPolicy = BoardPolicy(),
         offline_after: timedelta = OFFLINE_AFTER,
         quota: QuotaNote | None = None,
+        football: LiveFootballPipeline | None = None,
+        settings: PolicySettings | None = None,
+        favorites: Favorites = Favorites(),
+        fresh_past_due: timedelta = FRESH_PAST_DUE,
     ) -> None:
         if not schedules:
             raise ValueError("a board needs at least one schedule source")
+        # What the user set about how the board shares its airtime. None keeps the scheduler's bands
+        # (omni-board-policy/1), as a replay or a test that predates the policy decides.
+        self._settings = settings if settings is not None else PolicySettings(policy=PolicyName.BOARD_V1)
         self._schedules = tuple(schedules)
         self._store = store
         self._pipeline = pipeline
+        self._football = football  # NFL's cards, staged into the same queue; None: NFL's games have no cards
         self._queue = queue
         self._registry = registry
         self._sink = sink
@@ -207,10 +237,16 @@ class AppLoop:
         self._lanes = LaneClock()  # when each line went up, by the card's time on the board
         self._display_timezone = display_timezone  # the zone board clocks read in; None -> the render clock's
         self._offline_after = offline_after
+        self._fresh_past_due = fresh_past_due
         self._quota = quota  # why a quota holds a scope back; None: no quota is consulted
-        self._board = BoardSession(queue, sink.profile, policy=policy)
+        self._board = BoardSession(queue, sink.profile, policy=policy, settings=settings, favorites=favorites)
         self._frames = BoardFrameRenderer()
         self._health_changes_at: MonotonicTime | None = None  # when a league's health next changes by itself
+
+    @property
+    def settings(self) -> PolicySettings:
+        """The board policy's user settings this board runs with."""
+        return self._settings
 
     def refresh(self, at: ClockReading) -> Refresh:
         """One refresh as of ``at``: bring the cards up to date, and tell the board how its source stands."""
@@ -220,13 +256,9 @@ class AppLoop:
             self._store.take(schedule.observe(at, held))
         reconciliation = self._store.reconcile(at.monotonic)
 
-        baseball = [
-            contest
-            for contest in self._store.contests
-            if isinstance(contest, TeamGame) and contest.sport is Sport.BASEBALL
-        ]
+        games = [contest for contest in self._store.contests if isinstance(contest, TeamGame)]
         pipeline_result = self._pipeline.refresh(
-            baseball,
+            [game for game in games if game.sport is Sport.BASEBALL],
             at=at,
             fetch_feed=self._fetch_feed,
             fetch_win_probability=self._fetch_win_probability,
@@ -234,10 +266,16 @@ class AppLoop:
             fetch_pregame_details=self._fetch_pregame_details,
             fetch_game_lines=self._fetch_game_lines,
         )
+        if self._football is not None:
+            football = self._football.refresh([game for game in games if game.league is League.NFL], at=at)
+            pipeline_result = _together(pipeline_result, football)
         unseen = tuple(self._queue.prune(at))
         leagues = tuple(self._judge(league) for league in self._store.league_healths(at.monotonic))
         health, status = self._health(leagues, pipeline_result)
-        self._board.publish(health)
+        view = pipeline_result.policy
+        offers = tuple(offer for offer in view.offers if self._queue.card(offer.card.raw) is not None)
+        policy = PolicyView(view.games, offers)  # an offer whose card the prune just took has nothing to promote
+        self._board.publish(health, policy=policy)
         return Refresh(
             at=now,
             provider_status=status,
@@ -246,6 +284,7 @@ class AppLoop:
             pipeline=pipeline_result,
             unseen=unseen,
             leagues=leagues,
+            policy=policy,
         )
 
     def paint(self, at: ClockReading, *, clock: Clock | None = None) -> Painted:
@@ -291,9 +330,11 @@ class AppLoop:
             shown = clock.read()
             lanes.shown(shown.monotonic)
         self._board.committed(cue, shown)
-        changes, notes = tuple(self._board.changes()), tuple(self._board.notes())
+        changes, notes, decisions = self._board_says()
         if isinstance(payload, BoardFrame):
-            return Painted(at=shown.utc, shown=None, frame=payload.kind, changes=changes, notes=notes)
+            return Painted(
+                at=shown.utc, shown=None, frame=payload.kind, changes=changes, notes=notes, decisions=decisions
+            )
         presented = None
         if cue.reason is not None and any(change.kind is ChangeKind.UP for change in changes):
             presented = Presentation(
@@ -311,12 +352,19 @@ class AppLoop:
             presented=presented,
             changes=changes,
             notes=notes,
+            decisions=decisions,
         )
 
     def _failed(self, at: ClockReading, exc: Exception) -> Painted:
-        changes, notes = tuple(self._board.changes()), tuple(self._board.notes())
+        changes, notes, decisions = self._board_says()
         error = f"{type(exc).__name__}: {exc}"
-        return Painted(at=at.utc, shown=None, render_error=error, changes=changes, notes=notes)
+        return Painted(at=at.utc, shown=None, render_error=error, changes=changes, notes=notes, decisions=decisions)
+
+    def _board_says(
+        self,
+    ) -> tuple[tuple[LaneChange[BoardPayload], ...], tuple[BoardNote, ...], tuple[PolicyDecision, ...]]:
+        """What the board did, noted and decided since it was last asked."""
+        return tuple(self._board.changes()), tuple(self._board.notes()), tuple(self._board.decisions())
 
     def run_once(self, at: ClockReading) -> TickResult:
         """One refresh, then one paint, at ``at``."""
@@ -332,12 +380,13 @@ class AppLoop:
         )
 
     def refresh_deadline(self, at: ClockReading) -> MonotonicTime | None:
-        """When a refresh would next find something changed by itself, as of ``at``: a state, play or result
-        clearing the delay, a live card going stale or a stale game's cards coming down, the source going stale
-        or offline, or a card that hasn't aired running out of time to (it's dropped then, and traced as
-        missed)."""
+        """When a refresh would next find something changed by itself, as of ``at``, in either league: a state,
+        play or result clearing the delay, a caption's time running out, a live card going stale or a stale game's
+        cards coming down, the source going stale or offline, or a card that hasn't aired running out of time to
+        (it's dropped then, and traced as missed)."""
         missed = self._queue.next_miss(at)
-        return earliest((self._pipeline.next_deadline(at), self._health_changes_at, missed))
+        football = self._football.next_deadline(at) if self._football is not None else None
+        return earliest((self._pipeline.next_deadline(at), football, self._health_changes_at, missed))
 
     def next_deadline(self, at: ClockReading) -> MonotonicTime | None:
         """When either pass next has something to do by itself, as of ``at``."""
@@ -360,7 +409,8 @@ class AppLoop:
 
     def _judge(self, scope: ScopeHealth) -> LeagueHealth:
         """How far the board can trust a league's schedule, from its current scope's health. A quota holding
-        the scope back is the reason, fresh or not: it's why no newer answer came."""
+        the scope back is the reason, fresh or not: it's why no newer answer came. It's offline `offline_after`
+        past when a read of the scope was due."""
         league = scope.scope.league
         held = self._quota(scope.scope) if self._quota is not None else None
         error = held or scope.error or "no answer"
@@ -371,12 +421,13 @@ class AppLoop:
         # Ages are whole seconds, and a limit is passed only once a full second over it.
         second = timedelta(seconds=1)
         since = scope.fresh_from.monotonic
-        if scope.age > self._offline_after:
+        offline = max(scope.max_age - self._fresh_past_due, timedelta(0)) + self._offline_after
+        if scope.age > offline:
             reason = f"no schedule for over {_span(self._offline_after)}: {error}"
             return LeagueHealth(league=league, source=SourceHealth.OFFLINE, scope=scope, reason=reason)
         if scope.status is ProviderStatus.STALE:
             reason = f"no schedule for over {_span(scope.max_age)}: {error}"
-            changes_at = since + self._offline_after + second
+            changes_at = since + offline + second
             return LeagueHealth(
                 league=league, source=SourceHealth.STALE, scope=scope, reason=reason, changes_at=changes_at
             )
@@ -418,6 +469,31 @@ class _ShownLines(LaneFrame):
         for lane, text, overflows in self._asked:
             view.elapsed(lane, text, overflows=overflows)
         view.commit()
+
+
+def _together(first: PipelineResult, second: PipelineResult) -> PipelineResult:
+    """Two pipelines' passes as one: each kind of card, hold and final from both, ids sorted where a pass sorts
+    them."""
+    return PipelineResult(
+        pregames=first.pregames + second.pregames,
+        statuses=first.statuses + second.statuses,
+        ingested=first.ingested + second.ingested,
+        big_plays=first.big_plays + second.big_plays,
+        no_hitters=first.no_hitters + second.no_hitters,
+        finals=first.finals + second.finals,
+        held=tuple(sorted(first.held + second.held, key=str)),
+        removed=tuple(sorted(first.removed + second.removed, key=str)),
+        skipped=first.skipped + second.skipped,
+        warnings=first.warnings + second.warnings,
+        stale=tuple(sorted(first.stale + second.stale, key=str)),
+        releases=tuple(sorted(first.releases + second.releases, key=lambda release: str(release[0]))),
+        ends=first.ends + second.ends,
+        unconfirmed=tuple(sorted(first.unconfirmed + second.unconfirmed, key=str)),
+        corrections=first.corrections + second.corrections,
+        policy=PolicyView(
+            MappingProxyType({**first.policy.games, **second.policy.games}), first.policy.offers + second.policy.offers
+        ),
+    )
 
 
 def _span(span: timedelta) -> str:

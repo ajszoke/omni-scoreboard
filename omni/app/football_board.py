@@ -64,7 +64,8 @@ the final, released under the delay like any reading.
 A feed that stops answering is shown as stale: once no answer has come for `FEED_STALE_AFTER` past when
 the next was due, the card dims, the strip clears (a stoppage held on it too) and the meter goes, until
 the next answer is released. A feed the quota holds back goes stale the same way, and says so: its log
-names the quota once, and again only when the reason changes. A halftime hold is quiet on purpose and
+names the quota once, and again only when the reason changes. When the month is spent on NFLMeta's Free
+plan, the log says so once, plainly, with the next step: switch the account to Builder and restart. A halftime hold is quiet on purpose and
 never stale, nor is a final the feed has parked on.
 
 The market moves on a play as it happens, while the feed reports it 20 to 30 seconds later, so a fresh
@@ -78,7 +79,9 @@ ahead of the feed: the meter is opt-in until it's anchored to the market's own c
 The log keeps apart what arrives (`>`), what the strip puts up (`=`, when the display shows it), what it
 clears early (`x`: the field moved on without its play, the feed went stale, it failed to draw), what a
 display that went away took off the panel (`~`), and what it drops unseen (`-`), with notes on the feed
-itself (`!`).
+itself (`!`). Each line's telemetry names a strip entry by its kind (a routine play, a major score, with its
+play's number), and only the line it quotes carries the feed's words: what a play said, an injury's text, a
+note's detail, a failure's message (`omni.app.run_log`).
 """
 
 from __future__ import annotations
@@ -94,6 +97,7 @@ from omni.core.clock import ClockReading, MonotonicTime
 from omni.app.display import DisplaySink
 from omni.app.football_feed import AFTER_FINAL, RETRY_AFTER_FAILURE, FeedResult, FeedSource
 from omni.app.frame_stream import AcknowledgingSink, DisplayLost, DisplayReceipt, FrameShown
+from omni.app.run_log import LogLine, print_telemetry
 from omni.cards.base import CardId, CardKind, CardPriority, DedupeKey, DisplayTiming, LayoutSupport, ScoreboardCard
 from omni.cards.football import LiveFootballCardPayload
 from omni.core.enum import DisplayPriority, PanelProfile
@@ -237,7 +241,7 @@ class FootballBoard:
         logos: LogoStore | None = None,
         timezone: tzinfo | None = None,
         marquee: MarqueeStyle = DEFAULT_MARQUEE,
-        log: Callable[[str], None] = print,
+        log: Callable[[LogLine], None] = print_telemetry,
         renderer: Renderer[LiveFootballCardPayload] | None = None,
     ) -> None:
         self._feed = feed
@@ -269,7 +273,9 @@ class FootballBoard:
         self._prices: deque[_Price] = deque()  # the market's readings, oldest first
         self._last_step: ClockReading | None = None  # the previous step's reading, to notice a clock jump
         self._majors: set[SegmentKey] = set()  # the strip entries offered as major, which no backlog drops
+        self._labels: dict[SegmentKey, str] = {}  # each strip entry's kind, as the log's telemetry names it
         self._refused: str | None = None  # why the quota is holding the feed's asks back, while it is
+        self._spent_noted = False  # the log has said the plan's month is spent, and what to do next
 
     @property
     def showing(self) -> NflLiveSnapshot | None:
@@ -290,7 +296,7 @@ class FootballBoard:
                 self._take(reading, at)
                 if self._woke and not _jumped_since(reading, at):
                     self._woke = False
-                    self._log("woke: an answer from after the sleep is up")
+                    self._note("woke: an answer from after the sleep is up")
         stale = self._check_stale(at) or self._woke
         cue = self._strip.cue(at)
         if self._end_close(at):
@@ -345,7 +351,7 @@ class FootballBoard:
         if abs(jump) <= WALL_JUMP:
             return
         slept = jump > timedelta(0)
-        self._log(
+        self._note(
             f"clock: the wall clock jumped {_signed(jump)} against the monotonic clock"
             + (" (the host slept?)" if slept else "")
         )
@@ -354,7 +360,7 @@ class FootballBoard:
             self._trace(self._strip.changes())
             self._dropped(unseen, EndReason.SOURCE_STALE.value)
             self._woke = True
-            self._log("woke: dimming the card until an answer from after the sleep is up")
+            self._note("woke: dimming the card until an answer from after the sleep is up")
 
     def _stale_at(self) -> MonotonicTime | None:
         """When the feed goes stale if nothing more is heard: past when its next answer was due, by
@@ -371,10 +377,10 @@ class FootballBoard:
         stale = stale_at is not None and at.monotonic >= stale_at
         if stale and not self._stale:
             why = f" ({self._refused})" if self._refused is not None else ""
-            self._log(f"feed stale: no answer{why}; dimming the card until it answers")
+            self._note(f"feed stale: no answer{why}; dimming the card until it answers")
             self._dropped(self._strip.clear(at, EndReason.SOURCE_STALE), EndReason.SOURCE_STALE.value)
         elif self._stale and not stale:
-            self._log("feed answering again")
+            self._note("feed answering again")
         self._stale = stale
         return stale
 
@@ -437,11 +443,23 @@ class FootballBoard:
         self, reading: _Reading, events: Sequence[FootballEvent], at: ClockReading
     ) -> list[Segment[PlaySummary]]:
         """A reading's events for the strip, on a profile that draws one, available from its release."""
-        return _segments(reading, events, min(reading.show_at, at.utc)) if self._strip_drawn else []
+        if not self._strip_drawn:
+            return []
+        self._labels.update((SegmentKey(Surface.PLAY_STRIP, event.key), _entry(event)) for event in events)
+        return _segments(reading, events, min(reading.show_at, at.utc))
+
+    def _note(self, telemetry: str, quoting: str | None = None) -> None:
+        """A log line: our own telemetry, and the same line quoting the feed when it does."""
+        self._log(LogLine(telemetry, quoting))
+
+    def _strip_note(self, mark: str, segment: Segment[PlaySummary], suffix: str = "") -> None:
+        """A log line about a strip entry: its kind in the telemetry, and its words only in what it quotes."""
+        label = self._labels.get(segment.key, "an entry")
+        self._note(f"  {mark} {label}{suffix}", f"  {mark} {_words(segment.frames[0])}{suffix}")
 
     def _dropped(self, segments: list[Segment[PlaySummary]], why: str) -> None:
         for segment in segments:
-            self._log(f"  - {_words(segment.frames[0])} (unseen: {why})")
+            self._strip_note("-", segment, f" (unseen: {why})")
 
     def _credit(self, at: ClockReading) -> None:
         """Credit what the display says it showed since the last ask, as of ``at``, when the board learns
@@ -456,7 +474,7 @@ class FootballBoard:
                 continue
             if not receipt.confirmed and not self._unconfirmed:
                 self._unconfirmed = True
-                self._log(UNCONFIRMED_NOTE)
+                self._note(UNCONFIRMED_NOTE)
             handed = self._shown(receipt.frame)
             if handed is None:
                 continue
@@ -482,33 +500,39 @@ class FootballBoard:
         away lost, what went unseen."""
         mark = " (unconfirmed)" if unconfirmed else ""
         for change in changes:
-            words = _words(change.segment.frames[0])
+            segment = change.segment
             if change.kind is ChangeKind.UP:
-                self._log(f"  = {words}{mark}")
+                self._strip_note("=", segment, mark)
             elif change.kind is ChangeKind.AGAIN:
-                self._log(f"  = {words} (again, on the new display){mark}")
+                self._strip_note("=", segment, f" (again, on the new display){mark}")
             elif change.kind is ChangeKind.BLANKED:
-                self._log(f"  ~ {words} (blanked: the display went away)")
+                self._strip_note("~", segment, " (blanked: the display went away)")
             elif change.kind is ChangeKind.DOWN and change.reason is not None and change.reason in _EARLY:
-                self._log(f"  x {words} (cleared: {_CLEARED_WORDS.get(change.reason, change.reason.value)})")
+                self._strip_note("x", segment, f" (cleared: {_CLEARED_WORDS.get(change.reason, change.reason.value)})")
             elif change.kind is ChangeKind.DROPPED:
                 why = _UNSEEN_WORDS.get(change.reason, change.reason.value) if change.reason is not None else "dropped"
-                self._log(f"  - {words} (unseen: {why})")
+                self._strip_note("-", segment, f" (unseen: {why})")
 
     def _absorb(self, result: FeedResult, at: ClockReading) -> None:
         """An answer from the feed: queue its reading behind the broadcast delay, and log what came."""
         if self._holding and not result.held:
             self._holding = False
-            self._log("halftime hold over: polling again")
+            self._note("halftime hold over: polling again")
         snapshot = result.snapshot
         if snapshot is None:
-            if result.refused is None or result.error != self._refused:
-                self._log(f"feed: {result.error}")
+            if result.refused is not None and result.error != self._refused:
+                self._note(f"feed: {result.error}")  # the quota's own reason
+                notice = result.refused.notice
+                if notice is not None and not self._spent_noted:
+                    self._spent_noted = True
+                    self._note(notice)  # once, plainly, with the next step
+            elif result.refused is None:
+                self._note("feed: the ask failed", f"feed: {result.error}")  # a failure's message may quote the feed
             self._refused = result.error if result.refused is not None else None
             return
         self._refused = None
         for note in snapshot.notes:
-            self._log(f"  ! {note.kind.value}: {note.detail}")
+            self._note(f"  ! {note.kind.value}", f"  ! {note.kind.value}: {note.detail}")
         received = result.received_monotonic if result.received_monotonic is not None else at.monotonic
         price = self._probability(result, received)
         reading = _Reading(
@@ -528,14 +552,14 @@ class FootballBoard:
         line = _describe(snapshot) + meter
         if line != self._last_line:
             self._last_line = line
-            self._log(line)
+            self._note(line)
         for event in snapshot.events:
-            self._log(f"  > {_words(event.summary)}")
+            self._note(f"  > {_entry(event)}", f"  > {_words(event.summary)}")
         if result.holding:
             self._holding = True
-            self._log("halftime: holding off the feed")
+            self._note("halftime: holding off the feed")
         if reading.next_in >= AFTER_FINAL:
-            self._log("final: no more polling")
+            self._note("final: no more polling")
 
     def _probability(self, result: FeedResult, received: MonotonicTime) -> _Price | None:
         """The market's price from `meter_lag` before this answer arrived, if it's fresh enough."""
@@ -543,7 +567,7 @@ class FootballBoard:
         if quote is None:
             return None
         if quote.error is not None:
-            self._log(f"market: {quote.error}")
+            self._note("market: the ask failed", f"market: {quote.error}")
         else:
             self._prices.append(_Price(quote.probability, received))
         while len(self._prices) > 1 and received.since(self._prices[1].asked) >= self._meter_lag:
@@ -579,11 +603,11 @@ class FootballBoard:
             error = f"{type(exc).__name__}: {exc}"
             if error != self._paint_error:
                 self._paint_error = error
-                self._log(f"paint failed: {error}")
+                self._note(f"paint failed: {type(exc).__name__}", f"paint failed: {error}")  # it may quote a caption
             return
         if self._paint_error is not None:
             self._paint_error = None
-            self._log("paint recovered")
+            self._note("paint recovered")
         self._handed.append(_Handed(handed, at, cue, lanes, self._lanes_version))
 
     def _paint(
@@ -633,7 +657,8 @@ class FootballBoard:
             if cue is None:
                 raise
             self._strip.failed(cue, at)
-            self._log(f"strip: a caption failed to draw: {type(exc).__name__}: {exc}")
+            failed = f"strip: a caption failed to draw: {type(exc).__name__}"
+            self._note(failed, f"{failed}: {exc}")
             self._trace(self._strip.changes())
             return self._paint(reading, state, None, at, stale=stale)
         return frame, lanes, cue
@@ -711,6 +736,12 @@ def _frames(event: FootballEvent) -> tuple[PlaySummary, ...]:
 
 def _words(summary: PlaySummary) -> str:
     return summary.headline + (f" | {summary.detail}" if summary.detail else "")
+
+
+def _entry(event: FootballEvent) -> str:
+    """A strip entry as the log's telemetry names it, without its words: "routine play #57", "major score"."""
+    weight = "major" if event.major else "routine"
+    return f"{weight} {event.kind.value}" + (f" #{event.play}" if event.play is not None else "")
 
 
 def _closing_view(before: FootballGameState, at_break: FootballGameState) -> FootballGameState:

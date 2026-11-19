@@ -1228,3 +1228,95 @@ def test_a_games_stage_comes_from_its_week(changes: dict[str, Any], stage: Seaso
     game = _provider(feed).poll(GAME, _at(T0)).game
     assert game.stage is stage
     assert (game.game_number, game.provider_date, game.neutral_site, game.national_broadcast) == (None,) * 4
+
+
+# --- slate reads: several games in one live-scores read, no plays ---------------------------------------------
+
+
+def _game_row(game_id: int, away: str, home: str, phase: str, **changes: Any) -> dict[str, Any]:
+    return _row(
+        game_id=game_id,
+        away_team={"abbr": away, "score": 3},
+        home_team={"abbr": home, "score": 7},
+        phase=phase,
+        **changes,
+    )
+
+
+def test_the_day_list_reads_every_listed_game_unfiltered_as_answers_without_plays() -> None:
+    feed = FakeFeed()
+    pre = _game_row(1, "CAR", "ATL", "pre", period=0, situation=None)
+    final = _game_row(3, "DAL", "NYG", "post", status_detail="Final", play_sync={"status": "unknown"})
+    unreadable = _game_row(4, "XXX", "NYG", "in")
+    feed.scores = [_scores(pre, _row(), final, unreadable, "junk", {"game_id": "5"}, poll=7)]
+    slate = _provider(feed).day_list()
+    assert feed.requests == [("/api/v1/live-scores", {})]  # unfiltered
+    assert [snapshot.game.id.raw for snapshot in slate.snapshots] == ["1", str(GAME), "3"]
+    assert slate.listed == frozenset({1, GAME, 3, 4})  # every id it listed, read or not
+    assert slate.warnings == (
+        "game 4: unreadable (KeyError: 'XXX')",
+        "game 5: unreadable (ValueError: no kickoff time)",
+    )
+    upcoming, live, done = slate.snapshots
+    assert (upcoming.phase, upcoming.state, upcoming.game.status) == (NflPhase.PRE, None, GameStatus.PREGAME)
+    assert all(snapshot.events == () and not snapshot.caught_up for snapshot in slate.snapshots)
+    assert all(snapshot.poll_every == DurationSeconds(7) for snapshot in slate.snapshots)
+    assert [snapshot.settled for snapshot in slate.snapshots] == [False, False, True]  # a final has nothing left
+    assert live.state is not None and live.state.timeouts is None  # only the plays could count them
+    assert live.state.coverage[FootballField.TIMEOUTS] is FieldCoverage.UNAVAILABLE
+    assert done.state is not None and done.state.interval is FootballInterval.FINAL
+    assert done.state.coverage[FootballField.TIMEOUTS] is FieldCoverage.NOT_APPLICABLE  # nothing left to spend
+    assert done.state.coverage[FootballField.CHALLENGES] is FieldCoverage.NOT_APPLICABLE
+
+
+def test_a_slate_read_at_halftime_has_no_timeouts_to_count() -> None:
+    feed = FakeFeed()
+    feed.scores = [_scores(_row(status_detail="Halftime", clock="0:00", situation=None))]
+    [snapshot] = _provider(feed).day_list().snapshots
+    assert snapshot.state is not None and snapshot.state.interval is FootballInterval.HALFTIME
+    assert snapshot.state.coverage[FootballField.TIMEOUTS] is FieldCoverage.NOT_APPLICABLE  # they start over
+    assert snapshot.state.coverage[FootballField.CHALLENGES] is FieldCoverage.UNAVAILABLE
+
+
+def test_the_live_scores_read_names_its_games_and_asks_only_those_in_progress() -> None:
+    feed = FakeFeed()
+    feed.scores = [_scores(_row())]
+    provider = _provider(feed)
+    [snapshot] = provider.live_scores([GAME, 7]).snapshots
+    assert feed.requests == [("/api/v1/live-scores", {"phase": "in", "game_ids": f"7,{GAME}"})]
+    assert snapshot.phase is NflPhase.IN and snapshot.events == ()
+    for wrong in ([], list(range(101))):
+        with pytest.raises(ValueError, match="names 1 to 100 games"):
+            provider.live_scores(wrong)
+
+
+def test_a_games_scoreboard_is_read_by_its_id_or_says_why_it_cant_be() -> None:
+    feed = FakeFeed()
+    final = _row(phase="post", status_detail="Final")
+    feed.scores = [
+        _scores(_game_row(7, "DAL", "NYG", "in"), final),
+        _scores(),
+        _scores(_row(away_team={"abbr": "XXX"})),
+    ]
+    provider = _provider(feed)
+    snapshot = provider.scoreboard(GAME)
+    assert feed.requests == [("/api/v1/live-scores", {"game_id": GAME})]
+    assert snapshot.game.id.raw == str(GAME) and snapshot.settled and snapshot.events == ()
+    with pytest.raises(ProviderError, match=f"NFLMeta has no readable game {GAME}: no longer lists it"):
+        provider.scoreboard(GAME)
+    with pytest.raises(ProviderError, match=f"game {GAME}: unreadable \\(KeyError: 'XXX'\\)"):
+        provider.scoreboard(GAME)
+
+
+def test_the_hold_s_end_is_known_once_it_has_begun_and_games_are_dated_in_the_league_s_zone() -> None:
+    feed = FakeFeed()
+    halftime = _scores(_synced("p0", status_detail="Halftime", clock="0:00"))
+    feed.scores = [_scores(_row()), halftime]
+    feed.plays = [_page(_change("p0", 100, "Kneel."))]
+    provider = _provider(feed)
+    assert provider.hold_ends(GAME) is None  # never polled
+    provider.poll(GAME, _at(T0))
+    assert provider.hold_ends(GAME) is None  # no halftime yet
+    provider.poll(GAME, _at(T0 + timedelta(minutes=1)))
+    assert provider.hold_ends(GAME) == _at(T0 + timedelta(minutes=1) + HALFTIME_HOLD).monotonic
+    assert str(provider.schedule_timezone) == "America/New_York"

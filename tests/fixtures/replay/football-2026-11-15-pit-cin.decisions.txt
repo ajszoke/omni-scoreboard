@@ -49,7 +49,7 @@ versions: policy omni-nfl-solo/1 | config omni-config/1 76a93823d4d8 | rules omn
   1500.50  strip  -
   1517.50  field  Q1 0-3 kickoff home
   1517.50  strip  PLAY 14 | detail 14
-  1527.50  strip  TV TIMEOUT 15
+  1527.50  strip  OFFICIAL TIMEOUT 15
   1698.00  field  Q1 0-3 -
   1698.00  strip  PLAY 16 | detail 16
   1718.00  strip  -
@@ -67,7 +67,7 @@ versions: policy omni-nfl-solo/1 | config omni-config/1 76a93823d4d8 | rules omn
   1872.25  strip  -
   1889.25  field  Q1 0-3 home 4&4 @1
   1899.25  strip  PLAY 20 | detail 20
-  1909.25  strip  TV TIMEOUT 21
+  1909.25  strip  OFFICIAL TIMEOUT 21
   2069.75  field  Q1 0-3 home 1&5 @1
   2069.75  strip  PLAY 22 | detail 22
   2089.75  strip  PLAY 22 | players 22
@@ -175,7 +175,7 @@ versions: policy omni-nfl-solo/1 | config omni-config/1 76a93823d4d8 | rules omn
   3945.00  strip  PLAY 51 | detail 51
   3963.25  field  Q2 0-10 away 4&11 @1
   3963.25  strip  -
-  3973.25  strip  TV TIMEOUT 52
+  3973.25  strip  OFFICIAL TIMEOUT 52
   4125.00  field  Q2 0-10 away 1&12 @1
   4125.00  strip  PLAY 53 | detail 53
   4145.00  strip  PLAY 53 | players 53
@@ -193,7 +193,7 @@ versions: policy omni-nfl-solo/1 | config omni-config/1 76a93823d4d8 | rules omn
   4306.75  field  Q2 0-10 home 4&5 @1
   4306.75  strip  PLAY 57 | detail 57
   4326.75  strip  PLAY 57 | players 57
-  4336.75  strip  TV TIMEOUT 58
+  4336.75  strip  OFFICIAL TIMEOUT 58
   4400.25  field  Q2 0-10 away 1&13 @1
   4400.25  strip  REVIEW 59 | detail 59
   4480.75  field  Q2 0-10 home 2&13 @1
@@ -221,7 +221,7 @@ versions: policy omni-nfl-solo/1 | config omni-config/1 76a93823d4d8 | rules omn
   4754.25  strip  -
   4774.50  field  Q2 0-17 kickoff home
   4774.50  strip  CONVERSION 66 | detail 66
-  4784.50  strip  TV TIMEOUT 67
+  4784.50  strip  OFFICIAL TIMEOUT 67
   4794.50  strip  INJURY 68 | detail 68
   4955.50  field  Q2 0-17 -
   4955.50  strip  PLAY 69 | detail 69
@@ -322,7 +322,7 @@ versions: policy omni-nfl-solo/1 | config omni-config/1 76a93823d4d8 | rules omn
   7584.75  strip  -
   7609.00  field  Q3 3-24 home 2&5 @1
   7609.00  strip  PLAY 105 | detail 105
-  7629.00  strip  TV TIMEOUT 106
+  7629.00  strip  OFFICIAL TIMEOUT 106
   7770.00  field  Q3 3-24 home 4&18 @1
   7770.00  strip  -
   7780.00  strip  PLAY 107 | detail 107
@@ -363,7 +363,7 @@ versions: policy omni-nfl-solo/1 | config omni-config/1 76a93823d4d8 | rules omn
   8219.25  field  Q3 3-30 -
   8239.25  field  Q3 3-31 -
   8279.50  strip  SCORE 117 | detail 117
-  8289.50  strip  TV TIMEOUT 118
+  8289.50  strip  OFFICIAL TIMEOUT 118
   8450.25  strip  PLAY 119 | detail 119
   8470.25  strip  PLAY 119 | players 119
   8480.75  field  Q3 3-31 away 1&20 @1
@@ -380,7 +380,7 @@ versions: policy omni-nfl-solo/1 | config omni-config/1 76a93823d4d8 | rules omn
   8611.25  field  Q3 3-31 home 4&20 @1
   8611.25  strip  -
   8621.25  strip  PLAY 123 | detail 123
-  8631.25  strip  TV TIMEOUT 124
+  8631.25  strip  OFFICIAL TIMEOUT 124
   8772.00  field  Q3 3-31 home 1&1 @2
   8772.00  strip  -
   8792.00  strip  PLAY 125 | detail 125
@@ -397,7 +397,7 @@ versions: policy omni-nfl-solo/1 | config omni-config/1 76a93823d4d8 | rules omn
   8928.00  strip  PLAY 128 | detail 128
   8938.00  field  Q3 3-31 away 4&1 @2
   8938.00  strip  -
-  8948.00  strip  TV TIMEOUT 129
+  8948.00  strip  OFFICIAL TIMEOUT 129
   9114.25  field  Q3 3-31 away 1&2 @2
   9114.25  strip  -
   9124.25  strip  PLAY 130 | detail 130
@@ -440,7 +440,7 @@ versions: policy omni-nfl-solo/1 | config omni-config/1 76a93823d4d8 | rules omn
   9673.25  field  Q4 11-31 kickoff away
   9673.25  strip  CONVERSION 141 | detail 141
   9693.25  strip  -
-  9703.25  strip  TV TIMEOUT 142
+  9703.25  strip  OFFICIAL TIMEOUT 142
   9864.00  field  Q4 11-31 -
   9864.00  strip  PLAY 143 | detail 143
   9884.00  strip  -
@@ -462,7 +462,7 @@ versions: policy omni-nfl-solo/1 | config omni-config/1 76a93823d4d8 | rules omn
  10193.50  field  Q4 11-38 -
  10203.50  field  Q4 11-38 kickoff home
  10203.50  strip  CONVERSION 148 | detail 148
- 10213.50  strip  TV TIMEOUT 149
+ 10213.50  strip  OFFICIAL TIMEOUT 149
  10374.50  field  Q4 11-38 -
  10374.50  strip  PLAY 150 | detail 150
  10394.50  strip  PLAY 150 | players 150
@@ -498,7 +498,7 @@ versions: policy omni-nfl-solo/1 | config omni-config/1 76a93823d4d8 | rules omn
  10772.50  field  Q4 18-38 kickoff away
  10780.75  strip  CONVERSION 159 | detail 159
  10800.75  strip  -
- 10823.00  strip  TV TIMEOUT 160
+ 10823.00  strip  OFFICIAL TIMEOUT 160
  10993.75  field  Q4 18-38 -
  10993.75  strip  PLAY 161 | detail 161
  11013.75  strip  PLAY 161 | players 161

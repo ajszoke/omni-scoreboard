@@ -17,7 +17,19 @@ versions, counts) may be kept. **Third-party content** (raw rows, play text, inj
 provider worded) follows its source's archive rule. A recording is third-party content: each recording
 folder gets a `RETENTION.json` stamp when it's made (`stamp_recording`), naming the source, when it was
 made, when it must be deleted by, and the terms' date. `recordings_due` lists recording folders with their
-stamps, reading nothing but the stamps; deleting stays the user's step.
+stamps, reading nothing but the stamps.
+
+The data expires on its own: `sweep_expired` deletes each stamped folder past its delete-by, after offering
+it to its source's `Miner`, which may keep our own telemetry from it first. A miner's failure never keeps an
+overdue folder: the terms bind, and mining is only our benefit. The sweep never deletes an unstamped folder
+(that's the user's step, by the source's rule), never one whose source's terms allow keeping it, and never
+anything a link under its root points to.
+
+Beside each source's terms stands the project's own use of its data (`ProjectUse`), and the user's ruling
+on that use (`RULINGS`). The one use so far is `ProjectUse.FAMILY_BOARD_DISPLAY`: showing a source's data on
+the family's own boards. Each entry answers whether its data may reach a family board that way
+(`FamilyDisplay`), and says where the answer comes from: the source's terms, or the user's ruling. The
+terms stay as written; the ruling never turns a refusal in them into a permission.
 
 `READS` says which sources each module reads or ships, so a new provider without an entry fails a test.
 """
@@ -25,32 +37,46 @@ stamps, reading nothing but the stamps; deleting stays the user's step.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator, Mapping
+import shutil
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path, PurePosixPath
-from typing import Any
+from types import MappingProxyType
+from typing import Any, Protocol
 
 from omni.core.enum import StrEnumMixin
 
 __all__ = [
+    "FAMILY_DISPLAY_RULING",
     "MANIFEST",
     "READS",
     "RETENTION_FILE",
+    "RULINGS",
     "Archive",
+    "Basis",
     "DataSource",
     "DueRecording",
     "DueStatus",
+    "FamilyDisplay",
+    "Miner",
+    "Mining",
     "OnTermination",
     "Permission",
+    "ProjectUse",
     "RetentionStamp",
+    "Ruling",
     "SourceRights",
+    "SweepAction",
+    "SweepReport",
+    "SweptRecording",
     "Telemetry",
     "read_stamp",
     "recordings_due",
     "retention_stamp",
     "stamp_recording",
+    "sweep_expired",
 ]
 
 RETENTION_FILE = "RETENTION.json"
@@ -106,9 +132,66 @@ class Telemetry(StrEnumMixin, str, Enum):
     THIRD_PARTY_CONTENT = "third_party_content"  # anything a provider worded: its source's archive rule
 
 
+class ProjectUse(StrEnumMixin, str, Enum):
+    """A use the project makes of a source's data, which its terms may not name as such."""
+
+    # Showing a source's data on the family's own boards, from a short-lived copy that expires: never
+    # archived, never sold, never shown to the public.
+    FAMILY_BOARD_DISPLAY = "family_board_display"
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Ruling:
+    """The user's ruling on one of the project's uses: when it was made, what it holds, the condition it rests
+    on, and when to look at it again."""
+
+    use: ProjectUse
+    ruled: date
+    holds: str
+    condition: str  # what every reliance on the ruling must keep true
+    revisit: str
+
+
+FAMILY_DISPLAY_RULING = Ruling(
+    use=ProjectUse.FAMILY_BOARD_DISPLAY,
+    ruled=date(2026, 11, 17),
+    holds="Friends and family seeing a source's data briefly on their own boards isn't a redistribution of it.",
+    condition="the copy that reaches a board expires quickly: never archived, sold or shown to the public",
+    revisit="revisit before any commercial use",
+)
+RULINGS: Mapping[ProjectUse, Ruling] = {FAMILY_DISPLAY_RULING.use: FAMILY_DISPLAY_RULING}
+
+
+class Basis(StrEnumMixin, str, Enum):
+    """Where an answer about a use comes from."""
+
+    TERMS = "terms"  # the source's own terms settle it
+    RULING = "ruling"  # the terms grant display or leave it open, and the user's ruling settles the rest
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class FamilyDisplay:
+    """Whether a source's data may reach a family board as `ProjectUse.FAMILY_BOARD_DISPLAY`, on what basis,
+    and how soon its longest-lived copy on the way expires.
+
+    An answer that rests on the ruling keeps the ruling's condition, so it records a bounded expiry: the
+    longest any copy the use makes (a cache's row, a diagnosis recording, a run log) is kept.
+    """
+
+    allowed: bool
+    basis: Basis
+    expiry: timedelta | None = None
+    why: str
+
+    def __post_init__(self) -> None:
+        if self.basis is Basis.RULING and self.allowed and (self.expiry is None or self.expiry <= timedelta(0)):
+            raise ValueError("a family display that rests on the ruling keeps its condition: a bounded expiry")
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class SourceRights:
-    """One source's terms, as far as they bear on what the project does with its data."""
+    """One source's terms, as far as they bear on what the project does with its data, and the answer for the
+    family's boards."""
 
     source: DataSource
     terms_url: str | None  # None when no single page holds them
@@ -123,16 +206,27 @@ class SourceRights:
     on_termination: OnTermination
     key_shared: Permission | None  # one key on several boards; None when the source takes no key
     notes: str
+    family_display: FamilyDisplay
 
     def __post_init__(self) -> None:
         if (self.archive is Archive.DIAGNOSIS) != (self.retention is not None):
             raise ValueError(f"{self.source}: a retention goes with a diagnosis archive, and only with one")
+        answer = self.family_display
+        if answer.allowed and self.display is Permission.DENIED:
+            raise ValueError(f"{self.source}: its terms bar display, so no family board may show it")
+        if answer.allowed and answer.basis is Basis.TERMS and not self.display.granted:
+            raise ValueError(f"{self.source}: its terms don't grant display, so they can't be what allows it")
 
 
 _RETROSHEET_NOTICE = (
     "The information used here was obtained free of charge from and is copyrighted by Retrosheet.  Interested"
     ' parties may contact Retrosheet at "www.retrosheet.org".'
 )
+
+_NFLMETA_RETENTION = timedelta(days=7)  # the user's rule for NFLMeta's recordings and run logs, since 2026-11-15
+# The market service's longest-lived copy: its S3 objects expire a day after they're written. Its table rows
+# expire after an hour, and a board ignores a price more than a minute old.
+_MARKET_SERVICE_COPIES = timedelta(days=1)
 
 # Where each term comes from: "SOURCES.md" is docs/agent_context/SOURCES.md, already verified there;
 # "read 2026-11-17" is a read of the terms themselves on that day, for this manifest.
@@ -150,6 +244,11 @@ _ENTRIES = (
         on_termination=OnTermination.DELETE,  # no agreement to end; the stricter value
         key_shared=None,
         notes="MLBAM's notice: individual, non-commercial, non-bulk use only; every other use needs its consent.",
+        family_display=FamilyDisplay(
+            allowed=True,
+            basis=Basis.TERMS,
+            why="Individual, non-commercial use: each board asks for its own owner and holds only what it shows.",
+        ),
     ),
     SourceRights(
         source=DataSource.NFLMETA,
@@ -158,13 +257,22 @@ _ENTRIES = (
         display=Permission.ALLOWED,  # SOURCES.md: Free is personal, non-commercial; paid plans may display scores
         cache=Permission.ALLOWED,  # SOURCES.md: "normal application caching", never a standing copy
         archive=Archive.DIAGNOSIS,  # SOURCES.md: no standing copy, no systematic accumulation
-        retention=timedelta(days=7),  # the user's rule since 2026-11-15
+        retention=_NFLMETA_RETENTION,
         train=Permission.DENIED,  # read 2026-11-17: "does not include model training or fine-tuning"
         redistribute=Permission.DENIED,  # read 2026-11-17: no redistributing, republishing or reselling
         attribution=None,  # read 2026-11-17: none of its own; material from nflverse carries nflverse's
         on_termination=OnTermination.DELETE,  # SOURCES.md: termination doesn't entitle keeping; a breach deletes
         key_shared=Permission.UNSTATED,  # read 2026-11-17: keys stay server-side and the holder answers for them
         notes="No standing copy and no training; a recording is for a diagnosis, deleted within 7 days.",
+        family_display=FamilyDisplay(
+            allowed=True,
+            basis=Basis.RULING,
+            expiry=_NFLMETA_RETENTION,
+            why=(
+                "Its terms bar redistributing it; the ruling holds the family seeing it briefly isn't that. Boards"
+                " hold it in memory, and its words land only in stamped folders deleted within 7 days."
+            ),
+        ),
     ),
     SourceRights(
         source=DataSource.BALLDONTLIE,
@@ -179,6 +287,11 @@ _ENTRIES = (
         on_termination=OnTermination.KEEP,  # SOURCES.md: §17, data may be kept after access ends
         key_shared=Permission.DENIED,  # SOURCES.md: §5 and §7(b) bar sharing keys
         notes="One key in a central poller may serve every Omni board; a key on each board would be sharing it.",
+        family_display=FamilyDisplay(
+            allowed=True,
+            basis=Basis.TERMS,
+            why="§6 allows any lawful personal or commercial use, and serving Omni's own boards isn't a substitute feed.",
+        ),
     ),
     SourceRights(
         source=DataSource.POLYMARKET_US,
@@ -193,6 +306,16 @@ _ENTRIES = (
         on_termination=OnTermination.DELETE,  # nothing allows keeping it; the stricter value
         key_shared=Permission.UNSTATED,  # SOURCES.md: the agreement binds each account holder
         notes="Public market data needs no key; the keyed stream's key stays in Omni's market service.",
+        family_display=FamilyDisplay(
+            allowed=True,
+            basis=Basis.RULING,
+            expiry=_MARKET_SERVICE_COPIES,
+            why=(
+                "Clause 22 bars redistributing it and nothing in the agreement speaks to display; the ruling holds"
+                " the family seeing a price briefly isn't redistribution. The market service's copies expire"
+                " within a day, and a board ignores a price a minute old."
+            ),
+        ),
     ),
     SourceRights(
         source=DataSource.BOVADA,
@@ -207,13 +330,19 @@ _ENTRIES = (
         on_termination=OnTermination.DELETE,  # nothing allows keeping it; the stricter value
         key_shared=None,
         notes="Private personal use: a board shows pregame lines for its owner, and the cloud poller leaves it off.",
+        family_display=FamilyDisplay(
+            allowed=False,
+            basis=Basis.TERMS,
+            why="9.3 bars storing it in another system, so it can't reach a board from a cache; 8.1 still lets a"
+            " board show its owner's pregame lines.",
+        ),
     ),
     SourceRights(
         source=DataSource.OMNI_MARKET_SERVICE,
         terms_url="https://github.com/ajszoke/omni-scoreboard/blob/main/cloud/README.md",  # our own service
         terms_read=date(2026, 11, 17),  # read 2026-11-17: cloud/README.md
         display=Permission.ALLOWED,
-        cache=Permission.ALLOWED,  # read 2026-11-17: its rows expire after an hour
+        cache=Permission.ALLOWED,  # read 2026-11-17: its rows expire after an hour, and its S3 copies after a day
         archive=Archive.NONE,  # what it holds is Polymarket US's prices, so Polymarket's rule
         train=Permission.UNSTATED,  # Polymarket US's rule
         redistribute=Permission.DENIED,  # it serves Omni's boards only
@@ -221,6 +350,12 @@ _ENTRIES = (
         on_termination=OnTermination.DELETE,
         key_shared=Permission.DENIED,  # read 2026-11-17: one token per board
         notes="Omni's own relay of market prices to its boards; what it holds follows the market's source.",
+        family_display=FamilyDisplay(
+            allowed=True,
+            basis=Basis.RULING,
+            expiry=_MARKET_SERVICE_COPIES,
+            why="It relays Polymarket US's prices, so Polymarket's answer: rows expire after an hour, S3 copies a day.",
+        ),
     ),
     SourceRights(
         source=DataSource.NFLVERSE,
@@ -235,6 +370,9 @@ _ENTRIES = (
         on_termination=OnTermination.KEEP,
         key_shared=None,
         notes="FTN's charting columns are CC BY-SA 4.0 (share-alike), so they're excluded; nothing here reads them.",
+        family_display=FamilyDisplay(
+            allowed=True, basis=Basis.TERMS, why="CC BY 4.0 allows any use, with the attribution."
+        ),
     ),
     SourceRights(
         source=DataSource.RETROSHEET,
@@ -249,6 +387,7 @@ _ENTRIES = (
         on_termination=OnTermination.KEEP,
         key_shared=None,
         notes="Not read yet: the planned MLB win-probability table's source. Its notice ships with it and in About.",
+        family_display=FamilyDisplay(allowed=True, basis=Basis.TERMS, why="Its notice allows any use, shown with it."),
     ),
     SourceRights(
         source=DataSource.WIKIPEDIA_COLORS,
@@ -263,6 +402,11 @@ _ENTRIES = (
         on_termination=OnTermination.KEEP,
         key_shared=None,
         notes="The NBA palette's starting colors; share-alike.",
+        family_display=FamilyDisplay(
+            allowed=True,
+            basis=Basis.TERMS,
+            why="CC BY-SA 4.0 allows any use, with the attribution, under the same license.",
+        ),
     ),
     SourceRights(
         source=DataSource.TEAM_LOGOS,
@@ -277,6 +421,11 @@ _ENTRIES = (
         on_termination=OnTermination.DELETE,  # no agreement to end; the stricter value
         key_shared=None,
         notes="Team trademarks: display only, as the boards' committed tiles; never redistributed beyond the boards.",
+        family_display=FamilyDisplay(
+            allowed=True,
+            basis=Basis.TERMS,
+            why="Display only, as the boards' committed tiles, never beyond the boards.",
+        ),
     ),
 )
 
@@ -319,6 +468,10 @@ READS: Mapping[str, frozenset[DataSource]] = {
     "tools/fetch_nfl_logos.py": frozenset({DataSource.NFLVERSE, DataSource.TEAM_LOGOS}),
     "tools/nflmeta_record.py": frozenset({DataSource.NFLMETA}),
     "tools/nflmeta_replay_trace.py": frozenset({DataSource.NFLMETA}),  # reads a recording
+    "omni/telemetry/nflmeta_mine.py": frozenset({DataSource.NFLMETA}),  # reads a recording, keeps our measurements
+    "omni/telemetry/runner_log_mine.py": frozenset({DataSource.NFLMETA}),  # reads a run log that quotes the feed
+    "omni/telemetry/miners.py": frozenset({DataSource.NFLMETA}),
+    "tools/nflmeta_mine.py": frozenset({DataSource.NFLMETA}),
 }
 
 
@@ -333,6 +486,7 @@ class DueStatus(StrEnumMixin, str, Enum):
     KEPT = "kept"  # its source allows keeping it
     UNSTAMPED = "unstamped"
     UNREADABLE = "unreadable"  # a stamp that can't be read
+    LINKED = "linked"  # a link, which nothing here follows
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -363,7 +517,9 @@ class RetentionStamp:
         }
 
     def status(self, now: datetime) -> DueStatus:
-        if self.delete_by is None:
+        """Where the recording stands at ``now``. A source whose terms allow keeping is kept, whatever a stamp
+        says of a deadline."""
+        if self.delete_by is None or MANIFEST[self.source].archive is Archive.KEEP:
             return DueStatus.KEPT
         return DueStatus.OVERDUE if now >= self.delete_by else DueStatus.CURRENT
 
@@ -430,13 +586,14 @@ class DueRecording:
     def line(self) -> str:
         """The recording as the due-list prints it: its name and its stamp, never its content."""
         stamp = self.stamp
+        if self.status is DueStatus.LINKED:
+            return f"{self.path}  a link: not followed"
         if stamp is None:
             why = "stamp unreadable" if self.status is DueStatus.UNREADABLE else "unstamped"
             return f"{self.path}  {why}: follow the source's rule by hand"
-        if stamp.delete_by is None:
+        if stamp.delete_by is None or self.status is DueStatus.KEPT:
             return f"{self.path}  {stamp.source}  kept: its terms allow keeping"
-        due = f"{stamp.delete_by.astimezone(timezone.utc):%Y-%m-%d %H:%M} UTC"
-        return f"{self.path}  {stamp.source}  delete by {due}" + (
+        return f"{self.path}  {stamp.source}  delete by {_due(stamp.delete_by)}" + (
             "  OVERDUE" if self.status is DueStatus.OVERDUE else ""
         )
 
@@ -445,7 +602,8 @@ def recordings_due(root: Path, now: datetime) -> tuple[DueRecording, ...]:
     """Every recording under ``root``, by its path, with where it stands at ``now``. Deletes nothing.
 
     A folder with a stamp is a recording, and nothing under it is looked at. A folder with no stamp and no
-    folders in it is an unstamped recording, and so is a file lying beside folders. Only stamps are read.
+    folders in it is an unstamped recording, and so is a file lying beside folders; an empty folder is
+    nothing. A link to a folder under ``root`` is listed and never followed. Only stamps are read.
     """
     if not root.is_dir():
         return ()
@@ -463,14 +621,155 @@ def _walk(folder: Path, root: Path, now: datetime) -> Iterator[DueRecording]:
         yield DueRecording(name, stamp.status(now), stamp)
         return
     children = sorted(folder.iterdir())
+    if not children:
+        return  # an empty folder holds nothing: one the sweep emptied, say
     if folder != root and not any(child.is_dir() for child in children):
         yield DueRecording(name, DueStatus.UNSTAMPED)
         return
     for child in children:
-        if child.is_dir():
+        path = PurePosixPath(child.relative_to(root).as_posix())
+        if child.is_symlink():
+            yield DueRecording(path, DueStatus.LINKED)
+        elif child.is_dir():
             yield from _walk(child, root, now)
         else:
-            yield DueRecording(PurePosixPath(child.relative_to(root).as_posix()), DueStatus.UNSTAMPED)
+            yield DueRecording(path, DueStatus.UNSTAMPED)
+
+
+# --- the expiry sweep -------------------------------------------------------------------------------------
+
+
+class Miner(Protocol):
+    """Keeps our own telemetry from a recording (ids, kinds, reasons, timings, counts) before it's deleted, as
+    a digest outside the recording's folder."""
+
+    def digest_for(self, folder: Path, stamp: RetentionStamp) -> Path:
+        """Where ``folder``'s digest goes. Once it exists, the folder has been mined."""
+        ...
+
+    def mine(self, folder: Path, stamp: RetentionStamp) -> Path | None:
+        """Write ``folder``'s digest; its path, or None when the folder held nothing to mine."""
+        ...
+
+
+class Mining(StrEnumMixin, str, Enum):
+    """What came of offering an overdue recording to its source's miner."""
+
+    MINED = "mined"
+    ALREADY_MINED = "already mined"  # its digest was there: not mined twice
+    NOTHING_TO_MINE = "nothing to mine"
+    FAILED = "mining failed"  # reported; the recording is deleted anyway
+    NO_MINER = "no miner"  # its source has none
+
+
+class SweepAction(StrEnumMixin, str, Enum):
+    """What the sweep did with a recording."""
+
+    DELETED = "deleted"
+    KEPT = "kept"  # not due, kept by its terms, or not the sweep's to judge (unstamped, unreadable, a link)
+    DELETE_FAILED = "delete failed"
+
+
+@dataclass(frozen=True, slots=True)
+class SweptRecording:
+    """One recording the sweep looked at: where it stood, what the sweep did, and what its miner did."""
+
+    due: DueRecording
+    action: SweepAction
+    mining: Mining | None = None  # for an overdue recording
+    digest: Path | None = None  # the digest its miner wrote, or had already
+    # What failed, by its type, never its message: a message could quote the recording.
+    mining_failed: str | None = None
+    delete_failed: str | None = None
+
+    def line(self) -> str:
+        """The recording as the sweep reports it: its name, its stamp and what was done; never its content."""
+        stamp = self.due.stamp
+        if self.action is SweepAction.KEPT or stamp is None or stamp.delete_by is None:
+            return self.due.line()
+        done = "deleted" if self.action is SweepAction.DELETED else f"not deleted ({self.delete_failed})"
+        mined = self.mining.value if self.mining is not None else Mining.NO_MINER.value
+        if self.digest is not None:
+            mined += f" to {self.digest}"
+        elif self.mining_failed is not None:
+            mined += f" ({self.mining_failed})"
+        return f"{self.due.path}  {stamp.source}  {done}: due {_due(stamp.delete_by)}; {mined}"
+
+
+@dataclass(frozen=True, slots=True)
+class SweepReport:
+    """What one sweep of a root did, recording by recording."""
+
+    root: Path
+    recordings: tuple[SweptRecording, ...]
+
+    def count(self, action: SweepAction) -> int:
+        return sum(1 for swept in self.recordings if swept.action is action)
+
+    def summary(self) -> str:
+        """A line of counts for the root: what was deleted, kept, left to the user, and what failed."""
+        by_hand = sum(1 for swept in self.recordings if swept.due.stamp is None)
+        failed = self.count(SweepAction.DELETE_FAILED)
+        mining = sum(1 for swept in self.recordings if swept.mining is Mining.FAILED)
+        return (
+            f"swept {self.root}: {self.count(SweepAction.DELETED)} deleted, {self.count(SweepAction.KEPT)} kept"
+            f" ({by_hand} without a readable stamp, left to the source's rule by hand)"
+            + (f", {failed} failed to delete" if failed else "")
+            + (f", {mining} failed to mine" if mining else "")
+        )
+
+
+_NO_MINERS: Mapping[DataSource, Miner] = MappingProxyType({})
+
+
+def sweep_expired(
+    root: Path,
+    now: datetime,
+    *,
+    miners: Mapping[DataSource, Miner] = _NO_MINERS,
+    remove: Callable[[Path], None] = shutil.rmtree,
+) -> SweepReport:
+    """Delete each stamped recording under ``root`` past its delete-by at ``now``, offering it first to its
+    source's miner in ``miners``; what was done with each recording.
+
+    A miner's failure is reported and the recording deleted anyway, and one whose digest already exists isn't
+    mined again. A recording the sweep can't delete is reported and kept. Only stamps are read (a miner reads
+    what it mines), and only what ``remove`` is given is deleted: overdue stamped folders under ``root``, and
+    never a link or what it points to.
+    """
+    swept: list[SweptRecording] = []
+    for due in recordings_due(root, now):
+        stamp = due.stamp
+        if due.status is not DueStatus.OVERDUE or stamp is None:
+            swept.append(SweptRecording(due, SweepAction.KEPT))
+            continue
+        folder = root / str(due.path)
+        mining, digest, mining_failed = _mine(folder, stamp, miners.get(stamp.source))
+        action, delete_failed = SweepAction.DELETED, None
+        try:
+            remove(folder)
+        except OSError as exc:
+            action, delete_failed = SweepAction.DELETE_FAILED, type(exc).__name__
+        swept.append(SweptRecording(due, action, mining, digest, mining_failed, delete_failed))
+    return SweepReport(root, tuple(swept))
+
+
+def _mine(folder: Path, stamp: RetentionStamp, miner: Miner | None) -> tuple[Mining, Path | None, str | None]:
+    """Offer an overdue recording to its miner: what came of it, the digest, and what failed, if anything."""
+    if miner is None:
+        return Mining.NO_MINER, None, None
+    try:
+        digest = miner.digest_for(folder, stamp)
+        if digest.exists():
+            return Mining.ALREADY_MINED, digest, None
+        written = miner.mine(folder, stamp)
+    except Exception as exc:  # whatever the miner does wrong, the overdue recording still goes
+        return Mining.FAILED, None, type(exc).__name__
+    return (Mining.MINED, written, None) if written is not None else (Mining.NOTHING_TO_MINE, None, None)
+
+
+def _due(instant: datetime) -> str:
+    return f"{instant.astimezone(timezone.utc):%Y-%m-%d %H:%M} UTC"
 
 
 def _instant(raw: str) -> datetime:

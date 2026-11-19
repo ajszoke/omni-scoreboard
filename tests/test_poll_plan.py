@@ -180,6 +180,23 @@ def test_a_key_nobody_wants_is_forgotten_even_in_flight() -> None:
     assert plan.latest_by(dropped, MonotonicTime(60), clock.read()) is None
 
 
+def test_a_dropped_key_is_never_asked_again_and_its_ask_out_is_ignored() -> None:
+    plan, clock = _plan()
+    done, out = _key(1), _key(2)
+    _want(plan, clock, done)
+    _want(plan, clock, out)
+    [first, second] = plan.take_due(clock.read())
+    plan.answered(done, "once", clock.read(), ask=first.number)
+    plan.drop(done)
+    plan.drop(out)  # its ask is still out
+    plan.drop(_key(3))  # a key the plan never had
+    assert not plan.begin(second, clock.read())  # a worker reaching it makes no request
+    plan.answered(out, "late", clock.read(), ask=second.number)
+    clock.advance(15 * S)
+    assert len(plan) == 0 and plan.take_due(clock.read()) == []  # not asked again within its cadence, or ever
+    assert plan.latest(done, clock.read()) is None and plan.latest(out, clock.read()) is None
+
+
 def test_the_next_deadline_is_the_earliest_idle_due_time() -> None:
     plan, clock = _plan()
     assert plan.next_due() is None

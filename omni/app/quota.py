@@ -75,6 +75,7 @@ __all__ = [
     "UsageStore",
     "account_limits",
     "nflmeta_billed",
+    "spent_notice",
     "tallying",
     "usage_line",
 ]
@@ -135,7 +136,11 @@ POLYMARKET_US_PUBLIC = AccountLimits(per_minute=25 * 60)  # 25 a second per IP
 
 
 class NflMetaPlan(StrEnumMixin, str, Enum):
-    """The NFLMeta plan the board's key is on. The user chooses it; the board never assumes a paid one."""
+    """The NFLMeta plan the board's key is on. The user chooses it; the board never assumes a paid one.
+
+    Free comes first, and Builder once Free's month is spent: the user switches the account, and restarts
+    the board with the new plan. The month's counts carry over, since they're what NFLMeta bills.
+    """
 
     FREE = "free"
     BUILDER = "builder"  # $12 a month
@@ -143,6 +148,31 @@ class NflMetaPlan(StrEnumMixin, str, Enum):
     @property
     def limits(self) -> AccountLimits:
         return NFLMETA_BUILDER if self is NflMetaPlan.BUILDER else NFLMETA_FREE
+
+    @property
+    def label(self) -> str:
+        """The plan's name, as NFLMeta writes it: "Free", "Builder"."""
+        return str(self).capitalize()
+
+    @property
+    def upgrade(self) -> NflMetaPlan | None:
+        """The plan to switch to once this one's month is spent, if there is one."""
+        return NflMetaPlan.BUILDER if self is NflMetaPlan.FREE else None
+
+    @classmethod
+    def on(cls, limits: AccountLimits) -> NflMetaPlan | None:
+        """The plan whose limits these are, if any is."""
+        return next((plan for plan in cls if plan.limits == limits), None)
+
+    def spent_notice(self, month: BillingMonth) -> str | None:
+        """What a log says, once, when this plan's month is spent and a bigger plan is the next step."""
+        upgrade = self.upgrade
+        if upgrade is None:
+            return None
+        return (
+            f"NFLMeta {self.label} is spent for {month}: switch the account to {upgrade.label}"
+            f" and restart with --nflmeta-plan {upgrade.value}"
+        )
 
 
 def account_limits(nflmeta: NflMetaPlan = NflMetaPlan.FREE) -> dict[ProviderAccount, AccountLimits]:
@@ -228,10 +258,19 @@ class Admission:
     used: int | None = None  # requests in the last minute, when the minute refused it
     per_minute: int | None = None
     retry_at: MonotonicTime | None = None  # when the minute has room again, when the minute refused it
+    plan: NflMetaPlan | None = None  # NFLMeta's plan, when the month is spent on it
+    month: BillingMonth | None = None  # the month that's spent
 
     @property
     def admitted(self) -> bool:
         return self.refusal is None
+
+    @property
+    def notice(self) -> str | None:
+        """When the month is spent on a plan with a bigger one next, what a log says once, with the next step."""
+        if self.refusal is not Refusal.EXHAUSTED or self.plan is None or self.month is None:
+            return None
+        return self.plan.spent_notice(self.month)
 
     @property
     def slowed(self) -> bool:
@@ -249,6 +288,9 @@ class Admission:
         if self.refusal is Refusal.PER_MINUTE:
             return f"quota: {name} {self.used} of {self.per_minute} a minute used, {kind} waiting"
         if self.refusal is Refusal.EXHAUSTED:
+            upgrade = self.plan.upgrade if self.plan is not None else None
+            if self.plan is not None and upgrade is not None:
+                return f"quota: {name} {self.plan.label} spent for {self.month}: switch to {upgrade.label}"
             return f"quota: {name} {self.measure.value} exhausted" if self.measure else f"quota: {name} exhausted"
         if not self.held_back:
             return f"quota: {name} {kind} admitted"
@@ -428,6 +470,8 @@ class QuotaLedger:
                     refusal=Refusal.EXHAUSTED,
                     measure=refused.measure,
                     left=0,
+                    plan=NflMetaPlan.on(held.limits) if account is ProviderAccount.NFLMETA else None,
+                    month=held.month,
                 )
             tighter = min(lefts, key=lambda left: left.share, default=None)
             slowed_by = 1
@@ -514,14 +558,22 @@ class QuotaLedger:
 
     def _account(self, account: ProviderAccount, at: ClockReading) -> _Account:
         """The account's counts for the month of ``at``. A new month starts from zero; a clock set back into
-        an earlier month counts on into the later one, since nothing spent is ever given back."""
+        an earlier month counts on into the later one, since nothing spent is ever given back.
+
+        Usage carried over from an earlier run is judged against this run's limits: a provider's word that
+        nothing was left already raised the counts to the limit it was given under, so an account the ledger
+        limits by the month keeps only the counts, and a bigger plan since (Free, then Builder) has room
+        again. An account with no monthly limit has only the word, and keeps it.
+        """
         month = BillingMonth.of(at.utc)
         held = self._accounts.get(account)
         if held is None:
             limits = self._limits[account]  # an account the ledger doesn't know fails here, loudly
             usage = self._usage.pop(account, None)
             if usage is not None and usage.month >= month:
-                held = _Account(limits, usage.month, usage.requests, usage.rows, usage.exhausted)
+                counted = limits.requests_a_month is not None or limits.rows_a_month is not None
+                exhausted = usage.exhausted and not counted
+                held = _Account(limits, usage.month, usage.requests, usage.rows, exhausted)
             else:
                 held = _Account(limits, month)
             self._accounts[account] = held
@@ -577,6 +629,15 @@ def _reconcile(held: _Account, balance: ProviderBalance) -> None:
         if limits.rows_a_month is not None:
             held.rows = max(held.rows, limits.rows_a_month - balance.rows_left)
         held.exhausted = held.exhausted or balance.rows_left <= 0
+
+
+def spent_notice(ledger: QuotaLedger, at: ClockReading) -> str | None:
+    """When NFLMeta's month is spent on a plan with a bigger one next, what a log says, with the next step."""
+    account = ProviderAccount.NFLMETA
+    plan = NflMetaPlan.on(ledger.limits(account))
+    if plan is None or not ledger.exhausted(account, at):
+        return None
+    return plan.spent_notice(ledger.usage(account, at).month)
 
 
 def usage_line(ledger: QuotaLedger, account: ProviderAccount, at: ClockReading) -> str:

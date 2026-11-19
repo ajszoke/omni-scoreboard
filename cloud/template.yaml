@@ -42,12 +42,19 @@ Resources:
         AttributeName: expires_at
         Enabled: true
 
-  # The keepsake copy of every reading. It outlives the stack, so tearing the service down can't lose it.
+  # A day's copy of every reading, to diagnose the poller by. Boards may show a market's prices only from a
+  # copy that expires quickly (omni/providers/rights.py), so each reading object goes a day after it's written.
   Archive:
     Type: AWS::S3::Bucket
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
+      LifecycleConfiguration:
+        Rules:
+          - Id: readings-expire
+            Status: Enabled
+            Prefix: readings/
+            ExpirationInDays: 1
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }

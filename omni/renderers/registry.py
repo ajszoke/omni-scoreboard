@@ -74,7 +74,7 @@ class RendererRegistry:
 
 def default_registry() -> RendererRegistry:
     """A registry wired with today's renderers: baseball's live, pregame, final, big-play, no-hitter and status
-    cards, and football's live card."""
+    cards, and football's live card, whose renderer draws football's final too."""
     registry = RendererRegistry()
     registry.register(Sport.BASEBALL, CardKind.LIVE_GAME, LiveBaseballRenderer())
     registry.register(Sport.BASEBALL, CardKind.PREGAME, PregameRenderer())
@@ -82,5 +82,7 @@ def default_registry() -> RendererRegistry:
     registry.register(Sport.BASEBALL, CardKind.BIG_PLAY, BigPlayRenderer())
     registry.register(Sport.BASEBALL, CardKind.NO_HITTER, NoHitterRenderer())
     registry.register(Sport.BASEBALL, CardKind.STATUS, StatusRenderer())
-    registry.register(Sport.FOOTBALL, CardKind.LIVE_GAME, LiveFootballRenderer())
+    football = LiveFootballRenderer()
+    registry.register(Sport.FOOTBALL, CardKind.LIVE_GAME, football)
+    registry.register(Sport.FOOTBALL, CardKind.FINAL, football)
     return registry

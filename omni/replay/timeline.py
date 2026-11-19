@@ -39,7 +39,8 @@ class GameFrame:
     while the game is LIVE, its observed state. A LIVE frame must carry state — that
     is what the loop's live pipeline fetches. ``events`` are the feed's plays as of this
     frame, oldest first, as a real feed lists every play so far; ``decisions`` are a
-    final's winning, losing and saving pitchers.
+    final's winning, losing and saving pitchers. A ``dated`` frame's answer says when it
+    stood (its ``as_of``), as StatsAPI's does: the moment it's read, by the source's clock.
     """
 
     at: datetime
@@ -47,6 +48,7 @@ class GameFrame:
     state: BaseballGameState | None = None
     events: tuple[BaseballGameEvent, ...] = ()
     decisions: PitchingDecisions | None = None
+    dated: bool = False
 
     def __post_init__(self) -> None:
         if self.at.tzinfo is None:

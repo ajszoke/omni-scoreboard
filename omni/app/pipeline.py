@@ -57,6 +57,18 @@ and while the guard finds the wall clock suspect, everything waits its full dela
 pins each card's window to the monotonic clock as it takes the card in, so a final's post-game window and
 a big play's run their whole length whatever the wall clock does after.
 
+**The policy's view.** Each pass ends with what the board's policy may read (`omni.policy.view.PolicyView`), from
+released state only (`omni.app.policy_facts`):
+- **each game carded live:** its leverage (the labeled proxy) from the newest state to have cleared the delay; whether
+  its card is current; both clubs' records as the pregame details had them when the game started (unknown for a game
+  already live when the board started, so today's result never moves them); and the break and action evidence the
+  detectors (`omni.events.mlb_breaks`) found in each answer, held through the delay with that answer's state;
+- **offers:** a released big play whose class scores (`classify_baseball_play`, on the released states either side
+  of it) offers its big-play card, once the state after it has cleared the delay too; a confirmed feat at the final
+  (`classify_baseball_final`) offers the final card, and a correction offers it again under its next revision; an
+  active no-hit or perfect bid offers its no-hitter card as a reminder, a new moment each inning it carries deeper.
+  What a game's first look or an outage's catch-up brings is offered flagged so (`CandidateOrigin`), never as live.
+
 **Staleness.** A live card is current while its feed's newest answer is: for that answer's
 `current_for` from its receipt when the source says how long that is, and otherwise until a read
 fails. From that point, or from the first failed read if that comes first, the game's cards are
@@ -81,8 +93,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
+from types import MappingProxyType
 from typing import Callable, Iterable
 
+from omni.app.policy_facts import (
+    AwaitingSuccessor,
+    Offer,
+    PlayContext,
+    ReleasedBreaks,
+    StandingOffers,
+    interrupt_stakes,
+    major_offer,
+)
 from omni.cards.base import CardId, DedupeKey, EndBasis, GameEnd
 from omni.cards.baseball import STATUS_CARD_STATUSES
 from omni.cards.factory import CardFactory
@@ -99,6 +121,12 @@ from omni.domain.baseball import (
 )
 from omni.domain.contest import TeamGame
 from omni.events.baseball import BaseballGameEvent, LiveBaseballFeed
+from omni.events.mlb_breaks import mlb_break_evidence, mlb_latest_action
+from omni.policy.interrupts import classify_baseball_final, classify_baseball_play
+from omni.policy.leverage import baseball_proxy
+from omni.policy.pool import MatchupRecords, StartingRecords, TeamRecord
+from omni.policy.promotion import CandidateOrigin, PromotionCandidate, PromotionKey, PromotionKind
+from omni.policy.view import EMPTY_POLICY_VIEW, GameFacts, PolicyView
 from omni.providers.base import ProviderError
 from omni.queue.delay_policy import Arrival, DelayPolicy, Held, ReleaseGuard
 from omni.queue.delayed_event_stream import DelayedEventStream
@@ -222,6 +250,47 @@ class _Final:
     reveal: MonotonicTime  # when that answer clears the delay
     shown: Held[LiveBaseballFeed] | None = None  # the newest final answer to have cleared the delay
     key: str | None = None  # its card's dedupe key, once revealed
+    origin: CandidateOrigin = CandidateOrigin.LIVE  # where that first answer came from, for a feat's offer
+    corrections: int = 0  # how many times a later answer has corrected the card
+
+
+@dataclass(frozen=True, slots=True)
+class _Stated:
+    """A live state held in the delay, and where its answer came from: live, or an outage's catch-up."""
+
+    state: BaseballGameState
+    origin: CandidateOrigin
+
+
+@dataclass(frozen=True, slots=True)
+class _Answered:
+    """A game's newest answer: when it arrived, its state, the state of the answer before it, and when it clears
+    the delay."""
+
+    received: MonotonicTime
+    state: BaseballGameState
+    before: BaseballGameState | None
+    settled: MonotonicTime
+
+
+@dataclass(frozen=True, slots=True)
+class _ReleasedPlay:
+    """A big play whose card is up: the play, its card, when it cleared the delay, and its place in the game."""
+
+    game: TeamGame
+    event: BaseballGameEvent
+    card: DedupeKey
+    eligible: MonotonicTime
+    context: PlayContext[BaseballGameState]
+
+
+@dataclass(frozen=True, slots=True)
+class _Bid:
+    """A no-hit or perfect bid at one depth: the moment it is, when it first cleared the delay, and from where."""
+
+    key: PromotionKey
+    eligible: MonotonicTime
+    origin: CandidateOrigin
 
 
 @dataclass(slots=True)
@@ -261,6 +330,7 @@ class PipelineResult:
     ends: tuple[tuple[CardId, GameEnd], ...] = ()  # each final revealed this pass: when its game ended, and why
     unconfirmed: tuple[LeagueScopedId, ...] = ()  # games the schedule calls final that their feed hasn't yet
     corrections: tuple[CardId, ...] = ()  # finals whose result a later final answer changed this pass
+    policy: PolicyView = EMPTY_POLICY_VIEW  # what the board's policy may read after this pass: released state only
 
 
 class LiveBaseballPipeline:
@@ -281,7 +351,7 @@ class LiveBaseballPipeline:
         self._queue = queue
         self._pregame_keys: dict[LeagueScopedId, str] = {}  # contest id -> its pregame card's key
         self._status_keys: dict[LeagueScopedId, str] = {}  # contest id -> its (delay/suspension) status card's key
-        self._feeds: dict[LeagueScopedId, DelayedFeed[BaseballGameState]] = {}
+        self._feeds: dict[LeagueScopedId, DelayedFeed[_Stated]] = {}
         # contest id -> its win-probability timelines; delayed in lockstep with the state feed so the
         # meter shows the reading from the same lag-old moment as the score (never a fresher one).
         self._meter_tracks: dict[LeagueScopedId, _MeterTracks] = {}
@@ -292,6 +362,18 @@ class LiveBaseballPipeline:
         self._unconfirmed: dict[LeagueScopedId, MonotonicTime] = {}  # final by the schedule, not yet the feed: since
         self._stale: dict[LeagueScopedId, MonotonicTime] = {}  # when a game's live card stopped being current
         self._current_until: dict[LeagueScopedId, MonotonicTime] = {}  # when a game's newest answer stops being
+        # What the board's policy reads, from released state only.
+        self._games: dict[LeagueScopedId, TeamGame] = {}  # each game on the slate, as it last listed it
+        self._shown: dict[LeagueScopedId, BaseballGameState] = {}  # the newest state to have cleared the delay
+        self._baselined: set[LeagueScopedId] = set()  # games a state has cleared the delay for: the first is a baseline
+        self._answered: dict[LeagueScopedId, _Answered] = {}  # each game's newest answer, for its plays' context
+        self._breaks: dict[LeagueScopedId, ReleasedBreaks] = {}
+        self._pregame_records: dict[LeagueScopedId, MatchupRecords] = {}  # the records an upcoming game's card has
+        self._records = StartingRecords()
+        self._play_context: dict[tuple[LeagueScopedId, str], PlayContext[BaseballGameState]] = {}  # big plays held
+        self._awaiting: AwaitingSuccessor[_ReleasedPlay] = AwaitingSuccessor()
+        self._offers = StandingOffers()
+        self._bids: dict[LeagueScopedId, _Bid] = {}
 
     def refresh(
         self,
@@ -315,15 +397,21 @@ class LiveBaseballPipeline:
         """
         self._guard.observe(at)
         now = at.utc
-        live = [game for game in games if game.status is GameStatus.LIVE]
-        upcoming = [game for game in games if game.status in _UPCOMING_STATUSES]
-        irregular = [game for game in games if game.status in STATUS_CARD_STATUSES]
-        final = [game for game in games if game.status is GameStatus.FINAL]
+        slate = list(games)
+        listed = {game.id: game for game in slate}
+        for gone in set(self._games) - set(listed):
+            self._forget(gone)
+        self._games = listed
+        live = [game for game in slate if game.status is GameStatus.LIVE]
+        upcoming = [game for game in slate if game.status in _UPCOMING_STATUSES]
+        irregular = [game for game in slate if game.status in STATUS_CARD_STATUSES]
+        final = [game for game in slate if game.status is GameStatus.FINAL]
         out = _Pass()
 
         # Upcoming games card without a live feed — there is no score to spoil, so no delay.
         for game in upcoming:
             details, detail_warnings = self._pregame_details_for(game, fetch_pregame_details)
+            self._note_records(game, details)
             lines, line_warnings = self._game_lines_for(game, fetch_game_lines, now=now)
             out.warnings.extend(f"{game.id}: {warning}" for warning in (*detail_warnings, *line_warnings))
             out.pregames.append(self._surface_pregame(game, details, lines, at=at))
@@ -336,16 +424,18 @@ class LiveBaseballPipeline:
         meters = (fetch_win_probability, fetch_fallback_win_probability)
         ended: set[LeagueScopedId] = set()  # live by the schedule, but final by their own feed
         for game in live:
+            origin = self._origin(game.id)  # an answer while its card is stale ends an outage: it's a catch-up
             feed = self._read_feed(game, fetch_feed, at, out)
             if feed is not None and feed.status is GameStatus.FINAL:
                 ended.add(game.id)  # the feed's own word on its result comes first, whatever the schedule says yet
-                self._final_game(game, feed, at, out, meters)
+                self._final_game(game, feed, at, out, meters, origin)
                 continue
             self._note_staleness(game.id, feed, at, out)
             if feed is not None:
                 arrival = Arrival(received=feed.received or at, as_of=feed.as_of)
-                out.big_plays.extend(self._surface_big_plays(game, feed.events, arrival, at))
-                self._surface_state(game, feed.state, arrival, at, out, meters, no_hitter=True)
+                context = self._admit(game, feed, arrival, at, origin)
+                out.big_plays.extend(self._surface_big_plays(game, feed.events, arrival, at, context))
+                self._surface_state(game, feed, arrival, at, out, meters, origin, no_hitter=True)
             self._enforce_staleness(game.id, at)
 
         for game in final:
@@ -354,7 +444,9 @@ class LiveBaseballPipeline:
             if shown is not None and self._queue.card(shown) is None:
                 continue  # its card's window is over: a correction can't bring it back, so its feed isn't read
             # A revealed final's feed is read for corrections only: a failed read there changes nothing.
-            self._final_game(game, self._read_feed(game, fetch_feed, at, out, report=shown is None), at, out, meters)
+            origin = self._origin(game.id)
+            feed = self._read_feed(game, fetch_feed, at, out, report=shown is None)
+            self._final_game(game, feed, at, out, meters, origin)
 
         live_ids = {game.id for game in live} - ended
         final_ids = {game.id for game in final} | ended
@@ -378,6 +470,7 @@ class LiveBaseballPipeline:
             ends=tuple(out.ends),
             unconfirmed=tuple(sorted(self._unconfirmed, key=str)),
             corrections=tuple(out.corrections),
+            policy=self._policy_view(at),
         )
 
     @staticmethod
@@ -403,26 +496,29 @@ class LiveBaseballPipeline:
         at: ClockReading,
         out: _Pass,
         meters: tuple[WinProbFetcher | None, WinProbFetcher | None],
+        origin: CandidateOrigin,
     ) -> None:
         """A game that is over by its schedule or by its feed, with its feed's answer (None when there was
         none): reveal its result once the feed says final and the delay allows, keep correcting it after, and
-        until then keep its live card going as the feed has it, for a while."""
+        until then keep its live card going as the feed has it, for a while. ``origin`` says whether the answer
+        ends an outage."""
         final = self._finals.get(game.id)
         if final is not None and final.key is not None:
             self._correct_final(game, final, feed, at, out)
             return
         if feed is not None:
             arrival = Arrival(received=feed.received or at, as_of=feed.as_of)
+            context = self._admit(game, feed, arrival, at, origin)
             # Drain any walk-off held from the live passes: it clears the delay at its own play time, which
             # is at or before the final's reveal, so it flashes, then the final confirms it.
-            out.big_plays.extend(self._surface_big_plays(game, feed.events, arrival, at))
+            out.big_plays.extend(self._surface_big_plays(game, feed.events, arrival, at, context))
             if feed.status is GameStatus.FINAL:
-                final = self._confirm_final(game, feed, arrival, at)
+                final = self._confirm_final(game, feed, arrival, at, context)
             elif final is None:
                 # The feed hasn't caught up with the schedule: the live card carries on as the feed has it.
                 self._unconfirmed.setdefault(game.id, at.monotonic)
                 self._note_staleness(game.id, feed, at, out)
-                self._surface_state(game, feed.state, arrival, at, out, meters, no_hitter=False)
+                self._surface_state(game, feed, arrival, at, out, meters, origin, no_hitter=False)
         if final is None:
             if feed is None:
                 self._unconfirmed.setdefault(game.id, at.monotonic)
@@ -431,13 +527,22 @@ class LiveBaseballPipeline:
             return
         self._reveal_final(game, final, at, out)
 
-    def _confirm_final(self, game: TeamGame, feed: LiveBaseballFeed, arrival: Arrival, at: ClockReading) -> _Final:
-        """An answer that says the game is final: the first starts its reveal, and each is held through the delay."""
+    def _confirm_final(
+        self,
+        game: TeamGame,
+        feed: LiveBaseballFeed,
+        arrival: Arrival,
+        at: ClockReading,
+        context: PlayContext[BaseballGameState],
+    ) -> _Final:
+        """An answer that says the game is final: the first starts its reveal, and each is held through the delay.
+        The first answer the board ever had of the game being final is a baseline: its feat is offered so flagged."""
         final = self._finals.get(game.id)
         if final is None:
             answers: DelayedFeed[LiveBaseballFeed] = DelayedFeed(self._guard)
             answers.push(feed, arrival, at)
-            final = _Final(answers, seen=arrival.received.utc, reveal=self._guard.pin(arrival, at))
+            origin = CandidateOrigin.BASELINE if context.before is None else context.origin
+            final = _Final(answers, seen=arrival.received.utc, reveal=self._guard.pin(arrival, at), origin=origin)
             self._finals[game.id] = final
             # The feed agrees with the schedule now, and its live card is held for the reveal.
             self._unconfirmed.pop(game.id, None)
@@ -483,6 +588,7 @@ class LiveBaseballPipeline:
         )
         self._queue.ingest(card, at)
         final.key = card.dedupe_key.raw
+        self._offer_feat(game, result.state, card.dedupe_key, final.reveal, final)
         # By the reveal, any walk-off has cleared the same delay and fired, so the stream is drained.
         self._event_streams.pop(game.id, None)
         out.finals.append(card.id)
@@ -508,6 +614,29 @@ class LiveBaseballPipeline:
         if rebuilt.payload != card.payload:
             self._queue.ingest(replace(card, payload=rebuilt.payload), at)
             out.corrections.append(card.id)
+            final.corrections += 1
+            self._offer_feat(game, result.state, card.dedupe_key, newest.release, final)
+
+    def _offer_feat(
+        self, game: TeamGame, state: BaseballGameState, card: DedupeKey, eligible: MonotonicTime, final: _Final
+    ) -> None:
+        """A final the feed confirms as a perfect game or a no-hitter offers its card, under the revision of the
+        correction it comes from; a correction that leaves no feat withdraws the offer."""
+        key = PromotionKey(game.id, "final")
+        offer = major_offer(
+            classify_baseball_final(state, final=True).event_class,
+            key=key,
+            card=card,
+            eligible=eligible,
+            predecessor=None,  # a feat's value doesn't rest on leverage
+            stakes=interrupt_stakes(game, self._starting_records(game.id)),
+            revision=final.corrections,
+            origin=final.origin,
+        )
+        if offer is None:
+            self._offers.withdraw(key)
+        else:
+            self._offers.add(offer)
 
     @staticmethod
     def _pregame_details_for(
@@ -556,18 +685,24 @@ class LiveBaseballPipeline:
     def _surface_state(
         self,
         game: TeamGame,
-        state: BaseballGameState,
+        feed: LiveBaseballFeed,
         arrival: Arrival,
         at: ClockReading,
         out: _Pass,
         meters: tuple[WinProbFetcher | None, WinProbFetcher | None],
+        origin: CandidateOrigin,
         *,
         no_hitter: bool,
     ) -> None:
-        """Hold a game's new state in its delay feed, and card the newest that has cleared it (with the
-        no-hitter, when asked); report the game as held while nothing new has."""
+        """Hold a game's new state in its delay feed, with the break and action evidence its answer shows, and card
+        the newest that has cleared it (with the no-hitter, when asked); report the game as held while nothing new
+        has."""
         state_feed = self._feeds.setdefault(game.id, DelayedFeed(self._guard))
-        state_feed.push(state, arrival, at)
+        state_feed.push(_Stated(feed.state, origin), arrival, at)
+        received = arrival.received
+        self._breaks.setdefault(game.id, ReleasedBreaks(self._guard)).push(
+            mlb_break_evidence(feed, game, received), mlb_latest_action(feed, game, received), arrival, at
+        )
         safe = state_feed.latest_eligible(at)
         if safe is None:
             out.held.append(game.id)  # still inside the TV delay — nothing safe to show yet
@@ -578,17 +713,22 @@ class LiveBaseballPipeline:
         since = self._stale.get(game.id)
         if since is not None and at.monotonic.since(since) >= STALE_FOR:
             return  # its cards are down for staleness: nothing goes back up until its feed is current again
+        state = safe.value.state
+        baseline = game.id not in self._baselined  # the first state to clear for a game is what the board tuned in to
+        self._baselined.add(game.id)
         # The meter takes the newest reading that arrived no later than the state now on the card.
         win_prob, wp_warnings = self._safe_win_probability(game, *meters, visible=safe.arrival.received, at=at)
         out.warnings.extend(f"{game.id}: {warning}" for warning in wp_warnings)
-        priority = self._scorer.score_live_baseball(game, safe.value)
-        card = self._factory.live_baseball(game, safe.value, now=at.utc, priority=priority, win_probability=win_prob)
+        priority = self._scorer.score_live_baseball(game, state)
+        card = self._factory.live_baseball(game, state, now=at.utc, priority=priority, win_probability=win_prob)
         self._queue.ingest(card, at)
         self._card_keys[game.id] = card.dedupe_key.raw
+        self._shown[game.id] = state
         out.ingested.append(card.id)
         if no_hitter:
             # No-hitter rides the same delay-safe state, so it is revealed/broken only as aired.
-            no_hit = self._surface_no_hitter(game, safe.value, at=at)
+            bid_origin = CandidateOrigin.BASELINE if baseline else safe.value.origin
+            no_hit = self._surface_no_hitter(game, state, at=at, release=safe.release, origin=bid_origin)
             if no_hit is not None:
                 out.no_hitters.append(no_hit)
 
@@ -627,9 +767,15 @@ class LiveBaseballPipeline:
         return (primary_reading if primary_reading is not None else fallback_reading), warnings
 
     def _surface_big_plays(
-        self, game: TeamGame, events: tuple[BaseballGameEvent, ...], arrival: Arrival, at: ClockReading
+        self,
+        game: TeamGame,
+        events: tuple[BaseballGameEvent, ...],
+        arrival: Arrival,
+        at: ClockReading,
+        context: PlayContext[BaseballGameState],
     ) -> list[CardId]:
-        """Flash notable events as big-play cards once they clear the TV delay (once each)."""
+        """Flash notable events as big-play cards once they clear the TV delay (once each). Each new one keeps
+        ``context``, its answer's place in the game, so its card can be offered for promotion once released."""
         stream = self._event_streams.get(game.id)
         if stream is None:
             # First sight of this game: prime the backlog so plays from before we tuned
@@ -641,20 +787,33 @@ class LiveBaseballPipeline:
         else:
             for event in events:
                 if event.importance.priority >= _BIG_PLAY_MIN_BAND:
-                    stream.push(event, replace(arrival, occurred=event.source_time), at, key=event.id.raw)
+                    if stream.push(event, replace(arrival, occurred=event.source_time), at, key=event.id.raw):
+                        self._play_context[(game.id, event.id.raw)] = context
         surfaced: list[CardId] = []
         for held in stream.release(at):
             card = self._factory.big_play(game, held.value, now=at.utc)
             self._queue.ingest(card, at)
             surfaced.append(card.id)
+            played = self._play_context.pop((game.id, held.value.id.raw))
+            self._awaiting.add(played.settled, _ReleasedPlay(game, held.value, card.dedupe_key, held.release, played))
         return surfaced
 
-    def _surface_no_hitter(self, game: TeamGame, state: BaseballGameState, *, at: ClockReading) -> CardId | None:
+    def _surface_no_hitter(
+        self,
+        game: TeamGame,
+        state: BaseballGameState,
+        *,
+        at: ClockReading,
+        release: MonotonicTime,
+        origin: CandidateOrigin,
+    ) -> CardId | None:
         """Surface (or refresh) an active no-hitter / perfect-game card, or remove it once broken.
 
         The depth shown is the pitching side's *finished* innings (not the raw current inning),
         and a confirmed clean sheet promotes the card to a perfect game — both off the same
         delay-safe state, so the feat is revealed and un-revealed only as the broadcast would show.
+        Each depth (and a perfect bid turning into a plain no-hitter) is a moment of its own for a reminder,
+        eligible from the ``release`` of the state that first showed it; ``origin`` is that state's.
         """
         feat = pitching_feat_progress(state, min_completed_innings=_NO_HITTER_MIN_COMPLETED_INNINGS)
         if feat is None:
@@ -668,6 +827,10 @@ class LiveBaseballPipeline:
         )
         self._queue.ingest(card, at)
         self._no_hitter_keys[game.id] = card.dedupe_key.raw
+        moment = PromotionKey(game.id, f"{feat.kind.value} through {feat.completed_innings}")
+        bid = self._bids.get(game.id)
+        if bid is None or bid.key != moment:
+            self._bids[game.id] = _Bid(moment, release, origin)
         return card.id
 
     def _note_staleness(
@@ -714,6 +877,7 @@ class LiveBaseballPipeline:
             for key in keys:
                 self._queue.remove(key)
             self._card_keys.pop(game_id, None)
+            self._shown.pop(game_id, None)
             self._no_hitter_keys.pop(game_id, None)
             return
         for key in keys:
@@ -774,7 +938,9 @@ class LiveBaseballPipeline:
                 if key is not None:
                     self._queue.remove(key)
                     removed_cards.append(contest_id)
+                self._shown.pop(contest_id, None)
                 self._feeds.pop(contest_id, None)
+                self._breaks.pop(contest_id, None)  # its break evidence rides the state feed's lifecycle too
                 self._meter_tracks.pop(contest_id, None)  # win-prob buffers ride the state feed's lifecycle
             no_hitter_key = self._no_hitter_keys.pop(contest_id, None)
             if no_hitter_key is not None:
@@ -786,6 +952,96 @@ class LiveBaseballPipeline:
         for contest_id in set(self._current_until) - (live_ids | holding):
             del self._current_until[contest_id]
         return tuple(sorted(removed_cards, key=str))
+
+    # --- what the board's policy reads ---------------------------------------------------------------------------
+
+    def _origin(self, game_id: LeagueScopedId) -> CandidateOrigin:
+        """Where a game's answer this pass comes from: one while its card is stale ends an outage."""
+        return CandidateOrigin.CATCH_UP if game_id in self._stale else CandidateOrigin.LIVE
+
+    def _admit(
+        self, game: TeamGame, feed: LiveBaseballFeed, arrival: Arrival, at: ClockReading, origin: CandidateOrigin
+    ) -> PlayContext[BaseballGameState]:
+        """A game's answer as the context of the plays it brings: the state of the answer before it, its own, and
+        when its own clears the delay. The same answer read again keeps the context it had."""
+        received = arrival.received.monotonic
+        last = self._answered.get(game.id)
+        if last is None or received > last.received:
+            before = last.state if last is not None else None
+            last = _Answered(received, feed.state, before, self._guard.pin(arrival, at))
+            self._answered[game.id] = last
+        return PlayContext(last.before, last.state, last.settled, origin)
+
+    def _note_records(self, game: TeamGame, details: PregameDetails | None) -> None:
+        """Keep an upcoming game's records, both clubs', as its pregame card has them."""
+        if details is None or details.away.record is None or details.home.record is None:
+            return
+        away, home = TeamRecord.of(details.away.record), TeamRecord.of(details.home.record)
+        self._pregame_records[game.id] = MatchupRecords(away=away, home=home)
+
+    def _starting_records(self, game_id: LeagueScopedId) -> MatchupRecords | None:
+        """A started game's records as they stood at its start; None for one the board didn't see before it."""
+        return self._records.read(game_id, self._pregame_records.get(game_id), started=True)
+
+    def _forget(self, game_id: LeagueScopedId) -> None:
+        """Drop what the policy kept of a game that has left the slate."""
+        self._pregame_records.pop(game_id, None)
+        self._records.forget(game_id)
+        self._baselined.discard(game_id)
+        self._answered.pop(game_id, None)
+        self._play_context = {key: played for key, played in self._play_context.items() if key[0] != game_id}
+        self._awaiting.forget(lambda released: released.game.id != game_id)
+
+    def _policy_view(self, at: ClockReading) -> PolicyView:
+        """What the board's policy may read after this pass: each game carded live, from its newest released state,
+        and the offers whose cards are staged."""
+        for track in self._breaks.values():
+            track.release(at)
+        for released in self._awaiting.ready(at.monotonic):
+            self._offer_play(released)
+        games: dict[LeagueScopedId, GameFacts] = {}
+        for game_id in self._card_keys:
+            track = self._breaks[game_id]
+            games[game_id] = GameFacts(
+                game=self._games[game_id],
+                leverage=baseball_proxy(self._shown[game_id]),
+                fresh=game_id not in self._stale,
+                records=self._starting_records(game_id),
+                breaks=track.breaks,
+                action=track.action,
+            )
+        self._bids = {game_id: bid for game_id, bid in self._bids.items() if game_id in self._no_hitter_keys}
+        reminders = [
+            PromotionCandidate(
+                key=bid.key,
+                kind=PromotionKind.REMINDER,
+                eligible=bid.eligible,
+                card=DedupeKey(self._no_hitter_keys[game_id]),
+                origin=bid.origin,
+            )
+            for game_id, bid in self._bids.items()
+        ]
+        offers: tuple[Offer, ...] = (*self._offers.current(at.monotonic, self._staged), *reminders)
+        return PolicyView(MappingProxyType(games), offers)
+
+    def _offer_play(self, released: _ReleasedPlay) -> None:
+        """A released big play whose class scores offers its card, valued on the released state before it."""
+        context, game = released.context, released.game
+        classification = classify_baseball_play(released.event, before=context.before, after=context.after)
+        offer = major_offer(
+            classification.event_class,
+            key=PromotionKey(game.id, released.event.id.raw),
+            card=released.card,
+            eligible=released.eligible,
+            predecessor=baseball_proxy(context.before) if context.before is not None else None,
+            stakes=interrupt_stakes(game, self._starting_records(game.id)),
+            origin=context.origin,
+        )
+        if offer is not None:
+            self._offers.add(offer)
+
+    def _staged(self, card: DedupeKey) -> bool:
+        return self._queue.card(card.raw) is not None
 
     @staticmethod
     def _final_release(

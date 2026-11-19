@@ -10,13 +10,16 @@ as the board's feed would have asked, against a stand-in NFLMeta built from the 
 - a play-feed ask gets every recorded change written by then, in the feed's order, after the cursor.
 
 It writes two traces of the answers the board would have received (`omni.replay.football`):
-- ``board-trace.jsonl`` beside the recording (git-ignored), as the provider worded them;
+- ``board-trace.jsonl`` inside the recording's folder, as the provider worded them. That folder is stamped
+  to expire, and it's the only place the trace's words land;
 - ``--out``, minimized for the repo. It keeps the timing, the phases and breaks, the score, who has the
   ball, the timeouts and challenges, and each strip entry's kind, order and when its play was written
   (so a play that arrived late replays as late). It has no NFLMeta text or ids: entries are renamed by
-  their order ("PLAY 17"), and the next snap's down, distance and spot, like the game clock, are
-  stand-ins. The stand-ins change exactly when the real values did, so a board decides alike on both
-  traces. This tool checks that before it writes.
+  their kind and order ("PLAY 17", as a replay names them), and the next snap's down, distance and spot,
+  like the game clock, are stand-ins. The stand-ins change exactly when the real values did, so a board
+  decides alike on both traces. This tool checks that before it writes.
+
+What it prints is counts, times and paths: never a word of the feed's.
 """
 
 from __future__ import annotations
@@ -39,7 +42,7 @@ from omni.domain.football import FootballGameState
 from omni.events.football import FootballEvent
 from omni.providers.nfl_teams import NflTeamRegistry
 from omni.providers.nflmeta import NFLMETA_SOURCE, FeedNote, NflLiveSnapshot, NflMetaLiveProvider
-from omni.replay.football import answer_record, header_record, load_trace, replay_board
+from omni.replay.football import EntryLabels, answer_record, header_record, load_trace, replay_board
 
 _PERIOD_SECONDS = 900
 # Recorded arrivals run up to a couple of seconds ahead of the feed's pace (request times vary, and the
@@ -125,7 +128,7 @@ class Minimizer:
     """Strips NFLMeta's words and ids from answers, keeping what a board decides on."""
 
     def __init__(self) -> None:
-        self._keys: dict[str, int] = {}
+        self._labels = EntryLabels()
         self._snaps: dict[tuple[int | None, ...], tuple[int | None, ...]] = {}
         self._counts: dict[tuple[bool, ...], int] = {}
         self._period_began: dict[int, datetime] = {}
@@ -140,18 +143,7 @@ class Minimizer:
         return replace(result, snapshot=replace(snapshot, state=state, events=events, notes=notes))
 
     def _event(self, event: FootballEvent) -> FootballEvent:
-        number = self._keys.setdefault(event.key, len(self._keys) + 1)
-        summary = event.summary
-        return replace(
-            event,
-            key=f"e{number}",
-            summary=replace(
-                summary,
-                headline=f"{event.kind.value.upper().replace('_', ' ')} {number}",
-                detail=f"detail {number}" if summary.detail else None,
-            ),
-            players_line=f"players {number}" if event.players_line else None,
-        )
+        return replace(self._labels.event(event), key=f"e{self._labels.number(event)}")
 
     def _state(self, state: FootballGameState, received: datetime) -> FootballGameState:
         down, distance, to_goal = self._snap((state.down, state.distance, state.yards_to_goal))

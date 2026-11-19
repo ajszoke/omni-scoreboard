@@ -1,0 +1,967 @@
+versions: policy omni-board-policy/2 | config omni-config/1 8aca364038f9 | rules omni-rules/2026.1 | models none
+     0.0  source  fresh
+     0.0  up      mlb:mlb_statsapi:bos-nyy:pregame  (rotation)
+     0.0  card    mlb:mlb_statsapi:bos-nyy:pregame  (neutral) | why: Red Sox at Yankees: no live game to weigh
+    45.0  wait    mlb:mlb_statsapi:sf-sd bid reminder 1 r0  (baseline)
+    48.0  down    mlb:mlb_statsapi:bos-nyy:pregame  (ran its time, 48.0s)
+    48.0  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+    48.0  base    mlb:mlb_statsapi:atl-nym:live  (recovery) | G 0.723 proxy F 4.00 T 1.000 Q 0.500 | target 47.92% (league 100.00%, 47.92% within) | actual - | debt +0.00s (league +0.00s) | why: Braves: favorite, close late game, a full turn after the alerts
+    60.0  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+    60.0  up      mlb:mlb_statsapi:col-lad:live  (rotation)
+    60.0  base    mlb:mlb_statsapi:col-lad:live  (weighted) | G 0.611 proxy F 2.50 T 1.000 Q 0.500 | target 27.53% (league 100.00%, 27.53% within) | actual 0.00% | debt +3.30s (league +0.00s) | why: Rockies: second favorite, close late game
+    72.0  down    mlb:mlb_statsapi:col-lad:live  (ran its time, 12.0s)
+    72.0  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+    72.0  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.723 proxy F 4.00 T 1.000 Q 0.500 | target 47.92% (league 100.00%, 47.92% within) | actual 50.00% | debt -0.50s (league +0.00s) | why: Braves: favorite, close late game
+    84.0  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+    84.0  up      mlb:mlb_statsapi:hou-tex:live  (rotation)
+    84.0  base    mlb:mlb_statsapi:hou-tex:live  (weighted) | G 0.309 proxy F 1.00 T 1.000 Q 0.500 | target 8.40% (league 100.00%, 8.40% within) | actual 0.00% | debt +3.03s (league +0.00s) | why: Astros at Rangers: in rotation
+    96.0  down    mlb:mlb_statsapi:hou-tex:live  (ran its time, 12.0s)
+    96.0  up      mlb:mlb_statsapi:chc-stl:live  (rotation)
+    96.0  base    mlb:mlb_statsapi:chc-stl:live  (weighted) | G 0.290 proxy F 1.00 T 1.000 Q 0.500 | target 8.25% (league 100.00%, 8.25% within) | actual 0.00% | debt +3.96s (league +0.00s) | why: Cubs at Cardinals: in rotation
+   108.0  down    mlb:mlb_statsapi:chc-stl:live  (ran its time, 12.0s)
+   108.0  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+   108.0  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.744 proxy F 4.00 T 1.000 Q 0.500 | target 48.07% (league 100.00%, 48.07% within) | actual 40.00% | debt +4.75s (league +0.00s) | why: Braves: favorite, close late game
+   120.0  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+   120.0  up      mlb:mlb_statsapi:col-lad:live  (rotation)
+   120.0  base    mlb:mlb_statsapi:col-lad:live  (weighted) | G 0.629 proxy F 2.50 T 1.000 Q 0.500 | target 27.59% (league 100.00%, 27.59% within) | actual 16.67% | debt +7.83s (league +0.00s) | why: Rockies: second favorite, close late game
+   132.0  down    mlb:mlb_statsapi:col-lad:live  (ran its time, 12.0s)
+   132.0  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+   132.0  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.744 proxy F 4.00 T 1.000 Q 0.500 | target 48.07% (league 100.00%, 48.07% within) | actual 42.86% | debt +4.29s (league +0.00s) | why: Braves: favorite, close late game
+   144.0  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+   144.0  up      mlb:mlb_statsapi:sf-sd:live  (rotation)
+   144.0  base    mlb:mlb_statsapi:sf-sd:live  (weighted) | G 0.251 proxy F 1.00 T 1.000 Q 0.500 | target 7.82% (league 100.00%, 7.82% within) | actual 0.00% | debt +7.56s (league +0.00s) | why: Giants at Padres: in rotation
+   156.0  down    mlb:mlb_statsapi:sf-sd:live  (ran its time, 12.0s)
+   156.0  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+   156.0  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.744 proxy F 4.00 T 1.000 Q 0.500 | target 48.07% (league 100.00%, 48.07% within) | actual 44.44% | debt +3.82s (league +0.00s) | why: Braves: favorite, close late game
+   168.0  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+   168.0  up      mlb:mlb_statsapi:col-lad:live  (rotation)
+   168.0  base    mlb:mlb_statsapi:col-lad:live  (weighted) | G 0.647 proxy F 2.50 T 1.000 Q 0.500 | target 27.65% (league 100.00%, 27.65% within) | actual 20.00% | debt +9.07s (league +0.00s) | why: Rockies: second favorite, close late game
+   180.0  down    mlb:mlb_statsapi:col-lad:live  (ran its time, 12.0s)
+   180.0  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+   180.0  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.765 proxy F 4.00 T 1.000 Q 0.500 | target 48.22% (league 100.00%, 48.22% within) | actual 45.45% | debt +3.38s (league +0.00s) | why: Braves: favorite, close late game
+   192.0  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+   192.0  up      mlb:mlb_statsapi:col-lad:live  (rotation)
+   192.0  base    mlb:mlb_statsapi:col-lad:live  (weighted) | G 0.647 proxy F 2.50 T 1.000 Q 0.500 | target 27.65% (league 100.00%, 27.65% within) | actual 25.00% | debt +3.71s (league +0.00s) | why: Rockies: second favorite, close late game
+   204.0  down    mlb:mlb_statsapi:col-lad:live  (ran its time, 12.0s)
+   204.0  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+   204.0  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.765 proxy F 4.00 T 1.000 Q 0.500 | target 48.22% (league 100.00%, 48.22% within) | actual 46.15% | debt +2.95s (league +0.00s) | why: Braves: favorite, close late game
+   216.0  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+   216.0  up      mlb:mlb_statsapi:hou-tex:live  (rotation)
+   216.0  base    mlb:mlb_statsapi:hou-tex:live  (weighted) | G 0.315 proxy F 1.00 T 1.000 Q 0.500 | target 8.27% (league 100.00%, 8.27% within) | actual 7.14% | debt +2.01s (league +0.00s) | why: Astros at Rangers: in rotation
+   228.0  down    mlb:mlb_statsapi:hou-tex:live  (ran its time, 12.0s)
+   228.0  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+   228.0  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.723 proxy F 4.00 T 1.000 Q 0.500 | target 47.92% (league 100.00%, 47.92% within) | actual 46.67% | debt +2.53s (league +0.00s) | why: Braves: favorite, close late game
+   240.0  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+   240.0  up      mlb:mlb_statsapi:col-lad:live  (rotation)
+   240.0  base    mlb:mlb_statsapi:col-lad:live  (weighted) | G 0.611 proxy F 2.50 T 1.000 Q 0.500 | target 27.53% (league 100.00%, 27.53% within) | actual 25.00% | debt +4.97s (league +0.00s) | why: Rockies: second favorite, close late game
+   252.0  down    mlb:mlb_statsapi:col-lad:live  (ran its time, 12.0s)
+   252.0  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+   252.0  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.723 proxy F 4.00 T 1.000 Q 0.500 | target 47.92% (league 100.00%, 47.92% within) | actual 47.06% | debt +2.03s (league +0.00s) | why: Braves: favorite, close late game
+   264.0  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+   264.0  up      mlb:mlb_statsapi:chc-stl:live  (rotation)
+   264.0  base    mlb:mlb_statsapi:chc-stl:live  (weighted) | G 0.290 proxy F 1.00 T 1.000 Q 0.500 | target 8.25% (league 100.00%, 8.25% within) | actual 5.56% | debt +5.70s (league +0.00s) | why: Cubs at Cardinals: in rotation
+   276.0  down    mlb:mlb_statsapi:chc-stl:live  (ran its time, 12.0s)
+   276.0  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+   276.0  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.723 proxy F 4.00 T 1.000 Q 0.500 | target 47.92% (league 100.00%, 47.92% within) | actual 47.37% | debt +1.53s (league +0.00s) | why: Braves: favorite, close late game
+   285.0  wait    mlb:mlb_statsapi:col-lad col-lad:ab:1 r0  (below_bar) | bar 1.10 action
+   288.0  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+   288.0  up      mlb:mlb_statsapi:col-lad:bigplay:col-lad:ab:1  (rotation)
+   288.0  base    mlb:mlb_statsapi:col-lad:bigplay:col-lad:ab:1  (weighted) | G 0.449 proxy F 2.50 T 1.000 Q 0.500 | target 24.71% (league 100.00%, 24.71% within) | actual 25.00% | debt +6.18s (league +0.00s) | why: Rockies: second favorite, its big play first
+   294.0  down    mlb:mlb_statsapi:col-lad:bigplay:col-lad:ab:1  (ran its time, 6.0s)
+   294.0  up      mlb:mlb_statsapi:col-lad:live  (rotation)
+   294.0  wait    mlb:mlb_statsapi:col-lad col-lad:ab:1 r0  (already_shown)
+   294.0  card    mlb:mlb_statsapi:col-lad:live  (base) | why: Rockies: second favorite, its big play first
+   300.0  down    mlb:mlb_statsapi:col-lad:live  (ran its time, 6.0s)
+   300.0  up      mlb:mlb_statsapi:sf-sd:live  (rotation)
+   300.0  base    mlb:mlb_statsapi:sf-sd:live  (weighted) | G 0.251 proxy F 1.00 T 1.000 Q 0.500 | target 8.13% (league 100.00%, 8.13% within) | actual 4.76% | debt +7.79s (league +0.00s) | why: Giants at Padres: in rotation
+   312.0  down    mlb:mlb_statsapi:sf-sd:live  (ran its time, 12.0s)
+   312.0  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+   312.0  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.744 proxy F 4.00 T 1.000 Q 0.500 | target 52.28% (league 100.00%, 52.28% within) | actual 45.45% | debt +7.27s (league +0.00s) | why: Braves: favorite, close late game
+   324.0  base    mlb:mlb_statsapi:atl-nym:live  (weighted, again) | G 0.744 proxy F 4.00 T 1.000 Q 0.500 | target 52.28% (league 100.00%, 52.28% within) | actual 47.83% | debt +1.55s (league +0.00s) | why: Braves: favorite, close late game
+   336.0  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 24.0s)
+   336.0  up      mlb:mlb_statsapi:col-lad:bigplay:col-lad:ab:2  (rotation)
+   336.0  base    mlb:mlb_statsapi:col-lad:bigplay:col-lad:ab:2  (weighted) | G 0.250 proxy F 2.50 T 1.000 Q 0.500 | target 21.25% (league 100.00%, 21.25% within) | actual 25.00% | debt +5.21s (league +0.00s) | why: Rockies: second favorite, its big play first
+   342.0  down    mlb:mlb_statsapi:col-lad:bigplay:col-lad:ab:2  (ran its time, 6.0s)
+   342.0  up      mlb:mlb_statsapi:col-lad:live  (rotation)
+   342.0  card    mlb:mlb_statsapi:col-lad:live  (base) | why: Rockies: second favorite, its big play first
+   348.0  down    mlb:mlb_statsapi:col-lad:live  (ran its time, 6.0s)
+   348.0  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+   348.0  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.765 proxy F 4.00 T 1.000 Q 0.500 | target 52.60% (league 100.00%, 52.60% within) | actual 48.00% | debt +2.09s (league +0.00s) | why: Braves: favorite, close late game
+   360.0  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+   360.0  up      mlb:mlb_statsapi:hou-tex:live  (rotation)
+   360.0  base    mlb:mlb_statsapi:hou-tex:live  (weighted) | G 0.315 proxy F 1.00 T 1.000 Q 0.500 | target 9.02% (league 100.00%, 9.02% within) | actual 7.69% | debt +2.48s (league +0.00s) | why: Astros at Rangers: in rotation
+   372.0  down    mlb:mlb_statsapi:hou-tex:live  (ran its time, 12.0s)
+   372.0  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+   372.0  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.765 proxy F 4.00 T 1.000 Q 0.500 | target 52.60% (league 100.00%, 52.60% within) | actual 48.15% | debt +2.72s (league +0.00s) | why: Braves: favorite, close late game
+   384.0  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+   384.0  up      mlb:mlb_statsapi:col-lad:live  (rotation)
+   384.0  base    mlb:mlb_statsapi:col-lad:live  (weighted) | G 0.251 proxy F 2.50 T 1.000 Q 0.500 | target 21.08% (league 100.00%, 21.08% within) | actual 25.00% | debt +3.35s (league +0.00s) | why: Rockies: second favorite
+   396.0  down    mlb:mlb_statsapi:col-lad:live  (ran its time, 12.0s)
+   396.0  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+   396.0  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.765 proxy F 4.00 T 1.000 Q 0.500 | target 52.60% (league 100.00%, 52.60% within) | actual 48.28% | debt +3.34s (league +0.00s) | why: Braves: favorite, close late game
+   408.0  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+   408.0  up      mlb:mlb_statsapi:chc-stl:live  (rotation)
+   408.0  base    mlb:mlb_statsapi:chc-stl:live  (weighted) | G 0.290 proxy F 1.00 T 1.000 Q 0.500 | target 9.78% (league 100.00%, 9.78% within) | actual 6.67% | debt +6.25s (league +0.00s) | why: Cubs at Cardinals: in rotation
+   420.0  down    mlb:mlb_statsapi:chc-stl:live  (ran its time, 12.0s)
+   420.0  up      mlb:mlb_statsapi:atl-nym:bigplay:atl-nym:ab:1  (rotation)
+   420.0  base    mlb:mlb_statsapi:atl-nym:bigplay:atl-nym:ab:1  (weighted) | G 0.494 proxy F 4.00 T 1.000 Q 0.500 | target 47.45% (league 100.00%, 47.45% within) | actual 48.39% | debt +3.35s (league +0.00s) | why: Braves: favorite, its big play first
+   426.0  down    mlb:mlb_statsapi:atl-nym:bigplay:atl-nym:ab:1  (ran its time, 6.0s)
+   426.0  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+   426.0  card    mlb:mlb_statsapi:atl-nym:live  (base) | why: Braves: favorite, its big play first
+   432.0  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 6.0s)
+   432.0  up      mlb:mlb_statsapi:sf-sd:live  (rotation)
+   432.0  base    mlb:mlb_statsapi:sf-sd:live  (weighted) | G 0.250 proxy F 1.00 T 1.000 Q 0.500 | target 9.37% (league 100.00%, 9.37% within) | actual 6.25% | debt +7.13s (league +0.00s) | why: Giants at Padres: in rotation
+   444.0  down    mlb:mlb_statsapi:sf-sd:live  (ran its time, 12.0s)
+   444.0  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+   444.0  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.494 proxy F 4.00 T 1.000 Q 0.500 | target 47.45% (league 100.00%, 47.45% within) | actual 48.48% | debt +2.74s (league +0.00s) | why: Braves: favorite
+   456.0  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+   456.0  up      mlb:mlb_statsapi:col-lad:live  (rotation)
+   456.0  base    mlb:mlb_statsapi:col-lad:live  (weighted) | G 0.250 proxy F 2.50 T 1.000 Q 0.500 | target 23.43% (league 100.00%, 23.43% within) | actual 23.53% | debt +7.65s (league +0.00s) | why: Rockies: second favorite
+   468.0  down    mlb:mlb_statsapi:col-lad:live  (ran its time, 12.0s)
+   468.0  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+   468.0  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.494 proxy F 4.00 T 1.000 Q 0.500 | target 47.41% (league 100.00%, 47.41% within) | actual 48.57% | debt +2.13s (league +0.00s) | why: Braves: favorite
+   480.0  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+   480.0  up      mlb:mlb_statsapi:col-lad:live  (rotation)
+   480.0  base    mlb:mlb_statsapi:col-lad:live  (weighted) | G 0.251 proxy F 2.50 T 1.000 Q 0.500 | target 23.42% (league 100.00%, 23.42% within) | actual 25.00% | debt +1.27s (league +0.00s) | why: Rockies: second favorite
+   492.0  down    mlb:mlb_statsapi:col-lad:live  (ran its time, 12.0s)
+   492.0  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+   492.0  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.494 proxy F 4.00 T 1.000 Q 0.500 | target 47.41% (league 100.00%, 47.41% within) | actual 48.65% | debt +1.51s (league +0.00s) | why: Braves: favorite
+   504.0  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+   504.0  up      mlb:mlb_statsapi:hou-tex:live  (rotation)
+   504.0  base    mlb:mlb_statsapi:hou-tex:live  (weighted) | G 0.312 proxy F 1.00 T 1.000 Q 0.500 | target 9.99% (league 100.00%, 9.99% within) | actual 7.89% | debt +4.38s (league +0.00s) | why: Astros at Rangers: in rotation
+   516.0  down    mlb:mlb_statsapi:hou-tex:live  (ran its time, 12.0s)
+   516.0  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+   516.0  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.494 proxy F 4.00 T 1.000 Q 0.500 | target 47.41% (league 100.00%, 47.41% within) | actual 48.72% | debt +0.89s (league +0.00s) | why: Braves: favorite
+   528.0  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+   528.0  up      mlb:mlb_statsapi:chc-stl:live  (rotation)
+   528.0  base    mlb:mlb_statsapi:chc-stl:live  (weighted) | G 0.299 proxy F 1.00 T 1.000 Q 0.500 | target 9.83% (league 100.00%, 9.83% within) | actual 7.50% | debt +6.01s (league +0.00s) | why: Cubs at Cardinals: in rotation
+   540.0  down    mlb:mlb_statsapi:chc-stl:live  (ran its time, 12.0s)
+   540.0  up      mlb:mlb_statsapi:sf-sd:live  (rotation)
+   540.0  base    mlb:mlb_statsapi:sf-sd:live  (weighted) | G 0.251 proxy F 1.00 T 1.000 Q 0.500 | target 9.34% (league 100.00%, 9.34% within) | actual 7.32% | debt +5.25s (league +0.00s) | why: Giants at Padres: in rotation
+   552.0  down    mlb:mlb_statsapi:sf-sd:live  (ran its time, 12.0s)
+   552.0  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+   552.0  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.499 proxy F 4.00 T 1.000 Q 0.500 | target 47.47% (league 100.00%, 47.47% within) | actual 47.62% | debt +5.97s (league +0.00s) | why: Braves: favorite
+   564.0  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+   564.0  up      mlb:mlb_statsapi:col-lad:live  (rotation)
+   564.0  base    mlb:mlb_statsapi:col-lad:live  (weighted) | G 0.251 proxy F 2.50 T 1.000 Q 0.500 | target 23.36% (league 100.00%, 23.36% within) | actual 23.26% | debt +8.92s (league +0.00s) | why: Rockies: second favorite
+   576.0  down    mlb:mlb_statsapi:col-lad:live  (ran its time, 12.0s)
+   576.0  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+   576.0  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.499 proxy F 4.00 T 1.000 Q 0.500 | target 47.47% (league 100.00%, 47.47% within) | actual 47.73% | debt +5.36s (league +0.00s) | why: Braves: favorite
+   588.0  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+   588.0  up      mlb:mlb_statsapi:col-lad:live  (rotation)
+   588.0  base    mlb:mlb_statsapi:col-lad:live  (weighted) | G 0.250 proxy F 2.50 T 1.000 Q 0.500 | target 23.48% (league 100.00%, 23.48% within) | actual 24.44% | debt +2.53s (league +0.00s) | why: Rockies: second favorite
+   600.0  down    mlb:mlb_statsapi:col-lad:live  (ran its time, 12.0s)
+   600.0  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+   600.0  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.489 proxy F 4.00 T 1.000 Q 0.500 | target 52.48% (league 100.00%, 52.48% within) | actual 47.83% | debt +4.74s (league +0.00s) | why: Braves: favorite
+   612.0  base    mlb:mlb_statsapi:atl-nym:live  (weighted, again) | G 0.489 proxy F 4.00 T 1.000 Q 0.500 | target 52.48% (league 100.00%, 52.48% within) | actual 48.94% | debt -0.96s (league +0.00s) | why: Braves: favorite
+   624.0  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 24.0s)
+   624.0  up      mlb:mlb_statsapi:hou-tex:live  (rotation)
+   624.0  base    mlb:mlb_statsapi:hou-tex:live  (weighted) | G 0.309 proxy F 1.00 T 1.000 Q 0.500 | target 11.07% (league 100.00%, 11.07% within) | actual 8.33% | debt +4.64s (league +0.00s) | why: Astros at Rangers: in rotation
+   636.0  down    mlb:mlb_statsapi:hou-tex:live  (ran its time, 12.0s)
+   636.0  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+   636.0  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.489 proxy F 4.00 T 1.000 Q 0.500 | target 52.48% (league 100.00%, 52.48% within) | actual 48.98% | debt -0.36s (league +0.00s) | why: Braves: favorite
+   648.0  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+   648.0  up      mlb:mlb_statsapi:col-lad:live  (rotation)
+   648.0  base    mlb:mlb_statsapi:col-lad:live  (weighted) | G 0.251 proxy F 2.50 T 1.000 Q 0.500 | target 25.97% (league 100.00%, 25.97% within) | actual 24.00% | debt +5.84s (league +0.00s) | why: Rockies: second favorite
+   660.0  down    mlb:mlb_statsapi:col-lad:live  (ran its time, 12.0s)
+   660.0  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+   660.0  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.494 proxy F 4.00 T 1.000 Q 0.500 | target 52.57% (league 100.00%, 52.57% within) | actual 49.02% | debt +0.24s (league +0.00s) | why: Braves: favorite
+   672.1  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+   672.1  up      mlb:mlb_statsapi:sf-sd:live  (rotation)
+   672.1  base    mlb:mlb_statsapi:sf-sd:live  (weighted) | G 0.251 proxy F 1.00 T 1.000 Q 0.500 | target 10.39% (league 100.00%, 10.39% within) | actual 7.69% | debt +6.35s (league +0.00s) | why: Giants at Padres: in rotation
+   684.1  down    mlb:mlb_statsapi:sf-sd:live  (ran its time, 12.0s)
+   684.1  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+   684.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.494 proxy F 4.00 T 1.000 Q 0.500 | target 52.57% (league 100.00%, 52.57% within) | actual 49.06% | debt +0.86s (league +0.00s) | why: Braves: favorite
+   696.1  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+   696.1  up      mlb:mlb_statsapi:col-lad:live  (rotation)
+   696.1  base    mlb:mlb_statsapi:col-lad:live  (weighted) | G 0.251 proxy F 2.50 T 1.000 Q 0.500 | target 25.97% (league 100.00%, 25.97% within) | actual 24.07% | debt +6.30s (league +0.00s) | why: Rockies: second favorite
+   708.1  down    mlb:mlb_statsapi:col-lad:live  (ran its time, 12.0s)
+   708.1  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+   708.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.499 proxy F 4.00 T 1.000 Q 0.500 | target 52.65% (league 100.00%, 52.65% within) | actual 49.09% | debt +1.48s (league +0.00s) | why: Braves: favorite
+   720.1  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+   720.1  up      mlb:mlb_statsapi:hou-tex:live  (rotation)
+   720.1  base    mlb:mlb_statsapi:hou-tex:live  (weighted) | G 0.315 proxy F 1.00 T 1.000 Q 0.500 | target 11.09% (league 100.00%, 11.09% within) | actual 8.93% | debt +3.27s (league +0.00s) | why: Astros at Rangers: in rotation
+   732.1  down    mlb:mlb_statsapi:hou-tex:live  (ran its time, 12.0s)
+   732.1  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+   732.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.499 proxy F 4.00 T 1.000 Q 0.500 | target 52.65% (league 100.00%, 52.65% within) | actual 49.12% | debt +2.11s (league +0.00s) | why: Braves: favorite
+   744.1  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+   744.1  up      mlb:mlb_statsapi:col-lad:live  (rotation)
+   744.1  base    mlb:mlb_statsapi:col-lad:live  (weighted) | G 0.251 proxy F 2.50 T 1.000 Q 0.500 | target 25.90% (league 100.00%, 25.90% within) | actual 24.14% | debt +6.74s (league +0.00s) | why: Rockies: second favorite
+   756.1  down    mlb:mlb_statsapi:col-lad:live  (ran its time, 12.0s)
+   756.1  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+   756.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.499 proxy F 4.00 T 1.000 Q 0.500 | target 52.65% (league 100.00%, 52.65% within) | actual 49.15% | debt +2.75s (league +0.00s) | why: Braves: favorite
+   768.1  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+   768.1  up      mlb:mlb_statsapi:sf-sd:live  (rotation)
+   768.1  base    mlb:mlb_statsapi:sf-sd:live  (weighted) | G 0.250 proxy F 1.00 T 1.000 Q 0.500 | target 10.41% (league 100.00%, 10.41% within) | actual 8.33% | debt +4.30s (league +0.00s) | why: Giants at Padres: in rotation
+   780.1  down    mlb:mlb_statsapi:sf-sd:live  (ran its time, 12.0s)
+   780.1  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+   780.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.489 proxy F 4.00 T 1.000 Q 0.500 | target 52.48% (league 100.00%, 52.48% within) | actual 49.18% | debt +3.36s (league +0.00s) | why: Braves: favorite
+   792.1  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+   792.1  up      mlb:mlb_statsapi:col-lad:live  (rotation)
+   792.1  base    mlb:mlb_statsapi:col-lad:live  (weighted) | G 0.250 proxy F 2.50 T 1.000 Q 0.500 | target 26.03% (league 100.00%, 26.03% within) | actual 24.19% | debt +7.21s (league +0.00s) | why: Rockies: second favorite
+   804.1  down    mlb:mlb_statsapi:col-lad:live  (ran its time, 12.0s)
+   804.1  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+   804.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.489 proxy F 4.00 T 1.000 Q 0.500 | target 52.48% (league 100.00%, 52.48% within) | actual 49.21% | debt +3.96s (league +0.00s) | why: Braves: favorite
+   816.1  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+   816.1  up      mlb:mlb_statsapi:col-lad:live  (rotation)
+   816.1  base    mlb:mlb_statsapi:col-lad:live  (weighted) | G 0.250 proxy F 2.50 T 1.000 Q 0.500 | target 26.03% (league 100.00%, 26.03% within) | actual 25.00% | debt +1.46s (league +0.00s) | why: Rockies: second favorite
+   828.1  down    mlb:mlb_statsapi:col-lad:live  (ran its time, 12.0s)
+   828.1  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+   828.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.494 proxy F 4.00 T 1.000 Q 0.500 | target 52.57% (league 100.00%, 52.57% within) | actual 49.23% | debt +4.56s (league +0.00s) | why: Braves: favorite
+   840.1  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+   840.1  up      mlb:mlb_statsapi:hou-tex:live  (rotation)
+   840.1  base    mlb:mlb_statsapi:hou-tex:live  (weighted) | G 0.312 proxy F 1.00 T 1.000 Q 0.500 | target 11.08% (league 100.00%, 11.08% within) | actual 9.09% | debt +4.57s (league +0.00s) | why: Astros at Rangers: in rotation
+   852.1  down    mlb:mlb_statsapi:hou-tex:live  (ran its time, 12.0s)
+   852.1  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+   852.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.494 proxy F 4.00 T 1.000 Q 0.500 | target 52.57% (league 100.00%, 52.57% within) | actual 49.25% | debt +5.17s (league +0.00s) | why: Braves: favorite
+   864.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted, again) | G 0.494 proxy F 4.00 T 1.000 Q 0.500 | target 52.57% (league 100.00%, 52.57% within) | actual 50.00% | debt -0.52s (league +0.00s) | why: Braves: favorite
+   876.1  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 24.0s)
+   876.1  up      mlb:mlb_statsapi:col-lad:live  (rotation)
+   876.1  base    mlb:mlb_statsapi:col-lad:live  (weighted) | G 0.251 proxy F 2.50 T 1.000 Q 0.500 | target 25.97% (league 100.00%, 25.97% within) | actual 24.64% | debt +5.04s (league +0.00s) | why: Rockies: second favorite
+   888.1  down    mlb:mlb_statsapi:col-lad:live  (ran its time, 12.0s)
+   888.1  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+   888.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.499 proxy F 4.00 T 1.000 Q 0.500 | target 52.65% (league 100.00%, 52.65% within) | actual 50.00% | debt +0.10s (league +0.00s) | why: Braves: favorite
+   900.1  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+   900.1  up      mlb:mlb_statsapi:sf-sd:live  (rotation)
+   900.1  base    mlb:mlb_statsapi:sf-sd:live  (weighted) | G 0.251 proxy F 1.00 T 1.000 Q 0.500 | target 10.36% (league 100.00%, 10.36% within) | actual 8.45% | debt +6.03s (league +0.00s) | why: Giants at Padres: in rotation
+   912.1  down    mlb:mlb_statsapi:sf-sd:live  (ran its time, 12.0s)
+   912.1  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+   912.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.499 proxy F 4.00 T 1.000 Q 0.500 | target 52.65% (league 100.00%, 52.65% within) | actual 50.00% | debt +0.74s (league +0.00s) | why: Braves: favorite
+   924.1  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+   924.1  up      mlb:mlb_statsapi:col-lad:live  (rotation)
+   924.1  base    mlb:mlb_statsapi:col-lad:live  (weighted) | G 0.251 proxy F 2.50 T 1.000 Q 0.500 | target 25.90% (league 100.00%, 25.90% within) | actual 24.66% | debt +5.48s (league +0.00s) | why: Rockies: second favorite
+   936.1  down    mlb:mlb_statsapi:col-lad:live  (ran its time, 12.0s)
+   936.1  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+   936.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.499 proxy F 4.00 T 1.000 Q 0.500 | target 52.65% (league 100.00%, 52.65% within) | actual 50.00% | debt +1.37s (league +0.00s) | why: Braves: favorite
+   948.1  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+   948.1  up      mlb:mlb_statsapi:hou-tex:live  (rotation)
+   948.1  base    mlb:mlb_statsapi:hou-tex:live  (weighted) | G 0.309 proxy F 1.00 T 1.000 Q 0.500 | target 10.32% (league 100.00%, 10.32% within) | actual 9.33% | debt +4.53s (league +0.00s) | why: Astros at Rangers: in rotation
+   960.1  down    mlb:mlb_statsapi:hou-tex:live  (ran its time, 12.0s)
+   960.1  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+   960.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.489 proxy F 4.00 T 1.000 Q 0.500 | target 48.93% (league 100.00%, 48.93% within) | actual 50.00% | debt +1.56s (league +0.00s) | why: Braves: favorite
+   972.1  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+   972.1  up      mlb:mlb_statsapi:col-lad:bigplay:col-lad:ab:3  (rotation)
+   972.1  base    mlb:mlb_statsapi:col-lad:bigplay:col-lad:ab:3  (weighted) | G 0.507 proxy F 2.50 T 1.000 Q 0.500 | target 31.04% (league 100.00%, 31.04% within) | actual 24.68% | debt +7.15s (league +0.00s) | why: Rockies: second favorite, its big play first
+   978.1  down    mlb:mlb_statsapi:col-lad:bigplay:col-lad:ab:3  (ran its time, 6.0s)
+   978.1  up      mlb:mlb_statsapi:col-lad:live  (rotation)
+   978.1  card    mlb:mlb_statsapi:col-lad:live  (base) | why: Rockies: second favorite, its big play first
+   984.1  down    mlb:mlb_statsapi:col-lad:live  (ran its time, 6.0s)
+   984.1  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+   984.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.489 proxy F 4.00 T 1.000 Q 0.500 | target 48.93% (league 100.00%, 48.93% within) | actual 50.00% | debt +1.30s (league +0.00s) | why: Braves: favorite
+   996.1  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+   996.1  up      mlb:mlb_statsapi:col-lad:live  (rotation)
+   996.1  base    mlb:mlb_statsapi:col-lad:live  (weighted) | G 0.507 proxy F 2.50 T 1.000 Q 0.500 | target 31.04% (league 100.00%, 31.04% within) | actual 25.32% | debt +2.60s (league +0.00s) | why: Rockies: second favorite
+  1008.1  down    mlb:mlb_statsapi:col-lad:live  (ran its time, 12.0s)
+  1008.1  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+  1008.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.494 proxy F 4.00 T 1.000 Q 0.500 | target 49.05% (league 100.00%, 49.05% within) | actual 50.00% | debt +1.05s (league +0.00s) | why: Braves: favorite
+  1020.1  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+  1020.1  up      mlb:mlb_statsapi:sf-sd:live  (rotation)
+  1020.1  base    mlb:mlb_statsapi:sf-sd:live  (weighted) | G 0.246 proxy F 1.00 T 1.000 Q 0.500 | target 9.64% (league 100.00%, 9.64% within) | actual 8.64% | debt +5.98s (league +0.00s) | why: Giants at Padres: in rotation
+  1032.1  down    mlb:mlb_statsapi:sf-sd:live  (ran its time, 12.0s)
+  1032.1  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+  1032.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.494 proxy F 4.00 T 1.000 Q 0.500 | target 49.05% (league 100.00%, 49.05% within) | actual 50.00% | debt +0.82s (league +0.00s) | why: Braves: favorite
+  1044.1  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+  1044.1  up      mlb:mlb_statsapi:col-lad:live  (rotation)
+  1044.1  base    mlb:mlb_statsapi:col-lad:live  (weighted) | G 0.507 proxy F 2.50 T 1.000 Q 0.500 | target 30.98% (league 100.00%, 30.98% within) | actual 25.30% | debt +5.48s (league +0.00s) | why: Rockies: second favorite
+  1056.1  down    mlb:mlb_statsapi:col-lad:live  (ran its time, 12.0s)
+  1056.1  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+  1056.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.494 proxy F 4.00 T 1.000 Q 0.500 | target 49.05% (league 100.00%, 49.05% within) | actual 50.00% | debt +0.59s (league +0.00s) | why: Braves: favorite
+  1068.1  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+  1068.1  up      mlb:mlb_statsapi:hou-tex:live  (rotation)
+  1068.1  base    mlb:mlb_statsapi:hou-tex:live  (weighted) | G 0.315 proxy F 1.00 T 1.000 Q 0.500 | target 10.34% (league 100.00%, 10.34% within) | actual 9.41% | debt +4.93s (league +0.00s) | why: Astros at Rangers: in rotation
+  1080.1  down    mlb:mlb_statsapi:hou-tex:live  (ran its time, 12.0s)
+  1080.1  up      mlb:mlb_statsapi:col-lad:live  (rotation)
+  1080.1  base    mlb:mlb_statsapi:col-lad:live  (weighted) | G 0.509 proxy F 2.50 T 1.000 Q 0.500 | target 30.96% (league 100.00%, 30.96% within) | actual 25.58% | debt +4.63s (league +0.00s) | why: Rockies: second favorite
+  1092.1  down    mlb:mlb_statsapi:col-lad:live  (ran its time, 12.0s)
+  1092.1  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+  1092.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.499 proxy F 4.00 T 1.000 Q 0.500 | target 49.11% (league 100.00%, 49.11% within) | actual 49.43% | debt +6.26s (league +0.00s) | why: Braves: favorite
+  1104.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted, again) | G 0.499 proxy F 4.00 T 1.000 Q 0.500 | target 49.11% (league 100.00%, 49.11% within) | actual 50.00% | debt +0.15s (league +0.00s) | why: Braves: favorite
+  1116.1  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 24.0s)
+  1116.1  up      mlb:mlb_statsapi:col-lad:live  (rotation)
+  1116.1  base    mlb:mlb_statsapi:col-lad:live  (weighted) | G 0.509 proxy F 2.50 T 1.000 Q 0.500 | target 30.96% (league 100.00%, 30.96% within) | actual 25.84% | debt +3.77s (league +0.00s) | why: Rockies: second favorite
+  1128.1  down    mlb:mlb_statsapi:col-lad:live  (ran its time, 12.0s)
+  1128.1  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+  1128.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.489 proxy F 4.00 T 1.000 Q 0.500 | target 48.99% (league 100.00%, 48.99% within) | actual 50.00% | debt -0.06s (league +0.00s) | why: Braves: favorite
+  1140.1  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+  1140.1  up      mlb:mlb_statsapi:sf-sd:live  (rotation)
+  1140.1  base    mlb:mlb_statsapi:sf-sd:live  (weighted) | G 0.248 proxy F 1.00 T 1.000 Q 0.500 | target 9.69% (league 100.00%, 9.69% within) | actual 8.79% | debt +5.53s (league +0.00s) | why: Giants at Padres: in rotation
+  1152.1  down    mlb:mlb_statsapi:sf-sd:live  (ran its time, 12.0s)
+  1152.1  up      mlb:mlb_statsapi:col-lad:live  (rotation)
+  1152.1  base    mlb:mlb_statsapi:col-lad:live  (weighted) | G 0.503 proxy F 2.50 T 1.000 Q 0.500 | target 30.99% (league 100.00%, 30.99% within) | actual 26.09% | debt +2.92s (league +0.00s) | why: Rockies: second favorite
+  1164.1  down    mlb:mlb_statsapi:col-lad:live  (ran its time, 12.0s)
+  1164.1  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+  1164.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.489 proxy F 4.00 T 1.000 Q 0.500 | target 48.99% (league 100.00%, 48.99% within) | actual 49.46% | debt +5.57s (league +0.00s) | why: Braves: favorite
+  1176.1  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+  1176.1  up      mlb:mlb_statsapi:hou-tex:live  (rotation)
+  1176.1  base    mlb:mlb_statsapi:hou-tex:live  (weighted) | G 0.309 proxy F 1.00 T 1.000 Q 0.500 | target 10.33% (league 100.00%, 10.33% within) | actual 9.57% | debt +4.09s (league +0.00s) | why: Astros at Rangers: in rotation
+  1188.1  down    mlb:mlb_statsapi:hou-tex:live  (ran its time, 12.0s)
+  1188.1  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+  1188.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.494 proxy F 4.00 T 1.000 Q 0.500 | target 49.05% (league 100.00%, 49.05% within) | actual 49.47% | debt +5.33s (league +0.00s) | why: Braves: favorite
+  1200.1  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+  1200.1  up      mlb:mlb_statsapi:col-lad:live  (rotation)
+  1200.1  base    mlb:mlb_statsapi:col-lad:live  (weighted) | G 0.507 proxy F 2.50 T 1.000 Q 0.500 | target 30.98% (league 100.00%, 30.98% within) | actual 26.04% | debt +5.80s (league +0.00s) | why: Rockies: second favorite
+  1212.1  down    mlb:mlb_statsapi:col-lad:live  (ran its time, 12.0s)
+  1212.1  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+  1212.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.494 proxy F 4.00 T 1.000 Q 0.500 | target 49.05% (league 100.00%, 49.05% within) | actual 49.48% | debt +5.10s (league +0.00s) | why: Braves: favorite
+  1224.1  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+  1224.1  up      mlb:mlb_statsapi:col-lad:live  (rotation)
+  1224.1  base    mlb:mlb_statsapi:col-lad:live  (weighted) | G 0.507 proxy F 2.50 T 1.000 Q 0.500 | target 30.98% (league 100.00%, 30.98% within) | actual 26.53% | debt +1.23s (league +0.00s) | why: Rockies: second favorite
+  1236.1  down    mlb:mlb_statsapi:col-lad:live  (ran its time, 12.0s)
+  1236.1  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+  1236.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.494 proxy F 4.00 T 1.000 Q 0.500 | target 49.05% (league 100.00%, 49.05% within) | actual 49.49% | debt +4.87s (league +0.00s) | why: Braves: favorite
+  1248.1  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+  1248.1  up      mlb:mlb_statsapi:sf-sd:live  (rotation)
+  1248.1  base    mlb:mlb_statsapi:sf-sd:live  (weighted) | G 0.244 proxy F 1.00 T 1.000 Q 0.500 | target 9.55% (league 100.00%, 9.55% within) | actual 9.00% | debt +3.97s (league +0.00s) | why: Giants at Padres: in rotation
+  1260.1  down    mlb:mlb_statsapi:sf-sd:live  (ran its time, 12.0s)
+  1260.1  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+  1260.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.511 proxy F 4.00 T 1.000 Q 0.500 | target 49.35% (league 100.00%, 49.35% within) | actual 49.50% | debt +4.68s (league +0.00s) | why: Braves: favorite
+  1272.1  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+  1272.1  up      mlb:mlb_statsapi:col-lad:live  (rotation)
+  1272.1  base    mlb:mlb_statsapi:col-lad:live  (weighted) | G 0.509 proxy F 2.50 T 1.000 Q 0.500 | target 30.81% (league 100.00%, 30.81% within) | actual 26.47% | debt +4.06s (league +0.00s) | why: Rockies: second favorite
+  1284.1  down    mlb:mlb_statsapi:col-lad:live  (ran its time, 12.0s)
+  1284.1  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+  1284.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.511 proxy F 4.00 T 1.000 Q 0.500 | target 44.81% (league 100.00%, 44.81% within) | actual 49.51% | debt +4.52s (league +0.00s) | why: Braves: favorite
+  1296.1  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+  1296.1  up      mlb:mlb_statsapi:hou-tex:live  (rotation)
+  1296.1  base    mlb:mlb_statsapi:hou-tex:live  (weighted) | G 0.315 proxy F 1.00 T 1.000 Q 0.500 | target 9.34% (league 100.00%, 9.34% within) | actual 9.62% | debt +4.36s (league +0.00s) | why: Astros at Rangers: in rotation
+  1308.1  down    mlb:mlb_statsapi:hou-tex:live  (ran its time, 12.0s)
+  1308.1  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+  1308.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.511 proxy F 4.00 T 1.000 Q 0.500 | target 44.89% (league 100.00%, 44.89% within) | actual 49.52% | debt +3.28s (league +0.00s) | why: Braves: favorite
+  1320.1  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+  1320.1  up      mlb:mlb_statsapi:col-lad:live  (rotation)
+  1320.1  base    mlb:mlb_statsapi:col-lad:live  (weighted) | G 0.503 proxy F 2.50 T 1.000 Q 0.500 | target 27.88% (league 100.00%, 27.88% within) | actual 26.42% | debt +5.81s (league +0.00s) | why: Rockies: second favorite
+  1332.1  down    mlb:mlb_statsapi:col-lad:live  (ran its time, 12.0s)
+  1332.1  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+  1332.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.511 proxy F 4.00 T 1.000 Q 0.500 | target 44.89% (league 100.00%, 44.89% within) | actual 49.53% | debt +2.05s (league +0.00s) | why: Braves: favorite
+  1344.1  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+  1344.1  up      mlb:mlb_statsapi:bos-nyy:live  (rotation)
+  1344.1  base    mlb:mlb_statsapi:bos-nyy:live  (weighted) | G 0.300 proxy F 1.00 T 1.000 Q 0.500 | target 9.21% (league 100.00%, 9.21% within) | actual 0.00% | debt +5.52s (league +0.00s) | why: Red Sox at Yankees: in rotation
+  1356.1  down    mlb:mlb_statsapi:bos-nyy:live  (ran its time, 12.0s)
+  1356.1  up      mlb:mlb_statsapi:col-lad:live  (rotation)
+  1356.1  base    mlb:mlb_statsapi:col-lad:live  (weighted) | G 0.503 proxy F 2.50 T 1.000 Q 0.500 | target 27.88% (league 100.00%, 27.88% within) | actual 26.61% | debt +3.85s (league +0.00s) | why: Rockies: second favorite
+  1368.1  down    mlb:mlb_statsapi:col-lad:live  (ran its time, 12.0s)
+  1368.1  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+  1368.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.508 proxy F 4.00 T 1.000 Q 0.500 | target 41.01% (league 100.00%, 41.01% within) | actual 49.09% | debt +6.22s (league +0.00s) | why: Braves: favorite
+  1380.1  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+  1380.1  up      mlb:mlb_statsapi:sf-sd:live  (rotation)
+  1380.1  base    mlb:mlb_statsapi:sf-sd:live  (weighted) | G 0.246 proxy F 1.00 T 1.000 Q 0.500 | target 7.97% (league 100.00%, 7.97% within) | actual 9.01% | debt +3.67s (league +0.00s) | why: Giants at Padres: in rotation
+  1392.1  down    mlb:mlb_statsapi:sf-sd:live  (ran its time, 12.0s)
+  1392.1  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+  1392.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.508 proxy F 4.00 T 1.000 Q 0.500 | target 41.01% (league 100.00%, 41.01% within) | actual 49.11% | debt +4.06s (league +0.00s) | why: Braves: favorite
+  1404.1  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+  1404.1  up      mlb:mlb_statsapi:col-lad:live  (rotation)
+  1404.1  base    mlb:mlb_statsapi:col-lad:live  (weighted) | G 0.507 proxy F 2.50 T 1.000 Q 0.500 | target 25.59% (league 100.00%, 25.59% within) | actual 26.55% | debt +4.41s (league +0.00s) | why: Rockies: second favorite
+  1416.1  down    mlb:mlb_statsapi:col-lad:live  (ran its time, 12.0s)
+  1416.1  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+  1416.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.508 proxy F 4.00 T 1.000 Q 0.500 | target 41.01% (league 100.00%, 41.01% within) | actual 49.12% | debt +1.90s (league +0.00s) | why: Braves: favorite
+  1428.1  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+  1428.1  up      mlb:mlb_statsapi:chc-stl:live  (rotation)
+  1428.1  base    mlb:mlb_statsapi:chc-stl:live  (weighted) | G 0.314 proxy F 1.00 T 1.000 Q 0.500 | target 8.55% (league 100.00%, 8.55% within) | actual 0.00% | debt +5.08s (league +0.00s) | why: Cubs at Cardinals: in rotation
+  1440.1  down    mlb:mlb_statsapi:chc-stl:live  (ran its time, 12.0s)
+  1440.1  up      mlb:mlb_statsapi:hou-tex:live  (rotation)
+  1440.1  base    mlb:mlb_statsapi:hou-tex:live  (weighted) | G 0.315 proxy F 1.00 T 1.000 Q 0.500 | target 8.56% (league 100.00%, 8.56% within) | actual 9.48% | debt +5.21s (league +0.00s) | why: Astros at Rangers: in rotation
+  1452.1  down    mlb:mlb_statsapi:hou-tex:live  (ran its time, 12.0s)
+  1452.1  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+  1452.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.505 proxy F 4.00 T 1.000 Q 0.500 | target 40.87% (league 100.00%, 40.87% within) | actual 48.72% | debt +4.63s (league +0.00s) | why: Braves: favorite
+  1464.1  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+  1464.1  up      mlb:mlb_statsapi:col-lad:live  (rotation)
+  1464.1  base    mlb:mlb_statsapi:col-lad:live  (weighted) | G 0.509 proxy F 2.50 T 1.000 Q 0.500 | target 25.64% (league 100.00%, 25.64% within) | actual 26.27% | debt +7.78s (league +0.00s) | why: Rockies: second favorite
+  1476.1  down    mlb:mlb_statsapi:col-lad:live  (ran its time, 12.0s)
+  1476.1  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+  1476.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.505 proxy F 4.00 T 1.000 Q 0.500 | target 40.87% (league 100.00%, 40.87% within) | actual 48.74% | debt +2.44s (league +0.00s) | why: Braves: favorite
+  1488.1  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+  1488.1  up      mlb:mlb_statsapi:bos-nyy:live  (rotation)
+  1488.1  base    mlb:mlb_statsapi:bos-nyy:live  (weighted) | G 0.300 proxy F 1.00 T 1.000 Q 0.500 | target 8.43% (league 100.00%, 8.43% within) | actual 5.88% | debt +5.86s (league +0.00s) | why: Red Sox at Yankees: in rotation
+  1500.1  down    mlb:mlb_statsapi:bos-nyy:live  (ran its time, 12.0s)
+  1500.1  up      mlb:mlb_statsapi:col-lad:live  (rotation)
+  1500.1  base    mlb:mlb_statsapi:col-lad:live  (weighted) | G 0.503 proxy F 2.50 T 1.000 Q 0.500 | target 25.52% (league 100.00%, 25.52% within) | actual 26.45% | debt +4.99s (league +0.00s) | why: Rockies: second favorite
+  1512.1  down    mlb:mlb_statsapi:col-lad:live  (ran its time, 12.0s)
+  1512.1  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+  1512.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.511 proxy F 4.00 T 1.000 Q 0.500 | target 41.09% (league 100.00%, 41.09% within) | actual 48.36% | debt +5.20s (league +0.00s) | why: Braves: favorite
+  1524.1  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+  1524.1  up      mlb:mlb_statsapi:sf-sd:live  (rotation)
+  1524.1  base    mlb:mlb_statsapi:sf-sd:live  (weighted) | G 0.248 proxy F 1.00 T 1.000 Q 0.500 | target 7.98% (league 100.00%, 7.98% within) | actual 8.94% | debt +3.13s (league +0.00s) | why: Giants at Padres: in rotation
+  1536.1  down    mlb:mlb_statsapi:sf-sd:live  (ran its time, 12.0s)
+  1536.1  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+  1536.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.511 proxy F 4.00 T 1.000 Q 0.500 | target 41.09% (league 100.00%, 41.09% within) | actual 48.39% | debt +3.07s (league +0.00s) | why: Braves: favorite
+  1548.1  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+  1548.1  up      mlb:mlb_statsapi:col-lad:live  (rotation)
+  1548.1  base    mlb:mlb_statsapi:col-lad:live  (weighted) | G 0.507 proxy F 2.50 T 1.000 Q 0.500 | target 25.58% (league 100.00%, 25.58% within) | actual 26.40% | debt +5.24s (league +0.00s) | why: Rockies: second favorite
+  1560.1  down    mlb:mlb_statsapi:col-lad:live  (ran its time, 12.0s)
+  1560.1  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+  1560.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.508 proxy F 4.00 T 1.000 Q 0.500 | target 40.99% (league 100.00%, 40.99% within) | actual 48.41% | debt +0.92s (league +0.00s) | why: Braves: favorite
+  1572.1  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+  1572.1  up      mlb:mlb_statsapi:chc-stl:live  (rotation)
+  1572.1  base    mlb:mlb_statsapi:chc-stl:live  (weighted) | G 0.308 proxy F 1.00 T 1.000 Q 0.500 | target 8.50% (league 100.00%, 8.50% within) | actual 5.88% | debt +5.33s (league +0.00s) | why: Cubs at Cardinals: in rotation
+  1584.1  down    mlb:mlb_statsapi:chc-stl:live  (ran its time, 12.0s)
+  1584.1  up      mlb:mlb_statsapi:hou-tex:live  (rotation)
+  1584.1  base    mlb:mlb_statsapi:hou-tex:live  (weighted) | G 0.312 proxy F 1.00 T 1.000 Q 0.500 | target 8.53% (league 100.00%, 8.53% within) | actual 9.38% | debt +5.50s (league +0.00s) | why: Astros at Rangers: in rotation
+  1596.1  down    mlb:mlb_statsapi:hou-tex:live  (ran its time, 12.0s)
+  1596.1  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+  1596.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.508 proxy F 4.00 T 1.000 Q 0.500 | target 40.99% (league 100.00%, 40.99% within) | actual 48.06% | debt +3.67s (league +0.00s) | why: Braves: favorite
+  1608.1  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+  1608.1  up      mlb:mlb_statsapi:col-lad:live  (rotation)
+  1608.1  base    mlb:mlb_statsapi:col-lad:live  (weighted) | G 0.509 proxy F 2.50 T 1.000 Q 0.500 | target 25.64% (league 100.00%, 25.64% within) | actual 26.15% | debt +8.59s (league +0.00s) | why: Rockies: second favorite
+  1620.1  down    mlb:mlb_statsapi:col-lad:live  (ran its time, 12.0s)
+  1620.1  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+  1620.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.505 proxy F 4.00 T 1.000 Q 0.500 | target 40.87% (league 100.00%, 40.87% within) | actual 48.09% | debt +1.50s (league +0.00s) | why: Braves: favorite
+  1632.1  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+  1632.1  up      mlb:mlb_statsapi:bos-nyy:live  (rotation)
+  1632.1  base    mlb:mlb_statsapi:bos-nyy:live  (weighted) | G 0.301 proxy F 1.00 T 1.000 Q 0.500 | target 8.44% (league 100.00%, 8.44% within) | actual 6.90% | debt +6.01s (league +0.00s) | why: Red Sox at Yankees: in rotation
+  1644.1  down    mlb:mlb_statsapi:bos-nyy:live  (ran its time, 12.0s)
+  1644.1  up      mlb:mlb_statsapi:col-lad:live  (rotation)
+  1644.1  base    mlb:mlb_statsapi:col-lad:live  (weighted) | G 0.509 proxy F 2.50 T 1.000 Q 0.500 | target 25.64% (league 100.00%, 25.64% within) | actual 26.32% | debt +5.82s (league +0.00s) | why: Rockies: second favorite
+  1656.1  down    mlb:mlb_statsapi:col-lad:live  (ran its time, 12.0s)
+  1656.1  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+  1656.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.505 proxy F 4.00 T 1.000 Q 0.500 | target 40.87% (league 100.00%, 40.87% within) | actual 47.76% | debt +4.21s (league +0.00s) | why: Braves: favorite
+  1668.1  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+  1668.1  up      mlb:mlb_statsapi:sf-sd:live  (rotation)
+  1668.1  base    mlb:mlb_statsapi:sf-sd:live  (weighted) | G 0.248 proxy F 1.00 T 1.000 Q 0.500 | target 7.98% (league 100.00%, 7.98% within) | actual 8.89% | debt +2.59s (league +0.00s) | why: Giants at Padres: in rotation
+  1680.1  down    mlb:mlb_statsapi:sf-sd:live  (ran its time, 12.0s)
+  1680.1  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+  1680.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.511 proxy F 4.00 T 1.000 Q 0.500 | target 41.09% (league 100.00%, 41.09% within) | actual 47.79% | debt +2.04s (league +0.00s) | why: Braves: favorite
+  1692.1  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+  1692.1  up      mlb:mlb_statsapi:col-lad:live  (rotation)
+  1692.1  base    mlb:mlb_statsapi:col-lad:live  (weighted) | G 0.503 proxy F 2.50 T 1.000 Q 0.500 | target 25.52% (league 100.00%, 25.52% within) | actual 26.28% | debt +6.09s (league +0.00s) | why: Rockies: second favorite
+  1704.1  down    mlb:mlb_statsapi:col-lad:live  (ran its time, 12.0s)
+  1704.1  up      mlb:mlb_statsapi:chc-stl:live  (rotation)
+  1704.1  base    mlb:mlb_statsapi:chc-stl:live  (weighted) | G 0.303 proxy F 1.00 T 1.000 Q 0.500 | target 8.46% (league 100.00%, 8.46% within) | actual 7.14% | debt +4.56s (league +0.00s) | why: Cubs at Cardinals: in rotation
+  1716.1  down    mlb:mlb_statsapi:chc-stl:live  (ran its time, 12.0s)
+  1716.1  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+  1716.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.511 proxy F 4.00 T 1.000 Q 0.500 | target 41.09% (league 100.00%, 41.09% within) | actual 47.48% | debt +4.84s (league +0.00s) | why: Braves: favorite
+  1728.1  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+  1728.1  up      mlb:mlb_statsapi:hou-tex:live  (rotation)
+  1728.1  base    mlb:mlb_statsapi:hou-tex:live  (weighted) | G 0.312 proxy F 1.00 T 1.000 Q 0.500 | target 8.53% (league 100.00%, 8.53% within) | actual 9.29% | debt +5.79s (league +0.00s) | why: Astros at Rangers: in rotation
+  1740.1  down    mlb:mlb_statsapi:hou-tex:live  (ran its time, 12.0s)
+  1740.1  up      mlb:mlb_statsapi:col-lad:live  (rotation)
+  1740.1  base    mlb:mlb_statsapi:col-lad:live  (weighted) | G 0.507 proxy F 2.50 T 1.000 Q 0.500 | target 25.58% (league 100.00%, 25.58% within) | actual 26.24% | debt +6.35s (league +0.00s) | why: Rockies: second favorite
+  1752.1  down    mlb:mlb_statsapi:col-lad:live  (ran its time, 12.0s)
+  1752.1  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+  1752.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.508 proxy F 4.00 T 1.000 Q 0.500 | target 40.99% (league 100.00%, 40.99% within) | actual 47.18% | debt +7.61s (league +0.00s) | why: Braves: favorite
+  1764.1  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+  1764.1  up      mlb:mlb_statsapi:bos-nyy:live  (rotation)
+  1764.1  base    mlb:mlb_statsapi:bos-nyy:live  (weighted) | G 0.300 proxy F 1.00 T 1.000 Q 0.500 | target 8.43% (league 100.00%, 8.43% within) | actual 7.50% | debt +5.14s (league +0.00s) | why: Red Sox at Yankees: in rotation
+  1776.1  down    mlb:mlb_statsapi:bos-nyy:live  (ran its time, 12.0s)
+  1776.1  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+  1776.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.508 proxy F 4.00 T 1.000 Q 0.500 | target 40.99% (league 100.00%, 40.99% within) | actual 47.22% | debt +5.44s (league +0.00s) | why: Braves: favorite
+  1788.1  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+  1788.1  up      mlb:mlb_statsapi:col-lad:live  (rotation)
+  1788.1  base    mlb:mlb_statsapi:col-lad:live  (weighted) | G 0.508 proxy F 2.50 T 1.000 Q 0.500 | target 25.62% (league 100.00%, 25.62% within) | actual 26.21% | debt +6.63s (league +0.00s) | why: Rockies: second favorite
+  1800.1  down    mlb:mlb_statsapi:col-lad:live  (ran its time, 12.0s)
+  1800.1  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+  1800.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.505 proxy F 4.00 T 1.000 Q 0.500 | target 40.87% (league 100.00%, 40.87% within) | actual 47.26% | debt +3.27s (league +0.00s) | why: Braves: favorite
+  1812.1  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+  1812.1  up      mlb:mlb_statsapi:col-lad:live  (rotation)
+  1812.1  base    mlb:mlb_statsapi:col-lad:live  (weighted) | G 0.508 proxy F 2.50 T 1.000 Q 0.500 | target 25.62% (league 100.00%, 25.62% within) | actual 26.53% | debt +0.78s (league +0.00s) | why: Rockies: second favorite
+  1824.1  down    mlb:mlb_statsapi:col-lad:live  (ran its time, 12.0s)
+  1824.1  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+  1824.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.505 proxy F 4.00 T 1.000 Q 0.500 | target 40.87% (league 100.00%, 40.87% within) | actual 47.30% | debt +1.08s (league +0.00s) | why: Braves: favorite
+  1836.1  down    mlb:mlb_statsapi:atl-nym:live  (ran its time, 12.0s)
+  1836.1  up      mlb:mlb_statsapi:sf-sd:live  (rotation)
+  1836.1  base    mlb:mlb_statsapi:sf-sd:live  (weighted) | G 0.244 proxy F 1.00 T 1.000 Q 0.500 | target 7.95% (league 100.00%, 7.95% within) | actual 8.72% | debt +3.97s (league +0.00s) | why: Giants at Padres: in rotation
+  1845.0  wait    mlb:mlb_statsapi:col-lad col-lad:ab:4 r0  (below_bar) | bar 1.10 action
+  1848.1  down    mlb:mlb_statsapi:sf-sd:live  (ran its time, 12.0s)
+  1848.1  up      mlb:mlb_statsapi:chc-stl:live  (rotation)
+  1848.1  base    mlb:mlb_statsapi:chc-stl:live  (weighted) | G 0.303 proxy F 1.00 T 1.000 Q 0.500 | target 8.47% (league 100.00%, 8.47% within) | actual 7.50% | debt +4.82s (league +0.00s) | why: Cubs at Cardinals: in rotation
+  1860.0  final   mlb:mlb_statsapi:col-lad:final  (ended 1800.0, its decisive play)
+  1860.1  down    mlb:mlb_statsapi:chc-stl:live  (ran its time, 12.0s)
+  1860.1  up      mlb:mlb_statsapi:atl-nym:live  (rotation)
+  1860.1  base    mlb:mlb_statsapi:atl-nym:live  (weighted) | G 0.505 proxy F 4.00 T 1.000 Q 0.500 | target 55.05% (league 100.00%, 55.05% within) | actual 47.02% | debt +3.80s (league +0.00s) | why: Braves: favorite
+  1870.0  final   mlb:mlb_statsapi:atl-nym:final  (ended 1825.0, first seen final)
+  1870.0  down    mlb:mlb_statsapi:atl-nym:live  (no longer current, 9.9s)
+  1870.0  up      mlb:mlb_statsapi:hou-tex:live  (rotation)
+  1870.0  base    mlb:mlb_statsapi:hou-tex:live  (rescue) | G 0.309 proxy F 1.00 T 1.000 Q 0.500 | target 25.49% (league 100.00%, 25.49% within) | actual 9.22% | debt +6.20s (league +0.00s) | rescue 10/8 misses | why: Astros at Rangers: overdue for a turn
+  1878.0  down    mlb:mlb_statsapi:hou-tex:live  (next waiting, 8.0s)
+  1878.0  up      mlb:mlb_statsapi:col-lad:bigplay:col-lad:ab:4  (takeover)
+  1878.0  promote mlb:mlb_statsapi:col-lad:bigplay:col-lad:ab:4  (major) | I 0.588 late winner on proxy | bar 0.35 open | cooldown until 1938.0 | why: Rockies: late winner; no favorite in action
+  1886.0  wait    mlb:mlb_statsapi:col-lad col-lad:ab:4 r0  (already_shown)
+  1890.0  down    mlb:mlb_statsapi:col-lad:bigplay:col-lad:ab:4  (ran its time, 12.0s)
+  1890.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  1890.0  card    mlb:mlb_statsapi:col-lad:final  (result) | why: Rockies: final
+  1898.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  1898.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  1898.0  card    mlb:mlb_statsapi:atl-nym:final  (result) | why: Braves: final
+  1906.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  1906.0  up      mlb:mlb_statsapi:bos-nyy:live  (rotation)
+  1906.0  base    mlb:mlb_statsapi:bos-nyy:live  (weighted) | G 0.300 proxy F 1.00 T 1.000 Q 0.500 | target 25.22% (league 100.00%, 25.22% within) | actual 8.08% | debt +4.38s (league +0.00s) | why: Red Sox at Yankees: in rotation
+  1918.0  down    mlb:mlb_statsapi:bos-nyy:live  (ran its time, 12.0s)
+  1918.0  up      mlb:mlb_statsapi:hou-tex:live  (rotation)
+  1918.0  base    mlb:mlb_statsapi:hou-tex:live  (weighted) | G 0.312 proxy F 1.00 T 1.000 Q 0.500 | target 25.52% (league 100.00%, 25.52% within) | actual 9.56% | debt +3.30s (league -0.00s) | why: Astros at Rangers: in rotation
+  1930.0  down    mlb:mlb_statsapi:hou-tex:live  (ran its time, 12.0s)
+  1930.0  up      mlb:mlb_statsapi:chc-stl:live  (rotation)
+  1930.0  base    mlb:mlb_statsapi:chc-stl:live  (weighted) | G 0.308 proxy F 1.00 T 1.000 Q 0.500 | target 25.43% (league 100.00%, 25.43% within) | actual 8.99% | debt +3.10s (league -0.00s) | why: Cubs at Cardinals: in rotation
+  1942.0  down    mlb:mlb_statsapi:chc-stl:live  (ran its time, 12.0s)
+  1942.0  up      mlb:mlb_statsapi:sf-sd:live  (rotation)
+  1942.0  base    mlb:mlb_statsapi:sf-sd:live  (weighted) | G 0.246 proxy F 1.00 T 1.000 Q 0.500 | target 23.82% (league 100.00%, 23.82% within) | actual 9.00% | debt +5.43s (league -0.00s) | why: Giants at Padres: in rotation
+  1954.0  down    mlb:mlb_statsapi:sf-sd:live  (ran its time, 12.0s)
+  1954.0  up      mlb:mlb_statsapi:bos-nyy:live  (rotation)
+  1954.0  base    mlb:mlb_statsapi:bos-nyy:live  (weighted) | G 0.300 proxy F 1.00 T 1.000 Q 0.500 | target 25.22% (league 100.00%, 25.22% within) | actual 9.35% | debt +4.49s (league -0.00s) | why: Red Sox at Yankees: in rotation
+  1966.0  down    mlb:mlb_statsapi:bos-nyy:live  (ran its time, 12.0s)
+  1966.0  up      mlb:mlb_statsapi:hou-tex:live  (rotation)
+  1966.0  base    mlb:mlb_statsapi:hou-tex:live  (weighted) | G 0.315 proxy F 1.00 T 1.000 Q 0.500 | target 25.57% (league 100.00%, 25.57% within) | actual 9.95% | debt +3.56s (league -0.00s) | why: Astros at Rangers: in rotation
+  1978.0  down    mlb:mlb_statsapi:hou-tex:live  (ran its time, 12.0s)
+  1978.0  up      mlb:mlb_statsapi:chc-stl:live  (rotation)
+  1978.0  base    mlb:mlb_statsapi:chc-stl:live  (weighted) | G 0.314 proxy F 1.00 T 1.000 Q 0.500 | target 25.52% (league 100.00%, 25.52% within) | actual 10.31% | debt +3.31s (league -0.00s) | why: Cubs at Cardinals: in rotation
+  1990.0  down    mlb:mlb_statsapi:chc-stl:live  (ran its time, 12.0s)
+  1990.0  up      mlb:mlb_statsapi:sf-sd:live  (rotation)
+  1990.0  base    mlb:mlb_statsapi:sf-sd:live  (weighted) | G 0.244 proxy F 1.00 T 1.000 Q 0.500 | target 23.72% (league 100.00%, 23.72% within) | actual 9.41% | debt +4.84s (league -0.00s) | why: Giants at Padres: in rotation
+  2002.0  down    mlb:mlb_statsapi:sf-sd:live  (ran its time, 12.0s)
+  2002.0  up      mlb:mlb_statsapi:bos-nyy:live  (rotation)
+  2002.0  base    mlb:mlb_statsapi:bos-nyy:live  (weighted) | G 0.301 proxy F 1.00 T 1.000 Q 0.500 | target 25.19% (league 100.00%, 25.19% within) | actual 10.44% | debt +4.59s (league -0.00s) | why: Red Sox at Yankees: in rotation
+  2014.0  down    mlb:mlb_statsapi:bos-nyy:live  (ran its time, 12.0s)
+  2014.0  up      mlb:mlb_statsapi:hou-tex:live  (rotation)
+  2014.0  base    mlb:mlb_statsapi:hou-tex:live  (weighted) | G 0.315 proxy F 1.00 T 1.000 Q 0.500 | target 25.57% (league 100.00%, 25.57% within) | actual 10.32% | debt +3.83s (league -0.00s) | why: Astros at Rangers: in rotation
+  2026.0  down    mlb:mlb_statsapi:hou-tex:live  (ran its time, 12.0s)
+  2026.0  up      mlb:mlb_statsapi:chc-stl:live  (rotation)
+  2026.0  base    mlb:mlb_statsapi:chc-stl:live  (weighted) | G 0.303 proxy F 1.00 T 1.000 Q 0.500 | target 25.35% (league 100.00%, 25.35% within) | actual 11.43% | debt +3.56s (league -0.00s) | why: Cubs at Cardinals: in rotation
+  2038.0  down    mlb:mlb_statsapi:chc-stl:live  (ran its time, 12.0s)
+  2038.0  up      mlb:mlb_statsapi:sf-sd:live  (rotation)
+  2038.0  base    mlb:mlb_statsapi:sf-sd:live  (weighted) | G 0.248 proxy F 1.00 T 1.000 Q 0.500 | target 23.90% (league 100.00%, 23.90% within) | actual 9.79% | debt +4.25s (league -0.00s) | why: Giants at Padres: in rotation
+  2050.0  down    mlb:mlb_statsapi:sf-sd:live  (ran its time, 12.0s)
+  2050.0  up      mlb:mlb_statsapi:bos-nyy:live  (rotation)
+  2050.0  base    mlb:mlb_statsapi:bos-nyy:live  (weighted) | G 0.300 proxy F 1.00 T 1.000 Q 0.500 | target 25.26% (league 100.00%, 25.26% within) | actual 11.38% | debt +4.70s (league -0.00s) | why: Red Sox at Yankees: in rotation
+  2062.0  down    mlb:mlb_statsapi:bos-nyy:live  (ran its time, 12.0s)
+  2062.0  up      mlb:mlb_statsapi:hou-tex:live  (rotation)
+  2062.0  base    mlb:mlb_statsapi:hou-tex:live  (weighted) | G 0.309 proxy F 1.00 T 1.000 Q 0.500 | target 25.49% (league 100.00%, 25.49% within) | actual 10.68% | debt +4.07s (league -0.00s) | why: Astros at Rangers: in rotation
+  2074.0  down    mlb:mlb_statsapi:hou-tex:live  (ran its time, 12.0s)
+  2074.0  up      mlb:mlb_statsapi:chc-stl:live  (rotation)
+  2074.0  base    mlb:mlb_statsapi:chc-stl:live  (weighted) | G 0.303 proxy F 1.00 T 1.000 Q 0.500 | target 25.35% (league 100.00%, 25.35% within) | actual 12.39% | debt +3.73s (league -0.00s) | why: Cubs at Cardinals: in rotation
+  2086.0  down    mlb:mlb_statsapi:chc-stl:live  (ran its time, 12.0s)
+  2086.0  up      mlb:mlb_statsapi:sf-sd:live  (rotation)
+  2086.0  base    mlb:mlb_statsapi:sf-sd:live  (weighted) | G 0.246 proxy F 1.00 T 1.000 Q 0.500 | target 23.82% (league 100.00%, 23.82% within) | actual 10.15% | debt +3.72s (league -0.00s) | why: Giants at Padres: in rotation
+  2098.0  down    mlb:mlb_statsapi:sf-sd:live  (ran its time, 12.0s)
+  2098.0  up      mlb:mlb_statsapi:bos-nyy:live  (rotation)
+  2098.0  base    mlb:mlb_statsapi:bos-nyy:live  (weighted) | G 0.300 proxy F 1.00 T 1.000 Q 0.500 | target 25.22% (league 100.00%, 25.22% within) | actual 12.22% | debt +4.82s (league -0.00s) | why: Red Sox at Yankees: in rotation
+  2110.0  down    mlb:mlb_statsapi:bos-nyy:live  (ran its time, 12.0s)
+  2110.0  up      mlb:mlb_statsapi:hou-tex:live  (rotation)
+  2110.0  base    mlb:mlb_statsapi:hou-tex:live  (weighted) | G 0.312 proxy F 1.00 T 1.000 Q 0.500 | target 25.52% (league 100.00%, 25.52% within) | actual 11.01% | debt +4.31s (league -0.00s) | why: Astros at Rangers: in rotation
+  2122.0  down    mlb:mlb_statsapi:hou-tex:live  (ran its time, 12.0s)
+  2122.0  up      mlb:mlb_statsapi:chc-stl:live  (rotation)
+  2122.0  base    mlb:mlb_statsapi:chc-stl:live  (weighted) | G 0.308 proxy F 1.00 T 1.000 Q 0.500 | target 25.43% (league 100.00%, 25.43% within) | actual 13.23% | debt +3.93s (league -0.00s) | why: Cubs at Cardinals: in rotation
+  2134.0  down    mlb:mlb_statsapi:chc-stl:live  (ran its time, 12.0s)
+  2134.0  up      mlb:mlb_statsapi:sf-sd:live  (rotation)
+  2134.0  base    mlb:mlb_statsapi:sf-sd:live  (weighted) | G 0.246 proxy F 1.00 T 1.000 Q 0.500 | target 23.82% (league 100.00%, 23.82% within) | actual 10.50% | debt +3.15s (league -0.00s) | why: Giants at Padres: in rotation
+  2145.0  wait    mlb:mlb_statsapi:bos-nyy bos-nyy:ab:1 r0  (below_every_bar)
+  2146.0  down    mlb:mlb_statsapi:sf-sd:live  (ran its time, 12.0s)
+  2146.0  up      mlb:mlb_statsapi:bos-nyy:bigplay:bos-nyy:ab:1  (rotation)
+  2146.0  base    mlb:mlb_statsapi:bos-nyy:bigplay:bos-nyy:ab:1  (weighted) | G 0.204 proxy F 1.00 T 1.000 Q 0.500 | target 23.26% (league 100.00%, 23.26% within) | actual 12.95% | debt +4.92s (league -0.00s) | why: Red Sox at Yankees: its big play first
+  2150.0  wait    mlb:mlb_statsapi:hou-tex hou-tex:ab:1 r0  (below_every_bar)
+  2152.0  down    mlb:mlb_statsapi:bos-nyy:bigplay:bos-nyy:ab:1  (ran its time, 6.0s)
+  2152.0  up      mlb:mlb_statsapi:bos-nyy:live  (rotation)
+  2152.0  card    mlb:mlb_statsapi:bos-nyy:live  (base) | why: Red Sox at Yankees: its big play first
+  2158.0  down    mlb:mlb_statsapi:bos-nyy:live  (ran its time, 6.0s)
+  2158.0  up      mlb:mlb_statsapi:hou-tex:bigplay:hou-tex:ab:1  (rotation)
+  2158.0  base    mlb:mlb_statsapi:hou-tex:bigplay:hou-tex:ab:1  (weighted) | G 0.290 proxy F 1.00 T 1.000 Q 0.500 | target 26.41% (league 100.00%, 26.41% within) | actual 11.34% | debt +4.65s (league -0.00s) | why: Astros at Rangers: its big play first
+  2164.0  down    mlb:mlb_statsapi:hou-tex:bigplay:hou-tex:ab:1  (ran its time, 6.0s)
+  2164.0  up      mlb:mlb_statsapi:hou-tex:live  (rotation)
+  2164.0  card    mlb:mlb_statsapi:hou-tex:live  (base) | why: Astros at Rangers: its big play first
+  2165.0  wait    mlb:mlb_statsapi:hou-tex hou-tex:ab:2 r0  (below_every_bar)
+  2170.0  down    mlb:mlb_statsapi:hou-tex:live  (ran its time, 6.0s)
+  2170.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2170.0  card    mlb:mlb_statsapi:col-lad:final  (repeat) | why: Rockies: final, again
+  2178.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2178.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2178.0  card    mlb:mlb_statsapi:atl-nym:final  (repeat) | why: Braves: final, again
+  2186.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2186.0  up      mlb:mlb_statsapi:chc-stl:bigplay:chc-stl:ab:1  (rotation)
+  2186.0  base    mlb:mlb_statsapi:chc-stl:bigplay:chc-stl:ab:1  (weighted) | G 0.218 proxy F 1.00 T 1.000 Q 0.500 | target 23.99% (league 100.00%, 23.99% within) | actual 13.96% | debt +4.10s (league -0.00s) | why: Cubs at Cardinals: its big play first
+  2192.0  down    mlb:mlb_statsapi:chc-stl:bigplay:chc-stl:ab:1  (ran its time, 6.0s)
+  2192.0  up      mlb:mlb_statsapi:chc-stl:live  (rotation)
+  2192.0  card    mlb:mlb_statsapi:chc-stl:live  (base) | why: Cubs at Cardinals: its big play first
+  2198.0  down    mlb:mlb_statsapi:chc-stl:live  (ran its time, 6.0s)
+  2198.0  up      mlb:mlb_statsapi:sf-sd:live  (rotation)
+  2198.0  base    mlb:mlb_statsapi:sf-sd:live  (weighted) | G 0.244 proxy F 1.00 T 1.000 Q 0.500 | target 24.71% (league 100.00%, 24.71% within) | actual 10.83% | debt +2.91s (league -0.00s) | why: Giants at Padres: in rotation
+  2210.0  down    mlb:mlb_statsapi:sf-sd:live  (ran its time, 12.0s)
+  2210.0  up      mlb:mlb_statsapi:bos-nyy:live  (rotation)
+  2210.0  base    mlb:mlb_statsapi:bos-nyy:live  (weighted) | G 0.204 proxy F 1.00 T 1.000 Q 0.500 | target 23.60% (league 100.00%, 23.60% within) | actual 13.61% | debt +4.27s (league -0.00s) | why: Red Sox at Yankees: in rotation
+  2222.0  down    mlb:mlb_statsapi:bos-nyy:live  (ran its time, 12.0s)
+  2222.0  up      mlb:mlb_statsapi:hou-tex:bigplay:hou-tex:ab:2  (rotation)
+  2222.0  base    mlb:mlb_statsapi:hou-tex:bigplay:hou-tex:ab:2  (weighted) | G 0.354 proxy F 1.00 T 1.000 Q 0.500 | target 27.65% (league 100.00%, 27.65% within) | actual 11.64% | debt +5.78s (league -0.00s) | why: Astros at Rangers: its big play first
+  2228.0  down    mlb:mlb_statsapi:hou-tex:bigplay:hou-tex:ab:2  (ran its time, 6.0s)
+  2228.0  up      mlb:mlb_statsapi:hou-tex:live  (rotation)
+  2228.0  card    mlb:mlb_statsapi:hou-tex:live  (base) | why: Astros at Rangers: its big play first
+  2234.0  down    mlb:mlb_statsapi:hou-tex:live  (ran its time, 6.0s)
+  2234.0  up      mlb:mlb_statsapi:chc-stl:live  (rotation)
+  2234.0  base    mlb:mlb_statsapi:chc-stl:live  (weighted) | G 0.218 proxy F 1.00 T 1.000 Q 0.500 | target 23.96% (league 100.00%, 23.96% within) | actual 14.60% | debt +3.61s (league -0.00s) | why: Cubs at Cardinals: in rotation
+  2246.0  down    mlb:mlb_statsapi:chc-stl:live  (ran its time, 12.0s)
+  2246.0  up      mlb:mlb_statsapi:sf-sd:live  (rotation)
+  2246.0  base    mlb:mlb_statsapi:sf-sd:live  (weighted) | G 0.248 proxy F 1.00 T 1.000 Q 0.500 | target 24.78% (league 100.00%, 24.78% within) | actual 11.14% | debt +2.80s (league -0.00s) | why: Giants at Padres: in rotation
+  2254.0  wait    mlb:mlb_statsapi:bos-nyy bos-nyy:ab:1 r0  (expired)
+  2258.0  down    mlb:mlb_statsapi:sf-sd:live  (ran its time, 12.0s)
+  2258.0  up      mlb:mlb_statsapi:hou-tex:live  (rotation)
+  2258.0  wait    mlb:mlb_statsapi:hou-tex hou-tex:ab:1 r0  (expired)
+  2258.0  base    mlb:mlb_statsapi:hou-tex:live  (weighted) | G 0.354 proxy F 1.00 T 1.000 Q 0.500 | target 27.65% (league 100.00%, 27.65% within) | actual 12.00% | debt +3.74s (league -0.00s) | why: Astros at Rangers: in rotation
+  2270.0  down    mlb:mlb_statsapi:hou-tex:live  (ran its time, 12.0s)
+  2270.0  up      mlb:mlb_statsapi:bos-nyy:live  (rotation)
+  2270.0  base    mlb:mlb_statsapi:bos-nyy:live  (weighted) | G 0.205 proxy F 1.00 T 1.000 Q 0.500 | target 23.57% (league 100.00%, 23.57% within) | actual 14.01% | debt +6.43s (league -0.00s) | why: Red Sox at Yankees: in rotation
+  2277.0  wait    mlb:mlb_statsapi:hou-tex hou-tex:ab:2 r0  (expired)
+  2282.0  down    mlb:mlb_statsapi:bos-nyy:live  (ran its time, 12.0s)
+  2282.0  up      mlb:mlb_statsapi:chc-stl:live  (rotation)
+  2282.0  base    mlb:mlb_statsapi:chc-stl:live  (weighted) | G 0.220 proxy F 1.00 T 1.000 Q 0.500 | target 23.96% (league 100.00%, 23.96% within) | actual 15.17% | debt +3.11s (league -0.00s) | why: Cubs at Cardinals: in rotation
+  2294.0  down    mlb:mlb_statsapi:chc-stl:live  (ran its time, 12.0s)
+  2294.0  up      mlb:mlb_statsapi:sf-sd:live  (rotation)
+  2294.0  base    mlb:mlb_statsapi:sf-sd:live  (weighted) | G 0.246 proxy F 1.00 T 1.000 Q 0.500 | target 24.68% (league 100.00%, 24.68% within) | actual 11.44% | debt +2.67s (league -0.00s) | why: Giants at Padres: in rotation
+  2306.0  down    mlb:mlb_statsapi:sf-sd:live  (ran its time, 12.0s)
+  2306.0  up      mlb:mlb_statsapi:hou-tex:live  (rotation)
+  2306.0  base    mlb:mlb_statsapi:hou-tex:live  (weighted) | G 0.361 proxy F 1.00 T 1.000 Q 0.500 | target 27.79% (league 100.00%, 27.79% within) | actual 12.29% | debt +5.06s (league -0.00s) | why: Astros at Rangers: in rotation
+  2318.0  down    mlb:mlb_statsapi:hou-tex:live  (ran its time, 12.0s)
+  2318.0  up      mlb:mlb_statsapi:bos-nyy:live  (rotation)
+  2318.0  base    mlb:mlb_statsapi:bos-nyy:live  (weighted) | G 0.205 proxy F 1.00 T 1.000 Q 0.500 | target 23.57% (league 100.00%, 23.57% within) | actual 14.55% | debt +5.74s (league -0.00s) | why: Red Sox at Yankees: in rotation
+  2330.0  down    mlb:mlb_statsapi:bos-nyy:live  (ran its time, 12.0s)
+  2330.0  up      mlb:mlb_statsapi:chc-stl:live  (rotation)
+  2330.0  base    mlb:mlb_statsapi:chc-stl:live  (weighted) | G 0.222 proxy F 1.00 T 1.000 Q 0.500 | target 23.96% (league 100.00%, 23.96% within) | actual 15.69% | debt +2.62s (league -0.00s) | why: Cubs at Cardinals: in rotation
+  2342.0  down    mlb:mlb_statsapi:chc-stl:live  (ran its time, 12.0s)
+  2342.0  up      mlb:mlb_statsapi:hou-tex:live  (rotation)
+  2342.0  base    mlb:mlb_statsapi:hou-tex:live  (weighted) | G 0.369 proxy F 1.00 T 1.000 Q 0.500 | target 27.94% (league 100.00%, 27.94% within) | actual 12.62% | debt +3.08s (league -0.00s) | why: Astros at Rangers: in rotation
+  2354.0  down    mlb:mlb_statsapi:hou-tex:live  (ran its time, 12.0s)
+  2354.0  up      mlb:mlb_statsapi:sf-sd:live  (rotation)
+  2354.0  base    mlb:mlb_statsapi:sf-sd:live  (weighted) | G 0.244 proxy F 1.00 T 1.000 Q 0.500 | target 24.56% (league 100.00%, 24.56% within) | actual 11.67% | debt +5.45s (league -0.00s) | why: Giants at Padres: in rotation
+  2366.0  down    mlb:mlb_statsapi:sf-sd:live  (ran its time, 12.0s)
+  2366.0  up      mlb:mlb_statsapi:bos-nyy:live  (rotation)
+  2366.0  base    mlb:mlb_statsapi:bos-nyy:live  (weighted) | G 0.206 proxy F 1.00 T 1.000 Q 0.500 | target 23.54% (league 100.00%, 23.54% within) | actual 15.03% | debt +5.05s (league -0.00s) | why: Red Sox at Yankees: in rotation
+  2378.0  down    mlb:mlb_statsapi:bos-nyy:live  (ran its time, 12.0s)
+  2378.0  up      mlb:mlb_statsapi:chc-stl:live  (rotation)
+  2378.0  base    mlb:mlb_statsapi:chc-stl:live  (weighted) | G 0.222 proxy F 1.00 T 1.000 Q 0.500 | target 23.96% (league 100.00%, 23.96% within) | actual 16.15% | debt +2.12s (league -0.00s) | why: Cubs at Cardinals: in rotation
+  2390.0  down    mlb:mlb_statsapi:chc-stl:live  (ran its time, 12.0s)
+  2390.0  up      mlb:mlb_statsapi:hou-tex:live  (rotation)
+  2390.0  base    mlb:mlb_statsapi:hou-tex:live  (weighted) | G 0.354 proxy F 1.00 T 1.000 Q 0.500 | target 27.65% (league 100.00%, 27.65% within) | actual 12.88% | debt +4.49s (league -0.00s) | why: Astros at Rangers: in rotation
+  2400.0  stale   mlb:mlb_statsapi:hou-tex:live
+  2402.0  down    mlb:mlb_statsapi:hou-tex:live  (ran its time, 12.0s)
+  2402.0  up      mlb:mlb_statsapi:sf-sd:live  (rotation)
+  2402.0  stale   mlb:mlb_statsapi:sf-sd:live
+  2402.0  base    mlb:mlb_statsapi:sf-sd:live  (weighted) | G 0.248 proxy F 1.00 T 1.000 Q 0.500 | target 24.78% (league 100.00%, 24.78% within) | actual 11.95% | debt +5.27s (league -0.00s) | why: Giants at Padres: in rotation
+  2414.0  down    mlb:mlb_statsapi:sf-sd:live  (ran its time, 12.0s)
+  2414.0  up      mlb:mlb_statsapi:bos-nyy:live  (rotation)
+  2414.0  stale   mlb:mlb_statsapi:bos-nyy:live
+  2414.0  base    mlb:mlb_statsapi:bos-nyy:live  (weighted) | G 0.204 proxy F 1.00 T 1.000 Q 0.500 | target 23.60% (league 100.00%, 23.60% within) | actual 15.47% | debt +4.36s (league -0.00s) | why: Red Sox at Yankees: in rotation
+  2426.0  down    mlb:mlb_statsapi:bos-nyy:live  (ran its time, 12.0s)
+  2426.0  up      mlb:mlb_statsapi:hou-tex:live  (rotation)
+  2426.0  stale   mlb:mlb_statsapi:hou-tex:live
+  2426.0  base    mlb:mlb_statsapi:hou-tex:live  (weighted) | G 0.354 proxy F 1.00 T 1.000 Q 0.500 | target 27.65% (league 100.00%, 27.65% within) | actual 13.20% | debt +2.45s (league -0.00s) | why: Astros at Rangers: in rotation
+  2438.1  down    mlb:mlb_statsapi:hou-tex:live  (ran its time, 12.0s)
+  2438.1  up      mlb:mlb_statsapi:chc-stl:live  (rotation)
+  2438.1  stale   mlb:mlb_statsapi:chc-stl:live
+  2438.1  base    mlb:mlb_statsapi:chc-stl:live  (weighted) | G 0.218 proxy F 1.00 T 1.000 Q 0.500 | target 23.96% (league 100.00%, 23.96% within) | actual 16.38% | debt +4.49s (league -0.00s) | why: Cubs at Cardinals: in rotation
+  2450.1  down    mlb:mlb_statsapi:chc-stl:live  (ran its time, 12.0s)
+  2450.1  up      mlb:mlb_statsapi:sf-sd:live  (rotation)
+  2450.1  stale   mlb:mlb_statsapi:sf-sd:live
+  2450.1  base    mlb:mlb_statsapi:sf-sd:live  (weighted) | G 0.248 proxy F 1.00 T 1.000 Q 0.500 | target 24.78% (league 100.00%, 24.78% within) | actual 12.21% | debt +5.16s (league -0.00s) | why: Giants at Padres: in rotation
+  2462.1  down    mlb:mlb_statsapi:sf-sd:live  (ran its time, 12.0s)
+  2462.1  up      mlb:mlb_statsapi:bos-nyy:live  (rotation)
+  2462.1  stale   mlb:mlb_statsapi:bos-nyy:live
+  2462.1  base    mlb:mlb_statsapi:bos-nyy:live  (weighted) | G 0.204 proxy F 1.00 T 1.000 Q 0.500 | target 23.60% (league 100.00%, 23.60% within) | actual 15.88% | debt +3.69s (league -0.00s) | why: Red Sox at Yankees: in rotation
+  2474.1  down    mlb:mlb_statsapi:bos-nyy:live  (ran its time, 12.0s)
+  2474.1  up      mlb:mlb_statsapi:hou-tex:live  (rotation)
+  2474.1  stale   mlb:mlb_statsapi:hou-tex:live
+  2474.1  base    mlb:mlb_statsapi:hou-tex:live  (weighted) | G 0.354 proxy F 1.00 T 1.000 Q 0.500 | target 27.65% (league 100.00%, 27.65% within) | actual 13.43% | debt +3.72s (league -0.00s) | why: Astros at Rangers: in rotation
+  2486.1  down    mlb:mlb_statsapi:hou-tex:live  (ran its time, 12.0s)
+  2486.1  up      mlb:mlb_statsapi:chc-stl:live  (rotation)
+  2486.1  stale   mlb:mlb_statsapi:chc-stl:live
+  2486.1  base    mlb:mlb_statsapi:chc-stl:live  (weighted) | G 0.218 proxy F 1.00 T 1.000 Q 0.500 | target 23.96% (league 100.00%, 23.96% within) | actual 16.76% | debt +4.00s (league -0.00s) | why: Cubs at Cardinals: in rotation
+  2498.1  down    mlb:mlb_statsapi:chc-stl:live  (ran its time, 12.0s)
+  2498.1  up      mlb:mlb_statsapi:sf-sd:live  (rotation)
+  2498.1  stale   mlb:mlb_statsapi:sf-sd:live
+  2498.1  base    mlb:mlb_statsapi:sf-sd:live  (weighted) | G 0.248 proxy F 1.00 T 1.000 Q 0.500 | target 24.78% (league 100.00%, 24.78% within) | actual 12.47% | debt +5.06s (league -0.00s) | why: Giants at Padres: in rotation
+  2510.1  down    mlb:mlb_statsapi:sf-sd:live  (ran its time, 12.0s)
+  2510.1  up      mlb:mlb_statsapi:bos-nyy:live  (rotation)
+  2510.1  stale   mlb:mlb_statsapi:bos-nyy:live
+  2510.1  base    mlb:mlb_statsapi:bos-nyy:live  (weighted) | G 0.204 proxy F 1.00 T 1.000 Q 0.500 | target 23.60% (league 100.00%, 23.60% within) | actual 16.25% | debt +3.02s (league -0.00s) | why: Red Sox at Yankees: in rotation
+  2519.0  source  stale  (no schedule for over 2m: ProviderError: replay outage)
+  2520.0  down    mlb:mlb_statsapi:bos-nyy:live  (no longer current, 9.9s)
+  2520.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2520.0  stale   mlb:mlb_statsapi:col-lad:final
+  2520.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2528.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2528.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2528.0  stale   mlb:mlb_statsapi:atl-nym:final
+  2528.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2536.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2536.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2536.0  stale   mlb:mlb_statsapi:col-lad:final
+  2536.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2544.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2544.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2544.0  stale   mlb:mlb_statsapi:atl-nym:final
+  2544.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2552.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2552.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2552.0  stale   mlb:mlb_statsapi:col-lad:final
+  2552.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2560.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2560.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2560.0  stale   mlb:mlb_statsapi:atl-nym:final
+  2560.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2568.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2568.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2568.0  stale   mlb:mlb_statsapi:col-lad:final
+  2568.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2576.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2576.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2576.0  stale   mlb:mlb_statsapi:atl-nym:final
+  2576.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2584.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2584.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2584.0  stale   mlb:mlb_statsapi:col-lad:final
+  2584.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2592.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2592.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2592.0  stale   mlb:mlb_statsapi:atl-nym:final
+  2592.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2600.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2600.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2600.0  stale   mlb:mlb_statsapi:col-lad:final
+  2600.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2608.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2608.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2608.0  stale   mlb:mlb_statsapi:atl-nym:final
+  2608.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2616.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2616.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2616.0  stale   mlb:mlb_statsapi:col-lad:final
+  2616.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2624.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2624.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2624.0  stale   mlb:mlb_statsapi:atl-nym:final
+  2624.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2632.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2632.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2632.0  stale   mlb:mlb_statsapi:col-lad:final
+  2632.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2640.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2640.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2640.0  stale   mlb:mlb_statsapi:atl-nym:final
+  2640.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2648.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2648.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2648.0  stale   mlb:mlb_statsapi:col-lad:final
+  2648.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2656.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2656.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2656.0  stale   mlb:mlb_statsapi:atl-nym:final
+  2656.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2664.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2664.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2664.0  stale   mlb:mlb_statsapi:col-lad:final
+  2664.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2672.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2672.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2672.0  stale   mlb:mlb_statsapi:atl-nym:final
+  2672.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2680.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2680.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2680.0  stale   mlb:mlb_statsapi:col-lad:final
+  2680.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2688.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2688.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2688.0  stale   mlb:mlb_statsapi:atl-nym:final
+  2688.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2696.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2696.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2696.0  stale   mlb:mlb_statsapi:col-lad:final
+  2696.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2704.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2704.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2704.0  stale   mlb:mlb_statsapi:atl-nym:final
+  2704.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2712.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2712.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2712.0  stale   mlb:mlb_statsapi:col-lad:final
+  2712.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2720.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2720.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2720.0  stale   mlb:mlb_statsapi:atl-nym:final
+  2720.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2728.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2728.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2728.0  stale   mlb:mlb_statsapi:col-lad:final
+  2728.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2736.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2736.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2736.0  stale   mlb:mlb_statsapi:atl-nym:final
+  2736.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2744.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2744.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2744.0  stale   mlb:mlb_statsapi:col-lad:final
+  2744.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2752.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2752.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2752.0  stale   mlb:mlb_statsapi:atl-nym:final
+  2752.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2760.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2760.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2760.0  stale   mlb:mlb_statsapi:col-lad:final
+  2760.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2768.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2768.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2768.0  stale   mlb:mlb_statsapi:atl-nym:final
+  2768.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2776.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2776.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2776.0  stale   mlb:mlb_statsapi:col-lad:final
+  2776.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2784.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2784.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2784.0  stale   mlb:mlb_statsapi:atl-nym:final
+  2784.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2792.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2792.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2792.0  stale   mlb:mlb_statsapi:col-lad:final
+  2792.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2800.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2800.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2800.0  stale   mlb:mlb_statsapi:atl-nym:final
+  2800.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2808.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2808.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2808.0  stale   mlb:mlb_statsapi:col-lad:final
+  2808.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2816.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2816.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2816.0  stale   mlb:mlb_statsapi:atl-nym:final
+  2816.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2824.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2824.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2824.0  stale   mlb:mlb_statsapi:col-lad:final
+  2824.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2832.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2832.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2832.0  stale   mlb:mlb_statsapi:atl-nym:final
+  2832.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2840.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2840.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2840.0  stale   mlb:mlb_statsapi:col-lad:final
+  2840.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2848.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2848.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2848.0  stale   mlb:mlb_statsapi:atl-nym:final
+  2848.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2856.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2856.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2856.0  stale   mlb:mlb_statsapi:col-lad:final
+  2856.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2864.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2864.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2864.0  stale   mlb:mlb_statsapi:atl-nym:final
+  2864.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2872.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2872.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2872.0  stale   mlb:mlb_statsapi:col-lad:final
+  2872.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2880.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2880.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2880.0  stale   mlb:mlb_statsapi:atl-nym:final
+  2880.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2888.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2888.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2888.0  stale   mlb:mlb_statsapi:col-lad:final
+  2888.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2896.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2896.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2896.0  stale   mlb:mlb_statsapi:atl-nym:final
+  2896.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2904.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2904.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2904.0  stale   mlb:mlb_statsapi:col-lad:final
+  2904.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2912.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2912.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2912.0  stale   mlb:mlb_statsapi:atl-nym:final
+  2912.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2920.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2920.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2920.1  stale   mlb:mlb_statsapi:col-lad:final
+  2920.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2928.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2928.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2928.1  stale   mlb:mlb_statsapi:atl-nym:final
+  2928.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2936.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2936.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2936.1  stale   mlb:mlb_statsapi:col-lad:final
+  2936.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2944.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2944.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2944.1  stale   mlb:mlb_statsapi:atl-nym:final
+  2944.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2952.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2952.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2952.1  stale   mlb:mlb_statsapi:col-lad:final
+  2952.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2960.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2960.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2960.1  stale   mlb:mlb_statsapi:atl-nym:final
+  2960.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2968.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2968.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2968.1  stale   mlb:mlb_statsapi:col-lad:final
+  2968.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2976.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2976.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2976.1  stale   mlb:mlb_statsapi:atl-nym:final
+  2976.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2984.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2984.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2984.1  stale   mlb:mlb_statsapi:col-lad:final
+  2984.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2992.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2992.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2992.1  stale   mlb:mlb_statsapi:atl-nym:final
+  2992.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2999.0  source  offline  (no schedule for over 10m: ProviderError: replay outage)
+  2999.0  down    mlb:mlb_statsapi:atl-nym:final  (cleared, 7.0s)
+  2999.0  frame   offline  (no schedule for over 10m: ProviderError: replay outage)
+  3120.0  source  fresh
+  3120.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  3120.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  3128.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  3128.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  3128.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  3136.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  3136.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  3136.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  3144.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  3144.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  3144.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  3152.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  3152.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  3152.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  3160.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  3160.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  3160.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  3168.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  3168.0  up      mlb:mlb_statsapi:hou-tex:live  (rotation)
+  3168.0  cap     refused auxiliary
+  3168.0  base    mlb:mlb_statsapi:hou-tex:live  (recovery) | G 0.361 proxy F 1.00 T 1.000 Q 0.500 | target 27.79% (league 100.00%, 27.79% within) | actual - | debt +0.00s (league +0.00s) | why: Astros at Rangers: a full turn after the alerts
+  3180.0  down    mlb:mlb_statsapi:hou-tex:live  (ran its time, 12.0s)
+  3180.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  3180.0  card    mlb:mlb_statsapi:col-lad:final  (repeat) | why: Rockies: final, again
+  3188.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  3188.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  3188.0  card    mlb:mlb_statsapi:atl-nym:final  (repeat) | why: Braves: final, again
+  3196.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  3196.0  up      mlb:mlb_statsapi:sf-sd:live  (rotation)
+  3196.0  base    mlb:mlb_statsapi:sf-sd:live  (weighted) | G 0.246 proxy F 1.00 T 1.000 Q 0.500 | target 24.68% (league 100.00%, 24.68% within) | actual 0.00% | debt +2.96s (league +0.00s) | why: Giants at Padres: in rotation
+  3208.0  down    mlb:mlb_statsapi:sf-sd:live  (ran its time, 12.0s)
+  3208.0  up      mlb:mlb_statsapi:chc-stl:live  (rotation)
+  3208.0  base    mlb:mlb_statsapi:chc-stl:live  (weighted) | G 0.220 proxy F 1.00 T 1.000 Q 0.500 | target 23.96% (league 100.00%, 23.96% within) | actual 0.00% | debt +5.75s (league +0.00s) | why: Cubs at Cardinals: in rotation
+  3220.0  down    mlb:mlb_statsapi:chc-stl:live  (ran its time, 12.0s)
+  3220.0  up      mlb:mlb_statsapi:bos-nyy:live  (rotation)
+  3220.0  base    mlb:mlb_statsapi:bos-nyy:live  (weighted) | G 0.205 proxy F 1.00 T 1.000 Q 0.500 | target 23.57% (league 100.00%, 23.57% within) | actual 0.00% | debt +8.48s (league +0.00s) | why: Red Sox at Yankees: in rotation
+  3232.0  down    mlb:mlb_statsapi:bos-nyy:live  (ran its time, 12.0s)
+  3232.0  up      mlb:mlb_statsapi:hou-tex:live  (rotation)
+  3232.0  base    mlb:mlb_statsapi:hou-tex:live  (weighted) | G 0.369 proxy F 1.00 T 1.000 Q 0.500 | target 27.94% (league 100.00%, 27.94% within) | actual 25.00% | debt +1.34s (league +0.00s) | why: Astros at Rangers: in rotation
+  3244.0  down    mlb:mlb_statsapi:hou-tex:live  (ran its time, 12.0s)
+  3244.0  up      mlb:mlb_statsapi:sf-sd:live  (rotation)
+  3244.0  base    mlb:mlb_statsapi:sf-sd:live  (weighted) | G 0.244 proxy F 1.00 T 1.000 Q 0.500 | target 24.56% (league 100.00%, 24.56% within) | actual 20.00% | debt +2.79s (league +0.00s) | why: Giants at Padres: in rotation
+  3256.0  down    mlb:mlb_statsapi:sf-sd:live  (ran its time, 12.0s)
+  3256.0  up      mlb:mlb_statsapi:chc-stl:live  (rotation)
+  3256.0  base    mlb:mlb_statsapi:chc-stl:live  (weighted) | G 0.222 proxy F 1.00 T 1.000 Q 0.500 | target 23.96% (league 100.00%, 23.96% within) | actual 16.67% | debt +5.25s (league +0.00s) | why: Cubs at Cardinals: in rotation
+  3268.0  down    mlb:mlb_statsapi:chc-stl:live  (ran its time, 12.0s)
+  3268.0  up      mlb:mlb_statsapi:bos-nyy:live  (rotation)
+  3268.0  base    mlb:mlb_statsapi:bos-nyy:live  (weighted) | G 0.206 proxy F 1.00 T 1.000 Q 0.500 | target 23.54% (league 100.00%, 23.54% within) | actual 14.29% | debt +7.79s (league +0.00s) | why: Red Sox at Yankees: in rotation
+  3280.0  down    mlb:mlb_statsapi:bos-nyy:live  (ran its time, 12.0s)
+  3280.0  up      mlb:mlb_statsapi:hou-tex:live  (rotation)
+  3280.0  base    mlb:mlb_statsapi:hou-tex:live  (weighted) | G 0.369 proxy F 1.00 T 1.000 Q 0.500 | target 27.94% (league 100.00%, 27.94% within) | actual 25.00% | debt +2.75s (league +0.00s) | why: Astros at Rangers: in rotation
+  3292.0  down    mlb:mlb_statsapi:hou-tex:live  (ran its time, 12.0s)
+  3292.0  up      mlb:mlb_statsapi:sf-sd:live  (rotation)
+  3292.0  base    mlb:mlb_statsapi:sf-sd:live  (weighted) | G 0.248 proxy F 1.00 T 1.000 Q 0.500 | target 24.78% (league 100.00%, 24.78% within) | actual 22.22% | debt +2.58s (league +0.00s) | why: Giants at Padres: in rotation
