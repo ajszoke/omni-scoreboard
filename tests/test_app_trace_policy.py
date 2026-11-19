@@ -53,7 +53,7 @@ def test_a_promotion_in_a_mound_visit_is_written_with_its_value_bar_hold_cooldow
         "guest 23:00:18: admitted mlb:mlb_statsapi:g01:bigplay:p1 in mlb:mlb_statsapi:g00",
         "guest 23:00:30: refused mlb:mlb_statsapi:g01:live in mlb:mlb_statsapi:g00 (turns_spent)",
         "base 23:00:30 omni-board-policy/2: mlb:mlb_statsapi:g00:live (return) | G 0.400 proxy F 4.00 T 1.000"
-        " Q 0.500 | target 80.00% (league 100.00%, 80.00% within) | actual 100.00% | debt -8.40s (league +0.00s)"
+        " Q 0.500 | target 80.00% (league 100.00%, 80.00% within) | actual 100.00% | debt -3.60s (league +0.00s)"
         " | why: Braves: favorite, back before its break ends",
     ]
 

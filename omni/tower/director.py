@@ -30,7 +30,10 @@ or the clock.
 **Base turns** go by debt (`targets`, `AirtimeLedger.choose`), league first, then game; the same game winning again
 keeps its frame. When favorites are in breaks and none is in action, another game's card is their guest: it must
 fit what's left of each lease with the return margin, or the board goes back to the favorite. A base turn is
-credited with its confirmed time when it ends or is cut short; nothing accrues during other cards.
+credited with its confirmed time when it ends or is cut short; nothing accrues during other cards. When the games
+eligible for it change mid-turn (a favorite's break begins or ends, a game leaves), the time so far is credited to
+the eligible games as they were, and the rest of the turn to them as they are now: a favorite in its break accrues
+nothing from the moment the board sees it, and nothing is credited back for a break once it ends.
 
 **Promotions** reach the broker as the view offers them. The broker says when one may start (the bars, the 24 s
 hold, lifetimes, the 60 s cooldown); the director adds what the broker leaves to the board: protected minimums,
@@ -211,6 +214,7 @@ class Turn:
     candidate: PromotionCandidate[DedupeKey] | None = None
     why: str = ""
     started: MonotonicTime | None = None
+    accounted: MonotonicTime | None = None  # a base turn: credited up to here
     live_base: bool = False  # a live base card was on hand when it was chosen: its airtime runs up the non-base cap
     ended: bool = False
     captioned: bool = False  # a caption has aired in it
@@ -625,7 +629,11 @@ class PolicyDirector:
         staying = {game.contest for game in pool.games} | resting
         if self._current is not None:
             staying.add(self._current.contest)
-        for contest in sorted(self._accounts - staying, key=str):
+        leaving = sorted(self._accounts - staying, key=str)
+        changing = [entry.contest for entry in entries if (entry.contest in resting) != (entry.contest in self._frozen)]
+        if leaving or changing:
+            self._split(pool, at)
+        for contest in leaving:
             self._ledger.retire(contest)
             self._frozen.discard(contest)
         self._accounts &= staying
@@ -937,7 +945,7 @@ class PolicyDirector:
     def _begin(self, turn: Turn, air: Air, at: ClockReading, start: MonotonicTime, *, again: bool = False) -> None:
         """A turn's first frame (or its card's frame staying up for it): the run, its guests, the trace. A card
         rotating on its own at neutral weight (``again``) isn't written again."""
-        turn.started = start
+        turn.started = turn.accounted = start
         self._current = turn
         self._run = self._run.after(turn.rung)
         if turn.rung.base:
@@ -985,14 +993,34 @@ class PolicyDirector:
         self._run = self._run.aired(turn.rung, at.monotonic.since(turn.started), live_base=turn.live_base)
         if turn.targets is None:
             return
-        aired = at.monotonic.since(turn.started)
-        completed = aired >= turn.length
-        clamps = self._ledger.served(turn.targets, turn.contest, min(aired, turn.length), completed=completed)
+        completed = at.monotonic.since(turn.started) >= turn.length
+        self._credit(turn, at, completed=completed)
+        if completed:
+            self._recovery_owed = False
+
+    def _split(self, pool: Targets, at: ClockReading) -> None:
+        """The games eligible for the base turn on air are changing: credit its time so far to them as they were, and
+        account the rest of it by ``pool``, when its own game is in it (else by the targets it was chosen by)."""
+        turn = self._current
+        if turn is None or turn.targets is None:
+            return
+        assert turn.started is not None  # a turn is current from its first frame
+        if at.monotonic >= turn.started + turn.length:
+            return  # it has run its length: all of it was the eligible games' as they were, credited as it ends
+        self._credit(turn, at, completed=False)
+        if pool.game(turn.contest) is not None:
+            turn.targets = pool
+
+    def _credit(self, turn: Turn, at: ClockReading, *, completed: bool) -> None:
+        """Credit a base turn's confirmed time from where it was last accounted up to ``at`` (never past its length)."""
+        assert turn.targets is not None and turn.started is not None and turn.accounted is not None
+        end = min(at.monotonic, turn.started + turn.length)
+        aired = max(end.since(turn.accounted), _ZERO)
+        turn.accounted = max(end, turn.accounted)
+        clamps = self._ledger.served(turn.targets, turn.contest, aired, completed=completed)
         self._accounts |= {game.contest for game in turn.targets.games}
         if clamps:
             self._note(ClampNote(at=at, clamps=clamps))
-        if completed:
-            self._recovery_owed = False
 
     def _restart(self, at: ClockReading) -> None:
         """An outage: old leases and every ledger account are void, and the turn on air isn't credited (a non-base

@@ -136,3 +136,52 @@ def test_an_owed_recovery_cut_short_by_an_outage_is_still_owed_when_the_source_r
     [recovery] = [note for note in run.of(BaseTurnNote) if note.at.monotonic.seconds == 60.0]
     assert recovery.reason is BaseReason.RECOVERY
     assert run.shown(_key(live(base)))[1] == (60.0, 72.0)  # the full turn, through its completion
+
+
+# --- fairness through a favorite's break -------------------------------------------------------------------------------
+
+
+def _braves_break(opens: float, ends: float) -> Run:
+    """The Braves (a favorite), the Angels and the Orioles live; the Braves' inning break is released at ``opens`` and
+    play resumes at ``ends``."""
+    braves, angels, other = games(3)
+    run = Run()
+    run.stage(live(braves), live(angels), live(other))
+    run.describe(facts(braves, 0.5), facts(angels, 0.6), facts(other, 0.3))
+    in_break = evidence(braves, BreakKind.MLB_INNING_BREAK, received=opens, stated=175)
+    run.publish_at(opens, lambda: run.describe(facts(braves, 0.5, breaks=(in_break,))))
+    run.publish_at(ends, lambda: run.describe(facts(braves, 0.5, action=action(braves, "ab 12 p1", received=ends))))
+    run.publish()
+    run.run(0, ends + 20)
+    return run
+
+
+def test_a_favorite_whose_break_opens_in_another_game_s_turn_is_credited_up_to_it_and_nothing_after() -> None:
+    """The Angels' turn at 12 is chosen with the Braves acting. The Braves' break opens at 17, and the board sees it at
+    20, when the turn's protection ends: the turn's first 8 s are credited to the games eligible when it was chosen,
+    the Braves among them, and its last 4 s to the games eligible now, without them. Nothing is credited for the
+    break, nor back once it ends, so at their next turn, at 44, the Braves are owed their own turn's pay (12 s at
+    their share, less the 12 s shown) and those 8 s."""
+    braves = games(1)[0]
+    run = _braves_break(opens=17, ends=40)
+    turns = {note.at.monotonic.seconds: note for note in run.of(BaseTurnNote)}
+    assert [(at, note.contest.raw) for at, note in sorted(turns.items())][:5] == [
+        (0.0, "g00"),
+        (12.0, "g01"),
+        (24.0, "g02"),
+        (36.0, "g01"),
+        (44.0, "g00"),
+    ]
+    first, chosen = turns[0.0].targets, turns[12.0].targets
+    assert first is not None and chosen is not None
+    own, latched = first.game(braves.id), chosen.game(braves.id)
+    assert own is not None and latched is not None
+    expected = -12 + 12 * own.within_league + 8 * latched.within_league
+    assert turns[44.0].debt == pytest.approx(expected, abs=1e-9)  # 1.53 s; crediting by the turn's end gave -3.88 s
+
+
+def test_a_favorite_s_own_turn_runs_its_12_s_when_its_break_opens_in_it() -> None:
+    run = _braves_break(opens=5, ends=30)
+    braves = games(1)[0]
+    assert run.shown(live(braves).dedupe_key.raw)[0] == (0.0, 12.0)
+    assert [note.contest for note in run.of(BaseTurnNote)][1] != braves.id  # then its break is another game's
