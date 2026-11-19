@@ -20,11 +20,13 @@ from omni.cards.base import CardKind, ScoreboardCard
 from omni.core.enum import Sport
 from omni.panels.geometry import geometry_for
 from omni.renderers.base import Renderer
+from omni.renderers.basketball_pregame import BasketballPregameRenderer
 from omni.renderers.big_play import BigPlayRenderer
 from omni.renderers.canvas import Canvas
 from omni.renderers.context import RenderContext
 from omni.renderers.final import FinalRenderer
 from omni.renderers.live_baseball import LiveBaseballRenderer
+from omni.renderers.live_basketball import LiveBasketballRenderer
 from omni.renderers.live_football import LiveFootballRenderer
 from omni.renderers.no_hitter import NoHitterRenderer
 from omni.renderers.pregame import PregameRenderer
@@ -74,7 +76,8 @@ class RendererRegistry:
 
 def default_registry() -> RendererRegistry:
     """A registry wired with today's renderers: baseball's live, pregame, final, big-play, no-hitter and status
-    cards, and football's live card, whose renderer draws football's final and a play's own card too."""
+    cards; football's live card, whose renderer draws football's final and a play's own card too; and basketball's
+    game card, whose renderer draws its final too, and its pregame card."""
     registry = RendererRegistry()
     registry.register(Sport.BASEBALL, CardKind.LIVE_GAME, LiveBaseballRenderer())
     registry.register(Sport.BASEBALL, CardKind.PREGAME, PregameRenderer())
@@ -86,4 +89,8 @@ def default_registry() -> RendererRegistry:
     registry.register(Sport.FOOTBALL, CardKind.LIVE_GAME, football)
     registry.register(Sport.FOOTBALL, CardKind.FINAL, football)
     registry.register(Sport.FOOTBALL, CardKind.BIG_PLAY, football)  # a play's own card: the field it left, captioned
+    basketball = LiveBasketballRenderer()
+    registry.register(Sport.BASKETBALL, CardKind.LIVE_GAME, basketball)
+    registry.register(Sport.BASKETBALL, CardKind.FINAL, basketball)
+    registry.register(Sport.BASKETBALL, CardKind.PREGAME, BasketballPregameRenderer())
     return registry
