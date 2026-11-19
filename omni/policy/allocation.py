@@ -10,6 +10,10 @@ action, its rank ``F``. Each league's mass is its games' weights, boosted a litt
 scaled by the user's league weight. A league's share blends its mass with an even split (80/20); a game takes
 its league's share in proportion to its weight. When favorites act, their combined share has a floor that
 rises with the leverage of the most important one, from 30% in a blowout to 70% close and late.
+
+A stale game (its released state isn't current) gets no share at all: it's set aside, so it earns no turns, credit,
+wait or floor, and a healthy game elsewhere never loses a turn to it. Its dim card is the board's last safe fallback,
+shown only when nothing fresh is.
 """
 
 from __future__ import annotations
@@ -210,6 +214,7 @@ class SetAsideReason(StrEnumMixin, str, Enum):
 
     MUTED = "muted"
     NOT_DRAWABLE = "not drawable"
+    STALE = "stale"  # its released state isn't current: a last-safe fallback at most, never weighted
     FAVORITE_IN_BREAK = "favorite in break"  # while anything else can be shown
 
 
@@ -301,6 +306,8 @@ def targets(
             set_aside.append(SetAside(entry.contest, SetAsideReason.MUTED))
         elif not entry.drawable:
             set_aside.append(SetAside(entry.contest, SetAsideReason.NOT_DRAWABLE))
+        elif not entry.fresh:
+            set_aside.append(SetAside(entry.contest, SetAsideReason.STALE))
         else:
             candidates.append(entry)
     resting = [entry for entry in candidates if entry.favorite_rank is not None and entry.in_break]

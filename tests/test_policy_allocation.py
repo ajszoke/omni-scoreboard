@@ -192,11 +192,11 @@ def test_a_favorite_in_action_is_weighed_by_its_rank_and_two_favorites_meeting_c
     assert (weight.f, weight.q, weight.t, weight.b, weight.acting_favorite) == (1.0, 0.5, 1.0, 2.5, False)
 
 
-def test_a_stale_favorite_loses_its_boost_and_its_floor_at_once() -> None:
+def test_a_stale_game_gets_no_share_and_a_stale_favorite_no_boost_or_floor() -> None:
     result = targets([_entry(League.MLB, "atl", 0.0, rank=1, fresh=False), *_others(League.MLB, 14, 1.0)])
-    atl = result.game(_id(League.MLB, "atl"))
-    assert atl is not None and atl.weight.f == 1.0 and not atl.weight.acting_favorite
-    assert result.floor is None and f"{atl.share:.2%}" == "2.78%"  # 1 of 36
+    assert result.game(_id(League.MLB, "atl")) is None and len(result.games) == 14
+    assert result.set_aside == (SetAside(_id(League.MLB, "atl"), SetAsideReason.STALE),)
+    assert result.floor is None and {f"{game.share:.2%}" for game in result.games} == {"7.14%"}  # 1 of 14 each
 
 
 @pytest.mark.parametrize(

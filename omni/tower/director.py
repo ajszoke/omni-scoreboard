@@ -8,7 +8,9 @@ for one board: the airtime ledger, the promotion broker, the lease book and the 
 
 **The live pool.** A game is in it when the view's facts describe it (released and live), it isn't muted, and its
 base card (its live card, or the final that replaced it) is in the cards and drawable on the panel. A delay or a
-suspension is a status card, not a pool entry.
+suspension is a status card, not a pool entry. A stale game is set aside from the weighted targets, and its ledger
+account ends: its dim card airs only when nothing fresh can, as the last safe frame (`CardRole.FALLBACK`), with no
+base turn, credit or wait.
 
 **A legal decision** comes once the card on air has had its minimum. A base turn's protection runs from the first
 frame of its game's card, so a game that wins again keeps its frame without a new minimum, and the base card that
@@ -478,7 +480,7 @@ class PolicyDirector:
             return EndReason.RAN_ITS_TIME
         # The same card again (its game won again, or a lone card): its frame stays, and a new turn begins.
         renewed, role = option.air.turn, option.air.role
-        again = role is air.role is CardRole.NEUTRAL  # the same card rotating on its own says nothing new
+        again = role is air.role and role in _ROTATING  # the same card rotating on its own says nothing new
         air.turn, air.role, air.summary = renewed, role, option.air.summary
         start = turn.started + turn.length
         self._begin(renewed, air, at, start, again=again)
@@ -809,6 +811,8 @@ class PolicyDirector:
             role = self._role(scene, card) if live else _neutral(card, self._aired(key))
             if role is not None:
                 options.append((role, card))
+        if not options and not live:  # nothing fresh to show: a stale game's dim card is the last safe frame
+            options = [(CardRole.FALLBACK, card) for card in scene.base.values() if card.dedupe_key.raw in scene.usable]
         if not options:
             return None
         role, card = min(options, key=lambda option: self._unseen(option[1]))
@@ -1383,8 +1387,11 @@ _ROLE_WORDS = MappingProxyType(
         CardRole.REPEAT: "final, again",
         CardRole.STATUS: "paused",
         CardRole.NEUTRAL: "no live game to weigh",
+        CardRole.FALLBACK: "the last safe frame; nothing fresh to show",
     }
 )
+
+_ROTATING = frozenset({CardRole.NEUTRAL, CardRole.FALLBACK})  # roles a lone card renews quietly
 
 
 def _reminder_key(contest: LeagueScopedId, bid: _Bid) -> PromotionKey:

@@ -112,11 +112,11 @@ def test_the_mixed_day_s_scorecard_is_its_recorded_one_on_every_profile(day: _Da
 
 def test_each_league_s_actual_base_share_lands_within_a_point_of_its_target(day: _Day) -> None:
     card = day.card
-    assert round(card.base, 1) == 16859.4
+    assert round(card.base, 1) == 16857.7
     shares = {each.league: (each.target / card.base, each.actual / card.base) for each in card.leagues}
     assert {league: (round(target, 4), round(actual, 4)) for league, (target, actual) in shares.items()} == {
-        League.MLB: (0.4120, 0.4160),
-        League.NFL: (0.5880, 0.5840),
+        League.MLB: (0.4181, 0.4180),
+        League.NFL: (0.5819, 0.5820),
     }
     for target, actual in shares.values():
         assert abs(actual - target) < 0.01
@@ -126,12 +126,12 @@ def test_the_favorites_get_their_share_and_no_game_waits_long_for_a_base_turn(da
     card = day.card
     panthers, braves, rockies = card.game(CAR), card.game(ATL), card.game(COL)
     assert (panthers.favorite, braves.favorite, rockies.favorite) == (1, 1, 2)
-    assert (round(panthers.target, 1), round(panthers.actual, 1)) == (4974.3, 4938.5)
-    assert (round(braves.target, 1), round(braves.actual, 1)) == (1945.2, 1942.4)
-    assert (round(rockies.target, 1), round(rockies.actual, 1)) == (2566.7, 2626.3)
+    assert (round(panthers.target, 1), round(panthers.actual, 1)) == (4958.1, 4944.2)
+    assert (round(braves.target, 1), round(braves.actual, 1)) == (1966.7, 1958.3)
+    assert (round(rockies.target, 1), round(rockies.actual, 1)) == (2632.1, 2630.3)
     assert max(game.longest_wait for game in card.games) == pytest.approx(156.2, abs=0.05)
-    assert sum(game.missed for game in card.games) == 5
-    assert (card.floor_turns, card.clamps, card.rescues) == (14, 12, 9)
+    assert sum(game.missed for game in card.games) == 1
+    assert (card.floor_turns, card.clamps, card.rescues) == (5, 12, 11)
 
 
 def test_breaks_lend_guests_with_no_overrun_and_none_before_the_released_state_shows_the_break(day: _Day) -> None:
@@ -145,7 +145,7 @@ def test_breaks_lend_guests_with_no_overrun_and_none_before_the_released_state_s
         "nfl team timeout": 1,
         "nfl two-minute warning": 1,
     }
-    assert (card.guests, dict(card.guest_refusals)) == (21, {"no_room": 5})
+    assert (card.guests, dict(card.guest_refusals)) == (22, {"no_room": 5})
     assert card.overruns == () and card.premature == ()
 
 

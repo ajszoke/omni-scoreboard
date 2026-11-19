@@ -627,318 +627,324 @@ versions: policy omni-board-policy/2 | config omni-config/1 8aca364038f9 | rules
   2390.0  base    mlb:mlb_statsapi:hou-tex:live  (weighted) | G 0.354 proxy F 1.00 T 1.000 Q 0.500 | target 27.65% (league 100.00%, 27.65% within) | actual 12.88% | debt +4.49s (league -0.00s) | why: Astros at Rangers: in rotation
   2400.0  stale   mlb:mlb_statsapi:hou-tex:live
   2402.0  down    mlb:mlb_statsapi:hou-tex:live  (ran its time, 12.0s)
-  2402.0  up      mlb:mlb_statsapi:sf-sd:live  (rotation)
-  2402.0  stale   mlb:mlb_statsapi:sf-sd:live
-  2402.0  base    mlb:mlb_statsapi:sf-sd:live  (weighted) | G 0.248 proxy F 1.00 T 1.000 Q 0.500 | target 24.78% (league 100.00%, 24.78% within) | actual 11.95% | debt +5.27s (league -0.00s) | why: Giants at Padres: in rotation
-  2414.0  down    mlb:mlb_statsapi:sf-sd:live  (ran its time, 12.0s)
-  2414.0  up      mlb:mlb_statsapi:bos-nyy:live  (rotation)
-  2414.0  stale   mlb:mlb_statsapi:bos-nyy:live
-  2414.0  base    mlb:mlb_statsapi:bos-nyy:live  (weighted) | G 0.204 proxy F 1.00 T 1.000 Q 0.500 | target 23.60% (league 100.00%, 23.60% within) | actual 15.47% | debt +4.36s (league -0.00s) | why: Red Sox at Yankees: in rotation
-  2426.0  down    mlb:mlb_statsapi:bos-nyy:live  (ran its time, 12.0s)
-  2426.0  up      mlb:mlb_statsapi:hou-tex:live  (rotation)
-  2426.0  stale   mlb:mlb_statsapi:hou-tex:live
-  2426.0  base    mlb:mlb_statsapi:hou-tex:live  (weighted) | G 0.354 proxy F 1.00 T 1.000 Q 0.500 | target 27.65% (league 100.00%, 27.65% within) | actual 13.20% | debt +2.45s (league -0.00s) | why: Astros at Rangers: in rotation
-  2438.1  down    mlb:mlb_statsapi:hou-tex:live  (ran its time, 12.0s)
-  2438.1  up      mlb:mlb_statsapi:chc-stl:live  (rotation)
-  2438.1  stale   mlb:mlb_statsapi:chc-stl:live
-  2438.1  base    mlb:mlb_statsapi:chc-stl:live  (weighted) | G 0.218 proxy F 1.00 T 1.000 Q 0.500 | target 23.96% (league 100.00%, 23.96% within) | actual 16.38% | debt +4.49s (league -0.00s) | why: Cubs at Cardinals: in rotation
-  2450.1  down    mlb:mlb_statsapi:chc-stl:live  (ran its time, 12.0s)
-  2450.1  up      mlb:mlb_statsapi:sf-sd:live  (rotation)
-  2450.1  stale   mlb:mlb_statsapi:sf-sd:live
-  2450.1  base    mlb:mlb_statsapi:sf-sd:live  (weighted) | G 0.248 proxy F 1.00 T 1.000 Q 0.500 | target 24.78% (league 100.00%, 24.78% within) | actual 12.21% | debt +5.16s (league -0.00s) | why: Giants at Padres: in rotation
-  2462.1  down    mlb:mlb_statsapi:sf-sd:live  (ran its time, 12.0s)
-  2462.1  up      mlb:mlb_statsapi:bos-nyy:live  (rotation)
-  2462.1  stale   mlb:mlb_statsapi:bos-nyy:live
-  2462.1  base    mlb:mlb_statsapi:bos-nyy:live  (weighted) | G 0.204 proxy F 1.00 T 1.000 Q 0.500 | target 23.60% (league 100.00%, 23.60% within) | actual 15.88% | debt +3.69s (league -0.00s) | why: Red Sox at Yankees: in rotation
-  2474.1  down    mlb:mlb_statsapi:bos-nyy:live  (ran its time, 12.0s)
-  2474.1  up      mlb:mlb_statsapi:hou-tex:live  (rotation)
-  2474.1  stale   mlb:mlb_statsapi:hou-tex:live
-  2474.1  base    mlb:mlb_statsapi:hou-tex:live  (weighted) | G 0.354 proxy F 1.00 T 1.000 Q 0.500 | target 27.65% (league 100.00%, 27.65% within) | actual 13.43% | debt +3.72s (league -0.00s) | why: Astros at Rangers: in rotation
-  2486.1  down    mlb:mlb_statsapi:hou-tex:live  (ran its time, 12.0s)
-  2486.1  up      mlb:mlb_statsapi:chc-stl:live  (rotation)
-  2486.1  stale   mlb:mlb_statsapi:chc-stl:live
-  2486.1  base    mlb:mlb_statsapi:chc-stl:live  (weighted) | G 0.218 proxy F 1.00 T 1.000 Q 0.500 | target 23.96% (league 100.00%, 23.96% within) | actual 16.76% | debt +4.00s (league -0.00s) | why: Cubs at Cardinals: in rotation
-  2498.1  down    mlb:mlb_statsapi:chc-stl:live  (ran its time, 12.0s)
-  2498.1  up      mlb:mlb_statsapi:sf-sd:live  (rotation)
-  2498.1  stale   mlb:mlb_statsapi:sf-sd:live
-  2498.1  base    mlb:mlb_statsapi:sf-sd:live  (weighted) | G 0.248 proxy F 1.00 T 1.000 Q 0.500 | target 24.78% (league 100.00%, 24.78% within) | actual 12.47% | debt +5.06s (league -0.00s) | why: Giants at Padres: in rotation
-  2510.1  down    mlb:mlb_statsapi:sf-sd:live  (ran its time, 12.0s)
-  2510.1  up      mlb:mlb_statsapi:bos-nyy:live  (rotation)
-  2510.1  stale   mlb:mlb_statsapi:bos-nyy:live
-  2510.1  base    mlb:mlb_statsapi:bos-nyy:live  (weighted) | G 0.204 proxy F 1.00 T 1.000 Q 0.500 | target 23.60% (league 100.00%, 23.60% within) | actual 16.25% | debt +3.02s (league -0.00s) | why: Red Sox at Yankees: in rotation
+  2402.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2402.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2410.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2410.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2410.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2418.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2418.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2418.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2426.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2426.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2426.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2434.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2434.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2434.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2442.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2442.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2442.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2450.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2450.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2450.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2458.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2458.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2458.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2466.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2466.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2466.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2474.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2474.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2474.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2482.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2482.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2482.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2490.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2490.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2490.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2498.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2498.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2498.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2506.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2506.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2506.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2514.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2514.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2514.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
   2519.0  source  stale  (no schedule for over 2m: ProviderError: replay outage)
-  2520.0  down    mlb:mlb_statsapi:bos-nyy:live  (no longer current, 9.9s)
-  2520.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
-  2520.0  stale   mlb:mlb_statsapi:col-lad:final
-  2520.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
-  2528.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
-  2528.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
-  2528.0  stale   mlb:mlb_statsapi:atl-nym:final
-  2528.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
-  2536.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
-  2536.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
-  2536.0  stale   mlb:mlb_statsapi:col-lad:final
-  2536.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
-  2544.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
-  2544.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
-  2544.0  stale   mlb:mlb_statsapi:atl-nym:final
-  2544.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
-  2552.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
-  2552.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
-  2552.0  stale   mlb:mlb_statsapi:col-lad:final
-  2552.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
-  2560.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
-  2560.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
-  2560.0  stale   mlb:mlb_statsapi:atl-nym:final
-  2560.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
-  2568.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
-  2568.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
-  2568.0  stale   mlb:mlb_statsapi:col-lad:final
-  2568.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
-  2576.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
-  2576.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
-  2576.0  stale   mlb:mlb_statsapi:atl-nym:final
-  2576.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
-  2584.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
-  2584.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
-  2584.0  stale   mlb:mlb_statsapi:col-lad:final
-  2584.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
-  2592.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
-  2592.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
-  2592.0  stale   mlb:mlb_statsapi:atl-nym:final
-  2592.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
-  2600.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
-  2600.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
-  2600.0  stale   mlb:mlb_statsapi:col-lad:final
-  2600.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
-  2608.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
-  2608.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
-  2608.0  stale   mlb:mlb_statsapi:atl-nym:final
-  2608.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
-  2616.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
-  2616.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
-  2616.0  stale   mlb:mlb_statsapi:col-lad:final
-  2616.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
-  2624.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
-  2624.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
-  2624.0  stale   mlb:mlb_statsapi:atl-nym:final
-  2624.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
-  2632.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
-  2632.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
-  2632.0  stale   mlb:mlb_statsapi:col-lad:final
-  2632.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
-  2640.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
-  2640.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
-  2640.0  stale   mlb:mlb_statsapi:atl-nym:final
-  2640.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
-  2648.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
-  2648.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
-  2648.0  stale   mlb:mlb_statsapi:col-lad:final
-  2648.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
-  2656.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
-  2656.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
-  2656.0  stale   mlb:mlb_statsapi:atl-nym:final
-  2656.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
-  2664.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
-  2664.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
-  2664.0  stale   mlb:mlb_statsapi:col-lad:final
-  2664.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
-  2672.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
-  2672.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
-  2672.0  stale   mlb:mlb_statsapi:atl-nym:final
-  2672.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
-  2680.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
-  2680.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
-  2680.0  stale   mlb:mlb_statsapi:col-lad:final
-  2680.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
-  2688.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
-  2688.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
-  2688.0  stale   mlb:mlb_statsapi:atl-nym:final
-  2688.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
-  2696.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
-  2696.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
-  2696.0  stale   mlb:mlb_statsapi:col-lad:final
-  2696.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
-  2704.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
-  2704.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
-  2704.0  stale   mlb:mlb_statsapi:atl-nym:final
-  2704.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
-  2712.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
-  2712.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
-  2712.0  stale   mlb:mlb_statsapi:col-lad:final
-  2712.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
-  2720.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
-  2720.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
-  2720.0  stale   mlb:mlb_statsapi:atl-nym:final
-  2720.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
-  2728.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
-  2728.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
-  2728.0  stale   mlb:mlb_statsapi:col-lad:final
-  2728.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
-  2736.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
-  2736.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
-  2736.0  stale   mlb:mlb_statsapi:atl-nym:final
-  2736.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
-  2744.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
-  2744.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
-  2744.0  stale   mlb:mlb_statsapi:col-lad:final
-  2744.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
-  2752.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
-  2752.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
-  2752.0  stale   mlb:mlb_statsapi:atl-nym:final
-  2752.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
-  2760.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
-  2760.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
-  2760.0  stale   mlb:mlb_statsapi:col-lad:final
-  2760.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
-  2768.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
-  2768.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
-  2768.0  stale   mlb:mlb_statsapi:atl-nym:final
-  2768.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
-  2776.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
-  2776.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
-  2776.0  stale   mlb:mlb_statsapi:col-lad:final
-  2776.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
-  2784.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
-  2784.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
-  2784.0  stale   mlb:mlb_statsapi:atl-nym:final
-  2784.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
-  2792.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
-  2792.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
-  2792.0  stale   mlb:mlb_statsapi:col-lad:final
-  2792.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
-  2800.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
-  2800.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
-  2800.0  stale   mlb:mlb_statsapi:atl-nym:final
-  2800.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
-  2808.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
-  2808.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
-  2808.0  stale   mlb:mlb_statsapi:col-lad:final
-  2808.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
-  2816.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
-  2816.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
-  2816.0  stale   mlb:mlb_statsapi:atl-nym:final
-  2816.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
-  2824.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
-  2824.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
-  2824.0  stale   mlb:mlb_statsapi:col-lad:final
-  2824.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
-  2832.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
-  2832.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
-  2832.0  stale   mlb:mlb_statsapi:atl-nym:final
-  2832.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
-  2840.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
-  2840.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
-  2840.0  stale   mlb:mlb_statsapi:col-lad:final
-  2840.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
-  2848.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
-  2848.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
-  2848.0  stale   mlb:mlb_statsapi:atl-nym:final
-  2848.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
-  2856.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
-  2856.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
-  2856.0  stale   mlb:mlb_statsapi:col-lad:final
-  2856.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
-  2864.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
-  2864.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
-  2864.0  stale   mlb:mlb_statsapi:atl-nym:final
-  2864.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
-  2872.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
-  2872.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
-  2872.0  stale   mlb:mlb_statsapi:col-lad:final
-  2872.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
-  2880.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
-  2880.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
-  2880.0  stale   mlb:mlb_statsapi:atl-nym:final
-  2880.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
-  2888.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
-  2888.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
-  2888.0  stale   mlb:mlb_statsapi:col-lad:final
-  2888.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
-  2896.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
-  2896.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
-  2896.0  stale   mlb:mlb_statsapi:atl-nym:final
-  2896.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
-  2904.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
-  2904.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
-  2904.0  stale   mlb:mlb_statsapi:col-lad:final
-  2904.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
-  2912.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
-  2912.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
-  2912.0  stale   mlb:mlb_statsapi:atl-nym:final
-  2912.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
-  2920.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
-  2920.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
-  2920.1  stale   mlb:mlb_statsapi:col-lad:final
-  2920.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
-  2928.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
-  2928.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
-  2928.1  stale   mlb:mlb_statsapi:atl-nym:final
-  2928.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
-  2936.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
-  2936.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
-  2936.1  stale   mlb:mlb_statsapi:col-lad:final
-  2936.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
-  2944.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
-  2944.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
-  2944.1  stale   mlb:mlb_statsapi:atl-nym:final
-  2944.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
-  2952.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
-  2952.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
-  2952.1  stale   mlb:mlb_statsapi:col-lad:final
-  2952.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
-  2960.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
-  2960.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
-  2960.1  stale   mlb:mlb_statsapi:atl-nym:final
-  2960.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
-  2968.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
-  2968.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
-  2968.1  stale   mlb:mlb_statsapi:col-lad:final
-  2968.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
-  2976.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
-  2976.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
-  2976.1  stale   mlb:mlb_statsapi:atl-nym:final
-  2976.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
-  2984.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
-  2984.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
-  2984.1  stale   mlb:mlb_statsapi:col-lad:final
-  2984.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
-  2992.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
-  2992.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
-  2992.1  stale   mlb:mlb_statsapi:atl-nym:final
-  2992.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2519.0  stale   mlb:mlb_statsapi:col-lad:final
+  2522.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2522.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2522.1  stale   mlb:mlb_statsapi:atl-nym:final
+  2522.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2530.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2530.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2530.1  stale   mlb:mlb_statsapi:col-lad:final
+  2530.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2538.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2538.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2538.1  stale   mlb:mlb_statsapi:atl-nym:final
+  2538.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2546.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2546.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2546.1  stale   mlb:mlb_statsapi:col-lad:final
+  2546.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2554.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2554.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2554.1  stale   mlb:mlb_statsapi:atl-nym:final
+  2554.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2562.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2562.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2562.1  stale   mlb:mlb_statsapi:col-lad:final
+  2562.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2570.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2570.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2570.1  stale   mlb:mlb_statsapi:atl-nym:final
+  2570.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2578.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2578.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2578.1  stale   mlb:mlb_statsapi:col-lad:final
+  2578.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2586.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2586.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2586.1  stale   mlb:mlb_statsapi:atl-nym:final
+  2586.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2594.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2594.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2594.1  stale   mlb:mlb_statsapi:col-lad:final
+  2594.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2602.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2602.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2602.1  stale   mlb:mlb_statsapi:atl-nym:final
+  2602.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2610.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2610.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2610.1  stale   mlb:mlb_statsapi:col-lad:final
+  2610.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2618.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2618.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2618.1  stale   mlb:mlb_statsapi:atl-nym:final
+  2618.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2626.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2626.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2626.1  stale   mlb:mlb_statsapi:col-lad:final
+  2626.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2634.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2634.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2634.1  stale   mlb:mlb_statsapi:atl-nym:final
+  2634.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2642.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2642.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2642.1  stale   mlb:mlb_statsapi:col-lad:final
+  2642.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2650.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2650.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2650.1  stale   mlb:mlb_statsapi:atl-nym:final
+  2650.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2658.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2658.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2658.1  stale   mlb:mlb_statsapi:col-lad:final
+  2658.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2666.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2666.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2666.1  stale   mlb:mlb_statsapi:atl-nym:final
+  2666.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2674.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2674.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2674.1  stale   mlb:mlb_statsapi:col-lad:final
+  2674.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2682.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2682.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2682.1  stale   mlb:mlb_statsapi:atl-nym:final
+  2682.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2690.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2690.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2690.1  stale   mlb:mlb_statsapi:col-lad:final
+  2690.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2698.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2698.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2698.1  stale   mlb:mlb_statsapi:atl-nym:final
+  2698.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2706.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2706.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2706.1  stale   mlb:mlb_statsapi:col-lad:final
+  2706.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2714.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2714.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2714.1  stale   mlb:mlb_statsapi:atl-nym:final
+  2714.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2722.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2722.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2722.1  stale   mlb:mlb_statsapi:col-lad:final
+  2722.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2730.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2730.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2730.1  stale   mlb:mlb_statsapi:atl-nym:final
+  2730.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2738.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2738.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2738.1  stale   mlb:mlb_statsapi:col-lad:final
+  2738.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2746.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2746.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2746.1  stale   mlb:mlb_statsapi:atl-nym:final
+  2746.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2754.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2754.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2754.1  stale   mlb:mlb_statsapi:col-lad:final
+  2754.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2762.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2762.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2762.1  stale   mlb:mlb_statsapi:atl-nym:final
+  2762.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2770.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2770.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2770.1  stale   mlb:mlb_statsapi:col-lad:final
+  2770.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2778.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2778.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2778.1  stale   mlb:mlb_statsapi:atl-nym:final
+  2778.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2786.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2786.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2786.1  stale   mlb:mlb_statsapi:col-lad:final
+  2786.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2794.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2794.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2794.1  stale   mlb:mlb_statsapi:atl-nym:final
+  2794.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2802.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2802.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2802.1  stale   mlb:mlb_statsapi:col-lad:final
+  2802.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2810.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2810.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2810.1  stale   mlb:mlb_statsapi:atl-nym:final
+  2810.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2818.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2818.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2818.1  stale   mlb:mlb_statsapi:col-lad:final
+  2818.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2826.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2826.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2826.1  stale   mlb:mlb_statsapi:atl-nym:final
+  2826.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2834.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2834.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2834.1  stale   mlb:mlb_statsapi:col-lad:final
+  2834.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2842.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2842.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2842.1  stale   mlb:mlb_statsapi:atl-nym:final
+  2842.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2850.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2850.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2850.1  stale   mlb:mlb_statsapi:col-lad:final
+  2850.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2858.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2858.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2858.1  stale   mlb:mlb_statsapi:atl-nym:final
+  2858.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2866.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2866.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2866.1  stale   mlb:mlb_statsapi:col-lad:final
+  2866.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2874.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2874.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2874.1  stale   mlb:mlb_statsapi:atl-nym:final
+  2874.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2882.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2882.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2882.1  stale   mlb:mlb_statsapi:col-lad:final
+  2882.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2890.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2890.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2890.1  stale   mlb:mlb_statsapi:atl-nym:final
+  2890.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2898.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2898.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2898.1  stale   mlb:mlb_statsapi:col-lad:final
+  2898.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2906.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2906.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2906.1  stale   mlb:mlb_statsapi:atl-nym:final
+  2906.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2914.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2914.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2914.1  stale   mlb:mlb_statsapi:col-lad:final
+  2914.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2922.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2922.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2922.1  stale   mlb:mlb_statsapi:atl-nym:final
+  2922.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2930.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2930.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2930.1  stale   mlb:mlb_statsapi:col-lad:final
+  2930.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2938.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2938.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2938.1  stale   mlb:mlb_statsapi:atl-nym:final
+  2938.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2946.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2946.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2946.1  stale   mlb:mlb_statsapi:col-lad:final
+  2946.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2954.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2954.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2954.1  stale   mlb:mlb_statsapi:atl-nym:final
+  2954.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2962.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2962.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2962.1  stale   mlb:mlb_statsapi:col-lad:final
+  2962.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2970.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2970.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2970.1  stale   mlb:mlb_statsapi:atl-nym:final
+  2970.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2978.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2978.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2978.1  stale   mlb:mlb_statsapi:col-lad:final
+  2978.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  2986.1  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  2986.1  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  2986.1  stale   mlb:mlb_statsapi:atl-nym:final
+  2986.1  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  2994.1  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  2994.1  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  2994.1  stale   mlb:mlb_statsapi:col-lad:final
+  2994.1  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
   2999.0  source  offline  (no schedule for over 10m: ProviderError: replay outage)
-  2999.0  down    mlb:mlb_statsapi:atl-nym:final  (cleared, 7.0s)
+  2999.0  down    mlb:mlb_statsapi:col-lad:final  (cleared, 4.9s)
   2999.0  frame   offline  (no schedule for over 10m: ProviderError: replay outage)
   3120.0  source  fresh
-  3120.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
-  3120.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
-  3128.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
-  3128.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
-  3128.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
-  3136.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
-  3136.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
-  3136.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
-  3144.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
-  3144.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
-  3144.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
-  3152.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
-  3152.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
-  3152.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
-  3160.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
-  3160.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
-  3160.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
-  3168.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  3120.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  3120.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  3128.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  3128.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  3128.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  3136.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  3136.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  3136.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  3144.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  3144.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  3144.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  3152.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
+  3152.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  3152.0  card    mlb:mlb_statsapi:atl-nym:final  (neutral) | why: Braves: no live game to weigh
+  3160.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  3160.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  3160.0  card    mlb:mlb_statsapi:col-lad:final  (neutral) | why: Rockies: no live game to weigh
+  3168.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
   3168.0  up      mlb:mlb_statsapi:hou-tex:live  (rotation)
   3168.0  cap     refused auxiliary
   3168.0  base    mlb:mlb_statsapi:hou-tex:live  (recovery) | G 0.361 proxy F 1.00 T 1.000 Q 0.500 | target 27.79% (league 100.00%, 27.79% within) | actual - | debt +0.00s (league +0.00s) | why: Astros at Rangers: a full turn after the alerts
   3180.0  down    mlb:mlb_statsapi:hou-tex:live  (ran its time, 12.0s)
-  3180.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
-  3180.0  card    mlb:mlb_statsapi:col-lad:final  (repeat) | why: Rockies: final, again
-  3188.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
-  3188.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
-  3188.0  card    mlb:mlb_statsapi:atl-nym:final  (repeat) | why: Braves: final, again
-  3196.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  3180.0  up      mlb:mlb_statsapi:atl-nym:final  (rotation)
+  3180.0  card    mlb:mlb_statsapi:atl-nym:final  (repeat) | why: Braves: final, again
+  3188.0  down    mlb:mlb_statsapi:atl-nym:final  (ran its time, 8.0s)
+  3188.0  up      mlb:mlb_statsapi:col-lad:final  (rotation)
+  3188.0  card    mlb:mlb_statsapi:col-lad:final  (repeat) | why: Rockies: final, again
+  3196.0  down    mlb:mlb_statsapi:col-lad:final  (ran its time, 8.0s)
   3196.0  up      mlb:mlb_statsapi:sf-sd:live  (rotation)
   3196.0  base    mlb:mlb_statsapi:sf-sd:live  (weighted) | G 0.246 proxy F 1.00 T 1.000 Q 0.500 | target 24.68% (league 100.00%, 24.68% within) | actual 0.00% | debt +2.96s (league +0.00s) | why: Giants at Padres: in rotation
   3208.0  down    mlb:mlb_statsapi:sf-sd:live  (ran its time, 12.0s)

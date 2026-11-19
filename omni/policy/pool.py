@@ -102,8 +102,8 @@ class PoolEntry:
     """One game the board could give a base turn, read from one released generation.
 
     ``favorite_rank`` is the better of its teams' ranks among the board's favorites (None if neither is
-    one). A stale entry stays in the pool but loses any favorite's boost at once; a muted one never counts,
-    whoever plays in it.
+    one). A stale entry gets no share (the allocation sets it aside), nor any favorite's boost; a muted one
+    never counts, whoever plays in it.
     """
 
     contest: LeagueScopedId

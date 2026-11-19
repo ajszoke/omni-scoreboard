@@ -79,6 +79,7 @@ class CardRole(StrEnumMixin, str, Enum):
     PREGAME = "pregame"
     STATUS = "status"  # a delay or a suspension
     NEUTRAL = "neutral"  # nothing live to weigh: the cards on hand at neutral weight
+    FALLBACK = "fallback"  # nothing fresh to show: a stale game's dim card, the last safe frame, with no base turn
 
 
 class BaseReason(StrEnumMixin, str, Enum):
