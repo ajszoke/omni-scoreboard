@@ -4,8 +4,9 @@
 - **Ratified by the user** 2026-11-17, from the design in review round 7. The favorite floor scales with
   leverage (§3.4); the rest is as designed.
 - **Built** with NFL on the shared board (2026-11-17), on H5's types: `ARCHITECTURE_TYPED_DOMAIN.md`, "The
-  board policy". The app decides with it by default; `--board-policy 1` keeps the scheduler's old bands
-  (`omni/queue/scheduler.py`), and the NFL single-game runner keeps its own focus as the rollback.
+  board policy". The app decides with it under `--board-policy 2`. The default stays `--board-policy 1`, the scheduler's
+  old bands (`omni/queue/scheduler.py`), until v2's live path passes its gates (`STATUS.md`), and the NFL
+  single-game runner keeps its own focus as the rollback.
 - **Not yet built:**
   - **leverage models:** every league runs the labeled proxy (§3.1), so no action interrupt can qualify
     from leverage; only verified feats do (§4);

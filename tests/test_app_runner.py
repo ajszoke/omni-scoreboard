@@ -287,8 +287,9 @@ def test_an_unknown_favorite_stops_the_app_with_a_usage_error_naming_it(
 # --- which leagues run, and the board policy's settings ------------------------------------------------------------
 
 
-def test_the_board_runs_mlb_and_nfl_unless_told_otherwise() -> None:
-    assert _parse_args(["--profile", "quad_128x64"]).leagues == {League.MLB, League.NFL}
+def test_the_board_runs_mlb_alone_unless_nfl_is_asked_for() -> None:
+    assert _parse_args(["--profile", "quad_128x64"]).leagues == {League.MLB}
+    assert _parse_args(["--profile", "quad_128x64", "--leagues", "mlb,nfl"]).leagues == {League.MLB, League.NFL}
     assert _parse_args(["--profile", "quad_128x64", "--leagues", "mlb"]).leagues == {League.MLB}
     assert _parse_args(["--profile", "quad_128x64", "--leagues", " NFL , mlb"]).leagues == {League.MLB, League.NFL}
 
@@ -311,7 +312,7 @@ def test_a_league_the_board_can_t_run_stops_the_app_with_a_usage_error_naming_it
 
 def test_without_an_nflmeta_key_nfl_is_off_said_once_and_mlb_runs_alone() -> None:
     said: list[str] = []
-    both = _parse_args(["--profile", "quad_128x64"])
+    both = _parse_args(["--profile", "quad_128x64", "--leagues", "mlb,nfl"])
     assert _leagues_on(both, None, said.append) == {League.MLB}
     assert said == ["omni.app: NFL is off: set NFLMETA_API_KEY in the environment or .env to put NFL on the board"]
     said.clear()
@@ -322,8 +323,9 @@ def test_without_an_nflmeta_key_nfl_is_off_said_once_and_mlb_runs_alone() -> Non
         _leagues_on(_parse_args(["--profile", "quad_128x64", "--leagues", "nfl"]), None, said.append)
 
 
-def test_the_board_policy_s_settings_default_to_policy_two_with_promotions_and_nothing_muted_or_weighted() -> None:
-    assert _parse_args(["--profile", "quad_128x64"]).settings == PolicySettings()
+def test_the_board_policy_s_settings_default_to_policy_one_with_promotions_and_nothing_muted_or_weighted() -> None:
+    assert _parse_args(["--profile", "quad_128x64"]).settings == PolicySettings(policy=PolicyName.BOARD_V1)
+    assert _parse_args(["--profile", "quad_128x64", "--board-policy", "2"]).settings == PolicySettings()
 
 
 def test_the_board_policy_s_settings_come_from_their_flags() -> None:

@@ -559,7 +559,7 @@ Provider modules own raw API shape. The rest of the system never sees raw JSON. 
   members and count toward its health, but have no cards (`AppLoop.refresh`). NFL's slate and feeds come from
   `PlannedNfl` (`omni/app/planned_nfl.py`) on the same `PollPlan` and quota ledger as MLB: the day's list once,
   each favorite's game at 10 s with its plays, the others in one `phase=in` read every 45 s, and one read per
-  other final. `--leagues mlb,nfl` (the default) and `NFLMETA_API_KEY` put NFL on the board.
+  other final. `--leagues mlb,nfl` (opt-in; the default is `mlb`) and `NFLMETA_API_KEY` put NFL on the board.
 - **Quota, per provider account** (`omni/app/quota.py`, `quota_store.py`):
   - **Accounts and limits:** each account the board spends (`ProviderAccount`: StatsAPI, NFLMeta,
     BALLDONTLIE, Polymarket US, Bovada, Omni's market service) has declared limits: a minute, a month's
@@ -575,8 +575,8 @@ Provider modules own raw API shape. The rest of the system never sees raw JSON. 
   - **What a refusal says:** a refused ask stays due, and its reason reaches the league's health.
   - **Persistence:** monthly usage persists under `--state-dir`, written atomically at most once a minute
     and at shutdown.
-- **Versions** (`omni/app/versions.py`): every run names its policy (`omni-board-policy/2` for the shared
-  board by default, `/1` for its old bands, `omni-nfl-solo/1` for the NFL runner), its config schema and the digest of the settings
+- **Versions** (`omni/app/versions.py`): every run names its policy (`omni-board-policy/1` for the shared
+  board by default, `/2` with `--board-policy 2`, `omni-nfl-solo/1` for the NFL runner), its config schema and the digest of the settings
   that change decisions, its rules (`omni/domain/rules.py`: MLB extra innings and NFL overtime by stage and
   season), its models (none yet) and its code's commit. Traces open with them, and replay decisions with
   all but the commit. Config migrations are typed and keep the original entry
