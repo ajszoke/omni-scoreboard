@@ -8,14 +8,20 @@ whichever of the board's sources asks it, so two sources that hit one account sh
 - **A month** is the UTC calendar month (`BillingMonth`), which is NFLMeta's: its quota headers count "the
   current UTC month". Its requests and rows start at zero when a new month begins.
 
-Two calls keep it:
+Three calls keep it:
 - **`admit`**, before an ask goes out, with the ask's class (a `PollPriority`) and the rows it's expected to
-  bill. A refusal says why (`Refusal`). An admitted ask holds its place in the minute until its request is
-  charged, so asks handed out together can't overrun the minute between them.
-- **`charge`**, after each HTTP response, with the rows it billed when the response says. Pages, retries and
-  failed requests that reached the server cost what they cost. When a response carries the provider's own
-  count of what's left (`ProviderBalance`), the ledger takes it if it shows more spent than its own count,
-  never less, and a provider that says nothing is left has exhausted the account.
+  bill. A refusal says why (`Refusal`). An admitted ask holds its place in the minute for its first request,
+  so asks handed out together can't overrun the minute between them.
+- **`admit_request`**, before each HTTP request. One ask can make several (a game's scores and its plays'
+  pages, a retry), and each is admitted on its own against the minute and the month: an ask's first request
+  takes the place its admission holds, so the ask isn't counted twice, and each one after it is admitted as
+  the ask's class, expecting the rows the ask hasn't billed yet. An ask's requests are known as its own while
+  they run inside `Admission.asking`. A request outside any ask is admitted on its own.
+- **`charge`**, after each request, with the rows it billed when the response says. Pages, retries and failed
+  requests cost what they cost, and a request that got no answer at all is counted too, since it may have
+  reached the server. When a response carries the provider's own count of what's left (`ProviderBalance`),
+  the ledger takes it if it shows more spent than its own count, never less, and a provider that says nothing
+  is left has exhausted the account.
 
 What is admitted as the month runs down is one declared table (`QuotaPolicy`, by default `SHEDDING`), read
 against the tighter of the month's requests and rows, as a share of each left once the ask is spent:
@@ -23,8 +29,8 @@ backfill goes first, then background slows to half its pace and then stops, then
 until the account is exhausted. The last fifth of each minute is kept for normal and focus asks, so a
 burst of background work always leaves room for recovery.
 
-The network code charges the ledger through a `Meter`, the seam each fetcher is wrapped in. While an ask
-runs inside `tallying`, its charges are tallied too, so whoever asked learns what the ask cost.
+The network code admits and charges each request through a `Meter`, the seam each fetcher is wrapped in. While an
+ask runs inside `tallying`, its charges are tallied too, so whoever asked learns what the ask cost.
 """
 
 from __future__ import annotations
@@ -65,11 +71,13 @@ __all__ = [
     "Meter",
     "MonthUsage",
     "NflMetaPlan",
+    "Permit",
     "ProviderAccount",
     "ProviderBalance",
     "QuotaExhausted",
     "QuotaLedger",
     "QuotaPolicy",
+    "QuotaRefused",
     "Refusal",
     "Tally",
     "UsageStore",
@@ -245,6 +253,27 @@ SHEDDING = QuotaPolicy(
 )
 
 
+@dataclass(slots=True, eq=False)
+class Permit:
+    """An admitted ask's standing with its account while its requests go out: its class, the rows it's expected to
+    bill and has billed so far, and whether the place its admission holds in the minute is still there for its first
+    request."""
+
+    account: ProviderAccount
+    priority: PollPriority
+    rows: int  # what the whole ask is expected to bill
+    billed: int = 0  # what its requests have billed so far
+    held: bool = True  # its first request hasn't gone yet
+
+    @property
+    def unbilled(self) -> int:
+        """What the ask is still expected to bill: a request after the first expects no more than this."""
+        return max(self.rows - self.billed, 0)
+
+
+_ASKING: ContextVar[Permit | None] = ContextVar("omni_quota_asking", default=None)
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Admission:
     """The ledger's answer to an ask: admitted (perhaps at a slower cadence), or refused and why."""
@@ -260,10 +289,23 @@ class Admission:
     retry_at: MonotonicTime | None = None  # when the minute has room again, when the minute refused it
     plan: NflMetaPlan | None = None  # NFLMeta's plan, when the month is spent on it
     month: BillingMonth | None = None  # the month that's spent
+    permit: Permit | None = field(default=None, compare=False, repr=False)  # an admitted ask's, for its requests
 
     @property
     def admitted(self) -> bool:
         return self.refusal is None
+
+    @contextmanager
+    def asking(self) -> Iterator[None]:
+        """Make the requests inside the block as this admitted ask's: the first takes the place it holds in the
+        minute, and each one after is admitted on its own, as its class (`QuotaLedger.admit_request`)."""
+        if self.permit is None:
+            raise ValueError("only an admitted ask makes requests")
+        token = _ASKING.set(self.permit)
+        try:
+            yield
+        finally:
+            _ASKING.reset(token)
 
     @property
     def notice(self) -> str | None:
@@ -391,7 +433,7 @@ class _Account:
     rows: int = 0
     exhausted: bool = False
     minute: deque[MonotonicTime] = field(default_factory=deque)
-    unspent: int = 0  # admitted asks whose request hasn't been charged yet: each already holds its place
+    unspent: int = 0  # admitted requests not charged yet: each already holds its place in the minute
 
     def usage(self) -> MonthUsage:
         return MonthUsage(self.month, requests=self.requests, rows=self.rows, exhausted=self.exhausted)
@@ -457,60 +499,96 @@ class QuotaLedger:
             return _exhausted(held, self._left(held, Demand(PollPriority.FOCUS))) is not None
 
     def admit(self, account: ProviderAccount, demand: Demand, at: ClockReading) -> Admission:
-        """Whether an ask of ``demand``'s class may go out now. An admitted one holds its place in the minute."""
-        rule = self._policy.rules[demand.priority]
+        """Whether an ask of ``demand``'s class may go out now. An admitted one holds its place in the minute for its
+        first request, and its requests run inside `Admission.asking`."""
         with self._lock:
-            held = self._account(account, at)
-            lefts = self._left(held, demand)
-            refused = _exhausted(held, lefts)
-            if refused is not None:
+            return self._admit(account, demand, at)
+
+    def admit_request(
+        self, account: ProviderAccount, at: ClockReading, *, unasked: PollPriority = PollPriority.FOCUS
+    ) -> Admission:
+        """Whether one HTTP request may go to ``account`` now, as part of the ask running here (`Admission.asking`).
+
+        The ask's first request takes the place its admission holds, unless the month has run out since. Each one
+        after it (a page, a retry) is admitted on its own as the ask's class, expecting the rows the ask hasn't
+        billed yet. A request outside any ask of this account's is admitted on its own, as its ask's class or as
+        ``unasked``.
+        """
+        permit = _ASKING.get()
+        own = permit if permit is not None and permit.account is account else None
+        with self._lock:
+            if own is not None and own.held:
+                held = self._account(account, at)
+                refused = _exhausted(held, self._left(held, Demand(own.priority, own.unbilled)))
+                if refused is not None:
+                    return self._spent(account, held, own.priority, refused)
+                own.held = False
+                return Admission(account=account, priority=own.priority, permit=own)
+            priority = permit.priority if permit is not None else unasked
+            return self._admit(account, Demand(priority, own.unbilled if own is not None else 1), at)
+
+    def _admit(self, account: ProviderAccount, demand: Demand, at: ClockReading) -> Admission:
+        rule = self._policy.rules[demand.priority]
+        held = self._account(account, at)
+        lefts = self._left(held, demand)
+        refused = _exhausted(held, lefts)
+        if refused is not None:
+            return self._spent(account, held, demand.priority, refused)
+        tighter = min(lefts, key=lambda left: left.share, default=None)
+        slowed_by = 1
+        if tighter is not None and not _keeps(tighter, rule.above):
+            if rule.slowed_above is None or not _keeps(tighter, rule.slowed_above):
+                refusal = Refusal.ROWS_RESERVE if tighter.measure is Measure.ROWS else Refusal.REQUESTS_RESERVE
                 return Admission(
                     account=account,
                     priority=demand.priority,
-                    refusal=Refusal.EXHAUSTED,
-                    measure=refused.measure,
-                    left=0,
-                    plan=NflMetaPlan.on(held.limits) if account is ProviderAccount.NFLMETA else None,
-                    month=held.month,
+                    refusal=refusal,
+                    measure=tighter.measure,
+                    left=tighter.percent,
                 )
-            tighter = min(lefts, key=lambda left: left.share, default=None)
-            slowed_by = 1
-            if tighter is not None and not _keeps(tighter, rule.above):
-                if rule.slowed_above is None or not _keeps(tighter, rule.slowed_above):
-                    refusal = Refusal.ROWS_RESERVE if tighter.measure is Measure.ROWS else Refusal.REQUESTS_RESERVE
-                    return Admission(
-                        account=account,
-                        priority=demand.priority,
-                        refusal=refusal,
-                        measure=tighter.measure,
-                        left=tighter.percent,
-                    )
-                slowed_by = self._policy.slowed_by
-            measure = tighter.measure if tighter is not None else None
-            left = tighter.percent if tighter is not None else None
-            per_minute = held.limits.per_minute
-            if per_minute is not None:
-                self._prune(held, at.monotonic)
-                cap = (
-                    per_minute
-                    if rule.uses_minute_reserve
-                    else per_minute - per_minute * self._policy.minute_reserve // 100
+            slowed_by = self._policy.slowed_by
+        measure = tighter.measure if tighter is not None else None
+        left = tighter.percent if tighter is not None else None
+        per_minute = held.limits.per_minute
+        if per_minute is not None:
+            self._prune(held, at.monotonic)
+            cap = (
+                per_minute if rule.uses_minute_reserve else per_minute - per_minute * self._policy.minute_reserve // 100
+            )
+            used = len(held.minute)
+            if used >= cap:
+                return Admission(
+                    account=account,
+                    priority=demand.priority,
+                    refusal=Refusal.PER_MINUTE,
+                    measure=measure,
+                    left=left,
+                    used=used,
+                    per_minute=per_minute,
+                    retry_at=held.minute[used - cap] + _MINUTE,
                 )
-                used = len(held.minute)
-                if used >= cap:
-                    return Admission(
-                        account=account,
-                        priority=demand.priority,
-                        refusal=Refusal.PER_MINUTE,
-                        measure=measure,
-                        left=left,
-                        used=used,
-                        per_minute=per_minute,
-                        retry_at=held.minute[used - cap] + _MINUTE,
-                    )
-                held.minute.append(at.monotonic)
-                held.unspent += 1
-            return Admission(account=account, priority=demand.priority, slowed_by=slowed_by, measure=measure, left=left)
+            held.minute.append(at.monotonic)
+            held.unspent += 1
+        return Admission(
+            account=account,
+            priority=demand.priority,
+            slowed_by=slowed_by,
+            measure=measure,
+            left=left,
+            permit=Permit(account, demand.priority, demand.rows),
+        )
+
+    @staticmethod
+    def _spent(account: ProviderAccount, held: _Account, priority: PollPriority, refused: _Exhausted) -> Admission:
+        return Admission(
+            account=account,
+            priority=priority,
+            refusal=Refusal.EXHAUSTED,
+            measure=refused.measure,
+            left=0,
+            plan=NflMetaPlan.on(held.limits) if account is ProviderAccount.NFLMETA else None,
+            month=held.month,
+        )
 
     def charge(
         self,
@@ -521,7 +599,8 @@ class QuotaLedger:
         rows: int | None = None,
         balance: ProviderBalance | None = None,
     ) -> None:
-        """Count ``requests`` that reached ``account``'s server, and the ``rows`` they billed when known. The
+        """Count ``requests`` that went to ``account``'s server, and the ``rows`` they billed when known. Each takes
+        a place an admission holds in the minute, while one is held; the rest take places of their own. The
         provider's ``balance``, when its response gave one, raises the count to it, and never lowers it."""
         with self._lock:
             held = self._account(account, at)
@@ -657,7 +736,15 @@ def usage_line(ledger: QuotaLedger, account: ProviderAccount, at: ClockReading) 
 # --- the metering seam -----------------------------------------------------------------------------------
 
 
-class QuotaExhausted(ProviderError):
+class QuotaRefused(ProviderError):
+    """An account's quota held a request back, so it was never made; ``admission`` says why."""
+
+    def __init__(self, admission: Admission) -> None:
+        super().__init__(admission.reason)
+        self.admission = admission
+
+
+class QuotaExhausted(QuotaRefused):
     """An account has nothing left this month, so the request was never made."""
 
 
@@ -699,7 +786,12 @@ def _unbilled(headers: Mapping[str, str]) -> Billed:
 
 
 class Meter:
-    """Charges one account of the ledger for each response its fetcher gets, from the response's headers."""
+    """Admits each request its fetcher is about to make on one account of the ledger, and charges it once made,
+    from its response's headers.
+
+    A request made outside any ask (a lookup at start) is admitted as ``unasked``: focus by default, since it's made
+    once, for what the board can't run without.
+    """
 
     def __init__(
         self,
@@ -708,6 +800,7 @@ class Meter:
         clock: Clock,
         *,
         billed: Callable[[Mapping[str, str]], Billed] = _unbilled,
+        unasked: PollPriority = PollPriority.FOCUS,
     ) -> None:
         if account not in ledger.accounts:
             raise ValueError(f"the ledger has no {account.label} account to charge")
@@ -715,28 +808,37 @@ class Meter:
         self._account = account
         self._clock = clock
         self._billed = billed
+        self._unasked = unasked
 
     @property
     def account(self) -> ProviderAccount:
         return self._account
 
-    def check(self) -> None:
-        """Raise `QuotaExhausted` when nothing is left this month, before a request is made."""
-        if self._ledger.exhausted(self._account, self._clock.read()):
-            raise QuotaExhausted(f"quota: {self._account.label} exhausted for the month; not asking")
+    def admit(self) -> None:
+        """Admit one request about to go out (`QuotaLedger.admit_request`), or raise `QuotaRefused` (`QuotaExhausted`
+        when the month is spent) so it's never made."""
+        admission = self._ledger.admit_request(self._account, self._clock.read(), unasked=self._unasked)
+        if admission.refusal is Refusal.EXHAUSTED:
+            raise QuotaExhausted(admission)
+        if not admission.admitted:
+            raise QuotaRefused(admission)
 
     def charge(self, headers: Mapping[str, str] | None = None) -> None:
-        """One response arrived: charge one request, and what its headers say it billed and left."""
+        """One request went out: charge it, with what its response's headers say it billed and left (nothing, for a
+        request that got no response)."""
         billed = self._billed(headers) if headers is not None else Billed()
         self._ledger.charge(self._account, at=self._clock.read(), rows=billed.rows, balance=billed.balance)
+        asking = _ASKING.get()
+        if asking is not None and asking.account is self._account:
+            asking.billed += billed.rows or 0
 
     def counted(self, fetch: Callable[P, R]) -> Callable[P, R]:
-        """``fetch``, made one request a call with rows unknown. A fetcher this plain can't tell whether a
-        failure reached the server, so each call counts, answered or not."""
+        """``fetch``, admitted and made one request a call with rows unknown. A fetcher this plain can't tell whether
+        a failure reached the server, so each call counts, answered or not."""
 
         @functools.wraps(fetch)
         def call(*args: P.args, **kwargs: P.kwargs) -> R:
-            self.check()
+            self.admit()
             try:
                 return fetch(*args, **kwargs)
             finally:
@@ -746,23 +848,22 @@ class Meter:
 
 
 class MeteredHttp:
-    """A fetcher that reads an `HttpAnswer` and returns its body, charging the meter for each response: an
-    answer, or an HTTP error the server sent (it carries headers). A failure with no response (a timeout, no
-    route) charges nothing here: the minute already counted the ask, and the provider's own count of what's
-    left catches the month up at its next answer."""
+    """A fetcher that reads an `HttpAnswer` and returns its body. The meter admits each request before it's made,
+    and charges it after: an answer or an HTTP error the server sent by its headers, and a failure with no response
+    (a timeout, a dropped connection) as one request with rows unknown, since it may have reached the server. The
+    provider's own count of what's left catches the rows up at its next answer."""
 
     def __init__(self, get: Callable[[str, Mapping[str, str | int]], HttpAnswer], meter: Meter) -> None:
         self._get = get
         self._meter = meter
 
     def __call__(self, path: str, query: Mapping[str, str | int]) -> Any:
-        self._meter.check()
+        self._meter.admit()
         try:
             answer = self._get(path, query)
         except Exception as exc:
             headers = getattr(exc, "headers", None)
-            if headers is not None:
-                self._meter.charge(_lowered(headers))
+            self._meter.charge(_lowered(headers) if headers is not None else None)
             raise
         self._meter.charge(_lowered(answer.headers))
         return answer.body

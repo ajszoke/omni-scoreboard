@@ -6,7 +6,10 @@ the ledger admits on NFLMeta's account, as focus: the one game the board follows
 the month is exhausted. A refused ask makes no request; it comes back as a failed answer that says why,
 and is tried again once the minute has room, or after the failure retry. While the final drains it asks at the
 live pace whatever the answer says, and once more on the drain's boundary, so the drain gets its reads.
-Its due times run on the monotonic clock, so a wall-clock step neither stops the asks nor hurries them.
+Each request a poll makes (its scores, its plays' pages) is admitted on the account in turn, as the ask's own
+(`omni.app.quota.Admission.asking`), so a poll that pages can't overrun the minute it shares with the rest of the
+account's asks. Its due times run on the monotonic clock, so a wall-clock step neither stops the asks nor hurries
+them.
 It also reads the market with each answer, when there is a market. Each answer comes back as a
 `FeedResult`, stamped with when it was asked and when it actually arrived, on both clocks. The board
 dates what it shows from the arrival, and holds it back from the arrival on the monotonic clock, which
@@ -22,6 +25,7 @@ from __future__ import annotations
 
 import queue
 from collections.abc import Callable
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Protocol
@@ -116,12 +120,14 @@ class GameFeed:
         """Ask the provider (and the market) as of ``at``; ``arrived`` reads the clock when the answer came."""
         now = at.utc
         held = self._provider.holding(self._game_id, at)  # a held poll repeats the last answer, unasked
+        asking: AbstractContextManager[None] = nullcontext()
         if not held and self._ledger is not None:
             admission = self._ledger.admit(ProviderAccount.NFLMETA, Demand(PollPriority.FOCUS, self._rows), at)
             if not admission.admitted:
                 return self._refused(admission, at, arrived)
+            asking = admission.asking()
         try:
-            with tallying() as billed:
+            with tallying() as billed, asking:
                 try:
                     snapshot = self._provider.poll(self._game_id, at)
                 finally:

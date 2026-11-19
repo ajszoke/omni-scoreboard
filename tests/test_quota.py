@@ -33,6 +33,7 @@ from omni.app.quota import (
     QuotaExhausted,
     QuotaLedger,
     QuotaPolicy,
+    QuotaRefused,
     Refusal,
     account_limits,
     nflmeta_billed,
@@ -173,6 +174,79 @@ def test_an_admitted_ask_holds_its_place_until_charged_and_extra_requests_take_m
     assert ledger.usage(TEST, clock.read()).requests == 3
     _spend(ledger, clock, requests=1)  # the second ask's request: one more
     assert not _admit(ledger, clock, FOCUS).admitted  # four requests made, four in the minute
+
+
+def _request(ledger: QuotaLedger, clock: FakeClock, account: ProviderAccount = TEST) -> Admission:
+    """One request admitted and, when admitted, made and charged."""
+    admission = ledger.admit_request(account, clock.read())
+    if admission.admitted:
+        ledger.charge(account, at=clock.read())
+    return admission
+
+
+def test_an_ask_s_first_request_takes_its_held_place_and_each_request_after_takes_one_of_its_own() -> None:
+    ledger, clock = _ledger(BALLDONTLIE_FREE)  # five a minute, the last kept for normal and focus
+    ask = _admit(ledger, clock, BACKGROUND)
+    with ask.asking():
+        assert _request(ledger, clock).admitted  # the place the ask holds
+        assert _request(ledger, clock).admitted  # a page: a place of its own
+    assert _admit(ledger, clock, FOCUS).admitted and _admit(ledger, clock, FOCUS).admitted  # four places
+    with ask.asking():
+        refused = _request(ledger, clock)  # a fifth would fit, but background leaves the minute's last fifth
+    assert refused.refusal is Refusal.PER_MINUTE and (refused.used, refused.priority) == (4, BACKGROUND)
+    assert ledger.usage(TEST, clock.read()).requests == 2
+
+
+def test_a_request_after_the_first_expects_only_the_rows_its_ask_hasn_t_billed() -> None:
+    ledger, clock = QuotaLedger(account_limits()), FakeClock(T0)
+    ledger.charge(NFL, at=clock.read(), rows=24_950)  # 50 rows left
+    ask = ledger.admit(NFL, Demand(FOCUS, rows=60), clock.read())  # expected to bill more than is left: refused
+    assert ask.refusal is Refusal.EXHAUSTED or not ask.admitted
+    ask = ledger.admit(NFL, Demand(FOCUS, rows=40), clock.read())
+    meter = Meter(ledger, NFL, clock, billed=nflmeta_billed)
+    with ask.asking():
+        assert ledger.admit_request(NFL, clock.read()).admitted
+        meter.charge({"x-nflmeta-response-rows": "30"})
+        assert ask.permit is not None and (ask.permit.billed, ask.permit.unbilled) == (30, 10)
+        assert ledger.admit_request(NFL, clock.read()).admitted  # ten more fit the twenty left
+        meter.charge({"x-nflmeta-response-rows": "15"})
+        assert ask.permit.unbilled == 0
+        assert ledger.admit_request(NFL, clock.read()).admitted  # none expected: five rows are left
+        meter.charge({"x-nflmeta-response-rows": "5"})
+        assert ledger.admit_request(NFL, clock.read()).refusal is Refusal.EXHAUSTED
+
+
+def test_an_ask_s_first_request_is_refused_when_the_month_ran_out_since_its_admission() -> None:
+    ledger, clock = QuotaLedger(account_limits()), FakeClock(T0)
+    ask = ledger.admit(NFL, Demand(FOCUS), clock.read())
+    ledger.charge(NFL, at=clock.read(), balance=ProviderBalance(requests_left=0))  # another ask spent the last
+    with ask.asking():
+        spent = ledger.admit_request(NFL, clock.read())
+    assert (
+        spent.refusal is Refusal.EXHAUSTED
+        and spent.reason == "quota: NFLMeta Free spent for 2026-11: switch to Builder"
+    )
+
+
+def test_a_request_on_another_account_inside_an_ask_is_admitted_as_the_ask_s_class() -> None:
+    ledger = QuotaLedger({NFL: UNLIMITED, TEST: AccountLimits(requests_a_month=100)})
+    clock = FakeClock(T0)
+    ledger.charge(TEST, at=clock.read(), requests=93)  # 7% left: normal runs, background is shed
+    for priority, admitted in ((NORMAL, True), (BACKGROUND, False)):
+        ask = ledger.admit(NFL, Demand(priority), clock.read())
+        with ask.asking():
+            assert ledger.admit_request(TEST, clock.read()).admitted is admitted
+    assert ledger.admit_request(TEST, clock.read()).admitted  # outside any ask: as focus by default
+    assert not ledger.admit_request(TEST, clock.read(), unasked=BACKGROUND).admitted
+
+
+def test_only_an_admitted_ask_makes_requests() -> None:
+    ledger, clock = _ledger(AccountLimits(per_minute=1))
+    _admit(ledger, clock, FOCUS)
+    refused = _admit(ledger, clock, FOCUS)
+    with pytest.raises(ValueError, match="only an admitted ask makes requests"):
+        with refused.asking():
+            pass
 
 
 def test_the_last_fifth_of_the_minute_is_kept_for_normal_and_focus() -> None:
@@ -407,9 +481,9 @@ def test_a_metered_fetcher_charges_each_response_and_each_error_the_server_sent(
         with pytest.raises(_HttpError):
             fetch("/api/v1/games/1/play-changes", {"cursor": "gone"})
         with pytest.raises(TimeoutError):
-            fetch("/api/v1/live-scores", {})  # no response: nothing to charge
-    assert (billed.requests, billed.rows) == (2, 14)
-    assert ledger.usage(NFL, clock.read()) == MonthUsage(BillingMonth(2026, 11), requests=11, rows=14)  # reconciled
+            fetch("/api/v1/live-scores", {})  # no response: it may have reached NFLMeta, so it counts
+    assert (billed.requests, billed.rows) == (3, 14)
+    assert ledger.usage(NFL, clock.read()) == MonthUsage(BillingMonth(2026, 11), requests=12, rows=14)  # reconciled
 
 
 def test_a_meter_that_reads_no_billing_charges_one_request_a_response() -> None:
@@ -429,9 +503,22 @@ def test_an_exhausted_account_makes_no_request_at_all() -> None:
         return HttpAnswer({}, {})
 
     fetch = MeteredHttp(get, Meter(ledger, NFL, clock))
-    with pytest.raises(QuotaExhausted, match="quota: NFLMeta exhausted for the month"):
+    with pytest.raises(QuotaExhausted, match="quota: NFLMeta Free spent for 2026-11: switch to Builder") as spent:
         fetch("/api/v1/live-scores", {})
+    assert spent.value.admission.refusal is Refusal.EXHAUSTED
     assert asked == []
+
+
+def test_a_request_the_minute_has_no_room_for_is_never_made_and_says_why() -> None:
+    ledger = QuotaLedger({ProviderAccount.MLB_STATSAPI: AccountLimits(per_minute=1)})
+    clock = FakeClock(T0)
+    asked: list[str] = []
+    counted = Meter(ledger, ProviderAccount.MLB_STATSAPI, clock).counted(asked.append)
+    counted("first")
+    with pytest.raises(QuotaRefused, match="quota: MLB StatsAPI 1 of 1 a minute used, focus waiting") as held:
+        counted("second")
+    assert not isinstance(held.value, QuotaExhausted) and asked == ["first"]
+    assert ledger.usage(ProviderAccount.MLB_STATSAPI, clock.read()).requests == 1
 
 
 def test_a_counted_fetcher_is_one_request_a_call_answered_or_not() -> None:
