@@ -16,13 +16,14 @@ import pytest
 from PIL import Image
 
 from omni.cards.base import CardKind, ScoreboardCard
-from omni.cards.basketball import BasketballGameCardPayload, PlayerLinesPanel
+from omni.cards.basketball import BasketballGameCardPayload, BestPlayers, CaptionPanel, PlayerLinesPanel
 from omni.core.clock import MonotonicTime
-from omni.core.enum import GameStatus, League, PanelProfile
+from omni.core.enum import GameStatus, HomeAway, League, PanelProfile
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.domain.baseball import WinLossRecord
-from omni.domain.basketball import BasketballPhase, BySide
+from omni.domain.basketball import BasketballPhase, BySide, ScoringRun
 from omni.domain.contest import GolfTournament
+from omni.events.basketball import TimeoutTaken
 from omni.panels.geometry import geometry_for
 from omni.renderers.basketball_pregame import BasketballPregameRenderer
 from omni.renderers.canvas import Canvas, RecordingCanvas
@@ -247,3 +248,33 @@ def test_a_non_team_contest_is_refused(profile: PanelProfile) -> None:
     card = dataclasses.replace(game_card(_live()), contest=golf)
     with pytest.raises(TypeError):
         LiveBasketballRenderer().render(card, RenderContext(profile=profile, now=T), RecordingCanvas(128, 64))
+
+
+# --- stack ---------------------------------------------------------------------------------------------------
+
+
+def _bottom(payload: BasketballGameCardPayload, *, up: float = 1.0) -> list[str]:
+    """The stack's two lines under the divider."""
+    return [op.text for op in _ops(payload, STACK, up=up).texts() if op.y > 50]
+
+
+def test_the_stacks_player_lines_show_one_team_a_half_and_nothing_for_a_team_with_no_one_there() -> None:
+    panel = PlayerLinesPanel(rank=0, players=BySide(_EVEN, None))
+    assert "8 PTS 4/5 FG" in _bottom(_live(bottom=panel))
+    assert _bottom(_live(bottom=panel), up=7.0) == []
+
+
+def test_a_run_takes_the_stacks_panel_from_the_line_score_but_never_from_a_caption() -> None:
+    run = ScoringRun(team=HomeAway.HOME, scored=9, allowed=2, span_seconds=95)
+    assert _bottom(_live(run=run)) == ["MIN 9-2", "LAST 1:35"]
+    timeout = CaptionPanel(caption=TimeoutTaken(side=HomeAway.AWAY, left=3))
+    assert _bottom(_live(run=run, bottom=timeout)) == ["TIMEOUT POR", "3 LEFT"]
+
+
+def test_a_finals_best_player_line_takes_as_many_numbers_as_fit() -> None:
+    quiet = player("J.Doe", 4, 4, 5, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 1)  # a steal is too few to mention
+    best = BestPlayers(players=BySide(None, quiet))
+    named = dataclasses.replace(_final(), best=best)
+    assert _bottom(named)[-1] == "8 PTS 1 REB"
+    assert _bottom(named, up=7.0) == []  # the loser has no line
+    assert _bottom(_final()) == []  # no best players named

@@ -209,18 +209,28 @@ class BasketballPregameCardPayload:
 BasketballPregameCard = ScoreboardCard[BasketballPregameCardPayload]
 
 
-_PROFILES = frozenset({PanelProfile.QUAD_128X64})
+_PROFILES = frozenset({PanelProfile.QUAD_128X64, PanelProfile.STACK_64X64})
 _QUAD_RECORD = "quad_128x64: from 100 points the record drops to 5x7, under a 6x10 code or timeouts"
+_STACK_RECORD = "stack_64x64: with a three-digit score the record passes under the score's first two columns"
 
 GAME_LAYOUT = LayoutSupport(
     profiles=_PROFILES,
-    compromise_notes=(_QUAD_RECORD,),
+    compromise_notes=(
+        _QUAD_RECORD,
+        _STACK_RECORD,
+        "stack_64x64: the box score keeps FG% and rebounds, and a player's line its points and field goals",
+        "stack_64x64: a play queue's count is a segmented divider, and a ruling's words split across the turn's halves",
+        "stack_64x64: a run takes the bottom panel from the line score and the stat panels, though never a caption",
+    ),
 )
 """A live or break card's boards and compromises."""
 
 FINAL_LAYOUT = LayoutSupport(
     profiles=_PROFILES,
-    compromise_notes=(_QUAD_RECORD,),
+    compromise_notes=(
+        _QUAD_RECORD,
+        _STACK_RECORD,
+    ),
 )
 """A final's boards and compromises."""
 
@@ -228,6 +238,7 @@ PREGAME_LAYOUT = LayoutSupport(
     profiles=_PROFILES,
     compromise_notes=(
         "quad_128x64: the odds drop their spread when it would leave no blank column before the tip beside them",
+        "stack_64x64: no standings, and odds wider than the board drop their spread",
     ),
 )
 """A pregame or postponed card's boards and compromises."""

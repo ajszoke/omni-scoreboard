@@ -1,4 +1,4 @@
-"""Renderer for the NBA game card, live through final, on the quad board (the stack and single follow).
+"""Renderer for the NBA game card, live through final, on the quad and stack boards (the single follows).
 
 The card keeps the house frame: team rows down the left, each a logo tile (or a color bar) with the win meter
 hugging it, a lane of the team's own words, and the score; the game's state at right; and, on the boards with
@@ -18,6 +18,15 @@ named all turn.
   ``HALF 12:35``, ``FINAL 2OT``). Under the divider: the line score by default; a caption, NFL's way, a headline
   in the event's tone over a white detail line, marked ``i/N`` while plays queue; the two teams' box-score lines;
   or one player a team, away over home, from each team's plus-minus order, the stats scrolling when they overflow.
+- stack_64x64 : 20-row team rows; the clock pinned left on row 40 and the pips (or the overtime) pinned right; a
+  divider at row 50 and two 4x6 lines under it. The code is 6x10 with two-digit scores and 5x7 from 100; the
+  record is 4x6 at any score, under the code with two blank rows below the score's ink. Under the divider: the
+  line score as two rows (``Q1`` over ``Q2``, the first half's total ``H1`` over ``Q3``, ``Q3`` over ``Q4``, the
+  last two periods in overtime); a caption, its rulings split across the halves; a run; FG% and rebounds; one
+  player a half, away first; and at a final, the winner's best player, then the loser's. COMPROMISE: with a 1xx
+  score, the record passes under the score's first two columns; the box score keeps FG% and rebounds, and a
+  player's line its points and field goals; while plays queue, the divider splits into one segment per play,
+  the one up in gold, in place of ``i/N``.
 
 A final settles the meter, full for the winner, and dims the loser's code, record and score.
 """
@@ -59,7 +68,7 @@ from omni.renderers.context import RenderContext
 from omni.renderers.font import rasterize
 from omni.renderers.team_row import draw_treated_mark
 from omni.renderers.text import draw_centered, draw_right_aligned, text_width
-from omni.renderers.text_lane import TextLane, draw_text_lane
+from omni.renderers.text_lane import LaneAnchor, TextLane, draw_text_lane
 from omni.renderers.visual_treatment import MatchupVisualTreatment, resolve_matchup_treatment
 from omni.renderers.win_meter import draw_win_meter
 
@@ -449,10 +458,221 @@ def _quad_player_lines(canvas: Canvas, context: RenderContext, card: _Card, pane
         draw_text_lane(canvas, lane, _stats_text(line), _STATS_TEAL, now=context.now, clock=marquee.clock)
 
 
+# --- stack 64x64 ------------------------------------------------------------------------------------------
+
+_S_ROW = 20
+_S_LANE_X = 24  # the code, record, timeouts and bonus box all start here
+# The code is 6x10 with two-digit scores and 5x7 from 100, where a 6x10 code would touch the score's first column;
+# its ink ends on the score's last row. The record is 4x6 at any score, with two blank rows under the score: it
+# clears a two-digit score, and passes under a 1xx's first two columns, since no face fits a five-character record
+# in the 16 columns left of one. Each is (face, cell row below the team row's top).
+_S_CODE = {False: ("6x10", 4), True: ("5x7", 6)}
+_S_RECORD = ("4x6", 14)
+_S_COUNTS = {False: "5x7", True: "4x6"}
+_S_COUNTS_ROW = 4
+_S_BONUS = ("4x6", 13)
+_S_CLOCK_Y = 40
+_S_CLOCK_MARGIN = 2  # the clock this far from the left edge, the pips or overtime this far from the right
+_S_PIP_GAP = 2
+_S_DIVIDER_Y = 50
+_S_LINES_Y = (52, 58)
+_PIP_STACK = (".XXX.", "XXXXX", "XXXXX", "XXXXX", ".XXX.")
+
+
+def _counting(line: PlayerLine) -> tuple[str, ...]:
+    """The line's other numbers worth a mention, biggest first: ``11 AST``, ``8 REB``, ``3 BLK``.
+
+    Rebounds and assists count from one; blocks and steals from two. A tie keeps that order.
+    """
+    found = [(line.rebounds, "REB", 1), (line.assists, "AST", 1), (line.blocks, "BLK", 2), (line.steals, "STL", 2)]
+    kept = [(value, label) for value, label, least in found if value >= least]
+    return tuple(f"{value} {label}" for value, label in sorted(kept, key=lambda item: -item[0]))
+
+
+def _caption(card: _Card) -> CaptionPanel | None:
+    bottom = card.payload.bottom
+    return bottom if isinstance(bottom, CaptionPanel) else None
+
+
+def _stack(canvas: Canvas, context: RenderContext, card: _Card) -> None:
+    treatment = card.treatment(context, PanelProfile.STACK_64X64, _S_ROW)
+    three = card.three_digits
+    code_font, code_row = _S_CODE[three]
+    record_font, record_row = _S_RECORD
+    rows = ((HomeAway.AWAY, treatment.away, 0), (HomeAway.HOME, treatment.home, _S_ROW))
+    for which, mark, top in rows:
+        side = card.state.side(which)
+        draw_treated_mark(canvas, context, card.team(which), mark)
+        if card.shows_counts:
+            canvas.text(_S_LANE_X, top + _S_COUNTS_ROW, _timeouts_text(side), _GOLD, font=_S_COUNTS[three])
+            if card.state.phase is BasketballPhase.LIVE and side.in_bonus:
+                bonus_font, bonus_row = _S_BONUS
+                _draw_inverted(canvas, _S_LANE_X, top + bonus_row, "BONUS", bonus_font)
+        else:
+            _names(canvas, card, which, _S_LANE_X, (top + code_row, top + record_row), (code_font, record_font))
+        draw_right_aligned(canvas, 64, top + 1, str(side.score), card.text_color(which), "8x13B")
+    _draw_meter(canvas, treatment, card)
+    _stack_clock_line(canvas, context, card)
+    _stack_divider(canvas, card)
+    _stack_bottom(canvas, context, card)
+
+
+def _stack_clock_line(canvas: Canvas, context: RenderContext, card: _Card) -> None:
+    """The clock pinned left and the quarter pips (or the overtime) pinned right; at a break, the break's words."""
+    state = card.state
+    font, y = "6x10", _S_CLOCK_Y
+    if state.phase is BasketballPhase.LIVE:
+        clock = state.clock.text if state.clock is not None else "--:--"
+        canvas.text(_S_CLOCK_MARGIN, y, clock, _GOLD, font=font)
+        right = 64 - _S_CLOCK_MARGIN
+        if state.is_overtime:  # the face's trailing blank column stands in for one pixel of the margin
+            draw_right_aligned(canvas, right + 1, y, period_label(state.period), _GOLD, font)
+        else:
+            width = _pips_width(_PIP_STACK, _S_PIP_GAP)
+            _draw_pips(canvas, right - width, y + 2, _PIP_STACK, _S_PIP_GAP, state.period)
+        return
+    if state.phase is BasketballPhase.END_OF_PERIOD:
+        label = f"END {period_label(state.period)}"
+    elif state.phase is BasketballPhase.HALFTIME:
+        ends = card.payload.break_ends_at
+        label = f"HALF {_countdown(ends - context.now)}" if ends is not None else "HALFTIME"
+    else:
+        label = f"FINAL/{period_label(state.period)}" if state.is_overtime else "FINAL"
+    draw_centered(canvas, 0, 64, y, label, _GOLD, font)
+
+
+def _stack_divider(canvas: Canvas, card: _Card) -> None:
+    """The gray divider; while plays queue, cut into one segment per waiting play, the one showing gold.
+
+    There's no room beside a 4x6 headline for an ``i/N`` count, so the divider carries it.
+    """
+    caption = _caption(card)
+    place = caption.place if caption is not None else None
+    if place is None:
+        canvas.fill_rect(0, _S_DIVIDER_Y, 64, 1, _DIVIDER)
+        return
+    for i in range(place.count):
+        x0, x1 = i * 64 // place.count, (i + 1) * 64 // place.count
+        gap = 0 if i == place.count - 1 else 1
+        canvas.fill_rect(x0, _S_DIVIDER_Y, x1 - x0 - gap, 1, _GOLD if i == place.index - 1 else _DIVIDER)
+
+
+def _stack_bottom(canvas: Canvas, context: RenderContext, card: _Card) -> None:
+    """Two small lines under the divider: the caption, a run, the rotation's panel, or a final's best players.
+
+    A caption keeps the panel; otherwise a run on takes it from the stat panels and the line score.
+    """
+    first, second = _S_LINES_Y
+    bottom = card.payload.bottom
+    run = _run_lines(card)
+    if card.state.phase is BasketballPhase.FINAL:
+        _stack_best(canvas, card)
+    elif isinstance(bottom, CaptionPanel):
+        _stack_caption(canvas, context, card, bottom)
+    elif run is not None:
+        draw_centered(canvas, 0, 64, first, run[0], _WHITE, "4x6")
+        draw_centered(canvas, 0, 64, second, run[1], _SECONDARY, "4x6")
+    elif isinstance(bottom, TeamBoxPanel):
+        away, home = bottom.box.away, bottom.box.home
+        lines = (("FG%", f"{away.fg_pct}-{home.fg_pct}"), ("REB", f"{away.rebounds}-{home.rebounds}"))
+        for (label, values), y in zip(lines, _S_LINES_Y):
+            _stack_labeled(canvas, y, label, _SECONDARY, values)
+    elif isinstance(bottom, PlayerLinesPanel):
+        # One player a half, away first, as the tiles above sit: the name and plus-minus, then points and shooting.
+        line = bottom.players[HomeAway.AWAY if card.half is TurnHalf.FIRST else HomeAway.HOME]
+        if line is not None:
+            _stack_name_line(canvas, first, line)
+            stats = f"{line.points} PTS {line.fg_made}/{line.fg_attempted} FG"
+            draw_centered(canvas, 0, 64, second, stats, _STATS_TEAL, "4x6")
+    else:
+        _stack_line_score(canvas, card)
+
+
+def _stack_caption(canvas: Canvas, context: RenderContext, card: _Card, panel: CaptionPanel) -> None:
+    """The caption's two lines, centered, scrolling when they overflow; a ruling in its narrower words, a pair of
+    lines a half."""
+    words = _words(panel, card)
+    if words.narrow is None:
+        headline, detail = words.headline, words.detail
+    else:
+        lines = words.narrow[0 if card.half is TurnHalf.FIRST else 1]
+        headline, detail = lines.headline, lines.detail
+    marquee = context.marquee
+    for text, color, y in ((headline, _TONE_COLOR[words.tone], _S_LINES_Y[0]), (detail, _WHITE, _S_LINES_Y[1])):
+        lane = TextLane(x=0, y=y, width=64, font="4x6", anchor=LaneAnchor.CENTER, style=marquee.style)
+        draw_text_lane(canvas, lane, text, color, now=context.now, clock=marquee.clock)
+
+
+def _stack_name_line(canvas: Canvas, y: int, line: PlayerLine) -> None:
+    """A player's name (white) and plus-minus (in its sign's color), centered."""
+    name, plus_minus = f"{line.name} ", _plus_minus_text(line)
+    x = (64 - text_width(name + plus_minus, "4x6")) // 2
+    canvas.text(x, y, name, _WHITE, font="4x6")
+    canvas.text(x + text_width(name, "4x6"), y, plus_minus, _plus_minus_color(line), font="4x6")
+
+
+def _stack_best(canvas: Canvas, card: _Card) -> None:
+    """A final's bottom panel: the winner's best player in the first half, the loser's in the second.
+
+    The name and plus-minus fill the first line; the points and then the line's biggest other numbers follow on
+    the second, as many as fit.
+    """
+    best = card.payload.best
+    winner = card.state.winner
+    if best is None or winner is None:
+        return
+    loser = HomeAway.HOME if winner is HomeAway.AWAY else HomeAway.AWAY
+    line = best.players[winner if card.half is TurnHalf.FIRST else loser]
+    if line is None:
+        return
+    first, second = _S_LINES_Y
+    _stack_name_line(canvas, first, line)
+    text = f"{line.points} PTS"
+    for item in _counting(line):
+        trial = f"{text} {item}"
+        if text_width(trial, "4x6") > 64:
+            break
+        text = trial
+    draw_centered(canvas, 0, 64, second, text, _STATS_TEAL, "4x6")
+
+
+def _stack_labeled(canvas: Canvas, y: int, label: str, label_color: RGBColor, values: str) -> None:
+    """``label away-home``, centered."""
+    x = (64 - text_width(f"{label} {values}", "4x6")) // 2
+    canvas.text(x, y, label, label_color, font="4x6")
+    canvas.text(x + text_width(f"{label} ", "4x6"), y, values, _WHITE, font="4x6")
+
+
+def _stack_line_rows(card: _Card) -> list[tuple[str, int, int, bool]]:
+    """The line score's two rows, (label, away, home, under way), latest last.
+
+    Q1 alone after the first; Q1 over Q2 through the half; the first half's total (H1) over Q3; Q3 over Q4; in
+    overtime the last two periods, ``Q4`` over ``OT`` or ``OT1`` over ``OT2``.
+    """
+    state = card.state
+    away, home = state.away.periods, state.home.periods
+    entered = min(len(away), len(home))
+    headers = _period_headers(entered)
+
+    def row(i: int) -> tuple[str, int, int, bool]:
+        return headers[i], away[i], home[i], state.phase is BasketballPhase.LIVE and i == state.period - 1
+
+    if entered == 3:
+        return [("H1", away[0] + away[1], home[0] + home[1], False), row(2)]
+    return [row(i) for i in range(max(0, entered - 2), entered)]
+
+
+def _stack_line_score(canvas: Canvas, card: _Card) -> None:
+    """The line score as two rows, ``Q2 25-33``: the period under way gold, a finished one gray."""
+    for (label, away, home, live), y in zip(_stack_line_rows(card), _S_LINES_Y):
+        _stack_labeled(canvas, y, label, _GOLD if live else _SECONDARY, f"{away}-{home}")
+
+
 # --- the renderer -----------------------------------------------------------------------------------------
 
 _DRAW: dict[PanelProfile, Callable[[Canvas, RenderContext, _Card], None]] = {
     PanelProfile.QUAD_128X64: _quad,
+    PanelProfile.STACK_64X64: _stack,
 }
 
 

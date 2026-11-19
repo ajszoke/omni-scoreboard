@@ -105,6 +105,12 @@ def test_the_quads_odds_drop_their_spread_when_it_would_crowd_the_tip_beside_the
     assert "MIN -650" in _texts(dataclasses.replace(no_tip, line=_LONG_LINE), QUAD)  # but not the long one
 
 
+def test_the_stacks_odds_drop_their_spread_only_when_the_line_is_wider_than_the_board() -> None:
+    assert "MIN -650 (-12.5)" in _texts(_payload(line=_LONG_LINE), STACK)  # 64 px: exactly the board
+    huge = FavoriteLine(favorite=HomeAway.HOME, moneyline=-1200, spread=-15.5)
+    assert "MIN -1200" in _texts(_payload(line=huge), STACK)
+
+
 @pytest.mark.parametrize("profile", PROFILES)
 def test_with_no_records_or_standings_the_card_shows_neither(profile: PanelProfile) -> None:
     texts = _texts(_payload(records=BySide(None, None)), profile)

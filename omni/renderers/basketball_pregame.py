@@ -1,4 +1,4 @@
-"""Renderer for the NBA pregame card, scheduled or postponed, on the quad board (the stack and single follow).
+"""Renderer for the NBA pregame card, scheduled or postponed, on the quad and stack boards (the single follows).
 
 A pregame card names the clubs (their marks and codes), their records, and when the game tips. The tip reads as
 a label and what it's about: ``TIP`` and the time with a countdown under it (``6:00 PM`` over ``1h 23m``, ``SOON``
@@ -13,11 +13,14 @@ stays right as it ticks.
   the odds, and the countdown, or the time under a date, (6x10) on the bottom record's line. COMPROMISE: when
   the odds would leave no blank column before the tip time, date or ``TIP TBD`` beside them, they drop their
   spread.
+- stack_64x64 : tiles, each club's code (white) over its record (teal), both in 6x10, the odds row between; then
+  the tip in two lines: the label and what it's about in 5x7 (``TIP 6:00 PM``), the countdown or the time
+  under it in 4x6. COMPROMISE: no standings; odds too wide for the board drop their spread.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, tzinfo
 
@@ -33,7 +36,7 @@ from omni.renderers.context import RenderContext
 from omni.renderers.font import rasterize
 from omni.renderers.pregame import start_time_label
 from omni.renderers.team_row import draw_matchup_marks
-from omni.renderers.text import text_width
+from omni.renderers.text import draw_centered, text_width
 
 __all__ = ["BasketballPregameRenderer", "TipLines", "Tip", "tip_lines"]
 
@@ -227,10 +230,60 @@ def _quad_odds(canvas: Canvas, game: TeamGame, line: FavoriteLine, beside: int) 
     canvas.text(_Q_TEXT_X, _Q_ODDS_Y, text, _ODDS_GREEN, font="4x6")
 
 
+# --- stack 64x64 ------------------------------------------------------------------------------------------
+
+_S_TEXT_X = 24
+_S_HOME_TOP = 27
+_S_ODDS_Y = 21
+_S_UPPER_Y = 48  # cell tops under the home record: the label line's ink on rows 48-53
+_S_LOWER_Y = 56  # and the countdown's (or the time's) on rows 56-60
+
+
+def _stack(canvas: Canvas, context: RenderContext, card: _Pregame) -> None:
+    """Marks, each club's code over its record the same way; the odds row between; then the tip, in two lines.
+
+    The top line is the label and what it's about, in 5x7: ``TIP 6:00 PM`` (or ``TIP 11/20`` on another day),
+    ``PPD 11/17`` for a postponed game with a new tip, ``PPD`` without one. Its widest case, ``TIP 12:00 PM``, is
+    58 px in 5x7, 3 px to spare each side. Under it, in 4x6: the countdown, the time when the top line has the
+    date, or ``TIP TBD``.
+    """
+    game, payload = card.game, card.payload
+    draw_matchup_marks(canvas, context, game.away, game.home, away_top=0, home_top=_S_HOME_TOP)
+    for which, top in ((HomeAway.AWAY, 0), (HomeAway.HOME, _S_HOME_TOP)):
+        canvas.text(_S_TEXT_X, top, card.team(which).abbreviation, _WHITE, font="6x10")
+        record = payload.records[which]
+        if record is not None:
+            canvas.text(_S_TEXT_X, top + 10, str(record), _STATS_TEAL, font="6x10")
+    if payload.line is not None:
+        odds = _odds_text(game, payload.line)
+        if text_width(odds, "4x6") > 64:
+            odds = _odds_text(game, payload.line, spread=False)
+        draw_centered(canvas, 0, 64, _S_ODDS_Y, odds, _ODDS_GREEN, "4x6")
+    upper: list[tuple[Tip, RGBColor]] = [(Tip(card.label), _GOLD)]
+    if card.tip is None:
+        lower = Tip(_TBD)
+    else:
+        upper.append((card.tip.upper, _WHITE))
+        lower = card.tip.lower
+    _draw_line_parts(canvas, _S_UPPER_Y, upper, "5x7")
+    _draw_line_parts(canvas, _S_LOWER_Y, [(lower, _WHITE)], "4x6")
+
+
+def _draw_line_parts(canvas: Canvas, y: int, parts: Sequence[tuple[Tip, RGBColor]], font: str) -> None:
+    """One line's parts, a space apart and centered across the board, each in its own color."""
+    space = text_width(" ", font)
+    total = sum(_tip_width(tip, font) for tip, _ in parts) + space * (len(parts) - 1)
+    x = (64 - total) // 2
+    for tip, color in parts:
+        _draw_tip(canvas, x, y, tip, color, font)
+        x += _tip_width(tip, font) + space
+
+
 # --- the renderer -----------------------------------------------------------------------------------------
 
 _DRAW: dict[PanelProfile, Callable[[Canvas, RenderContext, _Pregame], None]] = {
     PanelProfile.QUAD_128X64: _quad,
+    PanelProfile.STACK_64X64: _stack,
 }
 
 
