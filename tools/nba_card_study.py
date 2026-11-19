@@ -1593,17 +1593,17 @@ def _stack_line_score(canvas: Canvas, game: Game) -> None:
         _stack_labeled(canvas, y, label, _GOLD if live else _SECONDARY, f"{away}-{home}")
 
 
-_S_PREGAME_BIG_Y = 47  # cell tops under the home record: the big line's ink on rows 48-54
-_S_PREGAME_SMALL_Y = 57  # and the small line's on rows 57-61
+_S_PREGAME_TOP_Y = 48  # cell tops under the home record: the label line's ink on rows 48-53
+_S_PREGAME_BOTTOM_Y = 56  # and the countdown's (or the time's) on rows 56-60
 
 
 def _stack_pregame(canvas: Canvas, context: RenderContext, spec: Specimen) -> None:
     """Marks, each team's code over its record the same way; the odds row between; then the tip, in two lines.
 
-    What carries the news goes big (6x10): the tip time later today, the date on another day, or ``POSTPONED``.
-    The rest goes on a small line (4x6) under it: ``TIPOFF`` with the countdown, or with the time on another day;
-    a postponed game's new date and time; or ``TIP TBD``. A full line such as ``TIPOFF 6:00 PM`` would be 87 px in
-    6x10, wider than the board.
+    The top line is a short label and what it's about, in 5x7: ``TIP 6:00 PM`` (or ``TIP 11/20`` on another day),
+    ``PPD 11/17`` for a postponed game with a new tip, ``PPD`` without one. Its widest case, ``TIP 12:00 PM``, is
+    58 px in 5x7 (3 px to spare each side) and would be 69 in 6x10. Under it, in 4x6: the countdown, the time
+    when the top line has the date, or ``TIP TBD``.
     """
     game = spec.game
     away, home = _teams(game)
@@ -1614,22 +1614,16 @@ def _stack_pregame(canvas: Canvas, context: RenderContext, spec: Specimen) -> No
             canvas.text(_S_LANE_X, top + 10, side.record.text(), _STATS_TEAL, font="6x10")
     if game.line is not None:
         draw_centered(canvas, 0, 64, 21, _odds_text(game, game.line), _ODDS_GREEN, "4x6")
-    small: list[tuple[str, RGBColor]]
+    label = "TIP" if game.phase is Phase.PREGAME else "PPD"
+    upper: list[tuple[str, RGBColor]] = [(label, _GOLD)]
     clock = ""
     if game.tip is None:
-        big, big_color = "POSTPONED", _GOLD
-        small = [("TIP TBD", _WHITE)]
+        lower = "TIP TBD"
     else:
-        upper, lower, clock = _tip_lines(spec.now, game.tip, context.timezone)
-        if game.phase is Phase.PREGAME:
-            big, big_color = upper, _WHITE
-            small = [("TIPOFF", _GOLD), (lower, _WHITE)]
-        else:  # a new tip later today shows its time alone: a postponed game's countdown matters less
-            big, big_color = "POSTPONED", _GOLD
-            small = [(upper, _WHITE), (lower, _WHITE)] if upper != clock else [(clock, _WHITE)]
-    big_x = (64 - _when_width(big, clock, "6x10")) // 2
-    _draw_when(canvas, big_x, _S_PREGAME_BIG_Y, big, clock, big_color, "6x10")
-    _draw_line_parts(canvas, 64, _S_PREGAME_SMALL_Y, small, clock, "4x6")
+        when, lower, clock = _tip_lines(spec.now, game.tip, context.timezone)
+        upper.append((when, _WHITE))
+    _draw_line_parts(canvas, 64, _S_PREGAME_TOP_Y, upper, clock, "5x7")
+    _draw_line_parts(canvas, 64, _S_PREGAME_BOTTOM_Y, [(lower, _WHITE)], clock, "4x6")
 
 
 def _draw_line_parts(
