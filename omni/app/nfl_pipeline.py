@@ -934,6 +934,7 @@ class LiveFootballPipeline:
         held back can't caption or promote; and the field its card shows, released before the gap, is drawn stale
         from the gap's end (coming down `stale_for` later) until a state answered after it clears the delay. A final
         stands. (An output loss is the display's: the loop tells the pipelines only of a host's gap.)"""
+        self._guard.distrust(interruption.after)  # what a wake admits waits its full delay until the clock settles
         self._woke = interruption.after.monotonic
         for game_id, live in self._live.items():
             self._forget_plays(live)  # a play's own card from before the gap is history, as its offer is

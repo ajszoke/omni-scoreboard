@@ -138,8 +138,8 @@ def test_a_guest_cued_with_room_whose_first_frame_lands_at_16_with_8_s_left_is_d
     profile: PanelProfile,
 ) -> None:
     """Cued at 0 with 24 s left, the other game's 12 s turn and its 6 s margin fit; its first frame is confirmed at
-    16, when 8 s are left and it needs 18: it comes down unseen, spends none of the visit's one guest, and the
-    Rockies get their turn back."""
+    16, when 8 s are left and it needs 18: its pixels were up, but it's booked as an accidental display (no airtime),
+    spends none of the visit's one guest, and the Rockies get their turn back."""
     feed = _Feed()
     feed.answer(_visit(pitches=(-60,), began=-57, as_of=-45), received=-45)
     run = _run(profile)
@@ -147,8 +147,8 @@ def test_a_guest_cued_with_room_whose_first_frame_lands_at_16_with_8_s_left_is_d
     cue = run.board.cue(at(0))
     assert cue.payload == live(OTHER)
     run.board.committed(cue, at(16))
-    [dropped] = run.board.changes()
-    assert (dropped.kind, dropped.reason) == (ChangeKind.DROPPED, EndReason.INVALIDATED)
+    [down] = run.board.changes()
+    assert (down.kind, down.reason, down.aired) == (ChangeKind.DOWN, EndReason.GRANT_LAPSED, timedelta(0))
     refused = [note for note in run.board.decisions() if isinstance(note, GuestNote) and note.refusal is not None]
     assert [(note.refusal, note.boundary, note.at.monotonic.seconds) for note in refused] == [
         (LeaseRefusal.NO_ROOM, GrantBoundary.SWAP, 16.0)

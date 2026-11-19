@@ -380,7 +380,9 @@ class BoardSession:
             return EndReason.LANDED_LATE
         if on.air is not None:
             assert self._director is not None
-            if self._director.held(on.air, at) is not None:
+            refusal = self._director.grant_refusal(on.air, at)
+            if refusal is not None:
+                self._director.lapsed(on.air, refusal, at)  # the decisions say why it spent nothing
                 return EndReason.GRANT_LAPSED
         return None
 

@@ -369,12 +369,7 @@ class PolicyDirector:
         turn = air.turn
         refusal = self.grant_refusal(air, at)
         if refusal is not None:  # its break closed, changed or ran short before its frame: unseen, it spends nothing
-            if turn.candidate is not None:
-                reason = PromotionRefusal.NO_ROOM if refusal in _SHORT else PromotionRefusal.BREAK_OVER
-                self._note(UnspentNote(at=at, card=air.card.id, key=turn.candidate.key, reason=reason))
-            else:
-                boundary = GrantBoundary.SWAP
-                self._note(GuestNote(at=at, card=air.card.id, hosts=turn.hosts, refusal=refusal, boundary=boundary))
+            self.lapsed(air, refusal, at)
             return False
         if turn.candidate is not None and turn.started is None:
             assert self._cards is not None  # a card is up only from an input taken in
@@ -944,6 +939,17 @@ class PolicyDirector:
         if turn.tenure is Tenure.BREAK_GUEST and not turn.grants:
             turn.grants = tuple(self._leases.grant(host, turn.length) for host in turn.hosts)
 
+    def lapsed(self, air: Air, refusal: LeaseRefusal, at: ClockReading) -> None:
+        """A break's guest whose grant no longer held when its first frame landed: it spends nothing, and the
+        decisions say why (a promotion's room or break gone; a guest's lease, at its first frame)."""
+        turn = air.turn
+        if turn.candidate is not None:
+            reason = PromotionRefusal.NO_ROOM if refusal in _SHORT else PromotionRefusal.BREAK_OVER
+            self._note(UnspentNote(at=at, card=air.card.id, key=turn.candidate.key, reason=reason))
+        else:
+            boundary = GrantBoundary.SWAP
+            self._note(GuestNote(at=at, card=air.card.id, hosts=turn.hosts, refusal=refusal, boundary=boundary))
+
     def grant_refusal(self, air: Air, at: ClockReading) -> LeaseRefusal | None:
         """Whether a break's guest may still begin at ``at`` (None) or why not: each lease it was granted in must be
         the host's lease still, open, with a turn left and room for its whole turn and the return margin. Asked as its
@@ -1182,19 +1188,6 @@ class PolicyDirector:
             return f"{subject}: {status_words(card.payload.status)}"
         return f"{subject}: {_ROLE_WORDS[role]}"
 
-    def held(self, air: Air, at: ClockReading) -> LeaseRefusal | None:
-        """Whether the grant ``air`` was cued under still held at ``at``, as its first frame landed: each host whose
-        break it's a guest of must still have room for its turn. None when it held, or when ``air`` carries on a turn
-        already running; else why not, and the board books the frame as an accidental display."""
-        turn = air.turn
-        if turn.started is not None:
-            return None
-        for host in turn.hosts:
-            refusal = self._leases.guest_refusal(host, turn.length, at.monotonic)
-            if refusal is not None:
-                return refusal
-        return None
-
     def interrupted(self, interruption: Interruption, at: ClockReading) -> None:
         """The board was interrupted (`BOARD_POLICY.md` §6, "Wake or output loss"). The turn on air ends at ``at``,
         the last moment its display is known to have shown it, credited to there; nothing queued carries over, nor
@@ -1211,7 +1204,6 @@ class PolicyDirector:
         if not interruption.host:
             return
         self._leases = LeaseBook(self._policy.leases)
-        self._actions.clear()
         self._lapsed.clear()
         for contest in sorted({candidate.key.contest for candidate in self._broker.pending()}, key=str):
             self._broker.withdraw(contest)

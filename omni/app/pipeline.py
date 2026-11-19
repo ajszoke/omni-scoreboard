@@ -1223,6 +1223,7 @@ class LiveBaseballPipeline:
         the gap held back can't flash or promote; and a live card's state, released before the gap, is drawn stale
         from the gap's end (coming down `STALE_FOR` later) until a state answered after it clears the delay. Finals
         stand. (An output loss is the display's: the loop tells the pipelines only of a host's gap.)"""
+        self._guard.distrust(interruption.after)  # what a wake admits waits its full delay until the clock settles
         self._woke = interruption.after.monotonic
         self._feeds = {game_id: DelayedFeed(self._guard) for game_id in self._feeds}
         self._event_streams.clear()
