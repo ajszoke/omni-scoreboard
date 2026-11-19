@@ -10,6 +10,9 @@ Two payloads cover a game's life:
 - `BasketballPregameCardPayload` draws a game not yet under way, scheduled or postponed. It has no score, no
   clock and no state, but its own numbers: the tip, the standings and the betting line.
 
+Each card's `LayoutSupport` names the compromises its renderer makes on each board (`GAME_LAYOUT`, `FINAL_LAYOUT`,
+`PREGAME_LAYOUT`).
+
 A live card's 12 s turn has two 6 s halves: the first names each team (its code over its record), the second
 shows what each has left (its timeouts over the bonus). Which half is up depends on how long the card has been
 on the board, so it's never part of a payload: the renderer reads it from the render context.
@@ -21,7 +24,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
-from omni.cards.base import ScoreboardCard
+from omni.cards.base import LayoutSupport, ScoreboardCard
+from omni.core.enum import PanelProfile
 from omni.domain.baseball import WinLossRecord, WinProbability
 from omni.domain.basketball import (
     UNSTARTED,
@@ -39,6 +43,9 @@ from omni.domain.basketball import (
 from omni.events.basketball import BasketballCaption
 
 __all__ = [
+    "FINAL_LAYOUT",
+    "GAME_LAYOUT",
+    "PREGAME_LAYOUT",
     "BasketballGameCard",
     "BasketballGameCardPayload",
     "BasketballPregameCard",
@@ -200,3 +207,27 @@ class BasketballPregameCardPayload:
 
 
 BasketballPregameCard = ScoreboardCard[BasketballPregameCardPayload]
+
+
+_PROFILES = frozenset({PanelProfile.QUAD_128X64})
+_QUAD_RECORD = "quad_128x64: from 100 points the record drops to 5x7, under a 6x10 code or timeouts"
+
+GAME_LAYOUT = LayoutSupport(
+    profiles=_PROFILES,
+    compromise_notes=(_QUAD_RECORD,),
+)
+"""A live or break card's boards and compromises."""
+
+FINAL_LAYOUT = LayoutSupport(
+    profiles=_PROFILES,
+    compromise_notes=(_QUAD_RECORD,),
+)
+"""A final's boards and compromises."""
+
+PREGAME_LAYOUT = LayoutSupport(
+    profiles=_PROFILES,
+    compromise_notes=(
+        "quad_128x64: the odds drop their spread when it would leave no blank column before the tip beside them",
+    ),
+)
+"""A pregame or postponed card's boards and compromises."""

@@ -271,6 +271,32 @@ def test_a_frame_the_display_never_took_starts_nothing() -> None:
     assert later is not None and later[0] == 0 and _LONG.startswith(later[1])  # its line starts here, at its head
 
 
+def _up_for(clock: LaneClock, seconds: float, *, presentation: str = "card", commit: bool = True) -> float:
+    """How long a frame of ``presentation`` at ``seconds`` says its presentation has been up."""
+    frame = clock.frame(presentation, MonotonicTime(seconds))
+    up = frame.up_for()
+    if commit:
+        frame.commit()
+    return up
+
+
+def test_a_presentation_has_been_up_since_its_first_frame_was_taken() -> None:
+    clock = LaneClock()
+    assert _up_for(clock, 100.0, commit=False) == 0.0  # drawn, but the display never took it
+    assert _up_for(clock, 101.5) == 0.0  # this one it took: the presentation went up here
+    assert _up_for(clock, 107.0) == 5.5
+    assert _up_for(clock, 120.25, commit=False) == 18.75
+
+
+def test_a_new_presentation_goes_up_with_its_own_first_frame() -> None:
+    clock = LaneClock()
+    _up_for(clock, 10.0, presentation="first")
+    assert _up_for(clock, 30.0, presentation="first") == 20.0
+    assert _up_for(clock, 31.0, presentation="second") == 0.0
+    assert _up_for(clock, 37.0, presentation="second") == 6.0
+    assert _up_for(clock, 38.0, presentation="first") == 0.0  # back again: a new time on the board
+
+
 def test_speeds_raise_the_top_speed_at_one_acceleration_and_keep_the_holds() -> None:
     styles = {speed: DEFAULT_MARQUEE.at(speed) for speed in ScrollSpeed}
     assert [styles[speed].cruise_px_per_s for speed in ScrollSpeed] == [10.0, 12.5, 15.0]

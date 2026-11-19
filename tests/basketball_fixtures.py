@@ -14,8 +14,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from omni.cards.base import CardId, CardKind, CardPriority, DedupeKey, DisplayTiming, LayoutSupport, ScoreboardCard
+from omni.cards.base import CardId, CardKind, CardPriority, DedupeKey, DisplayTiming, ScoreboardCard
 from omni.cards.basketball import (
+    FINAL_LAYOUT,
+    GAME_LAYOUT,
+    PREGAME_LAYOUT,
     BasketballGameCardPayload,
     BasketballPregameCardPayload,
     BestPlayers,
@@ -136,7 +139,7 @@ def game_card(
         contest=contest,
         timing=DisplayTiming(available_at=T, min_display=DurationSeconds(5), max_display=DurationSeconds(30)),
         priority=CardPriority(band=DisplayPriority.FAVORITE, score=50.0),
-        layout_support=LayoutSupport(profiles=frozenset(ALL_PROFILES)),
+        layout_support=FINAL_LAYOUT if final else GAME_LAYOUT,
         dedupe_key=DedupeKey(key),
         payload=payload,
     )
@@ -153,7 +156,7 @@ def pregame_card(
         contest=contest,
         timing=DisplayTiming(available_at=T, min_display=DurationSeconds(5), max_display=DurationSeconds(30)),
         priority=CardPriority(band=DisplayPriority.FAVORITE, score=50.0),
-        layout_support=LayoutSupport(profiles=frozenset(ALL_PROFILES)),
+        layout_support=PREGAME_LAYOUT,
         dedupe_key=DedupeKey(key),
         payload=payload,
     )

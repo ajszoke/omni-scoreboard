@@ -22,6 +22,10 @@ so a frame that failed to draw starts nothing; and a new presentation starts eve
 even one whose text and place match a line before it. Without a clock (a still preview, a golden image),
 the cycle runs off the render clock itself.
 
+The clock also keeps when its presentation went up, the moment its first frame was taken, so a card that changes
+what it shows as it stays up (a live basketball card's two 6 s halves) can ask a frame how long that has been
+(`LaneFrame.up_for`), on the same terms as its lines.
+
 Every marquee moves the same way, whatever its length. It holds at the head, speeds up along one
 fixed ramp to a cruising speed, cruises, slows along the same ramp mirrored, holds at the tail, then
 comes back the same way. Only the cruise stretches with the text; a trip too short to reach cruising
@@ -222,14 +226,21 @@ class LaneClock:
     def __init__(self) -> None:
         self._presentation: Hashable | None = None
         self._lines: dict[_LaneKey, _Line] = {}
+        self._since: MonotonicTime | None = None  # when the presentation's first frame was taken
 
     def frame(self, presentation: Hashable, at: MonotonicTime) -> LaneFrame:
         """The view a frame of ``presentation``, drawn at ``at``, reads its lines' starts through."""
         lines = self._lines if presentation == self._presentation else {}
         return LaneFrame(self, presentation, at, lines)
 
-    def _commit(self, presentation: Hashable, lines: dict[_LaneKey, _Line]) -> None:
-        self._presentation, self._lines = presentation, lines
+    def _up_since(self, presentation: Hashable, at: MonotonicTime) -> MonotonicTime:
+        """When ``presentation`` went up: the moment it was first taken, or ``at`` for one not yet taken."""
+        if presentation == self._presentation and self._since is not None:
+            return self._since
+        return at
+
+    def _commit(self, presentation: Hashable, lines: dict[_LaneKey, _Line], since: MonotonicTime) -> None:
+        self._presentation, self._lines, self._since = presentation, lines, since
 
 
 class LaneFrame:
@@ -244,6 +255,7 @@ class LaneFrame:
         self._presentation = presentation
         self._at = at
         self._lines = dict(lines)  # this frame's own: the clock keeps its lines until the commit
+        self._since = clock._up_since(presentation, at)
 
     def elapsed(self, lane: TextLane, text: str, *, overflows: bool) -> float | None:
         """Seconds since ``text`` went up in ``lane``, or None during the beat before it shows."""
@@ -256,9 +268,14 @@ class LaneFrame:
         seconds = self._at.since(line.since).total_seconds()
         return seconds if seconds >= 0 else None
 
+    def up_for(self) -> float:
+        """Seconds since this frame's presentation went up: 0 for its first frame, counted from when the display
+        took that one."""
+        return self._at.since(self._since).total_seconds()
+
     def commit(self) -> None:
         """The display took this frame: the starts it chose stand."""
-        self._clock._commit(self._presentation, self._lines)
+        self._clock._commit(self._presentation, self._lines, self._since)
 
 
 @dataclass(frozen=True, slots=True)
