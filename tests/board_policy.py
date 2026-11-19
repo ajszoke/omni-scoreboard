@@ -149,6 +149,9 @@ def facts(
     )
 
 
+LAG = 45.0  # the viewer's delay the hand-built evidence is released through
+
+
 def evidence(
     contest: TeamGame,
     kind: BreakKind,
@@ -159,7 +162,8 @@ def evidence(
     stated: float | None = None,
     ended: bool = False,
 ) -> BreakEvidence:
-    """Break evidence received at ``received``; ``onset`` is how long before that the break began (None: unknown)."""
+    """Break evidence received at ``received`` in an answer that stood then, its release pinned `LAG` later; ``onset``
+    is how long before that the break began (None: unknown)."""
     reading = at(received)
     return BreakEvidence(
         id=BreakId(contest.id, kind, marker),
@@ -168,11 +172,18 @@ def evidence(
         onset=reading.utc - timedelta(seconds=onset) if onset is not None else None,
         stated=timedelta(seconds=stated) if stated is not None else None,
         ended=ended,
+        as_of=reading.utc,
+        released=MonotonicTime(received + LAG),
     )
 
 
-def action(contest: TeamGame, marker: str, *, received: float) -> ActionEvidence:
-    return ActionEvidence(contest=contest.id, marker=marker, received=at(received))
+def break_id(contest: TeamGame, kind: BreakKind, marker: str = "b1") -> BreakId:
+    return BreakId(contest.id, kind, marker)
+
+
+def action(contest: TeamGame, marker: str, *, received: float, closes: tuple[BreakId, ...] = ()) -> ActionEvidence:
+    """Released action at ``marker``, after (and so closing) the breaks ``closes`` names."""
+    return ActionEvidence(contest=contest.id, marker=marker, received=at(received), closes=frozenset(closes))
 
 
 def major(

@@ -20,8 +20,9 @@ A pause inside an inning break (a pitching change between halves) isn't evidence
 covers it, and §5 says it doesn't extend it. What §5 says lends nothing (a ball-strike challenge, a batter's
 timeout, a pinch hitter, a pickoff, a step-off, the automatic runner) isn't typed by the provider at all.
 
-An onset is given only when the feed's time for it is credible (`credible_onset`). The feed marks no correction
-of a stoppage, so every piece of evidence here is revision 0.
+An onset is given only when the feed's time for it is credible against the answer's own (`credible_onset`), and each
+piece of evidence carries when its answer stood, so the break's age is told on StatsAPI's clock. The feed marks no
+correction of a stoppage, so every piece of evidence here is revision 0.
 """
 
 from __future__ import annotations
@@ -57,7 +58,7 @@ def mlb_break_evidence(feed: LiveBaseballFeed, game: TeamGame, received: ClockRe
     status = feed.status if feed.status is not None else game.status
     if status in _STOPPED:
         marker = f"{status.value} {state.phase.value} {state.inning}"
-        return (_evidence(game, BreakKind.MLB_WEATHER, marker, received),)
+        return (_evidence(game, BreakKind.MLB_WEATHER, marker, received, as_of=feed.as_of),)
     if status is GameStatus.FINAL:
         return ()
     if state.phase.is_break:
@@ -69,7 +70,8 @@ def mlb_break_evidence(feed: LiveBaseballFeed, game: TeamGame, received: ClockRe
             _STOPPAGE_KINDS[stoppage.kind],
             f"at-bat {stoppage.at_bat} event {stoppage.event}",
             received,
-            onset=credible_onset(stoppage.began, as_of=feed.as_of, received=received),
+            as_of=feed.as_of,
+            onset=credible_onset(stoppage.began, as_of=feed.as_of),
         )
         for stoppage in signals.stoppages
         if not stoppage.resumed
@@ -80,6 +82,7 @@ def mlb_break_evidence(feed: LiveBaseballFeed, game: TeamGame, received: ClockRe
             BreakKind.MLB_REVIEW,
             f"at-bat {review.at_bat}" + (f" event {review.event}" if review.event is not None else ""),
             received,
+            as_of=feed.as_of,
             ended=not review.in_progress,
         )
         for review in signals.reviews
@@ -107,7 +110,8 @@ def _inning_break(feed: LiveBaseballFeed, game: TeamGame, received: ClockReading
         BreakKind.MLB_INNING_BREAK,
         f"{half.value} {state.inning} {state.phase.value}",
         received,
-        onset=credible_onset(ended, as_of=feed.as_of, received=received),
+        as_of=feed.as_of,
+        onset=credible_onset(ended, as_of=feed.as_of),
         stated=state.break_signals.inning_break_length,
     )
 
@@ -118,11 +122,13 @@ def _evidence(
     marker: str,
     received: ClockReading,
     *,
+    as_of: datetime | None,
     onset: datetime | None = None,
     stated: timedelta | None = None,
     ended: bool = False,
 ) -> BreakEvidence:
-    """Evidence the feed marks outright: every MLB break is read off a field that names it."""
+    """Evidence the feed marks outright: every MLB break is read off a field that names it, and its onset is the
+    stoppage's own time."""
     return BreakEvidence(
         id=BreakId(game.id, kind, marker),
         received=received,
@@ -130,4 +136,5 @@ def _evidence(
         onset=onset,
         stated=stated,
         ended=ended,
+        as_of=as_of,
     )

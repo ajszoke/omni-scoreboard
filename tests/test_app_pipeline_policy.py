@@ -9,6 +9,7 @@ synthetic.
 from __future__ import annotations
 
 import dataclasses
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from typing import Callable
 
@@ -268,12 +269,18 @@ def test_a_break_appears_only_once_released_and_later_released_action_supersedes
     still_inside = board.facts(39)
     assert still_inside is not None and still_inside.breaks == ()  # the break has reached the board, not the viewer
     shown = board.facts(40)
-    assert shown is not None and shown.breaks == mlb_break_evidence(inning_break, GAME, _seconds(10))
+    released = tuple(
+        replace(evidence, released=MonotonicTime(40.0))
+        for evidence in mlb_break_evidence(inning_break, GAME, _seconds(10))
+    )
+    assert shown is not None and shown.breaks == released  # with the release pinned for its answer
     assert len(shown.breaks) == 1 and _marker(shown) == "at-bat 40 pitch 3"
     standing = board.facts(45)  # newer action, but the answer that brings it still shows the break
     assert standing is not None and standing.breaks == shown.breaks and _marker(standing) == "at-bat 40 end"
+    assert standing.action is not None and standing.action.closes == frozenset()  # so it closes nothing
     over = board.facts(50)
     assert over is not None and over.breaks == () and _marker(over) == "at-bat 41 pitch 1"
+    assert over.action is not None and over.action.closes == {shown.breaks[0].id}  # the action came after it
 
 
 def test_an_ended_break_is_published_once_when_its_end_is_released_then_dropped_for_good() -> None:

@@ -61,6 +61,7 @@ def test_an_inning_break_carries_its_scheduled_length_and_began_when_its_half_en
         confidence=BreakConfidence.EXPLICIT,
         onset=T - 20 * S,
         stated=timedelta(seconds=145),
+        as_of=T,
     )
     assert onset_age(evidence) == 22 * S  # the answer stood 20 s after the third out and arrived 2 s later
 
@@ -228,7 +229,10 @@ def test_a_rain_delay_or_a_suspension_is_weather_and_nothing_else(detailed: str,
     visit = play(50, inning=7, complete=False, events=(action("mound_visit", at=T - 2 * S),))
     feed = read(answer(inning=7, plays=(visit,), status=detailed))
     assert _one(feed) == BreakEvidence(
-        id=BreakId(_GAME_ID, BreakKind.MLB_WEATHER, marker), received=RECEIVED, confidence=BreakConfidence.EXPLICIT
+        id=BreakId(_GAME_ID, BreakKind.MLB_WEATHER, marker),
+        received=RECEIVED,
+        confidence=BreakConfidence.EXPLICIT,
+        as_of=T,
     )
 
 
@@ -252,9 +256,9 @@ def test_a_final_game_has_no_breaks() -> None:
     [
         (T, T - 8 * S, True),
         (None, T - 8 * S, False),  # the answer doesn't say when it stood: the source's clock can't be checked
-        (T + 30 * S, T + 20 * S, False),  # the source's clock runs ahead of ours: every age would read short
-        (T, T + 10 * S, False),  # dated after it reached us
-        (T + 7 * S, T + 7 * S, True),  # within the second's rounding and the clocks' play
+        (T + 30 * S, T + 20 * S, True),  # the source's clock runs ahead of ours: its own age is still told
+        (T, T + 10 * S, False),  # dated after the answer that reports it
+        (T + 7 * S, T + 7 * S, True),  # within the second's rounding
     ],
 )
 def test_an_onset_is_given_only_when_the_feeds_time_for_it_is_credible(as_of: Any, began: Any, credible: bool) -> None:
@@ -264,7 +268,7 @@ def test_an_onset_is_given_only_when_the_feeds_time_for_it_is_credible(as_of: An
 
 
 def test_an_onset_needs_a_time_for_the_break() -> None:
-    assert credible_onset(None, as_of=T, received=RECEIVED) is None
+    assert credible_onset(None, as_of=T) is None
     untimed = play(41, complete=False, events=(action("mound_visit"),))
     assert _one(read(answer(plays=(untimed,)))).onset is None
 
@@ -272,8 +276,8 @@ def test_an_onset_needs_a_time_for_the_break() -> None:
 def test_an_onsets_age_is_never_below_zero_and_unknown_without_an_onset() -> None:
     evidence = _one(read(_fifth()))
     assert onset_age(BreakEvidence(id=evidence.id, received=RECEIVED, confidence=evidence.confidence)) is None
-    early = BreakEvidence(id=evidence.id, received=RECEIVED, confidence=evidence.confidence, onset=T + 4 * S)
-    assert onset_age(early) == timedelta(0)
+    early = BreakEvidence(id=evidence.id, received=RECEIVED, confidence=evidence.confidence, onset=T + 4 * S, as_of=T)
+    assert onset_age(early) == 2 * S  # none of its own, and the answer's 2 s transport
 
 
 # --- action evidence ------------------------------------------------------------------------------------------

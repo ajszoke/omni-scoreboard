@@ -14,7 +14,7 @@ from omni.policy.ledger import DebtClamp
 from omni.preferences.favorites import Favorites
 from omni.tower.decisions import ClampNote, LeaseNote, PolicyDecision
 from omni.tower.director import DirectorPolicy
-from tests.board_policy import Run, action, at, big_play, evidence, facts, final, games, live, major, reminder
+from tests.board_policy import Run, action, at, big_play, break_id, evidence, facts, final, games, live, major, reminder
 
 
 def _lines(notes: list[PolicyDecision]) -> list[str]:
@@ -92,7 +92,11 @@ def test_an_unspent_cue_a_yield_and_lease_changes_are_written() -> None:
     run.offers.append(major(play, 0.9, model=False, play="play 9"))
     run.publish()
     cue = run.board.cue(at(0))
-    run.describe(facts(atl, 0.4, action=action(atl, "ab 41 p2", received=-44)))
+    run.describe(
+        facts(
+            atl, 0.4, action=action(atl, "ab 41 p2", received=-44, closes=(break_id(atl, BreakKind.MLB_MOUND_VISIT),))
+        )
+    )
     run.publish()
     run.board.committed(cue, at(0.1))
     assert _lines(run.board.decisions()) == [
@@ -111,13 +115,21 @@ def test_an_unspent_cue_a_yield_and_lease_changes_are_written() -> None:
         closing.publish()
 
     def resumed() -> None:
-        closing.describe(facts(atl, 0.4, action=action(atl, "ab 41 p1", received=104 - 45)))
+        closing.describe(
+            facts(
+                atl,
+                0.4,
+                action=action(atl, "ab 41 p1", received=104 - 45, closes=(break_id(atl, BreakKind.MLB_INNING_BREAK),)),
+            )
+        )
         closing.publish()
 
     closing.on(90, inning_break)
     closing.on(104, resumed)
     closing.run(52, 108)
-    assert "yield 23:01:48: mlb:mlb_statsapi:g01:live (its host's break closed 23:01:44)" in _lines(closing.notes)
+    assert "yield 23:01:48: mlb:mlb_statsapi:g01:live (its host's break closed 23:01:44; aired 8.0s)" in _lines(
+        closing.notes
+    )
 
 
 def test_leases_refused_ended_open_ended_and_provisional_are_written_with_their_terms() -> None:

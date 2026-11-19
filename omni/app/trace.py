@@ -79,7 +79,10 @@ from omni.tower.decisions import (
     UnspentNote,
     WaitNote,
     YieldNote,
+    aired_words,
     event_words,
+    judged_words,
+    refused_guest,
 )
 from omni.tower.lane import ChangeKind, LaneChange
 
@@ -210,9 +213,10 @@ class DecisionTracer:
             hosts = ", ".join(str(host) for host in note.hosts)
             if note.refusal is None:
                 return f"guest {when}: admitted {note.card.raw} in {hosts}"
-            return f"guest {when}: refused {note.card.raw} in {hosts} ({note.refusal.value})"
+            return f"guest {when}: refused {note.card.raw} in {hosts} ({refused_guest(note)})"
         if isinstance(note, YieldNote):
-            return f"yield {when}: {note.card.raw} (its host's break closed {self._at(note.at, note.closed)})"
+            closed = self._at(note.at, note.closed)
+            return f"yield {when}: {note.card.raw} (its host's break closed {closed}{aired_words(note)})"
         if isinstance(note, CapNote):
             return f"cap {when}: the non-base cap is reached; refused {', '.join(rung.name.lower() for rung in note.refused)}"
         return f"clamp {when}: " + "; ".join(_clamp(clamp) for clamp in note.clamps)
@@ -246,7 +250,7 @@ class DecisionTracer:
     def _lease(self, when: str, note: LeaseNote) -> str:
         line = f"lease {when}: {note.event.value} {note.id}"
         if note.event is LeaseEvent.REFUSED and note.refusal is not None:
-            return line + f" ({note.refusal.value})"
+            return line + f" ({note.refusal.value})" + judged_words(note)
         if note.event is not LeaseEvent.OPENED:
             return line
         left = f"{note.remaining.total_seconds():.1f}s left" if note.remaining is not None else "open-ended"

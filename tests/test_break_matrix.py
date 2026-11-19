@@ -15,7 +15,7 @@ import pytest
 from omni.core.clock import ClockReading, MonotonicTime
 from omni.core.enum import League
 from omni.core.ids import LeagueScopedId
-from omni.domain.breaks import BreakConfidence, BreakEvidence, BreakId, BreakKind
+from omni.domain.breaks import BreakConfidence, BreakEvidence, BreakId, BreakKind, OnsetBasis
 from omni.events.break_detection import BREAK_CAPABILITIES, BreakCapability, onset_age
 from omni.events.football import FootballEventKind
 from omni.events.mlb_breaks import mlb_break_evidence
@@ -114,12 +114,29 @@ class _Example:
 
 
 def _expect(
-    kind: BreakKind, marker: str, *, onset: datetime | None = None, stated: timedelta | None = None
+    kind: BreakKind,
+    marker: str,
+    *,
+    onset: datetime | None = None,
+    stated: timedelta | None = None,
+    basis: OnsetBasis = OnsetBasis.EVENT,
 ) -> BreakEvidence:
-    contest, received = (_MLB_GAME, RECEIVED) if kind.league is League.MLB else (_NFL_GAME, _NFL_AT)
+    """The evidence an example becomes: each league's answer stood when its raw answer says (StatsAPI's at ``T``,
+    NFLMeta's 3 s before the look)."""
+    mlb = kind.league is League.MLB
+    contest, received, as_of = (_MLB_GAME, RECEIVED, T) if mlb else (_NFL_GAME, _NFL_AT, _NFL_AT.utc - 3 * S)
     return BreakEvidence(
-        id=BreakId(contest, kind, marker), received=received, confidence=_EXPLICIT, onset=onset, stated=stated
+        id=BreakId(contest, kind, marker),
+        received=received,
+        confidence=_EXPLICIT,
+        onset=onset,
+        stated=stated,
+        as_of=as_of,
+        onset_basis=basis,
     )
+
+
+_WRITTEN = OnsetBasis.PUBLISHED  # a stoppage row's onset is the feed's write of it
 
 
 _EXAMPLES: dict[BreakKind, _Example] = {
@@ -157,15 +174,15 @@ _EXAMPLES: dict[BreakKind, _Example] = {
     # the look.
     BreakKind.NFL_TEAM_TIMEOUT: _Example(
         _nfl(_stoppage_row("timeout", "Timeout #2 by CIN at 01:52.")),
-        _expect(BreakKind.NFL_TEAM_TIMEOUT, "play 412", onset=_NFL_AT.utc - 6 * S),
+        _expect(BreakKind.NFL_TEAM_TIMEOUT, "play 412", onset=_NFL_AT.utc - 6 * S, basis=_WRITTEN),
     ),
     BreakKind.NFL_OFFICIAL_TIMEOUT: _Example(
         _nfl(_stoppage_row("official_timeout", "Official Timeout at 01:52.")),
-        _expect(BreakKind.NFL_OFFICIAL_TIMEOUT, "play 412", onset=_NFL_AT.utc - 6 * S),
+        _expect(BreakKind.NFL_OFFICIAL_TIMEOUT, "play 412", onset=_NFL_AT.utc - 6 * S, basis=_WRITTEN),
     ),
     BreakKind.NFL_TWO_MINUTE_WARNING: _Example(
         _nfl(_stoppage_row("two_minute_warning", "Two-Minute Warning")),
-        _expect(BreakKind.NFL_TWO_MINUTE_WARNING, "play 412", onset=_NFL_AT.utc - 6 * S),
+        _expect(BreakKind.NFL_TWO_MINUTE_WARNING, "play 412", onset=_NFL_AT.utc - 6 * S, basis=_WRITTEN),
     ),
     # The scoreboard's {"status_detail": "End of 1st", "period": 1}.
     BreakKind.NFL_QUARTER_BREAK: _Example(
@@ -181,7 +198,13 @@ _EXAMPLES: dict[BreakKind, _Example] = {
                 [_row(330, "rush", "P.Mahomes kneels to KC 30 for -1 yards.", written=_NFL_AT.utc - 60 * S)],
             )
         ),
-        _expect(BreakKind.NFL_HALFTIME, "halftime", onset=_NFL_AT.utc - 60 * S, stated=HALFTIME_HOLD),
+        _expect(
+            BreakKind.NFL_HALFTIME,
+            "halftime",
+            onset=_NFL_AT.utc - 60 * S,
+            stated=HALFTIME_HOLD,
+            basis=OnsetBasis.LOCAL_HOLD,  # the provider's hold, on this board's clock
+        ),
     ),
 }
 

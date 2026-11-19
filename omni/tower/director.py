@@ -32,10 +32,13 @@ spends nothing. A non-base card waiting on its promotion airs by no other route 
 play, which leads its game's next turn. A no-hit bid's reminders are the director's to pace (§6): when new, then once
 60 open seconds have passed since the last one showed, three at most, each offered as a candidate of its own.
 
-**Leases** open on the view's released break evidence and close on newer released action. The evidence's release
-is taken as the first decision that read a view holding it (the facts don't carry the instant); the lease is
-anchored there, less the age the break already had when its evidence arrived. On an outage the lease book and the
-ledger start over.
+**Leases** open on the view's released break evidence and close when released action after the break began names
+it (`ActionEvidence.closes`). Each is anchored at the release instant pinned for its evidence's answer, less the age
+the break already had when that answer arrived, however late the decision that reads it; a new independent interval
+supersedes a shorter one. A guest's permission names the exact leases it was granted in (`LeaseGrant`), stamped as
+its card is handed to the board, and is checked again when its first frame is confirmed: a lease that changed or ran
+short by then discards the guest unseen (`grant_refusal`, `started`). A guest whose break closes after a valid start
+keeps its protected minimum, then gives the board back. On an outage the lease book and the ledger start over.
 
 **NFL's caption in rotation:** within a base turn, a live football card shows a caption once, for 10 s, only if the
 turn has 10 s of runway left for it; otherwise it's drawn as the field alone (its payload without ``last_play``).
@@ -76,7 +79,7 @@ from omni.policy.ladder import (
     pregame_permitted,
     yield_after_break,
 )
-from omni.policy.leases import Lease, LeaseBook, LeasePolicy, LeaseRefusal, LeaseState
+from omni.policy.leases import LeaseBook, LeaseGrant, LeasePolicy, LeaseRefusal, LeaseState, LeaseVerdict
 from omni.policy.ledger import AirtimeLedger, ChoiceReason, Rescue
 from omni.policy.pool import PoolEntry
 from omni.policy.promotion import (
@@ -100,6 +103,7 @@ from omni.tower.decisions import (
     CardNote,
     CardRole,
     ClampNote,
+    GrantBoundary,
     GuestNote,
     LeaseEvent,
     LeaseNote,
@@ -124,6 +128,7 @@ __all__ = ["Air", "DirectorPolicy", "PolicyDirector", "Turn"]
 
 _ZERO = timedelta(0)
 _BASE_RUNGS = (Rung.BASE_RECOVERY, Rung.RESCUE, Rung.BASE)
+_SHORT = frozenset({LeaseRefusal.NO_ROOM, LeaseRefusal.TURNS_SPENT})  # the break is on, but can't fit the card now
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -181,6 +186,7 @@ class Turn:
     reason: BaseReason | None = None  # a base turn: why its game won
     rescue: Rescue | None = None
     hosts: tuple[LeagueScopedId, ...] = ()  # the favorites whose break it's a guest of
+    grants: tuple[LeaseGrant, ...] = ()  # a break's guest: its permission in each host's lease, once handed over
     candidate: PromotionCandidate[DedupeKey] | None = None
     why: str = ""
     started: MonotonicTime | None = None
@@ -283,7 +289,6 @@ class PolicyDirector:
         self._view = PolicyView()
         self._offline = False
         self._games: set[LeagueScopedId] = set()  # the games the facts last described
-        self._actions: dict[LeagueScopedId, str] = {}  # each game's newest action marker seen
         self._lapsed: set[BreakId] = set()  # leases whose lapse is written
         self._frozen: set[LeagueScopedId] = set()
         self._accounts: set[LeagueScopedId] = set()  # games the ledger may hold an account for
@@ -322,23 +327,21 @@ class PolicyDirector:
         now = at.monotonic
         for contest in sorted(view.games, key=str):
             facts = view.games[contest]
-            if facts.action is not None and self._actions.get(contest) != facts.action.marker:
-                self._actions[contest] = facts.action.marker
-                revoked = self._leases.action(contest, now)
+            if facts.action is not None:
+                revoked = self._leases.resumed(contest, facts.action.closes, now)
                 if revoked is not None:
                     self._note(LeaseNote(at=at, id=revoked.id, event=LeaseEvent.REVOKED))
             for evidence in facts.breaks:
                 verdict = self._leases.observe(
                     evidence,
-                    released=now,
+                    at=now,
                     poll_interval=self._policy.poll_interval(contest.league),
-                    delay=max(now.since(evidence.received.monotonic), _ZERO),
                     national=facts.game.national_broadcast is True,
+                    fresh=facts.fresh,
                 )
-                self._lease_noted(evidence.id, verdict.lease, verdict.refusal, at)
+                self._lease_noted(evidence.id, verdict, at)
         for gone in sorted(self._games - set(view.games), key=str):
             self._leases.forget(gone)
-            self._actions.pop(gone, None)
         self._games = set(view.games)
         if self._settings.promotions:
             for candidate in view.offers:
@@ -352,16 +355,27 @@ class PolicyDirector:
         """What to put up with nothing on air: the card decided in this same cue as the last one came down, or the
         ladder's choice now."""
         queued, self._next = self._next, None
+        if queued is None:
+            option = self._decide(self._scene(view, at, skip))
+            queued = option.air if option is not None else None
         if queued is not None:
-            return queued
-        option = self._decide(self._scene(view, at, skip))
-        return option.air if option is not None else None
+            self._grant(queued.turn)
+        return queued
 
     def started(self, air: Air, at: ClockReading) -> bool:
         """The display committed ``air``'s first frame at ``at``. A promotion the broker rejects now (play resumed, a
         correction, its time ran out) spends nothing: False says to take it down unseen."""
         now = at.monotonic
         turn = air.turn
+        refusal = self.grant_refusal(air, at)
+        if refusal is not None:  # its break closed, changed or ran short before its frame: unseen, it spends nothing
+            if turn.candidate is not None:
+                reason = PromotionRefusal.NO_ROOM if refusal in _SHORT else PromotionRefusal.BREAK_OVER
+                self._note(UnspentNote(at=at, card=air.card.id, key=turn.candidate.key, reason=reason))
+            else:
+                boundary = GrantBoundary.SWAP
+                self._note(GuestNote(at=at, card=air.card.id, hosts=turn.hosts, refusal=refusal, boundary=boundary))
+            return False
         if turn.candidate is not None and turn.started is None:
             assert self._cards is not None  # a card is up only from an input taken in
             scene = self._scene(self._cards, at, frozenset())
@@ -402,14 +416,15 @@ class PolicyDirector:
             air.caption_until = None
             air.shown = _without_caption(air.card)
         if turn.tenure is Tenure.BREAK_GUEST:
-            closed = self._closed(turn.hosts)
+            closed = self._closed(turn)
             if closed is not None:
                 minimum = max(air.protected.since(turn.started), _ZERO)
                 turn.yield_at = yield_after_break(
                     tenure=turn.tenure, started=turn.started, minimum=minimum, turn=turn.length, closed=closed
                 )
                 if now >= turn.yield_at:
-                    self._note(YieldNote(at=at, card=air.card.id, hosts=turn.hosts, closed=closed))
+                    aired = now.since(turn.started)
+                    self._note(YieldNote(at=at, card=air.card.id, hosts=turn.hosts, closed=closed, aired=aired))
                     return EndReason.NEXT_WAITING
         if air.role is CardRole.PLAY_IN_TURN and now >= air.since + air.minimum:
             scene = self._scene(view, at, skip)
@@ -842,8 +857,10 @@ class PolicyDirector:
         self._run = self._run.after(turn.rung, start)
         if turn.rung.base:
             self._capped = False
+        self._grant(turn)
+        granted = {grant.contest: grant.id for grant in turn.grants}
         for host in turn.hosts:
-            self._leases.hosted(host, start)
+            self._leases.hosted(host, start, granted.get(host))
         if turn.hosts:
             self._refused[air.card.dedupe_key.raw] = None
             self._note(GuestNote(at=at, card=air.card.id, hosts=turn.hosts))
@@ -895,7 +912,6 @@ class PolicyDirector:
             self._current.ended = True
         self._accounts.clear()
         self._frozen.clear()
-        self._actions.clear()
         self._games.clear()
         self._cards = None
         self._run, self._recovery_owed, self._next, self._current = NonBaseRun(), False, None, None
@@ -915,16 +931,32 @@ class PolicyDirector:
         for stale in [promotion for promotion in self._waits if promotion not in waiting]:
             del self._waits[stale]
 
-    def _closed(self, hosts: Iterable[LeagueScopedId]) -> MonotonicTime | None:
-        """When the first of the hosts' breaks closed (play resumed, or the feed marked its end), if one has. A guest
-        fits its lease with the return margin, so it's never up when its lease runs out; a host whose game is over
-        has no lease left to close."""
-        closures: list[MonotonicTime] = []
-        for host in hosts:
-            lease = self._leases.lease(host)
-            if lease is not None and lease.closure is not None:
-                closures.append(lease.closure.at)
-        return min(closures, default=None)
+    def _closed(self, turn: Turn) -> MonotonicTime | None:
+        """When the first of the leases a guest was granted in closed (play resumed, the feed marked its end, or a new
+        interval superseded it), if one has. A guest fits its lease with the return margin from its first frame, so
+        it's never up when its lease runs out; a host whose game is over has no lease left to close."""
+        closures = [self._leases.closed(grant) for grant in turn.grants]
+        return min((closure for closure in closures if closure is not None), default=None)
+
+    def _grant(self, turn: Turn) -> None:
+        """A break's guest handed to the board: its permission in each host's lease, as the decision made at that
+        same instant found them, once."""
+        if turn.tenure is Tenure.BREAK_GUEST and not turn.grants:
+            turn.grants = tuple(self._leases.grant(host, turn.length) for host in turn.hosts)
+
+    def grant_refusal(self, air: Air, at: ClockReading) -> LeaseRefusal | None:
+        """Whether a break's guest may still begin at ``at`` (None) or why not: each lease it was granted in must be
+        the host's lease still, open, with a turn left and room for its whole turn and the return margin. Asked as its
+        first frame is confirmed (`started`), and by a board about to send a frame not yet confirmed. A card that
+        isn't a guest, or whose turn has begun, always may."""
+        turn = air.turn
+        if turn.started is not None:
+            return None
+        for grant in turn.grants:
+            refusal = self._leases.holds(grant, turn.length, at.monotonic)
+            if refusal is not None:
+                return refusal
+        return None
 
     def _remind(self, candidate: PromotionCandidate[DedupeKey], cards: CardView, at: ClockReading) -> None:
         """A no-hit bid's reminder (`BOARD_POLICY.md` §6): when new, then once 60 open seconds have passed since the
@@ -989,11 +1021,18 @@ class PolicyDirector:
         self._waits[key] = (revision, reason)
         self._note(WaitNote(at=at, key=key, revision=revision, reason=reason, bar=bar, context=context))
 
-    def _lease_noted(self, id: BreakId, lease: Lease | None, refusal: LeaseRefusal | None, at: ClockReading) -> None:
+    def _lease_noted(self, id: BreakId, verdict: LeaseVerdict, at: ClockReading) -> None:
+        lease, refusal = verdict.lease, verdict.refusal
         if refusal is LeaseRefusal.DUPLICATE:
             return
+        if verdict.superseded is not None:
+            self._note(LeaseNote(at=at, id=verdict.superseded.id, event=LeaseEvent.SUPERSEDED))
         if lease is None:
-            self._note(LeaseNote(at=at, id=id, event=LeaseEvent.REFUSED, refusal=refusal))
+            self._note(
+                LeaseNote(
+                    at=at, id=id, event=LeaseEvent.REFUSED, refusal=refusal, age=verdict.age, elapsed=verdict.elapsed
+                )
+            )
         elif lease.closure is not None:
             self._note(LeaseNote(at=at, id=id, event=LeaseEvent.ENDED))
         else:
@@ -1006,6 +1045,8 @@ class PolicyDirector:
                     remaining=remaining,
                     provisional=lease.provisional,
                     turns=lease.turns,
+                    age=lease.age,
+                    elapsed=verdict.elapsed,
                 )
             )
 
