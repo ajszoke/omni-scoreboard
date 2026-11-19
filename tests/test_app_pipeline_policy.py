@@ -8,13 +8,17 @@ synthetic.
 
 from __future__ import annotations
 
+import dataclasses
 from datetime import datetime, timedelta, timezone
+from typing import Callable
 
-from omni.app.pipeline import LiveBaseballPipeline
+import pytest
+
+from omni.app.pipeline import LiveBaseballPipeline, PipelineResult
 from omni.cards.base import DedupeKey
 from omni.cards.factory import CardFactory
 from omni.core.clock import ClockReading, MonotonicTime
-from omni.core.enum import DisplayPriority, GameStatus, League, UpdateUrgency
+from omni.core.enum import DisplayPriority, GameStatus, HomeAway, League, UpdateUrgency
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.core.time import DurationSeconds
 from omni.domain.baseball import (
@@ -27,6 +31,7 @@ from omni.domain.baseball import (
     BaseballReview,
     BaseballScoringImpact,
     InningPhase,
+    PlayLogCoverage,
     PregameDetails,
     PregameSide,
     WinLossRecord,
@@ -87,7 +92,9 @@ def _state(
     phase: InningPhase = InningPhase.TOP,
     away_hits: int = 3,
     home_hits: int = 3,
+    away_reached_base: bool | None = None,
     home_reached_base: bool | None = None,
+    play_log: PlayLogCoverage = PlayLogCoverage.COMPLETE,
     signals: BaseballBreakSignals = BaseballBreakSignals(),
 ) -> BaseballGameState:
     return BaseballGameState(
@@ -99,7 +106,9 @@ def _state(
         bases=BaseballBaseState(),
         away_hits=away_hits,
         home_hits=home_hits,
+        away_reached_base=away_reached_base,
         home_reached_base=home_reached_base,
+        play_log=play_log,
         break_signals=signals,
     )
 
@@ -183,11 +192,13 @@ class _Board:
         self.feed = _Feed()
         self.details: PregameDetails | None = None
 
-    def at(self, seconds: float, game: TeamGame = GAME) -> PolicyView:
-        result = self.pipeline.refresh(
+    def result(self, seconds: float, game: TeamGame = GAME) -> PipelineResult:
+        return self.pipeline.refresh(
             [game], at=_seconds(seconds), fetch_feed=self.feed, fetch_pregame_details=lambda _: self.details
         )
-        return result.policy
+
+    def at(self, seconds: float, game: TeamGame = GAME) -> PolicyView:
+        return self.result(seconds, game).policy
 
     def facts(self, seconds: float, game: TeamGame = GAME) -> GameFacts | None:
         return self.at(seconds, game).facts(GAME.id)
@@ -358,6 +369,160 @@ def test_a_scoring_big_play_offers_its_card_once_the_state_after_it_has_cleared_
     assert not any("e0" in offer.key.play for offer in board.at(160).offers)  # never the first look's
 
 
+HOMER_CARD = "mlb:mlb_statsapi:g1:bigplay:e1"
+
+
+def _offered_homer(board: _Board) -> tuple[BaseballGameEvent, PromotionCandidate[DedupeKey]]:
+    """A tying home run in the bottom of the 7th, played at 8 s and reported at 10 s: its card is up from 38 s and
+    its offer stands from 40 s, once the state after it has cleared the delay."""
+    board.feed.answer(_state(away=1, inning=7, phase=InningPhase.BOTTOM), 0)
+    homer = _play("e1", away=1, home=1, at=8, impact=BaseballScoringImpact(rbi=1, tying=True))
+    board.feed.answer(_state(away=1, home=1, inning=7, phase=InningPhase.BOTTOM), 10, events=(homer,))
+    board.at(0)
+    board.at(10)
+    [offer] = board.majors(40)
+    return homer, offer
+
+
+@pytest.mark.parametrize(
+    "corrected",
+    [
+        pytest.param(lambda homer: (), id="the at-bat no longer a mapped play"),
+        pytest.param(
+            lambda homer: (
+                dataclasses.replace(
+                    homer,
+                    event_type=BaseballGameEventType.DOUBLE,
+                    importance=dataclasses.replace(homer.importance, priority=DisplayPriority.NORMAL),
+                ),
+            ),
+            id="the at-bat now a double",
+        ),
+    ],
+)
+def test_a_big_play_a_correction_takes_away_is_withdrawn_at_once_and_its_card_comes_down_once_that_airs(
+    corrected: Callable[[BaseballGameEvent], tuple[BaseballGameEvent, ...]],
+) -> None:
+    board = _Board()
+    homer, _ = _offered_homer(board)
+    board.feed.answer(_state(away=1, home=1, inning=7, phase=InningPhase.BOTTOM), 50, events=corrected(homer))
+    assert board.majors(50) == ()  # the board knows the offer is stale, so it's no longer published
+    assert board.queue.card(HOMER_CARD) is not None  # the card is as the broadcast still has it
+    board.at(79)
+    assert board.queue.card(HOMER_CARD) is not None
+    assert board.majors(80) == () and board.queue.card(HOMER_CARD) is None  # the correction has aired
+    assert board.majors(100) == ()
+
+
+def test_a_big_play_a_correction_changes_is_offered_again_under_its_next_revision_with_its_card_revised() -> None:
+    board = _Board()
+    homer, offer = _offered_homer(board)
+    rescored = dataclasses.replace(homer, payload=dataclasses.replace(homer.payload, description="a play, reviewed"))
+    board.feed.answer(_state(away=1, home=1, inning=7, phase=InningPhase.BOTTOM), 50, events=(rescored,))
+    assert board.majors(50) == ()  # the standing offer names content the board knows is stale
+    card = board.queue.card(HOMER_CARD)
+    assert card is not None and card.payload.description == "a play"  # the broadcast hasn't shown the change
+    assert board.majors(79) == ()
+    [revised] = board.majors(80)
+    assert revised == dataclasses.replace(offer, eligible=MonotonicTime(80.0), revision=1)
+    card = board.queue.card(HOMER_CARD)
+    assert card is not None and card.payload.description == "a play, reviewed"
+    board.feed.answer(_state(away=1, home=1, inning=7, phase=InningPhase.BOTTOM), 60, events=(rescored,))
+    assert board.majors(90) == (revised,)  # the same version again revises nothing
+
+
+def _reviewed(play: BaseballGameEvent, *, unscored: bool = False) -> BaseballGameEvent:
+    """``play`` as a later answer has it: its description revised and, if ``unscored``, its run batted in taken away."""
+    payload = dataclasses.replace(play.payload, description="a play, reviewed")
+    if unscored:
+        payload = dataclasses.replace(payload, rbi=0, scoring_impact=BaseballScoringImpact(rbi=0))
+    return dataclasses.replace(play, payload=payload)
+
+
+@pytest.mark.parametrize(
+    ("play_log", "warnings"),
+    [
+        pytest.param(PlayLogCoverage.UNVERIFIED, (), id="a log that doesn't cover the game"),
+        pytest.param(PlayLogCoverage.COMPLETE, ("play 12: AttributeError: a garbled entry",), id="a play it dropped"),
+    ],
+)
+def test_an_answer_that_leaves_a_play_out_without_reading_its_whole_log_says_nothing_about_it(
+    play_log: PlayLogCoverage, warnings: tuple[str, ...]
+) -> None:
+    board = _Board()
+    _, offer = _offered_homer(board)
+    answer = board.feed.answer(_state(away=1, home=1, inning=7, phase=InningPhase.BOTTOM, play_log=play_log), 50)
+    board.feed.answers[-1] = dataclasses.replace(answer, warnings=warnings)
+    assert board.majors(50) == (offer,)
+    assert board.majors(80) == (offer,) and board.queue.card(HOMER_CARD) is not None
+
+
+def test_a_big_play_corrected_before_it_is_offered_is_first_offered_under_its_revision() -> None:
+    board = _Board()
+    board.feed.answer(_state(away=1, inning=7, phase=InningPhase.BOTTOM), 0)
+    homer = _play("e1", away=1, home=1, at=8, impact=BaseballScoringImpact(rbi=1, tying=True))
+    board.feed.answer(_state(away=1, home=1, inning=7, phase=InningPhase.BOTTOM), 10, events=(homer,))
+    board.at(0)
+    board.at(10)
+    board.feed.answer(_state(away=1, home=1, inning=7, phase=InningPhase.BOTTOM), 20, events=(_reviewed(homer),))
+    board.at(20)
+    assert board.at(38).offers == () and board.queue.card(HOMER_CARD) is not None  # up as the broadcast had it
+    assert board.majors(40) == ()  # its successor has cleared, but the play it would name is out of date
+    [revised] = board.majors(50)
+    assert (revised.revision, revised.eligible) == (1, MonotonicTime(50.0))
+
+
+def test_corrections_that_undo_each_other_before_either_airs_leave_the_play_offered_as_it_was() -> None:
+    board = _Board()
+    homer, offer = _offered_homer(board)
+    board.feed.answer(_state(away=1, home=1, inning=7, phase=InningPhase.BOTTOM), 50, events=(_reviewed(homer),))
+    assert board.majors(50) == ()
+    board.feed.answer(_state(away=1, home=1, inning=7, phase=InningPhase.BOTTOM), 55, events=(homer,))
+    assert board.majors(55) == ()
+    assert board.majors(85) == (offer,)  # both have aired: the play stands as its card has shown it all along
+    card = board.queue.card(HOMER_CARD)
+    assert card is not None and card.payload.description == "a play"
+
+
+def test_a_correction_that_leaves_a_big_play_no_longer_scoring_revises_its_card_and_offers_nothing() -> None:
+    board = _Board()
+    homer, _ = _offered_homer(board)
+    no_rbi = _reviewed(homer, unscored=True)
+    board.feed.answer(_state(away=1, home=1, inning=7, phase=InningPhase.BOTTOM), 50, events=(no_rbi,))
+    assert board.majors(80) == ()
+    card = board.queue.card(HOMER_CARD)
+    assert card is not None and card.payload.description == "a play, reviewed"
+
+
+def test_a_correction_to_a_big_play_after_its_game_s_final_has_aired_still_revises_its_card() -> None:
+    board = _Board()
+    final = _game(GameStatus.FINAL)
+    board.feed.answer(_state(away=1, inning=7, phase=InningPhase.BOTTOM), 0)
+    homer = _play("e1", away=1, home=1, at=8, impact=BaseballScoringImpact(rbi=1, tying=True))
+    ended = _state(away=1, home=1, inning=7, phase=InningPhase.BOTTOM)
+    board.feed.answer(ended, 10, events=(homer,), status=GameStatus.FINAL)
+    board.at(0)
+    board.at(10, final)
+    assert board.result(40, final).finals  # the home run aired at 38, the final at 40
+    board.feed.answer(ended, 50, events=(_reviewed(homer),), status=GameStatus.FINAL)
+    board.at(50, final)
+    card = board.queue.card(HOMER_CARD)
+    assert card is not None and card.payload.description == "a play"
+    board.at(80, final)
+    card = board.queue.card(HOMER_CARD)
+    assert card is not None and card.payload.description == "a play, reviewed"
+
+
+def test_a_big_play_whose_card_has_left_the_queue_is_forgotten_and_a_later_answer_changes_nothing() -> None:
+    board = _Board()
+    _offered_homer(board)
+    board.queue.prune(_seconds(158))  # its window is over
+    board.at(158)
+    board.feed.answer(_state(away=1, home=1, inning=7, phase=InningPhase.BOTTOM), 170)  # one that no longer has it
+    board.at(170)
+    assert board.majors(200) == () and board.queue.card(HOMER_CARD) is None
+
+
 def test_a_routine_big_play_offers_nothing() -> None:
     board = _Board(lag=0)
     board.feed.answer(_state(inning=7, phase=InningPhase.BOTTOM), 0)
@@ -411,6 +576,47 @@ def test_a_confirmed_no_hitter_offers_its_final_card_and_a_correction_offers_it_
     assert board.majors(120, final) == ()  # a scoring change took the no-hitter away: no feat, no offer
 
 
+def test_a_correction_that_voids_a_perfect_game_withdraws_its_offer_though_the_final_card_reads_the_same() -> None:
+    # The final reads as a perfect game; a correction finds a batter who reached on a dropped third strike. The
+    # linescore is unchanged, so the final card is too, but the next view no longer offers a perfect game: it offers
+    # the no-hitter under the next revision.
+    board = _Board()
+    board.feed.answer(_state(away=2, inning=9, phase=InningPhase.BOTTOM, home_hits=0, home_reached_base=False), 0)
+    perfect = _state(away=2, inning=9, phase=InningPhase.END, home_hits=0, home_reached_base=False)
+    board.feed.answer(perfect, 10, status=GameStatus.FINAL)
+    final = _game(GameStatus.FINAL)
+    board.at(0)
+    board.at(10, final)
+    [offer] = board.majors(40, final)
+    assert offer.value == interrupt_value(InterruptClass.PERFECT_GAME, predecessor=None, stakes=Stakes())
+    reached = _state(away=2, inning=9, phase=InningPhase.END, home_hits=0, home_reached_base=True)
+    board.feed.answer(reached, 50, status=GameStatus.FINAL)
+    board.at(50, final)
+    [corrected] = board.majors(80, final)
+    assert corrected.value == interrupt_value(InterruptClass.NO_HITTER, predecessor=None, stakes=Stakes())
+    assert (corrected.key, corrected.revision, corrected.eligible) == (offer.key, 1, MonotonicTime(80.0))
+    assert board.result(80, final).corrections == ()  # the card itself reads the same
+
+
+def test_a_final_over_a_play_log_that_doesnt_cover_the_game_offers_no_feat_until_a_correction_covers_it() -> None:
+    board = _Board()
+    board.feed.answer(_state(away=2, inning=9, phase=InningPhase.BOTTOM, home_hits=0), 0)
+    short = _state(away=2, inning=9, phase=InningPhase.END, home_hits=0, play_log=PlayLogCoverage.UNVERIFIED)
+    board.feed.answer(short, 10, status=GameStatus.FINAL)
+    final = _game(GameStatus.FINAL)
+    board.at(0)
+    board.at(10, final)
+    assert board.result(40, final).finals and board.majors(41, final) == ()  # the card is up; no feat is offered
+    covered = _state(away=2, inning=9, phase=InningPhase.END, home_hits=0, home_reached_base=False)
+    board.feed.answer(covered, 50, status=GameStatus.FINAL)
+    board.at(50, final)
+    assert board.majors(79, final) == ()
+    [offer] = board.majors(80, final)
+    assert offer.value == interrupt_value(InterruptClass.PERFECT_GAME, predecessor=None, stakes=Stakes())
+    assert (offer.revision, offer.eligible) == (1, MonotonicTime(80.0))
+    assert board.majors(90, final) == (offer,)  # the same answer again revises nothing
+
+
 def test_a_final_the_board_first_sees_already_over_offers_its_feat_only_as_a_baseline() -> None:
     board = _Board(lag=0)
     board.feed.answer(
@@ -424,7 +630,7 @@ def test_an_active_bid_offers_its_no_hitter_card_as_a_reminder_each_inning_it_de
     board = _Board(lag=0)
     board.feed.answer(_state(inning=7, away_hits=0), 0)  # tuned in to a bid through 6
     through_six = PromotionCandidate(
-        key=PromotionKey(GAME.id, "no_hitter through 6"),
+        key=PromotionKey(GAME.id, "home no_hitter through 6"),
         kind=PromotionKind.REMINDER,
         eligible=MonotonicTime(0.0),
         card=DedupeKey(NO_HITTER_KEY),
@@ -435,7 +641,50 @@ def test_an_active_bid_offers_its_no_hitter_card_as_a_reminder_each_inning_it_de
     assert board.at(5).offers == (through_six,)  # the same moment while the bid stands at that depth
     board.feed.answer(_state(inning=7, phase=InningPhase.BOTTOM, away_hits=0), 10)
     [through_seven] = board.at(10).offers
-    assert through_seven.key.play == "no_hitter through 7" and through_seven.eligible == MonotonicTime(10.0)
+    assert through_seven.key.play == "home no_hitter through 7" and through_seven.eligible == MonotonicTime(10.0)
     assert through_seven.origin is CandidateOrigin.LIVE
     board.feed.answer(_state(inning=7, phase=InningPhase.BOTTOM, away_hits=1), 20)
     assert board.at(20).offers == ()  # broken: its card is gone, and so is the reminder
+
+
+def test_a_bid_over_a_play_log_that_doesnt_cover_the_game_shows_its_card_but_is_offered_only_once_one_does() -> None:
+    # Tuned in to a bid through 6 over a log that stops short; the card shows, the reminder waits. The first covering
+    # answer is the bid's baseline, as the board's first look would have been.
+    board = _Board(lag=0)
+    board.feed.answer(_state(inning=7, away_hits=0, play_log=PlayLogCoverage.UNVERIFIED), 0)
+    assert board.at(0).offers == () and board.queue.card(NO_HITTER_KEY) is not None
+    board.feed.answer(_state(inning=7, away_hits=0), 5)
+    [reminder] = board.at(5).offers
+    assert (reminder.key.play, reminder.eligible, reminder.origin) == (
+        "home no_hitter through 6",
+        MonotonicTime(5.0),
+        CandidateOrigin.BASELINE,
+    )
+
+
+def test_a_perfect_bid_read_once_over_a_log_that_stops_short_is_not_offered_then_and_keeps_its_moment() -> None:
+    board = _Board(lag=0)
+    board.feed.answer(_state(inning=7, away_hits=0, away_reached_base=False), 0)
+    [perfect] = board.at(0).offers
+    assert perfect.key.play == "home perfect_game through 6"
+    # A log that stops short can't vouch for the clean sheet: the card reads a no-hitter, and nothing is offered.
+    board.feed.answer(_state(inning=7, away_hits=0, play_log=PlayLogCoverage.UNVERIFIED), 5)
+    assert board.at(5).offers == ()
+    card = board.queue.card(NO_HITTER_KEY)
+    assert card is not None and card.payload.perfect is False
+    board.feed.answer(_state(inning=7, away_hits=0, away_reached_base=False), 10)
+    assert board.at(10).offers == (perfect,)  # the same moment, from when it first cleared
+
+
+def test_a_bid_that_passes_to_the_other_staff_at_the_same_depth_is_a_moment_of_its_own() -> None:
+    # Both sides hitless into the top of the 7th: the home staff's bid through 6 shows. The away side's first hit
+    # leaves the away staff's, also through 6: the card now names the other staff, and so does the moment.
+    board = _Board(lag=0)
+    board.feed.answer(_state(inning=7, away_hits=0, home_hits=0), 0)
+    [home] = board.at(0).offers
+    board.feed.answer(_state(inning=7, away_hits=1, home_hits=0), 10)
+    [away] = board.at(10).offers
+    assert (home.key.play, away.key.play) == ("home no_hitter through 6", "away no_hitter through 6")
+    assert away.eligible == MonotonicTime(10.0)
+    card = board.queue.card(NO_HITTER_KEY)
+    assert card is not None and card.payload.pitching_side is HomeAway.AWAY
