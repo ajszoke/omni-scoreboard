@@ -160,6 +160,6 @@ def test_the_day_spends_what_the_quota_ledger_counts_and_spoils_nothing(day: _Da
 def test_the_day_s_promotions_waits_and_lapses_are_counted(day: _Day) -> None:
     card = day.card
     assert dict(card.promotions) == {}
-    assert dict(card.waits) == {"below_bar": 1, "below_every_bar": 3, "expired": 3, "retired": 1}
-    assert (card.held, card.ran_out) == (0, 4)
+    assert dict(card.waits) == {"already_shown": 1, "below_bar": 1, "below_every_bar": 3, "expired": 3}
+    assert (card.held, card.ran_out) == (0, 3)
     assert dict(card.leases) == {"lapsed": 32, "opened": 33, "revoked": 31}

@@ -2548,11 +2548,15 @@ versions: policy omni-board-policy/2 | config omni-config/1 209d2047f82a | rules
  50774.1  base    mlb:mlb_statsapi:776206:live  (weighted) | G 0.457 proxy F 2.50 T 1.000 Q 0.500 | target 24.22% (league 24.22%, 100.00% within) | actual 20.47% | debt -24.00s (league +3.51s) | why: Rockies: second favorite
  50782.1  wait    nfl:nflmeta:404 11 r0  (below_bar) | bar 1.10 action
  50786.1  down    mlb:mlb_statsapi:776206:live  (ran its time, 12.0s)
- 50786.1  up      nfl:nflmeta:404:live  (rotation)
- 50786.1  base    nfl:nflmeta:404:live  (weighted) | G 0.518 proxy F 4.00 T 1.000 Q 0.500 | target 48.57% (league 75.78%, 64.10% within) | actual 46.74% | debt +1.45s (league +4.48s) | why: Panthers: favorite
+ 50786.1  up      nfl:nflmeta:404:play:11:r0  (rotation)
+ 50786.1  base    nfl:nflmeta:404:play:11:r0  (weighted) | G 0.518 proxy F 4.00 T 1.000 Q 0.500 | target 48.57% (league 75.78%, 64.10% within) | actual 46.74% | debt +1.45s (league +4.48s) | why: Panthers: favorite, its big play first
+ 50789.5  wait    nfl:nflmeta:404 11 r0  (already_shown)
+ 50794.1  down    nfl:nflmeta:404:play:11:r0  (ran its time, 8.0s)
+ 50794.1  up      nfl:nflmeta:404:live  (rotation)
+ 50794.1  card    nfl:nflmeta:404:live  (base) | why: Panthers: favorite, its big play first
  50798.1  base    nfl:nflmeta:404:live  (weighted, again) | G 0.518 proxy F 4.00 T 1.000 Q 0.500 | target 48.57% (league 75.78%, 64.10% within) | actual 46.84% | debt -2.85s (league +1.57s) | why: Panthers: favorite
  50810.1  base    nfl:nflmeta:404:live  (weighted, again) | G 0.518 proxy F 4.00 T 1.000 Q 0.500 | target 48.57% (league 75.78%, 64.10% within) | actual 46.95% | debt -7.16s (league -1.34s) | why: Panthers: favorite
- 50822.1  down    nfl:nflmeta:404:live  (ran its time, 36.0s)
+ 50822.1  down    nfl:nflmeta:404:live  (ran its time, 28.0s)
  50822.1  up      mlb:mlb_statsapi:776206:live  (rotation)
  50822.1  base    mlb:mlb_statsapi:776206:live  (weighted) | G 0.457 proxy F 2.50 T 1.000 Q 0.500 | target 24.22% (league 24.22%, 100.00% within) | actual 20.52% | debt -24.00s (league +3.14s) | why: Rockies: second favorite
  50834.1  down    mlb:mlb_statsapi:776206:live  (ran its time, 12.0s)
@@ -2570,7 +2574,6 @@ versions: policy omni-board-policy/2 | config omni-config/1 209d2047f82a | rules
  50882.2  down    mlb:mlb_statsapi:776206:live  (ran its time, 12.0s)
  50882.2  up      nfl:nflmeta:404:live  (rotation)
  50882.2  base    nfl:nflmeta:404:live  (weighted) | G 0.518 proxy F 4.00 T 1.000 Q 0.500 | target 48.57% (league 75.78%, 64.10% within) | actual 46.79% | debt -0.40s (league +5.22s) | why: Panthers: favorite
- 50890.2  wait    nfl:nflmeta:404 11 r0  (retired)
  50894.2  base    nfl:nflmeta:404:live  (weighted, again) | G 0.518 proxy F 4.00 T 1.000 Q 0.500 | target 48.57% (league 75.78%, 64.10% within) | actual 46.89% | debt -4.71s (league +2.32s) | why: Panthers: favorite
  50906.2  down    nfl:nflmeta:404:live  (ran its time, 24.0s)
  50906.2  up      nfl:nflmeta:401:live  (rotation)

@@ -185,6 +185,12 @@ class Board:
         assert isinstance(card.payload, LiveFootballCardPayload)
         return card.payload
 
+    def show(self, game: TeamGame, kind: str = "live") -> None:
+        """The display's word that a frame of the game's card, as it's staged now, was shown now."""
+        card = self.card(game, kind)
+        assert card is not None
+        self.pipeline.presented(card, self.now)
+
     def caption(self, game: TeamGame) -> str | None:
         last = self.payload(game).last_play
         return last.headline if last is not None else None
@@ -288,6 +294,8 @@ def test_a_caption_is_gone_by_its_hard_end(major: bool, gone: int) -> None:
     board.answer(GAME, drive(clock=590), events=(play("p", board.now.utc, major=major),))
     board.at(50, GAME)
     assert board.caption(GAME) == "RUN +4"
+    board.show(GAME)  # a frame with the caption on it is shown: it has started
+    board.refresh(GAME)
     assert _seconds(board.pipeline.next_deadline(board.now)) == 50 + gone
     board.at(50 + gone - 0.1, GAME)
     assert board.caption(GAME) == "RUN +4"
@@ -310,20 +318,20 @@ def test_a_caption_that_can_t_start_within_its_bound_never_goes_up(major: bool, 
 
 
 def test_a_caption_that_started_in_time_stays_until_its_hard_end_through_a_quiet_spell() -> None:
-    board = Board()
-    board.answer(GAME, drive(), current_for=timedelta(seconds=20))
-    board.at(5, GAME)
+    board = Board(lag=0)
+    board.answer(GAME, drive())
+    board.at(0, GAME)
     board.answer(GAME, drive(), events=(play("p", board.now.utc),), current_for=timedelta(seconds=20))
-    board.at(50, GAME)
-    board.answer(GAME, drive(), current_for=LONG)
-    board.refresh(GAME)
-    assert board.caption(GAME) == "RUN +4"  # current again within its 60 s
+    board.at(5, GAME)
+    board.show(GAME)  # shown at 5: started
     board.answer(GAME, drive(), current_for=timedelta(seconds=1))
-    board.at(60, GAME)
+    board.at(30, GAME)
     assert board.caption(GAME) is None  # quiet: the field alone, but its time still runs
     board.answer(GAME, drive(), current_for=LONG)
-    board.at(130, GAME)
-    assert board.caption(GAME) == "RUN +4"  # past its start bound, but it had started
+    board.at(70, GAME)
+    assert board.caption(GAME) == "RUN +4"  # current again past its start bound, but it had started
+    board.at(95, GAME)
+    assert board.caption(GAME) is None  # its hard end
 
 
 def test_a_caption_goes_once_a_newer_answer_s_field_moves_on_and_stays_while_only_the_clock_runs() -> None:

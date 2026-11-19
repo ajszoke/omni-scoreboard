@@ -28,18 +28,18 @@ Confirmed base airtime: 16859.4 s.
 
 | Up | Seconds |
 |---|---:|
-| big_play | 18.0 |
+| big_play | 26.1 |
 | final | 1968.3 |
 | frame held | 45.0 |
 | frame idle | 36863.2 |
-| live_game | 16841.3 |
+| live_game | 16833.3 |
 | pregame | 64.0 |
 
 ## Decisions
 
 - Base turns while the favorite floor bound: 14; debts clamped: 12; rescues: 9.
-- Promotions made: none. Held for a better moment: 0. Ran out of time: 4.
-- Candidates' reasons: below_bar 1, below_every_bar 3, expired 3, retired 1.
+- Promotions made: none. Held for a better moment: 0. Ran out of time: 3.
+- Candidates' reasons: already_shown 1, below_bar 1, below_every_bar 3, expired 3.
 - Leases: lapsed 32, opened 33, revoked 31; opened by kind: mlb inning break 25, mlb mound visit 1, nfl halftime 3, nfl official timeout 1, nfl quarter break 1, nfl team timeout 1, nfl two-minute warning 1; evidence refused: none.
 - Guests admitted: 21; refused: no_room 5.
 - Overruns: 0. Premature breaks: 0.
