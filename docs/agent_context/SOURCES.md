@@ -158,8 +158,38 @@ NBA providers (review round 4's research thread):
     - So NBA captions can come only from changes in player lines between reads (a made 2- or 3-point basket, a free
       throw, an assist in the same read, a foul with its count, a steal, a block, a turnover), not from plays; and
       standings would have to be computed from results.
-    - The recorder reads the slate and every running game's player lines every ~6 s within 55 a minute: on 2026-11-18
-      (11 games) every answer was 200 with at least 3 requests left in each window.
+    - The recorder reads the slate and every running game's player lines every ~5 s within 55 a minute: on 2026-11-18
+      (12 games, recorded from 18:23 Mountain with 8 already under way) every answer was 200 with at least 3 requests
+      left in each window.
+  - **Timeouts by length**, from the 2026-11-16, -17 and -18 recordings (25 games; 244 decrements, the first two
+    nights read every ~13 s and the third every ~5 s). A decrement is posted a median 13 s after the clock stops
+    (p90 52 s). Periods the recording joined midway are left out of the counts by order.
+    - **The first and second decrement of a regulation quarter** are the TV timeouts (the NBA charges its mandatory
+      timeouts to a team, so a team's own and a mandatory one look alike): play resumed 220 s after the clock stopped
+      (median; p5 182 s, p90 252 s; n 150), or 204 s after the decrement was received (p10 173 s).
+    - **A third or later decrement in the quarter, or any in overtime,** is a team's own timeout: play resumed 113 s
+      after receipt (median; p25 91 s, p90 207 s; n 78). About one in six resumed within 60 s of receipt, for
+      reasons the data doesn't show.
+    - Four decrements came at a period's full clock (12:00), during the break, and 8 fell by two at once
+      (corrections).
+  - **Challenges:**
+    - A won challenge keeps its timeout: the count falls, then comes back with the clock still stopped. NOP and OKC
+      on 2026-11-18 got theirs back 108 s and 78 s after the decrement, and play resumed 19 s and 43 s after that;
+      POR on 2026-11-17 got it back after 130 s. BOS on 2026-11-18 got its back only at the half, 7½ minutes later.
+    - A lost challenge costs the timeout, so it reads as a timeout.
+    - Other ups in the count, within seconds of the fall or many minutes after, look like scorer corrections.
+    - A call taken back shows in the player lines. A player's fouls fall by one, alone, with a block added (the foul
+      became a block), or with a turnover removed (an offensive foul overturned). There were 7 on 2026-11-18, with or
+      without a challenge's restored count around them.
+    - Rebounds, assists, blocks and steals are also corrected down by one now and then.
+  - **Captions from player lines** (2026-11-18, player lines read every ~5 s):
+    - Of 953 reads with a scoring change, 909 held one scoring play and 42 more than one. In 38 of those 42,
+      both teams scored, and the order is unknowable.
+    - Of 697 team reads with a made basket, 413 had exactly one basket and one assist, so the assist is
+      attributable, and 277 had no assist. A further 52 reads had an assist and no basket, an assist posted a read
+      late: a caption should wait one read for its assist or go without.
+    - A player's basket and free throw (an and-one) landed in the same read only once.
+    - 369 fouls were added to player lines.
   - Terms, last updated 2026-10-20:
     - §6 allows any lawful personal or commercial use, including "backend APIs that support those products, provided those APIs are not offered to third parties".
     - Copying, caching, storing and archiving are allowed, with no retention deadline.

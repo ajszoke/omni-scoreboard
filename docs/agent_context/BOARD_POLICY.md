@@ -341,12 +341,14 @@ a lease.
 | NFL | injury timeout (active) | **30 s, one turn** |
 | NFL | review in progress (no marker yet) | 36 s, one turn, once detectable. A ruling grants nothing |
 | NFL | score → try → kickoff; a turnover; a snap gap | none |
-| NBA | a one-team timeout decrement, coherent | **60 s from inferred onset** (three 12 s turns after 15 s detection and the margin) |
-| NBA | a confirmed mandatory TV timeout (not detectable on Free) | later: 135/165 s (the rule is 165 s local, 195 s national) |
+| NBA | a one-team timeout decrement, coherent, that is the first or second of a regulation quarter (the TV timeouts) | **165 s from inferred onset** (twelve 12 s turns after 15 s detection and the margin). Cancel when the clock runs again. Measured: play resumed 220 s after the clock stopped (median; p5 182 s, n 150) |
+| NBA | a later decrement in the quarter, or one in overtime | **60 s from inferred onset** (three 12 s turns after 15 s detection and the margin). Cancel when the clock runs again. Measured: 113 s from the decrement's receipt (median), with a tail that resumes inside 30 s |
+| NBA | a decrement at a period's full clock (taken in the break) | none of its own: the break's ceiling holds |
+| NBA | a coach's challenge | none of its own. It begins as a decrement and gets that ceiling; a won challenge's restored count arrives 1–2 minutes later, with play resuming soon after |
 | NBA | END Q1, END Q3 | **135 s** local or unknown; **195 s** verified national (the rule is 150/210 s) |
 | NBA | halftime | **840 s** (the rule is 900 s) |
 | NBA | before OT | **135 s.** A `:00` reading alone never declares OT or final |
-| NBA | free throws, fouls, challenges, injuries, endgame inbounds | none on Free |
+| NBA | free throws, fouls, injuries, endgame inbounds | none |
 | NHL | later, provisional | team timeout 30 s; TV timeout 30 s until rules and traces support more; intermission 16 min; reviews 36 s; icing and goals none |
 
 **Tuning** comes only from residual-time traces: onset → publication → receipt → release → resumption. Never
@@ -469,7 +471,7 @@ acceptance runs them through real adapters, released generations and sink receip
 - **A generic official timeout** gets one 12 s guest.
 - **A positively identified TV timeout** (with 10 s detection) gets eight 12 s guests, 0–96.
 - **MLB inning breaks** of 120/145/175 s give 96/120/144 s of guest airtime at zero detection age.
-- **An NBA decrement** gives three turns at most.
+- **An NBA decrement** gives twelve turns at most when it is a quarter's first or second, and three otherwise.
 
 ## 10. Deferred
 
