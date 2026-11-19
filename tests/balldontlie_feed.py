@@ -136,3 +136,45 @@ class ScriptedFetch:
         if isinstance(answer, Exception):
             raise answer
         return answer
+
+
+def stat_row(
+    row_id: Any,
+    player_id: int,
+    first: str,
+    last: Any,
+    team_id: int = AWAY_ID,
+    *,
+    game_id: int = GAME,
+    period: Any = 3,
+    time: Any = "Q3 6:07",
+    **numbers: Any,
+) -> dict[str, Any]:
+    """One `/v1/stats` row: a player's line in a game, with the row's own view of the game. Counts not given are 0."""
+    row: dict[str, Any] = {"id": row_id, "min": "12:34"}
+    row.update({name: 0 for name in _COUNTS})
+    row.update(numbers)
+    row["player"] = {"id": player_id, "first_name": first, "last_name": last, "team_id": team_id}
+    row["team"] = {"id": team_id, "abbreviation": "UTA" if team_id == AWAY_ID else "LAL"}
+    row["game"] = {"id": game_id, "status": "3rd Qtr", "period": period, "time": time}
+    return row
+
+
+_COUNTS = (
+    "pts",
+    "fgm",
+    "fga",
+    "fg3m",
+    "fg3a",
+    "ftm",
+    "fta",
+    "oreb",
+    "dreb",
+    "reb",
+    "ast",
+    "stl",
+    "blk",
+    "turnover",
+    "pf",
+    "plus_minus",
+)

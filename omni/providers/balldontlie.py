@@ -23,6 +23,20 @@ period under way. There are only three overtime columns, so in a fourth overtime
 the third: the later periods have no points of their own, and the score is still the feed's whole score. A final
 counts at least as many periods as it has overtime points, since some old overtime finals read period 4.
 
+**The player lines.** `poll_lines` reads every player's line so far in the games it names, all in one request
+(``/v1/stats?game_ids[]=``, cursor-paged), and hands on a `LinesRead` for each game whose rows came back:
+
+- each row's side is the side whose club the row's ``team.id`` names, as the game's slate row numbered its clubs, so
+  a game's lines are read only once a slate poll has read the game;
+- the rows keep the order the feed sent them in, which is by the stat row's ``id``;
+- the read's period and clock are the stat rows' own (``game.period`` and ``game.time``), from the newest page;
+- every player who has appeared stays: a row the feed stops sending keeps its last line, in its place by its row's
+  ``id``;
+- a row whose numbers break a line's rules (points that don't add up, more makes than attempts), or that can't be
+  read, is `Unreadable`, and its player keeps their last line.
+
+A line names its player in the board's short form (`short_name`): ``A.Edwards``.
+
 **Fetching.** The HTTP fetch is injected (`BdlFetch`) and holds the key: the provider never sees it, so nothing it
 returns can carry it. `BalldontlieHttp` is the fetch over HTTPS. Every request is an `Exchange`: the answer's status
 and rate-limit window, or why no answer came. A 401 or 403 (the key refused, or an endpoint above its tier), a 429
@@ -38,7 +52,8 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Callable, Mapping
+import unicodedata
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from enum import Enum
@@ -48,7 +63,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from omni.core.clock import Clock, MonotonicTime
-from omni.core.enum import GameStatus, League, SeasonStage, StrEnumMixin
+from omni.core.enum import GameStatus, HomeAway, League, SeasonStage, StrEnumMixin
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.domain.basketball import (
     REGULATION_PERIODS,
@@ -57,8 +72,9 @@ from omni.domain.basketball import (
     BasketballPhase,
     BasketballSide,
     GameClock,
+    PlayerLine,
 )
-from omni.domain.basketball_reads import SlateRead
+from omni.domain.basketball_reads import LinesRead, PlayerKey, RosterLine, SlateRead
 from omni.domain.contest import TeamGame
 from omni.domain.teams import Team
 from omni.providers.nba_teams import NbaTeamRegistry
@@ -76,6 +92,8 @@ __all__ = [
     "Exchange",
     "FeedStatus",
     "FetchOutcome",
+    "GameLines",
+    "LinesPoll",
     "Poll",
     "Pregame",
     "RateLimit",
@@ -83,6 +101,7 @@ __all__ = [
     "SlateGame",
     "SlatePoll",
     "Unreadable",
+    "short_name",
 ]
 
 BALLDONTLIE_SOURCE = SourceRef("balldontlie")
@@ -174,20 +193,27 @@ class RowProblem(StrEnumMixin, str, Enum):
     UNKNOWN_TIME = "unknown_time"  # a ``time`` in no form the provider reads
     UNKNOWN_TEAM = "unknown_team"  # a club the registry doesn't know
     IMPOSSIBLE = "impossible"  # fields that can't all be true at once, like halftime in the third period
+    INVALID_LINE = "invalid_line"  # a player's numbers that break a line's rules, like more makes than attempts
+    WRONG_TEAM = "wrong_team"  # a stat row whose club is neither of its game's
+    STRAY = "stray"  # a stat row for a game the poll didn't name
+    NOT_ON_SLATE = "not_on_slate"  # lines for a game no slate poll has read, so its sides aren't known
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Unreadable:
-    """A row the provider couldn't read: why, the game it names when it names one, and a line for the log."""
+    """A row the provider couldn't read: why, the game and player it names when it names them, and a line for the
+    log."""
 
     problem: RowProblem
     detail: str
     game: LeagueScopedId | None = None
+    player: PlayerKey | None = None
 
     @property
     def line(self) -> str:
-        where = f"game {self.game.raw}: " if self.game is not None else ""
-        return f"{self.problem}: {where}{self.detail}"
+        names = [f"game {self.game.raw}"] if self.game is not None else []
+        names += [f"player {self.player.value}"] if self.player is not None else []
+        return ": ".join((str(self.problem), *([" ".join(names)] if names else []), self.detail))
 
 
 class FeedStatus(StrEnumMixin, str, Enum):
@@ -330,6 +356,40 @@ class SlatePoll(Poll):
     games: tuple[SlateGame, ...] = ()
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class GameLines:
+    """One game's lines, as a poll read them."""
+
+    game: LeagueScopedId
+    read: LinesRead
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class LinesPoll(Poll):
+    """A lines poll: a read for each game whose rows came back. Each row it couldn't read is `Unreadable`, naming
+    its game and player where it can."""
+
+    games: tuple[GameLines, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class _Kept:
+    """A player's last good line, under the stat row's ``id`` the feed orders its rows by."""
+
+    row: int
+    roster: RosterLine
+
+
+@dataclass(slots=True)
+class _Tracked:
+    """What the provider remembers of a game between polls: its clubs' ids in the feed, which say whose side a stat
+    row is on, and each player's last good line."""
+
+    away_team: int
+    home_team: int
+    lines: dict[PlayerKey, _Kept] = field(default_factory=dict)
+
+
 @dataclass(slots=True)
 class _Pages:
     """A paged read: its rows in page order, its requests, and what it came to."""
@@ -356,6 +416,7 @@ class BalldontlieProvider:
         self._registry = registry
         self._fetch = fetch
         self._clock = clock
+        self._games: dict[int, _Tracked] = {}
 
     def poll_slate(self, day: date) -> SlatePoll:
         """The games BALLDONTLIE files under ``day`` (a US Eastern date), every page read."""
@@ -367,9 +428,12 @@ class BalldontlieProvider:
         unreadable: list[Unreadable] = []
         for row in pages.rows:
             try:
-                games.append(self._slate_game(row, at))
+                game, clubs = self._slate_game(row, at)
             except _Unreadable as exc:
                 unreadable.append(Unreadable(problem=exc.problem, detail=exc.detail, game=_game_id(row)))
+                continue
+            games.append(game)
+            self._track(int(game.game.id.raw), *clubs)
         return SlatePoll(
             at=at,
             outcome=FetchOutcome.ANSWERED,
@@ -378,12 +442,79 @@ class BalldontlieProvider:
             games=tuple(games),
         )
 
-    def _slate_game(self, row: Any, at: MonotonicTime) -> SlateGame:
-        """A slate row as a game; `_Unreadable` when it can't be read."""
+    def poll_lines(self, games: Collection[LeagueScopedId]) -> LinesPoll:
+        """Every player's line so far in each of ``games``, read together, every page read: a read for each game
+        whose rows came back. Raises `ValueError` for no games, or one BALLDONTLIE doesn't number."""
+        wanted = sorted({_feed_id(game) for game in games})
+        if not wanted:
+            raise ValueError("a lines poll names at least one game")
+        query = (*(("game_ids[]", str(game_id)) for game_id in wanted), ("per_page", str(PAGE_SIZE)))
+        pages = self._pages("/v1/stats", query, _MAX_PAGES)
+        at = self._clock.monotonic()
+        if pages.outcome is not FetchOutcome.ANSWERED:
+            return LinesPoll(at=at, outcome=pages.outcome, exchanges=tuple(pages.exchanges), detail=pages.detail)
+        rows: dict[int, list[Mapping[str, Any]]] = {game_id: [] for game_id in wanted}
+        unreadable: list[Unreadable] = []
+        for row in pages.rows:
+            game_id = _stat_game(row)
+            if game_id is None:
+                unreadable.append(Unreadable(problem=RowProblem.MALFORMED, detail="a stat row that names no game"))
+            elif game_id not in rows:
+                unreadable.append(Unreadable(problem=RowProblem.STRAY, detail="not asked for", game=_scoped(game_id)))
+            else:
+                rows[game_id].append(row)
+        read = [self._game_lines(game_id, each, at, unreadable) for game_id, each in rows.items() if each]
+        return LinesPoll(
+            at=at,
+            outcome=FetchOutcome.ANSWERED,
+            exchanges=tuple(pages.exchanges),
+            unreadable=tuple(unreadable),
+            games=tuple(lines for lines in read if lines is not None),
+        )
+
+    def _track(self, game_id: int, away_team: int, home_team: int) -> None:
+        """Remember a game's clubs by their feed ids, keeping the lines already read."""
+        tracked = self._games.get(game_id)
+        if tracked is None:
+            self._games[game_id] = _Tracked(away_team, home_team)
+        else:
+            tracked.away_team, tracked.home_team = away_team, home_team
+
+    def _game_lines(
+        self, game_id: int, rows: list[Mapping[str, Any]], at: MonotonicTime, unreadable: list[Unreadable]
+    ) -> GameLines | None:
+        """One game's rows as its read, every player who has appeared in it in the feed's order; None, with why in
+        ``unreadable``, when it can't be read."""
+        game = _scoped(game_id)
+        tracked = self._games.get(game_id)
+        if tracked is None:
+            unreadable.append(Unreadable(problem=RowProblem.NOT_ON_SLATE, detail="its clubs aren't known", game=game))
+            return None
+        try:
+            period, clock = _view(rows[-1])
+        except _Unreadable as exc:
+            unreadable.append(Unreadable(problem=exc.problem, detail=exc.detail, game=game))
+            return None
+        sent: dict[PlayerKey, _Kept] = {}
+        for row in rows:
+            key: PlayerKey | None = None
+            try:
+                key = _player_key(row)
+                sent[key] = _kept(row, key, tracked)
+            except _Unreadable as exc:
+                unreadable.append(Unreadable(problem=exc.problem, detail=exc.detail, game=game, player=key))
+        kept = sorted((each for key, each in tracked.lines.items() if key not in sent), key=lambda each: each.row)
+        lines = _in_feed_order(list(sent.values()), kept)
+        tracked.lines.update(sent)
+        return GameLines(game=game, read=LinesRead(at=at, period=period, clock=clock, lines=lines))
+
+    def _slate_game(self, row: Any, at: MonotonicTime) -> tuple[SlateGame, tuple[int, int]]:
+        """A slate row as a game, with its away and home clubs' feed ids; `_Unreadable` when it can't be read."""
         row = _object(row, "the row")
         game_id = LeagueScopedId(League.NBA, BALLDONTLIE_SOURCE, str(_int(row, "id")))
         away_row = _object(row.get("visitor_team"), "visitor_team")
         home_row = _object(row.get("home_team"), "home_team")
+        clubs = (_int(away_row, "id"), _int(home_row, "id"))
         status = _status(row)
         tip = _instant(row.get("datetime"))
         if tip is None:
@@ -403,7 +534,7 @@ class BalldontlieProvider:
             pregame = None
             if phase is not None and phase in UNSTARTED:
                 pregame = Pregame(phase=phase, tip=None if phase is BasketballPhase.POSTPONED else tip)
-            return SlateGame(
+            slate_game = SlateGame(
                 game=game,
                 status=status,
                 phase=phase,
@@ -411,6 +542,7 @@ class BalldontlieProvider:
                 pregame=pregame,
                 cup=CupStage.of(row.get("ist_stage")),
             )
+            return slate_game, clubs
         except ValueError as exc:
             raise _Unreadable(RowProblem.IMPOSSIBLE, str(exc)) from exc
 
@@ -506,6 +638,137 @@ class BalldontlieHttp:
             if self._key in str(exc):
                 raise ConnectionError(f"{type(exc).__name__}, its message withheld: it named the key") from None
             raise
+
+
+def _feed_id(game: LeagueScopedId) -> int:
+    """A game's number in the feed; `ValueError` for an id the feed didn't give."""
+    if game.league is not League.NBA or game.source != BALLDONTLIE_SOURCE or not game.raw.isdigit():
+        raise ValueError(f"{game} isn't a BALLDONTLIE NBA game")
+    return int(game.raw)
+
+
+def _scoped(game_id: int) -> LeagueScopedId:
+    return LeagueScopedId(League.NBA, BALLDONTLIE_SOURCE, str(game_id))
+
+
+def _stat_game(row: Any) -> int | None:
+    """The game a stat row is for; None when it names none."""
+    game = row.get("game") if isinstance(row, dict) else None
+    game_id = game.get("id") if isinstance(game, dict) else None
+    return game_id if _is_int(game_id) else None
+
+
+def _view(row: Mapping[str, Any]) -> tuple[int, GameClock | None]:
+    """The period and clock a stat row has the game at: no clock at a break, at the final, or before one's read."""
+    game = _object(row.get("game"), "game")
+    period = _int(game, "period")
+    if period < 1:
+        raise _Unreadable(RowProblem.IMPOSSIBLE, "lines before the first period")
+    return period, _reading(game.get("time")).clock
+
+
+def _player_key(row: Mapping[str, Any]) -> PlayerKey:
+    player_id = _int(_object(row.get("player"), "player"), "id")
+    if player_id < 1:
+        raise _Unreadable(RowProblem.MALFORMED, "player.id isn't a player's number")
+    return PlayerKey(player_id)
+
+
+_LINE_FIELDS = (  # a line's numbers, by the feed's names
+    ("points", "pts"),
+    ("fg_made", "fgm"),
+    ("fg_attempted", "fga"),
+    ("threes_made", "fg3m"),
+    ("threes_attempted", "fg3a"),
+    ("ft_made", "ftm"),
+    ("ft_attempted", "fta"),
+    ("offensive_rebounds", "oreb"),
+    ("defensive_rebounds", "dreb"),
+    ("assists", "ast"),
+    ("steals", "stl"),
+    ("blocks", "blk"),
+    ("turnovers", "turnover"),
+    ("fouls", "pf"),
+    ("plus_minus", "plus_minus"),
+)
+
+
+def _kept(row: Mapping[str, Any], key: PlayerKey, tracked: _Tracked) -> _Kept:
+    """A stat row as its player's line, on the side its club is; `_Unreadable` when it can't be read."""
+    row_id = _int(row, "id")
+    club = _int(_object(row.get("team"), "team"), "id")
+    if club not in (tracked.away_team, tracked.home_team):
+        raise _Unreadable(RowProblem.WRONG_TEAM, f"club {club} isn't one of the game's")
+    side = HomeAway.AWAY if club == tracked.away_team else HomeAway.HOME
+    player = _object(row.get("player"), "player")
+    first, last = player.get("first_name"), player.get("last_name")
+    if not isinstance(first, str) or not isinstance(last, str):
+        raise _Unreadable(RowProblem.MALFORMED, "the player's name isn't text")
+    name = short_name(first, last)
+    if not name:
+        raise _Unreadable(RowProblem.MALFORMED, "the player has no name")
+    numbers = {ours: _int(row, theirs) for ours, theirs in _LINE_FIELDS}
+    try:
+        line = PlayerLine(name=name, **numbers)
+    except ValueError as exc:
+        raise _Unreadable(RowProblem.INVALID_LINE, str(exc)) from None
+    return _Kept(row_id, RosterLine(key=key, side=side, line=line))
+
+
+def _in_feed_order(sent: list[_Kept], kept: list[_Kept]) -> tuple[RosterLine, ...]:
+    """The lines a read sent, in the page's order, with each kept line the feed didn't send placed before the first
+    sent one whose row comes after it (``kept`` is in row order)."""
+    merged: list[_Kept] = []
+    waiting = 0
+    for each in sent:
+        while waiting < len(kept) and kept[waiting].row < each.row:
+            merged.append(kept[waiting])
+            waiting += 1
+        merged.append(each)
+    merged += kept[waiting:]
+    return tuple(each.roster for each in merged)
+
+
+_SUFFIXES = frozenset({"JR", "SR", "II", "III", "IV", "V"})
+_LOOKALIKES = {"‘": "'", "’": "'", "ʼ": "'", "‐": "-", "‑": "-"}
+# Latin-1's letters and Latin Extended-A: the fonts a board names players in (4x6, 5x7) draw every one.
+_FONT_LETTERS = range(0xC0, 0x180)
+
+
+def short_name(first: str, last: str) -> str:
+    """A player's name as a board shows it: the first initial, a dot, and the last name (``A.Edwards``).
+
+    - A generational suffix ending the last name is dropped: ``Jaquez Jr.`` gives ``J.Jaquez``, ``Holland II``
+      ``R.Holland``. A last name of one word is never a suffix.
+    - A last name of more than one part is kept whole: ``T.Jackson-Davis``, ``T.da Silva``. Shortening it would
+      trade one player for another (there are many Jacksons), and a caption's lane scrolls a long one.
+    - The initial is the first name's first letter: ``T.J.`` and ``AJ`` give ``T`` and ``A``.
+    - A letter the board's name fonts draw is kept, accent and all (``L.Dončić``): they draw every letter of
+      Latin-1 and Latin Extended-A. Any other letter is folded to its plain ASCII letters (``Ș`` to ``S``), or left
+      out when it has none. Curly apostrophes and hyphens are made straight.
+    - With no first name, the last name alone; with no last name, the first name alone.
+    """
+    given = _drawable(first.strip())
+    words = [word for word in (_drawable(part) for part in last.split()) if word]
+    while len(words) > 1 and words[-1].rstrip(".").upper() in _SUFFIXES:
+        words.pop()
+    surname = " ".join(words).rstrip(",")
+    initial = next((char for char in given if char.isalpha()), "")
+    if initial and surname:
+        return f"{initial.upper()}.{surname}"
+    return surname or " ".join(given.split())
+
+
+def _drawable(text: str) -> str:
+    """``text`` with each character the name fonts can't draw folded to plain ASCII, or left out."""
+    kept: list[str] = []
+    for char in text:
+        char = _LOOKALIKES.get(char, char)
+        if " " <= char <= "~" or (ord(char) in _FONT_LETTERS and char.isalpha()):
+            kept.append(char)
+        else:
+            kept += [part for part in unicodedata.normalize("NFKD", char) if " " <= part <= "~"]
+    return "".join(kept)
 
 
 def _text(raw: bytes) -> str:
