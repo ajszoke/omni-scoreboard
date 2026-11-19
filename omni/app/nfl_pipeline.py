@@ -47,6 +47,9 @@ released state only (`omni.app.policy_facts`):
   moment is the play it's about: a review's ruling is that play's next revision, and a try merges into its touchdown.
   The first look's plays are set aside, and what an outage's catch-up brings is offered flagged so (`CandidateOrigin`).
 
+**Notes.** What the feed says about a poll reaches the warnings in our own words alone (`FeedNote.ours`): its kind,
+how many, and which entry by our own label. The feed's own words go only to a log stamped to expire.
+
 **Priority** is the scheduler's bands: a favorite's game (`Favorites`, for NFL's own clubs) is in the favorite band;
 the others are normal.
 
@@ -97,7 +100,7 @@ from omni.policy.leverage import football_proxy
 from omni.policy.promotion import CandidateOrigin, PromotionKey
 from omni.policy.view import GameFacts, PolicyView
 from omni.preferences.favorites import Favorites
-from omni.providers.nflmeta import NflPhase
+from omni.providers.nflmeta import FeedNote, FeedNoteKind, NflPhase
 from omni.queue.delay_policy import Arrival, DelayPolicy, Held, ReleaseGuard
 from omni.queue.delayed_event_stream import DelayedEventStream
 from omni.queue.delayed_feed import DelayedFeed
@@ -342,7 +345,7 @@ class LiveFootballPipeline:
         """One answer: its plays into the delay, and its state as the field or, once the game is over, the result. A
         live state's break and action evidence is held with it. ``origin`` is where the answer came from."""
         snapshot = reading.snapshot
-        out.warnings.extend(f"{game.id}: {note.kind.value}: {note.detail}" for note in snapshot.notes)
+        out.warnings.extend(_noted(game.id, snapshot.notes))
         arrival = Arrival(received=reading.arrived, as_of=snapshot.observed_at)
         state = snapshot.state
         context = PlayContext(live.last, state, self._guard.pin(arrival, at), origin)
@@ -721,6 +724,20 @@ def _field_of(state: FootballGameState) -> tuple[object, ...]:
         state.yards_to_goal,
         state.set_piece,
     )
+
+
+def _noted(game: LeagueScopedId, notes: Iterable[FeedNote]) -> list[str]:
+    """An answer's notes as warning lines, in our own words alone: a line a kind, with how many there were and what
+    each was about. The feed's own words never go into one."""
+    kinds: dict[FeedNoteKind, list[FeedNote]] = {}
+    for note in notes:
+        kinds.setdefault(note.kind, []).append(note)
+    lines = []
+    for kind, noted in kinds.items():
+        count = f" x{len(noted)}" if len(noted) > 1 else ""
+        said = "; ".join(dict.fromkeys(part for note in noted for part in note.ours))
+        lines.append(f"{game}: {kind.value}{count}" + (f": {said}" if said else ""))
+    return lines
 
 
 def _result(state: FootballGameState) -> tuple[int, int, int]:

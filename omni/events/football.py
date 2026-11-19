@@ -26,6 +26,7 @@ from omni.events.football_clubs import canonical_play_text, club_code
 
 __all__ = [
     "ConversionResult",
+    "EntryLabel",
     "FieldGoalResult",
     "FootballEvent",
     "FootballEventKind",
@@ -159,6 +160,20 @@ _MAJOR_TONES = frozenset({PlayTone.SCORE, PlayTone.TURNOVER})
 _MAJOR_KINDS = frozenset({FootballEventKind.SCORE, FootballEventKind.REVIEW})
 
 
+@dataclass(frozen=True, slots=True)
+class EntryLabel:
+    """A strip entry named by our own labels, never its words: how much it matters, its kind, and its play's number.
+    It reads "routine play #57", "major score", so a log or a trace can name an entry without quoting the feed."""
+
+    kind: FootballEventKind
+    major: bool
+    play: int | None = None
+
+    def __str__(self) -> str:
+        weight = "major" if self.major else "routine"
+        return f"{weight} {self.kind.value}" + (f" #{self.play}" if self.play is not None else "")
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class FootballEvent:
     """One entry for the play strip: its headline and description, then the players' lines."""
@@ -177,6 +192,11 @@ class FootballEvent:
         first seen with a ruling on it is toned as the ruling). Everything else is routine: a play, a
         stoppage, a flag, an injury."""
         return self.kind in _MAJOR_KINDS or self.summary.tone in _MAJOR_TONES or self.scored_or_turned_over
+
+    @property
+    def label(self) -> EntryLabel:
+        """The entry by our own labels: what a log or a trace may say of it."""
+        return EntryLabel(self.kind, self.major, self.play)
 
 
 @dataclass(frozen=True, slots=True)

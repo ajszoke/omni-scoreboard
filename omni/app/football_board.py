@@ -532,7 +532,7 @@ class FootballBoard:
             return
         self._refused = None
         for note in snapshot.notes:
-            self._note(f"  ! {note.kind.value}", f"  ! {note.kind.value}: {note.detail}")
+            self._note(f"  ! {note.kind.value}", f"  ! {note.quoted}")
         received = result.received_monotonic if result.received_monotonic is not None else at.monotonic
         price = self._probability(result, received)
         reading = _Reading(

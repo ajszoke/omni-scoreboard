@@ -23,7 +23,7 @@ from omni.core.ids import LeagueScopedId
 from omni.core.time import DurationSeconds
 from omni.domain.contest import TeamGame
 from omni.domain.football import FootballGameState, FootballInterval, PlaySummary, PlayTone, SetPiece
-from omni.events.football import FootballEvent, FootballEventKind
+from omni.events.football import EntryLabel, FootballEvent, FootballEventKind
 from omni.preferences.favorites import Favorites
 from omni.providers.nfl_teams import NflTeamRegistry
 from omni.providers.nflmeta import NFLMETA_SOURCE, FeedNote, FeedNoteKind, NflLiveSnapshot, NflPhase
@@ -575,11 +575,20 @@ def test_a_live_game_with_no_answer_at_all_is_unfed_at_once() -> None:
     assert result.held == () and board.card(GAME) is None
 
 
-def test_a_feed_s_notes_are_passed_on_as_warnings() -> None:
+def test_a_feed_s_notes_are_passed_on_as_warnings_in_our_own_words_alone_a_line_a_kind() -> None:
     board = Board()
-    note = FeedNote(FeedNoteKind.PLAY_READ_FAILED, "page 2")
-    board.answer(GAME, drive(), notes=(note,))
-    assert board.at(0, GAME).warnings == (f"{GAME.id}: play read failed: page 2",)
+    notes = (
+        FeedNote(FeedNoteKind.PLAY_READ_FAILED, quoting="the feed's own message"),
+        FeedNote(FeedNoteKind.LATE_PLAY, entry=EntryLabel(FootballEventKind.PLAY, False, 12), quoting="RUN | words"),
+        FeedNote(FeedNoteKind.LATE_PLAY, entry=EntryLabel(FootballEventKind.INJURY, False), quoting="INJURY | words"),
+        FeedNote(FeedNoteKind.PLAY_MISSING, "not in the feed yet: reading again next poll"),
+    )
+    board.answer(GAME, drive(), notes=notes)
+    assert board.at(0, GAME).warnings == (
+        f"{GAME.id}: play read failed",
+        f"{GAME.id}: late play x2: routine play #12; routine injury",
+        f"{GAME.id}: matched play missing: not in the feed yet: reading again next poll",
+    )
 
 
 # --- priority, phases and teardown ------------------------------------------------------------------------------

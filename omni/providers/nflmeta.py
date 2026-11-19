@@ -78,6 +78,7 @@ from omni.domain.football import (
 )
 from omni.events.football import (
     ConversionResult,
+    EntryLabel,
     FieldGoalResult,
     FootballEvent,
     FootballEventKind,
@@ -181,8 +182,30 @@ class FeedNoteKind(StrEnumMixin, str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class FeedNote:
+    """A note about a poll. Our own parts may go anywhere: its kind, what happens next (``detail``), and the entry
+    it's about by our own label (``entry``). ``quoting`` is the feed's own words (a play's text, a failure's message),
+    which only a log stamped to expire may keep (`omni.app.run_log`)."""
+
     kind: FeedNoteKind
-    detail: str
+    detail: str | None = None
+    entry: EntryLabel | None = None
+    quoting: str | None = None
+
+    @property
+    def ours(self) -> tuple[str, ...]:
+        """What the note says in our own words, past its kind: the entry it's about, then what happens next."""
+        entry = str(self.entry) if self.entry is not None else None
+        return tuple(part for part in (entry, self.detail) if part is not None)
+
+    @property
+    def told(self) -> str:
+        """The note in our own words: its kind, the entry it's about, and what happens next."""
+        return ": ".join((self.kind.value, *self.ours))
+
+    @property
+    def quoted(self) -> str:
+        """The note as a stamped log keeps it: in the feed's words, when it quotes the feed."""
+        return f"{self.kind.value}: {self.quoting}" if self.quoting is not None else self.told
 
 
 class InjuryStatus(StrEnumMixin, str, Enum):
@@ -498,7 +521,7 @@ class NflMetaLiveProvider:
         if any(event.kind in _CORRECTIONS for event in events):
             tracked.watch_until = None
         notes += batch.notes
-        notes += [FeedNote(FeedNoteKind.LATE_PLAY, _event_words(event)) for event in ledger.held_back]
+        notes += [_late(event) for event in ledger.held_back]
         return events
 
     def _read_plays(self, game_id: int, tracked: _TrackedGame) -> _PlayBatch:
@@ -517,9 +540,9 @@ class NflMetaLiveProvider:
             except ProviderError as exc:
                 if batch.cursor is not None and getattr(exc.__cause__, "code", None) in _REJECTED_CURSOR:
                     batch.cursor, batch.restarted = None, True
-                    batch.notes.append(FeedNote(FeedNoteKind.CURSOR_RESET, str(exc)))
+                    batch.notes.append(FeedNote(FeedNoteKind.CURSOR_RESET, quoting=str(exc)))
                 else:
-                    batch.notes.append(FeedNote(FeedNoteKind.PLAY_READ_FAILED, str(exc)))
+                    batch.notes.append(FeedNote(FeedNoteKind.PLAY_READ_FAILED, quoting=str(exc)))
                 return batch
             for change in _rows(body):
                 if (play := _play(change)) is None:
@@ -825,9 +848,11 @@ def _without_plays(state: FootballGameState) -> FootballGameState:
     return state
 
 
-def _event_words(event: FootballEvent) -> str:
+def _late(event: FootballEvent) -> FeedNote:
+    """A late play's note: the entry by our own label, and its words for a stamped log only."""
     summary = event.summary
-    return summary.headline + (f" | {summary.detail}" if summary.detail else "")
+    words = summary.headline + (f" | {summary.detail}" if summary.detail else "")
+    return FeedNote(FeedNoteKind.LATE_PLAY, entry=event.label, quoting=words)
 
 
 def _board_key(row: Mapping[str, Any]) -> tuple[Any, ...]:
