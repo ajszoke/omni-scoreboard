@@ -333,7 +333,9 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
 
     clock = SystemClock()
     state_dir = args.state_dir if args.state_dir is not None else default_state_dir(os.environ, Path.home())
-    ledger = open_ledger(state_dir, NflMetaPlan(args.nflmeta_plan), log=lambda line: print(line, flush=True))
+    ledger = open_ledger(
+        state_dir, NflMetaPlan(args.nflmeta_plan), log=lambda line: print(line, flush=True), who="omni.app"
+    )
     zone = ZoneInfo(args.timezone)
     source = read_source_revision(_REPO_ROOT)
 
