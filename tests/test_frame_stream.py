@@ -18,6 +18,8 @@ from omni.app.frame_stream import (
     DisplayLost,
     DisplayUnavailable,
     FrameShown,
+    LinkProtocol,
+    LossCause,
     StreamDisplaySink,
     StreamFrame,
     ack_line,
@@ -25,6 +27,7 @@ from omni.app.frame_stream import (
     encode_legacy_frame,
     read_replies,
 )
+from omni.core.clock import MonotonicTime
 from omni.core.colors import RGBColor
 from omni.core.enum import PanelProfile
 from omni.renderers.canvas import Canvas, RecordingCanvas
@@ -269,3 +272,116 @@ def test_a_frame_the_writer_says_is_not_going_out_is_reported_and_sent_again() -
     assert sink.receipts() == []
     with pytest.raises(TypeError):
         sink.send(RecordingCanvas(64, 32))
+
+
+# Sessions: a receiver that reads them, its heartbeats and its watchdog.
+
+
+def _sessions(now: list[float]) -> DisplayLink:
+    link = DisplayLink(monotonic=lambda: now[0])
+    link.started(1)
+    link.ready(1)
+    link.announced(1, "boot-a")
+    return link
+
+
+def test_a_receiver_that_reads_sessions_is_credited_only_for_the_current_session() -> None:
+    now = [0.0]
+    link = _sessions(now)
+    protocol, session = link.protocol(1)
+    assert protocol is LinkProtocol.SESSIONS and link.acknowledges(1)
+    assert link.protocol(2) == (LinkProtocol.UNCONFIRMED, session)  # not a generation that's running
+    link.shown(1, 1, session=session + 1)  # a session it isn't in
+    link.shown(2, 2, session=session)  # another generation's word
+    now[0] = 1.5
+    link.shown(1, 3, session=session)
+    [shown] = link.receipts()
+    assert shown == FrameShown(3, generation=1) and shown.session == session and shown.heard == MonotonicTime(1.5)
+
+
+def test_a_blank_ends_the_session_and_a_late_ack_from_it_renews_nothing() -> None:
+    now = [0.0]
+    link = _sessions(now)
+    _, session = link.protocol(1)
+    link.shown(1, 1, session=session)
+    link.blanked(1, session + 5)  # not its session: ignored
+    link.blanked(2, session)  # not its generation: ignored
+    link.blanked(1, session)
+    receipts = link.receipts()
+    assert receipts == [FrameShown(1, generation=1), DisplayLost(1)]
+    lost = receipts[1]
+    assert isinstance(lost, DisplayLost) and lost.cause is LossCause.BLANKED and lost.session == session
+    assert link.protocol(1) == (LinkProtocol.SESSIONS, session + 1)  # the next frames go to a new session
+    link.shown(1, 2, session=session)  # the old session's ack arrives late
+    assert link.receipts() == [] and link.vouch(3, like=1) is False
+    link.shown(1, 4, session=session + 1)
+    assert link.receipts() == [FrameShown(4, generation=1)]
+
+
+def test_a_receiver_that_restarts_under_the_same_transport_starts_a_new_session() -> None:
+    now = [0.0]
+    link = _sessions(now)
+    _, session = link.protocol(1)
+    link.announced(2, "boot-z")  # another generation: ignored
+    link.announced(1, "boot-a")  # the same run, said again: nothing changes
+    link.shown(1, 1, session=session)
+    link.announced(1, "boot-b")
+    receipts = link.receipts()
+    assert receipts == [FrameShown(1, generation=1), DisplayLost(1)]
+    assert isinstance(receipts[1], DisplayLost) and receipts[1].cause is LossCause.REBOOTED
+    assert link.protocol(1)[1] == session + 1
+
+
+def test_a_receiver_silent_past_its_watchdog_has_lost_its_panel_while_heartbeats_keep_it() -> None:
+    now = [0.0]
+    link = _sessions(now)
+    _, session = link.protocol(1)
+    link.shown(1, 1, session=session)
+    for second in (2.0, 4.0, 6.0, 8.0, 10.0):
+        now[0] = second
+        link.alive(1, session)
+        link.alive(1, session + 1)  # not its session: no word
+        link.alive(2, session)  # nor another generation's
+    assert link.receipts() == [FrameShown(1, generation=1)]
+    now[0] = 17.9
+    assert link.receipts() == []
+    now[0] = 18.0
+    receipts = link.receipts()
+    assert receipts == [DisplayLost(1)] and isinstance(receipts[0], DisplayLost)
+    assert receipts[0].cause is LossCause.SILENT and receipts[0].heard == MonotonicTime(18.0)
+    now[0] = 30.0
+    assert link.receipts() == []  # nothing more to lose
+
+
+def test_an_older_receiver_never_goes_silent_and_keeps_its_acks() -> None:
+    now = [0.0]
+    link = DisplayLink(monotonic=lambda: now[0])
+    link.started(1)
+    link.ready(1)
+    link.shown(1, 1)
+    now[0] = 3600.0
+    assert link.receipts() == [FrameShown(1, generation=1)]
+    assert link.protocol(1)[0] is LinkProtocol.ACKNOWLEDGING
+    link.shown(1, 2, session=1)  # it can't speak sessions: such a word isn't its
+    assert link.receipts() == []
+
+
+def test_an_unchanged_frame_asks_for_a_heartbeat_every_2_s_and_a_changed_one_counts_as_one() -> None:
+    now = [0.0]
+    link = _sessions(now)
+    pipe = _Pipe()
+    beats: list[float] = []
+    sink = StreamDisplaySink(
+        PanelProfile.SINGLE_64X32, pipe, link, beat=lambda: beats.append(now[0]), monotonic=lambda: now[0]
+    )
+    first = sink.send(_lit(sink))
+    link.shown(1, first, session=link.protocol(1)[1])
+    for tenth in range(1, 51):  # five seconds of the same frame, drawn ten times a second
+        now[0] = tenth / 10
+        sink.send(_lit(sink))
+    assert beats == [2.0, 4.0]
+    now[0] = 5.5
+    sink.send(_lit(sink, 3))  # a change goes out: it's as good as a heartbeat
+    assert len(pipe.frames) == 2
+    plain = StreamDisplaySink(PanelProfile.SINGLE_64X32, _Pipe(), _sessions([0.0]))
+    plain.send(_lit(plain))  # without a beat to ask, nothing is asked

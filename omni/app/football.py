@@ -266,9 +266,11 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
         link = DisplayLink()
         pipe = SinkProcess(shlex.split(args.sink_command), link, log=log)
         writer = BackgroundFrameWriter(
-            pipe.write, on_error=lambda exc: log(f"display: a frame write failed: {type(exc).__name__}: {exc}")
+            pipe.write,
+            on_error=lambda exc: log(f"display: a frame write failed: {type(exc).__name__}: {exc}"),
+            heartbeat=pipe.heartbeat,
         )
-        sink = StreamDisplaySink(profile, writer, link)
+        sink = StreamDisplaySink(profile, writer, link, beat=writer.beat)  # heartbeats keep a held frame up
 
     market = PolymarketUsProvider().win_probability if args.odds else None
     feed = BackgroundFeed(GameFeed(provider, game_id, win_probability=market, ledger=ledger), clock)
