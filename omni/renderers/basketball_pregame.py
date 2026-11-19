@@ -1,4 +1,4 @@
-"""Renderer for the NBA pregame card, scheduled or postponed, on the quad and stack boards (the single follows).
+"""Renderer for the NBA pregame card, scheduled or postponed, across all three panel profiles.
 
 A pregame card names the clubs (their marks and codes), their records, and when the game tips. The tip reads as
 a label and what it's about: ``TIP`` and the time with a countdown under it (``6:00 PM`` over ``1h 23m``, ``SOON``
@@ -16,6 +16,10 @@ stays right as it ticks.
 - stack_64x64 : tiles, each club's code (white) over its record (teal), both in 6x10, the odds row between; then
   the tip in two lines: the label and what it's about in 5x7 (``TIP 6:00 PM``), the countdown or the time
   under it in 4x6. COMPROMISE: no standings; odds too wide for the board drop their spread.
+- single_64x32: color bars, each club's code (6x10) over its record (4x6); at right, the tip time (gold) over the
+  countdown over the favorite's moneyline. A postponed game puts ``PPD`` in the tip's slot and face and moves
+  the tip's lines down one. COMPROMISE: no standings, the moneyline without its spread, and no odds on a
+  postponed game, whose new tip takes their row.
 """
 
 from __future__ import annotations
@@ -35,7 +39,7 @@ from omni.renderers.canvas import Canvas
 from omni.renderers.context import RenderContext
 from omni.renderers.font import rasterize
 from omni.renderers.pregame import start_time_label
-from omni.renderers.team_row import draw_matchup_marks
+from omni.renderers.team_row import draw_matchup_marks, draw_single_bars
 from omni.renderers.text import draw_centered, text_width
 
 __all__ = ["BasketballPregameRenderer", "TipLines", "Tip", "tip_lines"]
@@ -279,11 +283,54 @@ def _draw_line_parts(canvas: Canvas, y: int, parts: Sequence[tuple[Tip, RGBColor
         x += _tip_width(tip, font) + space
 
 
+# --- single 64x32 -----------------------------------------------------------------------------------------
+
+_I_ROW = 16
+_I_CODE_X = 5
+_I_COLUMN = (26, 64)  # two clear columns past the widest 4x6 record
+_I_ROWS = (5, 13, 21)  # cell tops of the tip, the countdown and the favorite's line
+
+
+def _single(canvas: Canvas, context: RenderContext, card: _Pregame) -> None:
+    """Bars, each club's code over its record; at right, the tip over the countdown over the favorite's line.
+
+    The record is 4x6 here: the right column needs the columns a 5x7 record would take. The column is 38 wide, so
+    the tip can't take 6x10 (``12:00 PM`` needs 45); the tip and the countdown share 5x7. A tip on another day
+    shows its date over its time in their place. A postponed game puts ``PPD`` in the tip's slot and face and
+    moves those two down one.
+    """
+    game, payload = card.game, card.payload
+    draw_single_bars(canvas, context, game.away, game.home)
+    for which, top in ((HomeAway.AWAY, 0), (HomeAway.HOME, _I_ROW)):
+        canvas.text(_I_CODE_X, top + 1, card.team(which).abbreviation, _WHITE, font="6x10")
+        record = payload.records[which]
+        if record is not None:
+            canvas.text(_I_CODE_X, top + 10, str(record), _STATS_TEAL, font="4x6")
+    left, right = _I_COLUMN
+    tip_y, countdown_y, line_y = _I_ROWS
+    tip = card.tip
+    if payload.phase is BasketballPhase.POSTPONED:
+        draw_centered(canvas, left, right, tip_y, card.label, _GOLD, "5x7")
+    if tip is None:
+        draw_centered(canvas, left, right, countdown_y, _TBD, _WHITE, "5x7")
+        return
+    slots: tuple[tuple[Tip, int, RGBColor, str], ...]
+    if payload.phase is BasketballPhase.POSTPONED:  # the label takes the tip's slot, so its two lines move down one
+        slots = ((tip.upper, countdown_y, _WHITE, "5x7"), (tip.lower, line_y, _WHITE, "4x6"))
+    else:
+        slots = ((tip.upper, tip_y, _GOLD, "5x7"), (tip.lower, countdown_y, _WHITE, "5x7"))
+    for line, y, color, font in slots:
+        _draw_tip(canvas, left + (right - left - _tip_width(line, font)) // 2, y, line, color, font)
+    if payload.phase is BasketballPhase.SCHEDULED and payload.line is not None:
+        draw_centered(canvas, left, right, line_y, _odds_text(game, payload.line, spread=False), _ODDS_GREEN, "4x6")
+
+
 # --- the renderer -----------------------------------------------------------------------------------------
 
 _DRAW: dict[PanelProfile, Callable[[Canvas, RenderContext, _Pregame], None]] = {
     PanelProfile.QUAD_128X64: _quad,
     PanelProfile.STACK_64X64: _stack,
+    PanelProfile.SINGLE_64X32: _single,
 }
 
 

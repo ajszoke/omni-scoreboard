@@ -18,18 +18,21 @@ from PIL import Image
 from omni.cards.base import CardKind, ScoreboardCard
 from omni.cards.basketball import BasketballGameCardPayload, BestPlayers, CaptionPanel, PlayerLinesPanel
 from omni.core.clock import MonotonicTime
+from omni.core.colors import RGBColor
 from omni.core.enum import GameStatus, HomeAway, League, PanelProfile
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.domain.baseball import WinLossRecord
-from omni.domain.basketball import BasketballPhase, BySide, ScoringRun
+from omni.domain.basketball import BasketballPhase, BySide, CallChange, PlayerCallChange, ScoringRun
 from omni.domain.contest import GolfTournament
-from omni.events.basketball import TimeoutTaken
+from omni.events.basketball import CallReversed, FieldGoalMade, PersonalFoul, ShotValue, TimeoutTaken
 from omni.panels.geometry import geometry_for
 from omni.renderers.basketball_pregame import BasketballPregameRenderer
 from omni.renderers.canvas import Canvas, RecordingCanvas
 from omni.renderers.context import RenderContext
 from omni.renderers.image import LogoStore
+from omni.renderers.live_basketball import _GREEN as GREEN
 from omni.renderers.live_basketball import _SECONDARY as SECONDARY
+from omni.renderers.live_basketball import _WHITE as WHITE
 from omni.renderers.live_basketball import LiveBasketballRenderer, TurnHalf, turn_half
 from omni.renderers.pillow_canvas import PillowCanvas
 from omni.renderers.text_lane import LaneClock, LaneFrame, Marquee
@@ -278,3 +281,25 @@ def test_a_finals_best_player_line_takes_as_many_numbers_as_fit() -> None:
     assert _bottom(named)[-1] == "8 PTS 1 REB"
     assert _bottom(named, up=7.0) == []  # the loser has no line
     assert _bottom(_final()) == []  # no best players named
+
+
+# --- single --------------------------------------------------------------------------------------------------
+
+
+def test_the_singles_scoring_play_turns_its_teams_score_green_and_nothing_else_does() -> None:
+    basket = CaptionPanel(caption=FieldGoalMade(side=HomeAway.HOME, shooter="A.Edwards", value=ShotValue.TWO))
+    foul = CaptionPanel(caption=PersonalFoul(side=HomeAway.AWAY, player="D.Clingan", count=4))
+    reversal = CaptionPanel(
+        caption=CallReversed(change=PlayerCallChange(change=CallChange.FOUL_OFF, player="J.Randle"))
+    )
+
+    def scores(bottom: CaptionPanel) -> dict[str, RGBColor | None]:
+        return {op.text: op.color for op in _ops(_live(bottom=bottom), SINGLE).texts() if op.text in ("58", "68")}
+
+    assert scores(basket) == {"58": WHITE, "68": GREEN}
+    assert scores(foul) == scores(reversal) == {"58": WHITE, "68": WHITE}
+
+
+def test_the_single_shows_whose_timeout_play_is_stopped_for_in_place_of_the_clock() -> None:
+    texts = _texts(live(*_Q3, 3, 4380, home_win=83.0, timeout=HomeAway.HOME), SINGLE)
+    assert {"TO", "MIN"} <= set(texts) and "7:18" not in texts

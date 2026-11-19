@@ -111,6 +111,12 @@ def test_the_stacks_odds_drop_their_spread_only_when_the_line_is_wider_than_the_
     assert "MIN -1200" in _texts(_payload(line=huge), STACK)
 
 
+def test_the_single_shows_the_moneyline_alone_and_no_odds_for_a_postponed_game() -> None:
+    assert "MIN -265" in _texts(_payload(), SINGLE)
+    moved = _texts(_payload(phase=BasketballPhase.POSTPONED, tip=NOON), SINGLE)
+    assert not any("MIN -" in text for text in moved)
+
+
 @pytest.mark.parametrize("profile", PROFILES)
 def test_with_no_records_or_standings_the_card_shows_neither(profile: PanelProfile) -> None:
     texts = _texts(_payload(records=BySide(None, None)), profile)

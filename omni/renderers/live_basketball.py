@@ -1,4 +1,4 @@
-"""Renderer for the NBA game card, live through final, on the quad and stack boards (the single follows).
+"""Renderer for the NBA game card, live through final, across all three panel profiles.
 
 The card keeps the house frame: team rows down the left, each a logo tile (or a color bar) with the win meter
 hugging it, a lane of the team's own words, and the score; the game's state at right; and, on the boards with
@@ -27,6 +27,12 @@ named all turn.
   score, the record passes under the score's first two columns; the box score keeps FG% and rebounds, and a
   player's line its points and field goals; while plays queue, the divider splits into one segment per play,
   the one up in gold, in place of ``i/N``.
+- single_64x32: 16-row team rows with color bars. The code is 6x10 with two-digit scores and 5x7 from 100, over
+  a 5x7 record that may run beneath a three-digit score; the second half shows ``5TO`` over a boxed ``BON``. The
+  6x10 scores end at x42; right of them, the clock (4x6) over the pips, ``TO`` over the team's code while a
+  timeout lasts, a break's words, or a big ``F`` at a final (over ``2OT`` in overtime). A scoring play turns its
+  team's score green. COMPROMISE: there is no bottom panel, so no line score, captions, rulings, stat panels or
+  run.
 
 A final settles the meter, full for the winner, and dims the loser's code, record and score.
 """
@@ -668,11 +674,99 @@ def _stack_line_score(canvas: Canvas, card: _Card) -> None:
         _stack_labeled(canvas, y, label, _GOLD if live else _SECONDARY, f"{away}-{home}")
 
 
+# --- single 64x32 -----------------------------------------------------------------------------------------
+
+_I_ROW = 16
+_I_CODE_X = 5
+_I_SCORE_RIGHT = 42
+_I_SCORE_ROW = 1  # the score's cell sits a row into its lane, so its ink is on rows 2-8
+_I_MODULE = (44, 64)
+_I_CLOCK_Y = 10  # the clock and pips together, centered in the module
+_I_PIP_Y = 18
+_I_PIP_GAP = 1
+_I_WORDS_Y = (7, 16)
+_I_CODE = {False: ("6x10", 1), True: ("5x7", 3)}  # its ink ends on the score's last row
+_I_RECORD = ("5x7", 10)  # rows 10-15, under both, on every card
+_I_COUNTS_FONT = "5x7"
+_I_BONUS = "BON"
+_I_STACK_GAP = 1  # rows between the timeouts and the bonus box under them
+# Where each team's timeouts-over-bonus block starts. The block is 15 rows in 5x7 (6 of capitals, a blank row,
+# an 8-row box), a row short of the 16-row lane, so the away block hugs the top of its lane and the home block
+# the bottom of its own: the gap between the lanes is then wider than the gap inside a block.
+_I_COUNT_TOPS = {HomeAway.AWAY: 0, HomeAway.HOME: _I_ROW + 1}
+_PIP_SINGLE = (".XX.", "XXXX", "XXXX", ".XX.")
+
+
+def _single(canvas: Canvas, context: RenderContext, card: _Card) -> None:
+    treatment = card.treatment(context, PanelProfile.SINGLE_64X32, _I_ROW)
+    caption = _caption(card)
+    words = _words(caption, card) if caption is not None else None
+    scorer = (
+        caption.caption.side if caption is not None and words is not None and words.tone is PlayTone.SCORE else None
+    )
+    code_font, code_row = _I_CODE[card.three_digits]
+    record_font, record_row = _I_RECORD
+    rows = ((HomeAway.AWAY, treatment.away, 0), (HomeAway.HOME, treatment.home, _I_ROW))
+    for which, mark, top in rows:
+        side = card.state.side(which)
+        draw_treated_mark(canvas, context, card.team(which), mark)  # a color bar: a 20px tile can't fit a 16px row
+        if card.shows_counts:
+            count_top = _I_COUNT_TOPS[which]
+            canvas.text(_I_CODE_X, count_top, _timeouts_text(side, ""), _GOLD, font=_I_COUNTS_FONT)
+            if card.state.phase is BasketballPhase.LIVE and side.in_bonus:
+                box_top = count_top + _ink_height(_I_COUNTS_FONT) + _I_STACK_GAP
+                _draw_inverted(canvas, _I_CODE_X, box_top, _I_BONUS, _I_COUNTS_FONT)
+        else:
+            _names(canvas, card, which, _I_CODE_X, (top + code_row, top + record_row), (code_font, record_font))
+        score_color = _GREEN if which is scorer else card.text_color(which)
+        draw_right_aligned(canvas, _I_SCORE_RIGHT, top + _I_SCORE_ROW, str(side.score), score_color, "6x10")
+    _draw_meter(canvas, treatment, card)
+    _single_module(canvas, context, card)
+
+
+def _single_module(canvas: Canvas, context: RenderContext, card: _Card) -> None:
+    """Right of the scores: the clock and pips; ``TO`` over the code while a timeout lasts; a break's words."""
+    state = card.state
+    left, right = _I_MODULE
+    if state.timeout is not None:
+        draw_centered(canvas, left, right, _I_WORDS_Y[0], "TO", _GOLD, "5x7")
+        draw_centered(canvas, left, right, _I_WORDS_Y[1], card.codes[state.timeout], _WHITE, "5x7")
+        return
+    if state.phase is BasketballPhase.LIVE:
+        clock = state.clock.text if state.clock is not None else "--:--"
+        draw_centered(canvas, left, right, _I_CLOCK_Y, clock, _GOLD, "4x6")
+        if state.is_overtime:
+            draw_centered(canvas, left, right, _I_PIP_Y - 1, period_label(state.period), _GOLD, "4x6")
+        else:
+            width = _pips_width(_PIP_SINGLE, _I_PIP_GAP)
+            _draw_pips(canvas, left + (right - left - width) // 2, _I_PIP_Y, _PIP_SINGLE, _I_PIP_GAP, state.period)
+        return
+    if state.phase is BasketballPhase.FINAL:
+        # A big F; in overtime, over the overtime in the largest face that fits the module, on the home score's
+        # rows (the score's face and cell row) with two blank rows under the F.
+        if state.is_overtime:
+            ot_row = _I_ROW + _I_SCORE_ROW
+            draw_centered(canvas, left, right, ot_row - 12, "F", _GOLD, "8x13B")
+            draw_centered(canvas, left, right, ot_row, period_label(state.period), _GOLD, "6x10")
+        else:
+            draw_centered(canvas, left, right, 10, "F", _GOLD, "8x13B")
+        return
+    if state.phase is BasketballPhase.END_OF_PERIOD:
+        words = ("END", period_label(state.period))
+    else:
+        ends = card.payload.break_ends_at
+        words = ("HALF", _countdown(ends - context.now) if ends is not None else "TIME")
+    for word, y in zip(words, _I_WORDS_Y):
+        fits = text_width(word, "5x7") <= right - left  # 4x6 for a countdown too wide for 5x7, a row lower
+        draw_centered(canvas, left, right, y if fits else y + 1, word, _GOLD, "5x7" if fits else "4x6")
+
+
 # --- the renderer -----------------------------------------------------------------------------------------
 
 _DRAW: dict[PanelProfile, Callable[[Canvas, RenderContext, _Card], None]] = {
     PanelProfile.QUAD_128X64: _quad,
     PanelProfile.STACK_64X64: _stack,
+    PanelProfile.SINGLE_64X32: _single,
 }
 
 
