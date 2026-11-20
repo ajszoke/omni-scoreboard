@@ -49,6 +49,18 @@ def test_a_play_summary_needs_a_headline() -> None:
         PlaySummary(tone=PlayTone.STANDARD, headline="")
 
 
+@pytest.mark.parametrize(
+    "headline, short",
+    [
+        ("24 YARD PASS, 1ST DOWN", "24 YD PASS, 1ST DOWN"),
+        ("RUN, 2 YARD LOSS", "RUN, 2 YD LOSS"),
+        ("INTERCEPTION", "INTERCEPTION"),
+    ],
+)
+def test_a_short_headline_says_its_yardage_short(headline: str, short: str) -> None:
+    assert PlaySummary(tone=PlayTone.STANDARD, headline=headline).short_headline == short
+
+
 @pytest.mark.parametrize("away, home", [(-1, 0), (0, 4)])
 def test_timeouts_are_three_a_half_at_most(away: int, home: int) -> None:
     with pytest.raises(ValueError):

@@ -250,6 +250,21 @@ def test_a_play_with_no_detail_draws_only_its_headline() -> None:
     assert "TIMEOUT" in texts
 
 
+@pytest.mark.parametrize(
+    "headline, drawn",
+    [
+        # 22 letters of 6x10 overflow the 128 px strip by one, so the yardage reads short and nothing scrolls.
+        ("24 YARD PASS, 1ST DOWN", "24 YD PASS, 1ST DOWN"),
+        # 21 letters fit as they are.
+        ("11 YARD RUN, 1ST DOWN", "11 YARD RUN, 1ST DOWN"),
+    ],
+)
+def test_a_headline_too_long_for_the_quads_strip_says_its_yardage_short(headline: str, drawn: str) -> None:
+    state, _, _ = STATES["drive"]
+    play = PlaySummary(tone=PlayTone.STANDARD, headline=headline, detail="A.Richardson to M.Pittman")
+    assert drawn in _texts(state, PanelProfile.QUAD_128X64, last_play=play)
+
+
 def test_the_strip_is_empty_with_no_last_play() -> None:
     state, _, _ = STATES["drive"]
     assert not any("pass" in text for text in _texts(state, PanelProfile.QUAD_128X64))
