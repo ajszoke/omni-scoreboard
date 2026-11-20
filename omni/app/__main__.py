@@ -53,7 +53,7 @@ from __future__ import annotations
 import argparse
 import os
 import shlex
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Collection, Iterable
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
@@ -65,7 +65,7 @@ from omni.core.clock import SystemClock
 from omni.app.display import MatrixDevice, MatrixDisplaySink
 from omni.app.frame_stream import StreamDisplay, StreamDisplaySink, stream_display
 from omni.app.planned_mlb import MarketReader
-from omni.app.quota import Meter, NflMetaPlan, ProviderAccount
+from omni.app.quota import BalldontliePlan, Meter, NflMetaPlan, ProviderAccount
 from omni.app.runner import build_planned_loop, run_forever
 from omni.app.versions import DecisionConfig, PolicyName, SourceRevision, Versions, read_source_revision
 from omni.core.enum import League, PanelProfile
@@ -92,7 +92,8 @@ __all__ = ["main"]
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _BOARD_LEAGUES = (League.MLB, League.NFL)  # the leagues the shared board can run
 _POLICIES = {"1": PolicyName.BOARD_V1, "2": PolicyName.BOARD_V2}
-_NO_KEY = "omni.app: NFL is off: set NFLMETA_API_KEY in the environment or .env to put NFL on the board"
+# Each league that reads a keyed source, and the key's name in the environment or .env.
+_KEYS = {League.NFL: "NFLMETA_API_KEY", League.NBA: "BALLDONTLIE_API_KEY"}
 
 
 def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
@@ -125,6 +126,12 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         type=int,
         default=0,
         help="TV broadcast delay for NFL games in seconds (default 0, as the NFL runner's --delay)",
+    )
+    parser.add_argument(
+        "--nba-delay",
+        type=int,
+        default=0,
+        help="TV broadcast delay for NBA games in seconds (default 0, as NFL's)",
     )
     parser.add_argument(
         "--slot",
@@ -183,6 +190,13 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         choices=[plan.value for plan in NflMetaPlan],
         default=NflMetaPlan.FREE.value,
         help="the NFLMeta plan the key is on, whose limits the board keeps to (default free)",
+    )
+    parser.add_argument(
+        "--balldontlie-plan",
+        choices=[plan.value for plan in BalldontliePlan],
+        default=BalldontliePlan.FREE.value,
+        help="the BALLDONTLIE tier the key is on (default free: the day's games alone; all-star adds the players'"
+        " lines, so the captions and the stat panels)",
     )
     parser.add_argument(
         "--state-dir",
@@ -268,21 +282,31 @@ def _parse_weights(entries: Iterable[str]) -> dict[League, float]:
     return {league: weight for league, weight in weights.items() if weight != 1.0}
 
 
-def _leagues_on(args: argparse.Namespace, key: str | None, say: Callable[[str], None]) -> frozenset[League]:
-    """The leagues this run puts on the board: those asked for, less NFL without an NFLMeta key, which is said
-    once. With nothing left to run, the app stops, saying why."""
-    leagues: frozenset[League] = args.leagues
-    if League.NFL in leagues and not key:
-        leagues = leagues - {League.NFL}
+def _leagues_on(
+    args: argparse.Namespace, keys: Mapping[League, str | None], say: Callable[[str], None]
+) -> frozenset[League]:
+    """The leagues this run puts on the board: those asked for, less each keyed league whose key ``keys`` lacks,
+    which is said once. With nothing left to run, the app stops, saying why."""
+    asked: frozenset[League] = args.leagues
+    leagues = asked
+    for league, name in _KEYS.items():
+        if league not in asked or keys.get(league):
+            continue
+        leagues = leagues - {league}
+        code = league.value.upper()
+        off = f"omni.app: {code} is off: set {name} in the environment or .env to put {code} on the board"
         if not leagues:
-            raise SystemExit(f"{_NO_KEY}, and it's the only league asked for")
-        say(_NO_KEY)
+            left = "it's the only league asked for" if len(asked) == 1 else "no league asked for is left"
+            raise SystemExit(f"{off}, and {left}")
+        say(off)
     return leagues
 
 
-def _nflmeta_key() -> str | None:  # pragma: no cover - reads the environment and .env
-    """NFLMeta's key, from the environment or the git-ignored ``.env``, as the NFL runner reads it."""
-    return {**read_env_file(_REPO_ROOT / ".env"), **os.environ}.get("NFLMETA_API_KEY")
+def _keys(leagues: Collection[League]) -> dict[League, str | None]:  # pragma: no cover - reads the env and .env
+    """Each keyed league's key, for the leagues asked for, from the environment or the git-ignored ``.env``. The
+    keys are only handed on, never printed."""
+    env = {**read_env_file(_REPO_ROOT / ".env"), **os.environ}
+    return {league: env.get(name) for league, name in _KEYS.items() if league in leagues}
 
 
 def _versions(args: argparse.Namespace, source: SourceRevision) -> Versions:
@@ -307,6 +331,8 @@ def _versions(args: argparse.Namespace, source: SourceRevision) -> Versions:
             league_weights=settings.league_weights,
             promotions=settings.promotions,
             nfl_delay=timedelta(seconds=args.nfl_delay),
+            nba_delay=timedelta(seconds=args.nba_delay) if League.NBA in args.leagues else None,
+            nba_plan=BalldontliePlan(args.balldontlie_plan) if League.NBA in args.leagues else None,
         ),
         rules=RULES,
         source=source,
@@ -321,8 +347,9 @@ def _board_policy(args: argparse.Namespace) -> BoardPolicy:
 def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives the live emulator + network
     args = _parse_args(argv)
     profile = PanelProfile(args.profile)
-    key = _nflmeta_key() if League.NFL in args.leagues else None
-    leagues = _leagues_on(args, key, say=print)
+    keys = _keys(args.leagues)
+    leagues = _leagues_on(args, keys, say=print)
+    key = keys.get(League.NFL)
 
     # Lazy imports keep the network libraries and emulator out of import time and tests.
     from omni.app.football import NflMetaHttp
