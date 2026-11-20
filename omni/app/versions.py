@@ -42,6 +42,7 @@ from omni.providers.nflmeta import PlayFeedPace
 from omni.renderers.text_lane import ScrollSpeed
 
 if TYPE_CHECKING:  # the settings name their policies here, so only the type checker reads them back
+    from omni.app.quota import BalldontliePlan
     from omni.policy.settings import Mutes
 
 __all__ = [
@@ -92,6 +93,8 @@ class DecisionConfig:
     league_weights: Mapping[League, float] | None = None  # each league's weight the user set; the rest weigh 1
     promotions: bool | None = None  # whether big moments elsewhere may cut in
     nfl_delay: timedelta | None = None  # the broadcast delay NFL's games are held back by
+    nba_delay: timedelta | None = None  # the broadcast delay NBA's games are held back by
+    nba_plan: BalldontliePlan | None = None  # the BALLDONTLIE tier: whether NBA's cards have the players' lines
 
     def canonical(self) -> str:
         """The settings in force, sorted by name, e.g. ``delay=45s;favorites=mlb:ATL,mlb:COL;meter=off;...``."""

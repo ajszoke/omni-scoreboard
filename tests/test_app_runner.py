@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -219,7 +220,8 @@ def test_parse_args_defaults() -> None:
     assert ns.profile == "quad_128x64"
     assert ns.emulated is True
     assert ns.favorite == [] and ns.favorites == Favorites() and ns.delay == 45 and ns.slot == 12
-    assert ns.nfl_delay == 0  # as the NFL runner's --delay
+    assert ns.nfl_delay == 0 and ns.nba_delay == 0  # as the NFL runner's --delay
+    assert ns.balldontlie_plan == "free"  # the board never assumes a paid tier
     assert ns.timezone == "America/New_York"
     assert ns.meter is False and ns.no_odds is False  # the live meter is opt-in; pregame odds are on
 
@@ -227,6 +229,11 @@ def test_parse_args_defaults() -> None:
 def test_nfl_s_tv_delay_is_a_flag_of_its_own() -> None:
     ns = _parse_args(["--profile", "quad_128x64", "--delay", "45", "--nfl-delay", "30"])
     assert (ns.delay, ns.nfl_delay) == (45, 30)
+
+
+def test_nba_s_tv_delay_and_balldontlie_s_tier_are_flags_of_their_own() -> None:
+    ns = _parse_args(["--profile", "quad_128x64", "--nba-delay", "20", "--balldontlie-plan", "all-star"])
+    assert (ns.nba_delay, ns.balldontlie_plan) == (20, "all-star")
 
 
 def test_the_live_meter_is_asked_for_by_flag() -> None:
@@ -313,14 +320,26 @@ def test_a_league_the_board_can_t_run_stops_the_app_with_a_usage_error_naming_it
 def test_without_an_nflmeta_key_nfl_is_off_said_once_and_mlb_runs_alone() -> None:
     said: list[str] = []
     both = _parse_args(["--profile", "quad_128x64", "--leagues", "mlb,nfl"])
-    assert _leagues_on(both, None, said.append) == {League.MLB}
+    assert _leagues_on(both, {League.NFL: None}, said.append) == {League.MLB}
     assert said == ["omni.app: NFL is off: set NFLMETA_API_KEY in the environment or .env to put NFL on the board"]
     said.clear()
-    assert _leagues_on(both, "a-key", said.append) == {League.MLB, League.NFL} and said == []
-    assert _leagues_on(_parse_args(["--profile", "quad_128x64", "--leagues", "mlb"]), None, said.append) == {League.MLB}
+    assert _leagues_on(both, {League.NFL: "a-key"}, said.append) == {League.MLB, League.NFL} and said == []
+    assert _leagues_on(_parse_args(["--profile", "quad_128x64", "--leagues", "mlb"]), {}, said.append) == {League.MLB}
     assert said == []  # NFL wasn't asked for, so nothing's missing
     with pytest.raises(SystemExit, match="it's the only league asked for"):
-        _leagues_on(_parse_args(["--profile", "quad_128x64", "--leagues", "nfl"]), None, said.append)
+        _leagues_on(_parse_args(["--profile", "quad_128x64", "--leagues", "nfl"]), {}, said.append)
+
+
+def test_each_keyed_league_without_its_key_is_off_and_said_so_once_each() -> None:
+    said: list[str] = []
+    three = argparse.Namespace(leagues=frozenset({League.MLB, League.NFL, League.NBA}))
+    assert _leagues_on(three, {League.NFL: "a-key", League.NBA: ""}, said.append) == {League.MLB, League.NFL}
+    assert said == ["omni.app: NBA is off: set BALLDONTLIE_API_KEY in the environment or .env to put NBA on the board"]
+    said.clear()
+    keyed = argparse.Namespace(leagues=frozenset({League.NFL, League.NBA}))
+    with pytest.raises(SystemExit, match="NBA is off: .*, and no league asked for is left"):
+        _leagues_on(keyed, {}, said.append)
+    assert said == ["omni.app: NFL is off: set NFLMETA_API_KEY in the environment or .env to put NFL on the board"]
 
 
 def test_the_board_policy_s_settings_default_to_policy_one_with_promotions_and_nothing_muted_or_weighted() -> None:
