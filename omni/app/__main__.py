@@ -463,11 +463,12 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
     )
     on = ", ".join(league.value for league in League if league in leagues)
     target = f"the board's receiver ({args.sink_command})" if board is not None else "http://localhost:8888/"
+    meter = mlb.meter if mlb is not None else ("on" if args.meter else "off")  # MLB's says which market it reads
+    nba_meter = " (nba: Polymarket public quotes)" if nba is not None and args.meter else ""
+    nba_tier = f" nba {tier.label}," if nba is not None else ""
     print(
         f"omni.app: {profile.value}, leagues {on}, delay {args.delay}s (nfl {args.nfl_delay}s, nba {args.nba_delay}s),"
-        f" nba {tier.label}, favorites"
-        f" {args.favorites}, meter {mlb.meter if mlb is not None else 'off'}"
-        f"{' (nba: Polymarket public quotes)' if nba is not None and args.meter else ''} — {target}"
+        f"{nba_tier} favorites {args.favorites}, meter {meter}{nba_meter} — {target}"
     )
     if board is not None:
         board.start()
