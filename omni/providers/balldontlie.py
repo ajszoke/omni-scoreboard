@@ -40,7 +40,9 @@ A line names its player in the board's short form (`short_name`): ``A.Edwards``.
 **The season.** `read_season` reads a season's regular-season games (``/v1/games?seasons[]=``, with
 ``postseason=false``, cursor-paged) for the finals that count toward the clubs' records (`SlateGame.result`), which
 `omni.providers.nba_standings` counts and ranks. The NBA Cup's championship game is left out: it doesn't count toward
-the records, and the feed marks it by its ``ist_stage`` (`CupStage`).
+the records, and the feed marks it by its ``ist_stage`` (`CupStage`). `read_season_page` reads the same games a page
+at a time, each page one request, for a tier whose minute can't take a whole season at once; it can leave out the
+finals of games filed on or after a date, so a read made during a night's games carries none of them.
 
 **Fetching.** The HTTP fetch is injected (`BdlFetch`) and holds the key: the provider never sees it, so nothing it
 returns can carry it. `BalldontlieHttp` is the fetch over HTTPS. Every request is an `Exchange`: the answer's status
@@ -104,6 +106,7 @@ __all__ = [
     "Pregame",
     "RateLimit",
     "RowProblem",
+    "SeasonPage",
     "SeasonRead",
     "SlateGame",
     "SlatePoll",
@@ -381,6 +384,13 @@ class SeasonRead(Poll):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class SeasonPage(SeasonRead):
+    """One page of a season read: its finals, and the cursor its next page is asked with (None on the last)."""
+
+    cursor: str | None = None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class GameLines:
     """One game's lines, as a poll read them."""
 
@@ -499,21 +509,11 @@ class BalldontlieProvider:
     def read_season(self, season: int) -> SeasonRead:
         """``season``'s regular-season games (by its starting year), every page read: the finals that count toward
         the records. A read a day, with each final folded in as it happens, keeps the standings current."""
-        query = (("seasons[]", str(season)), ("postseason", "false"), ("per_page", str(PAGE_SIZE)))
-        pages = self._pages("/v1/games", query, _SEASON_PAGES)
+        pages = self._pages("/v1/games", _season_query(season), _SEASON_PAGES)
         at = self._clock.monotonic()
         if pages.outcome is not FetchOutcome.ANSWERED:
             return SeasonRead(at=at, outcome=pages.outcome, exchanges=tuple(pages.exchanges), detail=pages.detail)
-        results: list[GameResult] = []
-        unreadable: list[Unreadable] = []
-        for row in pages.rows:
-            try:
-                game, _ = self._slate_game(row, at)
-            except _Unreadable as exc:
-                unreadable.append(Unreadable(problem=exc.problem, detail=exc.detail, game=_game_id(row)))
-                continue
-            if game.result is not None:
-                results.append(game.result)
+        results, unreadable = self._results(pages.rows, at, None)
         return SeasonRead(
             at=at,
             outcome=FetchOutcome.ANSWERED,
@@ -521,6 +521,44 @@ class BalldontlieProvider:
             unreadable=tuple(unreadable),
             results=tuple(results),
         )
+
+    def read_season_page(self, season: int, *, cursor: str | None = None, before: date | None = None) -> SeasonPage:
+        """One page of ``season``'s regular-season games, from ``cursor`` (the first page without one), in one
+        request: the finals on it that count toward the records, those of games filed on or after ``before`` left
+        out when it's given, and the cursor of the page after it."""
+        query = _season_query(season)
+        exchange, body = self._ask("/v1/games", query if cursor is None else (*query, ("cursor", cursor)))
+        at = self._clock.monotonic()
+        if body is None:
+            return SeasonPage(at=at, outcome=exchange.outcome, exchanges=(exchange,), detail=exchange.detail)
+        results, unreadable = self._results(body["data"], at, before)
+        return SeasonPage(
+            at=at,
+            outcome=FetchOutcome.ANSWERED,
+            exchanges=(exchange,),
+            unreadable=tuple(unreadable),
+            results=tuple(results),
+            cursor=_cursor(body),
+        )
+
+    def _results(
+        self, rows: list[Any], at: MonotonicTime, before: date | None
+    ) -> tuple[list[GameResult], list[Unreadable]]:
+        """The finals among a season's rows that count toward the records, those filed on or after ``before`` left
+        out, and the rows that couldn't be read."""
+        results: list[GameResult] = []
+        unreadable: list[Unreadable] = []
+        for row in rows:
+            try:
+                game, _ = self._slate_game(row, at)
+            except _Unreadable as exc:
+                unreadable.append(Unreadable(problem=exc.problem, detail=exc.detail, game=_game_id(row)))
+                continue
+            filed = game.game.provider_date
+            assert filed is not None  # every row is filed under its date
+            if game.result is not None and (before is None or filed < before):
+                results.append(game.result)
+        return results, unreadable
 
     def _track(self, game_id: int, away_team: int, home_team: int) -> None:
         """Remember a game's clubs by their feed ids, keeping the lines already read."""
@@ -688,6 +726,10 @@ class BalldontlieHttp:
             if self._key in str(exc):
                 raise ConnectionError(f"{type(exc).__name__}, its message withheld: it named the key") from None
             raise
+
+
+def _season_query(season: int) -> BdlQuery:
+    return (("seasons[]", str(season)), ("postseason", "false"), ("per_page", str(PAGE_SIZE)))
 
 
 def _feed_id(game: LeagueScopedId) -> int:

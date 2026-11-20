@@ -37,6 +37,7 @@ from omni.app.loop import AppLoop, Painted, QuotaNote
 from omni.app.nfl_feeds import NflFeeds
 from omni.app.nfl_pipeline import LiveFootballPipeline
 from omni.app.planned_mlb import MLB_POLICIES, PlannedMlb
+from omni.app.planned_nba import MeteredBdl, PlannedNba, nba_accounts, nba_policies
 from omni.app.planned_nfl import NFL_POLICIES, PlannedNfl, nfl_accounts
 from omni.app.poll_plan import AccountMap, PollPlan
 from omni.app.poller import Poller
@@ -47,7 +48,15 @@ from omni.app.pipeline import (
     PregameDetailsFetcher,
     WinProbFetcher,
 )
-from omni.app.quota import HttpAnswer, Meter, MeteredHttp, ProviderAccount, QuotaLedger, nflmeta_billed
+from omni.app.quota import (
+    BalldontliePlan,
+    HttpAnswer,
+    Meter,
+    MeteredHttp,
+    ProviderAccount,
+    QuotaLedger,
+    nflmeta_billed,
+)
 from omni.app.supervisor import BackoffPolicy, ProviderSupervisor
 from omni.app.trace import DecisionTracer
 from omni.app.versions import Versions
@@ -57,7 +66,9 @@ from omni.core.time import DurationSeconds
 from omni.domain.contest import TeamGame
 from omni.events.baseball import LiveBaseballFeed
 from omni.preferences.favorites import Favorites
+from omni.providers.balldontlie import BalldontlieProvider, BdlFetch
 from omni.providers.base import PollScope, Provider, ProviderError, ScopeSource
+from omni.providers.nba_teams import NbaTeamRegistry
 from omni.providers.nfl_teams import NflTeamRegistry
 from omni.providers.nflmeta import NFLMETA_SOURCE, NflMetaLiveProvider
 from omni.queue.delay_policy import DelayPolicy
@@ -76,6 +87,7 @@ __all__ = [
     "build_loop",
     "build_planned_loop",
     "paint_frame",
+    "planned_nba_source",
     "planned_nfl_source",
     "run_forever",
     "warm_up",
@@ -266,14 +278,25 @@ def _no_baseball(game: TeamGame, now: datetime) -> LiveBaseballFeed:
     raise ProviderError(f"{game.id}: MLB isn't on this board")
 
 
-def board_plan(*, ledger: QuotaLedger | None, mlb: AccountMap | None, nfl: bool) -> PollPlan:
+def board_plan(
+    *, ledger: QuotaLedger | None, mlb: AccountMap | None, nfl: bool, nba: BalldontliePlan | None = None
+) -> PollPlan:
     """The one plan the board's leagues ask through: MLB's reads when ``mlb`` names the accounts they spend
-    (`omni.app.planned_mlb.mlb_accounts`), NFL's with ``nfl``, every NFL read spending NFLMeta's account. The
+    (`omni.app.planned_mlb.mlb_accounts`), NFL's with ``nfl``, every NFL read spending NFLMeta's account, and NBA's
+    when ``nba`` names the BALLDONTLIE tier they're paced for, every one spending BALLDONTLIE's account. The
     ``ledger`` admits each ask against its account's quota."""
-    if mlb is None and not nfl:
+    if mlb is None and not nfl and nba is None:
         raise ValueError("a board's plan needs at least one league")
-    policies = {**(MLB_POLICIES if mlb is not None else {}), **(NFL_POLICIES if nfl else {})}
-    sources = {**(mlb.sources if mlb is not None else {}), **(nfl_accounts().sources if nfl else {})}
+    policies = {
+        **(MLB_POLICIES if mlb is not None else {}),
+        **(NFL_POLICIES if nfl else {}),
+        **(nba_policies(nba) if nba is not None else {}),
+    }
+    sources = {
+        **(mlb.sources if mlb is not None else {}),
+        **(nfl_accounts().sources if nfl else {}),
+        **(nba_accounts().sources if nba is not None else {}),
+    }
     kinds = mlb.kinds if mlb is not None else {}
     return PollPlan(policies, ledger=ledger, accounts=AccountMap(sources=sources, kinds=kinds))
 
@@ -292,6 +315,22 @@ def planned_nfl_source(
     provider = NflMetaLiveProvider(NflTeamRegistry.default(source=NFLMETA_SOURCE), fetch=MeteredHttp(get, meter))
     planned = PlannedNfl(plan, clock, provider, favorites=favorites)
     return NflSource(schedule=planned, feeds=planned, held_back=planned.held_back)
+
+
+def planned_nba_source(
+    plan: PollPlan,
+    clock: Clock,
+    fetch: BdlFetch,
+    *,
+    ledger: QuotaLedger,
+    tier: BalldontliePlan,
+    log: Callable[[str], None] = print,
+) -> PlannedNba:
+    """NBA on the board: BALLDONTLIE read through ``fetch`` on ``plan`` at ``tier``'s pace, each request charged to
+    BALLDONTLIE's account on the ``ledger``, and its word on its minute heeded (`omni.app.planned_nba.MeteredBdl`)."""
+    meter = Meter(ledger, ProviderAccount.BALLDONTLIE, clock)
+    provider = BalldontlieProvider(NbaTeamRegistry.default(), fetch=MeteredBdl(fetch, meter, clock), clock=clock)
+    return PlannedNba(plan, clock, provider, tier=tier, log=log)
 
 
 def warm_up(loop: AppLoop, poller: Poller, clock: Clock) -> None:

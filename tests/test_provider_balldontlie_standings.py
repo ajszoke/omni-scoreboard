@@ -107,6 +107,29 @@ def test_a_failed_season_read_counts_nothing() -> None:
     assert (read.outcome, read.results) == (FetchOutcome.RATE_LIMITED, ())
 
 
+def test_a_season_read_a_page_at_a_time_asks_one_request_a_page_and_names_the_next() -> None:
+    provider, fetch = _provider(ok(*SEASON[:6], cursor=6), ok(*SEASON[6:]))
+    first = provider.read_season_page(2026)
+    assert first.complete and first.cursor == "6" and len(first.exchanges) == 1
+    assert [result.game.raw for result in first.results] == ["1", "2", "3", "4", "5", "6"]
+    last = provider.read_season_page(2026, cursor=first.cursor)
+    assert last.cursor is None and [result.game.raw for result in last.results] == ["7"]
+    assert fetch.asked[1][1][-1] == ("cursor", "6")
+
+
+def test_a_season_page_leaves_out_the_finals_filed_on_or_after_a_date() -> None:
+    later = _final(13, "UTA", "LAL", AWAY, date="2026-11-19")
+    provider, _ = _provider(ok(SEASON[0], later), ok(SEASON[0], later))
+    assert [each.game.raw for each in provider.read_season_page(2026, before=date(2026, 11, 19)).results] == ["1"]
+    assert [each.game.raw for each in provider.read_season_page(2026, before=date(2026, 11, 20)).results] == ["1", "13"]
+
+
+def test_a_failed_season_page_counts_nothing_and_says_why() -> None:
+    provider, _ = _provider(BdlAnswer(401, "", {}))
+    page = provider.read_season_page(2026)
+    assert (page.outcome, page.results, page.cursor, page.detail) == (FetchOutcome.UNAUTHORIZED, (), None, "HTTP 401")
+
+
 def test_records_count_the_regular_season_finals() -> None:
     standings = _standings()
     records = {abbreviation: _record(standings, abbreviation) for abbreviation in ("LAL", "GSW", "UTA", "PHX", "SAC")}
