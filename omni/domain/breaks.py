@@ -4,13 +4,13 @@ A break is a stretch when a game pauses: an inning break, a timeout, a quarter b
 lends a favorite's breaks to other games (`omni.policy`), so a break must be evidenced, never guessed.
 Each observation says what kind of break it is, which break (so a re-read of the same one renews nothing),
 when it was first received, when it began if the feed says so credibly (and what that instant is: the stoppage's
-own time, the feed's write of its row, or a hold this board counts), when the answer that showed it stood, any
+own time, the feed's write of its row, a hold this board counts, or the first read that showed play stopped), when the answer that showed it stood, any
 length the feed states, and how sure the evidence is. Each league's detector builds these from its parsed feed;
 once the viewer's delay releases one, it also carries the release instant pinned for its answer. The policy turns
 them into leases, which are ceilings, not promises.
 
 Times follow the clock rule: when the break began and when its answer stood are instants on the source's clock (UTC),
-but for a local hold's start, which is on ours; when the evidence arrived is a `ClockReading`, and its release a
+but for a local hold's start or a first read's arrival, which are on ours; when the evidence arrived is a `ClockReading`, and its release a
 monotonic instant, so a lease is anchored on the monotonic clock.
 
 How long a break had run when its evidence arrived (`BreakAge`) says how it's known: told on the source's own clock,
@@ -47,8 +47,8 @@ class BreakKind(StrEnumMixin, str, Enum):
     NFL_HALFTIME = "nfl halftime"
     NFL_INJURY_TIMEOUT = "nfl injury timeout"
     NFL_REVIEW = "nfl review"  # a review in progress, not its ruling
-    NBA_TEAM_TIMEOUT = "nba team timeout"  # one team's timeouts went down by one, coherently
-    NBA_TV_TIMEOUT = "nba tv timeout"  # a mandatory TV timeout; Free can't tell one
+    NBA_TEAM_TIMEOUT = "nba team timeout"  # a short timeout: a quarter's third or later, or one in overtime
+    NBA_TV_TIMEOUT = "nba tv timeout"  # a long one: a regulation quarter's first or second, the TV timeouts
     NBA_QUARTER_BREAK = "nba quarter break"  # after the first or third quarter
     NBA_HALFTIME = "nba halftime"
     NBA_BEFORE_OVERTIME = "nba before overtime"
@@ -75,6 +75,12 @@ class OnsetBasis(StrEnumMixin, str, Enum):
     EVENT = "event"  # the source's time for the stoppage itself: a mound visit's start, a half's last out
     PUBLISHED = "published"  # when the source wrote the row that names it: the stoppage began no later
     LOCAL_HOLD = "local_hold"  # when a hold this board counts began, on this board's clock (NFL's halftime hold)
+    LOCAL_READ = "local_read"  # the arrival of the first read that showed play stopped, on this board's clock (NBA's)
+
+    @property
+    def local(self) -> bool:
+        """Whether the onset is on this board's clock, never to be compared with the source's."""
+        return self in (OnsetBasis.LOCAL_HOLD, OnsetBasis.LOCAL_READ)
 
 
 class AgeBasis(StrEnumMixin, str, Enum):
@@ -82,6 +88,7 @@ class AgeBasis(StrEnumMixin, str, Enum):
 
     SAME_SOURCE = "same_source"  # its answer's time less its onset, both on the source's clock, and the transport
     LOCAL_HOLD = "local_hold"  # from a local hold's start to the evidence's receipt, both on this board's clock
+    LOCAL_READ = "local_read"  # from the first read that showed play stopped to the evidence's receipt, likewise
     PROVISIONAL = "provisional"  # the onset can't be told: one poll interval
 
 

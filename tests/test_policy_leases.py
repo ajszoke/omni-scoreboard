@@ -310,6 +310,7 @@ def test_an_onset_after_its_answer_within_the_seconds_rounding_counts_as_fresh()
     [
         (BreakKind.NBA_QUARTER_BREAK, False, 135),
         (BreakKind.NBA_QUARTER_BREAK, True, 195),
+        (BreakKind.NBA_TV_TIMEOUT, False, 165),
         (BreakKind.NBA_TV_TIMEOUT, True, 165),
         (BreakKind.NBA_HALFTIME, True, 840),
         (BreakKind.NFL_HALFTIME, False, 900),

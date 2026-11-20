@@ -36,7 +36,7 @@ from typing import Generic, TypeVar
 from omni.cards.base import DedupeKey
 from omni.core.clock import ClockReading, MonotonicTime
 from omni.core.enum import SeasonStage
-from omni.domain.breaks import BreakEvidence, BreakId, OnsetBasis
+from omni.domain.breaks import BreakEvidence, BreakId
 from omni.domain.contest import TeamGame
 from omni.events.break_detection import ActionEvidence
 from omni.policy.allocation import interrupt_quality
@@ -163,7 +163,7 @@ def _later(action: ActionEvidence, current: ActionEvidence | None) -> bool:
 def _after(action: ActionEvidence, evidence: BreakEvidence) -> bool:
     """Whether ``action`` came after the break began: by the source's clock when both say, else by its new marker. A
     local hold's start is on this board's clock, never compared with the source's."""
-    if action.at is None or evidence.onset is None or evidence.onset_basis is OnsetBasis.LOCAL_HOLD:
+    if action.at is None or evidence.onset is None or evidence.onset_basis.local:
         return True
     return action.at > evidence.onset
 
