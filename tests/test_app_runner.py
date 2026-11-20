@@ -299,12 +299,15 @@ def test_the_board_runs_mlb_alone_unless_nfl_is_asked_for() -> None:
     assert _parse_args(["--profile", "quad_128x64", "--leagues", "mlb,nfl"]).leagues == {League.MLB, League.NFL}
     assert _parse_args(["--profile", "quad_128x64", "--leagues", "mlb"]).leagues == {League.MLB}
     assert _parse_args(["--profile", "quad_128x64", "--leagues", " NFL , mlb"]).leagues == {League.MLB, League.NFL}
+    three = _parse_args(["--profile", "quad_128x64", "--leagues", "mlb,nfl,nba"]).leagues
+    assert three == {League.MLB, League.NFL, League.NBA}
+    assert _parse_args(["--profile", "quad_128x64", "--leagues", "nba"]).leagues == {League.NBA}
 
 
 @pytest.mark.parametrize(
     ("leagues", "message"),
     [
-        ("mlb,nba", "--leagues mlb,nba: the board can't run nba yet (only mlb and nfl)"),
+        ("mlb,nhl", "--leagues mlb,nhl: the board can't run nhl yet (only mlb, nfl and nba)"),
         ("xfl", "--leagues xfl: unknown league 'xfl'"),
         (",", "--leagues: name at least one league"),
     ],

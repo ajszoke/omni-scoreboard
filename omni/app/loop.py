@@ -9,7 +9,7 @@ The board refreshes and paints on separate cadences:
      scope that fails keeps what it had and another league's scopes carry on regardless;
   3. run each league's card pipeline (delay-safe, no spoilers) over its own games, both staging into the one card
      queue, and drop what can no longer air: `LiveBaseballPipeline` over the baseball games, and, when the board
-     has NFL, `LiveFootballPipeline` over the NFL games. No game reaches a pipeline that can't draw it: another
+     has them, `LiveFootballPipeline` over the NFL games and `LiveBasketballPipeline` over the NBA games. No game reaches a pipeline that can't draw it: another
      league's games stay members, and count toward its health, but have no cards until a pipeline of their own
      joins the board. Each pipeline gets the whole clock reading: its holds are pinned, and released, on the
      monotonic clock, so a wall-clock jump can't release one early. What they did is reported as one result;
@@ -86,6 +86,7 @@ from typing import Any, Protocol, runtime_checkable
 from omni.app.contest_store import ContestStore, ProviderStatus, Reconciliation, ScopeHealth
 from omni.app.display import DisplaySink
 from omni.app.frame_stream import AcknowledgingSink, DisplayLost
+from omni.app.nba_pipeline import LiveBasketballPipeline
 from omni.app.nfl_pipeline import LiveFootballPipeline
 from omni.app.pipeline import (
     FeedFetcher,
@@ -276,6 +277,7 @@ class AppLoop:
         offline_after: timedelta = OFFLINE_AFTER,
         quota: QuotaNote | None = None,
         football: LiveFootballPipeline | None = None,
+        basketball: LiveBasketballPipeline | None = None,
         settings: PolicySettings | None = None,
         favorites: Favorites = Favorites(),
         fresh_past_due: timedelta = FRESH_PAST_DUE,
@@ -290,6 +292,7 @@ class AppLoop:
         self._store = store
         self._pipeline = pipeline
         self._football = football  # NFL's cards, staged into the same queue; None: NFL's games have no cards
+        self._basketball = basketball  # NBA's, likewise
         self._queue = queue
         self._registry = registry
         self._sink = sink
@@ -352,6 +355,9 @@ class AppLoop:
         if self._football is not None:
             football = self._football.refresh([game for game in games if game.league is League.NFL], at=at)
             pipeline_result = _together(pipeline_result, football)
+        if self._basketball is not None:
+            basketball = self._basketball.refresh([game for game in games if game.league is League.NBA], at=at)
+            pipeline_result = _together(pipeline_result, basketball)
         unseen = tuple(self._queue.prune(at))
         leagues = tuple(self._judge(league) for league in self._store.league_healths(at.monotonic))
         health, status = self._health(leagues, pipeline_result)
@@ -466,6 +472,8 @@ class AppLoop:
         payload = cue.payload
         if self._football is not None and not isinstance(payload, BoardFrame):
             self._football.presented(payload, shown)  # every shown frame: a caption it carried has gone up
+        if self._basketball is not None and not isinstance(payload, BoardFrame):
+            self._basketball.presented(payload, shown, occurrence=cue.occurrence)  # its panel's halves, its captions
         if not self._board.committed(cue, shown, confirmed=confirmed):
             return
         if self._resuming is not None:
@@ -550,6 +558,8 @@ class AppLoop:
         self._pipeline.interrupted(interruption)
         if self._football is not None:
             self._football.interrupted(interruption)
+        if self._basketball is not None:
+            self._basketball.interrupted(interruption)
         self._taken = interruption.serial
 
     def _output_lost(self, lost: DisplayLost, at: ClockReading) -> Interruption:
@@ -591,7 +601,8 @@ class AppLoop:
         (it's dropped then, and traced as missed)."""
         missed = self._queue.next_miss(at)
         football = self._football.next_deadline(at) if self._football is not None else None
-        return earliest((self._pipeline.next_deadline(at), football, self._health_changes_at, missed))
+        basketball = self._basketball.next_deadline(at) if self._basketball is not None else None
+        return earliest((self._pipeline.next_deadline(at), football, basketball, self._health_changes_at, missed))
 
     def next_deadline(self, at: ClockReading) -> MonotonicTime | None:
         """When either pass next has something to do by itself, as of ``at``; watching for interruptions, at the

@@ -180,6 +180,9 @@ def test_nba_s_delay_and_tier_render_only_on_a_board_that_runs_nba() -> None:
     )
     assert nba.canonical() == "delay=0s;nba_delay=20s;nba_plan=all-star;profile=quad_128x64"
     assert "nba_" not in _mlb().config.canonical()
+    assert "nba_" not in _mlb("--nba-delay", "20").config.canonical()  # no NBA on the board: no NBA settings
+    board = _mlb("--leagues", "mlb,nba", "--nba-delay", "20", "--balldontlie-plan", "all-star").config.canonical()
+    assert "nba_delay=20s;nba_plan=all-star;" in board
 
 
 def test_a_board_policy_setting_given_as_its_default_is_the_default() -> None:
