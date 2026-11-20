@@ -40,7 +40,9 @@ revealed final folded in. Until a season read is in, a card shows none.
 
 **The policy's view** (`omni.policy.view.PolicyView`): each game carded live, from released state only: its leverage
 (the labeled proxy, `basketball_proxy`), whether its card is current, both clubs' records as they stood (unknown until
-the season is read), and whether it's an NBA Cup knockout game. NBA offers nothing for promotion.
+the season is read), whether it's an NBA Cup knockout game, and the break evidence the detector
+(`omni.events.nba_breaks`) found in each read, held through the delay with that read: its timeouts, begun and ended,
+and the breaks between periods. A catch-up's timeouts lend nothing. NBA offers nothing for promotion.
 
 **Priority** is the scheduler's bands: a game with one of NBA's favorites is in the favorite band; the others normal.
 """
@@ -57,6 +59,7 @@ from typing import Any, Generic, TypeVar
 from omni.app.nba_feeds import NbaFeeds, NbaReading
 from omni.app.nba_panel import BottomPanelQueue, PanelPolicy, PanelView, QueuedCaption
 from omni.app.pipeline import STALE_FOR, PipelineResult
+from omni.app.policy_facts import ReleasedBreaks
 from omni.cards.base import CardId, CardKind, CardPriority, DedupeKey, DisplayTiming, EndBasis, GameEnd, ScoreboardCard
 from omni.cards.basketball import (
     FINAL_LAYOUT,
@@ -77,6 +80,7 @@ from omni.domain.basketball import BasketballGameState, BasketballPhase, BySide,
 from omni.domain.basketball_reads import LinesRead, SlateRead
 from omni.domain.contest import TeamGame
 from omni.events.basketball_feed import BasketballFeedDeriver, FeedCaption, TimeoutEnd, TimeoutOnset
+from omni.events.nba_breaks import NbaBreaks
 from omni.policy.leverage import Leverage, basketball_proxy
 from omni.policy.pool import MatchupRecords, TeamRecord
 from omni.policy.view import GameFacts, PolicyView
@@ -151,6 +155,8 @@ class _Live:
     lines: DelayedFeed[LinesRead]
     captions: _Holding[_Told]
     timeouts: _Holding[TimeoutOnset | TimeoutEnd]
+    breaks: ReleasedBreaks  # its break evidence, held with the reads that showed it
+    detector: NbaBreaks
     deriver: BasketballFeedDeriver = field(default_factory=BasketballFeedDeriver)
     panel: BottomPanelQueue = field(default_factory=BottomPanelQueue)
     told: int = 0  # captions staged so far: each one's place
@@ -264,7 +270,7 @@ class LiveBasketballPipeline:
             ends=tuple(out.ends),
             unconfirmed=(),
             corrections=tuple(out.corrections),
-            policy=self._policy_view(),
+            policy=self._policy_view(at),
         )
 
     def presented(self, card: ScoreboardCard[Any], at: ClockReading, *, occurrence: int) -> None:
@@ -314,6 +320,7 @@ class LiveBasketballPipeline:
         for game_id, live in self._live.items():
             live.states, live.lines = DelayedFeed(self._guard), DelayedFeed(self._guard)
             live.captions, live.timeouts = _Holding(self._guard), _Holding(self._guard)
+            live.breaks, live.detector = ReleasedBreaks(self._guard), NbaBreaks(game_id)
             live.deriver = BasketballFeedDeriver()
             live.panel.reset()
             live.open.clear()
@@ -389,6 +396,8 @@ class LiveBasketballPipeline:
                 DelayedFeed(self._guard),
                 _Holding(self._guard),
                 _Holding(self._guard),
+                ReleasedBreaks(self._guard),
+                NbaBreaks(game.id),
                 panel=BottomPanelQueue(self._policy.panel),
             )
         live.game = game
@@ -415,11 +424,14 @@ class LiveBasketballPipeline:
     def _admit(
         self, game: TeamGame, live: _Live, reading: NbaReading, at: ClockReading, out: _Pass, *, catching_up: bool
     ) -> None:
-        """One read: through the deriver, its state or lines into the delay, and what the deriver told after it. A
-        read taken while the game's card is stale is a catch-up: what it told is history."""
+        """One read: through the deriver, its state or lines into the delay, what the deriver told after it, and the
+        break evidence it shows. A read taken while the game's card is stale is a catch-up: the plays and timeouts it
+        told are history, and lend nothing."""
         read = reading.read
         update = live.deriver.read(read)
         arrival = Arrival(received=reading.arrived)
+        shown = live.detector.read(read, replace(update, timeouts=()) if catching_up else update, reading.arrived)
+        live.breaks.push(shown, None, arrival, at)
         if isinstance(read, SlateRead):
             if read.state.phase is BasketballPhase.FINAL:
                 self._confirm_final(game, read.state, arrival, at)
@@ -698,10 +710,12 @@ class LiveBasketballPipeline:
 
     # --- what the board's policy reads ------------------------------------------------------------------------
 
-    def _policy_view(self) -> PolicyView:
-        """What the board's policy may read after this pass: each game carded live, from its newest released state."""
+    def _policy_view(self, at: ClockReading) -> PolicyView:
+        """What the board's policy may read after this pass: each game carded live, from its newest released state,
+        with the break evidence released with it."""
         games: dict[LeagueScopedId, GameFacts] = {}
         for game_id, live in self._live.items():
+            live.breaks.release(at)
             if live.card is None:
                 continue
             assert live.shown is not None  # a staged card shows the newest released state
@@ -712,6 +726,7 @@ class LiveBasketballPipeline:
                 fresh=game_id not in self._stale,
                 records=self._matchup(live.game),
                 cup_knockout=row is not None and row.cup in _KNOCKOUT,
+                breaks=live.breaks.breaks,
             )
         return PolicyView(MappingProxyType(games), ())
 

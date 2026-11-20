@@ -34,6 +34,7 @@ from omni.domain.basketball import (
     StandingRanks,
 )
 from omni.domain.basketball_reads import LinesRead, PlayerKey, RosterLine, SlateRead
+from omni.domain.breaks import BreakKind
 from omni.domain.contest import TeamGame
 from omni.events.basketball import FieldGoalMade, ShotValue, TimeoutTaken
 from omni.policy.leverage import ModelStatus
@@ -561,3 +562,26 @@ def test_a_stale_game_that_leaves_the_board_is_forgotten() -> None:
     board.feeds.rows.clear()
     result = board.pipeline.refresh((), at=board.clock.read())
     assert result.stale == () and [str(each) for each in result.removed] == ["nba:balldontlie:1"]
+
+
+def test_the_policy_reads_a_timeout_s_break_once_its_read_clears_the_delay_and_a_catch_up_s_lends_nothing() -> None:
+    board = _Board()
+    _under_way(board)
+    board.slate(_state(clock=5800))
+    board.run(2)
+    board.slate(_state(clock=5700))
+    board.run(2)
+    board.slate(_state(clock=5700, timeouts=(7, 6)))  # LAL's first timeout of the quarter, read at 35 s
+    assert board.refresh(29 * S).policy.facts(_game().id).breaks == ()  # type: ignore[union-attr]
+    facts = board.refresh(S).policy.facts(_game().id)
+    assert facts is not None
+    (timeout,) = facts.breaks
+    assert timeout.kind is BreakKind.NBA_TV_TIMEOUT and timeout.released == MonotonicTime(65.0)
+    caught = _Board()
+    caught.current_for = 5 * S
+    _under_way(caught)
+    caught.refresh(10 * S)  # stale: what comes next is a catch-up
+    caught.slate(_state(clock=5700, timeouts=(7, 6)))
+    caught.refresh(31 * S)
+    facts = caught.refresh(S).policy.facts(_game().id)
+    assert facts is None or facts.breaks == ()

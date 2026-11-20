@@ -1,6 +1,7 @@
 """What the league break detectors share: action evidence, the onset and age rules, and the capability matrix.
 
-Each league's detector (`omni.events.mlb_breaks`, `omni.events.nfl_breaks`) reads one answer about one game and gives two things:
+Each league's detector (`omni.events.mlb_breaks`, `omni.events.nfl_breaks`, `omni.events.nba_breaks`) reads one answer
+about one game and gives what it shows:
 - **break evidence** (`omni.domain.breaks.BreakEvidence`): the game has stopped, what kind of stop, which one,
   when it began if the feed says so credibly, and when that answer stood;
 - **action evidence** (`ActionEvidence`): the newest action the feed shows. A lease lent from a break ends
@@ -9,7 +10,8 @@ Each league's detector (`omni.events.mlb_breaks`, `omni.events.nfl_breaks`) read
 **A break's age at detection** (`detection_age`) is how long it had run when its evidence reached the board. It's
 told on the source's own clock where it can be: the answer's time less the onset, which no clock of ours enters,
 plus the answer's transport to us, measured when our clock and the source's agree well enough to measure it. A hold
-this board counts itself (NFL's halftime) is aged on our clock alone. When neither can be told, one poll interval
+this board counts itself (NFL's halftime), or an onset this board inferred from its own reads (NBA's timeouts), is aged
+on our clock alone. When neither can be told, one poll interval
 stands in, marked provisional. The viewer's delay never enters it: that lives in the release instant pinned for the
 answer.
 
@@ -82,15 +84,16 @@ def credible_onset(onset: datetime | None, *, as_of: datetime | None) -> datetim
 def detection_age(evidence: BreakEvidence, *, poll_interval: timedelta) -> BreakAge:
     """How long the break had run when its evidence arrived, and how that's known.
 
-    - **A local hold:** from its start to the evidence's receipt, both on this board's clock.
+    - **A local hold, or a first read's arrival:** from it to the evidence's receipt, both on this board's clock.
     - **An onset on the source's clock:** the answer's time less the onset, plus the transport from when the answer
       stood to its receipt. The transport is measured while it's plausible (no more than `TRANSPORT_LIMIT`, and the
       source's clock no further ahead of ours than `SOURCE_LEAD`); otherwise one poll interval stands in, marked.
     - **No onset to tell, or none coherent with its answer's time:** one poll interval, marked provisional.
     """
     onset, received = evidence.onset, evidence.received.utc
-    if onset is not None and evidence.onset_basis is OnsetBasis.LOCAL_HOLD:
-        return BreakAge(age=max(received - onset, _ZERO), basis=AgeBasis.LOCAL_HOLD)
+    if onset is not None and evidence.onset_basis.local:
+        basis = AgeBasis.LOCAL_HOLD if evidence.onset_basis is OnsetBasis.LOCAL_HOLD else AgeBasis.LOCAL_READ
+        return BreakAge(age=max(received - onset, _ZERO), basis=basis)
     as_of = evidence.as_of
     if onset is None or as_of is None or onset > as_of + SOURCE_LEAD:
         return BreakAge(age=poll_interval, basis=AgeBasis.PROVISIONAL, uncertainty=poll_interval)
@@ -128,7 +131,9 @@ class BreakCapability:
 
 _EXPLICIT = BreakConfidence.EXPLICIT
 _WRITTEN = "when the feed wrote the row (changed_at): its publication, so the stoppage began no later"
-_NO_NBA = "no NBA detector yet: NBA isn't on the shared board"
+_DROP = "the slate's {side}_timeouts_remaining down by one, coherently (the feed deriver)"
+_INFERRED = "the deriver's inferred onset: the arrival of the first read at the clock the timeout stopped"
+_INFERRED_CONFIDENCE = BreakConfidence.INFERRED
 
 _CAPABILITIES = (
     BreakCapability(
@@ -212,11 +217,31 @@ _CAPABILITIES = (
         confidence=None,
         signal="nothing marks a review in progress: the feed writes only the ruling, into the reviewed play's row",
     ),
-    BreakCapability(kind=BreakKind.NBA_TEAM_TIMEOUT, confidence=None, signal=_NO_NBA),
-    BreakCapability(kind=BreakKind.NBA_TV_TIMEOUT, confidence=None, signal=_NO_NBA),
-    BreakCapability(kind=BreakKind.NBA_QUARTER_BREAK, confidence=None, signal=_NO_NBA),
-    BreakCapability(kind=BreakKind.NBA_HALFTIME, confidence=None, signal=_NO_NBA),
-    BreakCapability(kind=BreakKind.NBA_BEFORE_OVERTIME, confidence=None, signal=_NO_NBA),
+    BreakCapability(
+        kind=BreakKind.NBA_TEAM_TIMEOUT,
+        confidence=_INFERRED_CONFIDENCE,
+        signal=_DROP.format(side="visitor or home") + ", the third or later of a regulation quarter, or in overtime",
+        onset=_INFERRED,
+    ),
+    BreakCapability(
+        kind=BreakKind.NBA_TV_TIMEOUT,
+        confidence=_INFERRED_CONFIDENCE,
+        signal=_DROP.format(side="visitor or home") + ", the first or second of a regulation quarter",
+        onset=_INFERRED,
+    ),
+    BreakCapability(
+        kind=BreakKind.NBA_QUARTER_BREAK, confidence=_EXPLICIT, signal='the slate\'s time "END Q1" or "END Q3"'
+    ),
+    BreakCapability(
+        kind=BreakKind.NBA_HALFTIME,
+        confidence=_EXPLICIT,
+        signal='the slate\'s time "Half" (or a "Halftime" status), or "END Q2"',
+    ),
+    BreakCapability(
+        kind=BreakKind.NBA_BEFORE_OVERTIME,
+        confidence=_EXPLICIT,
+        signal='the slate\'s time "END Q4" (or the end of an overtime) with the score tied',
+    ),
 )
 
 BREAK_CAPABILITIES: Mapping[BreakKind, BreakCapability] = {row.kind: row for row in _CAPABILITIES}
