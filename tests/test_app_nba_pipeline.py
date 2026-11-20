@@ -10,7 +10,7 @@ from typing import Any
 
 from omni.app.nba_feeds import NbaReading, SeasonResults
 from omni.app.nba_pipeline import LiveBasketballPipeline, NbaCardPolicy
-from omni.app.pipeline import PipelineResult
+from omni.app.pipeline import MeterReading, PipelineResult
 from omni.cards.base import CardKind, ScoreboardCard
 from omni.cards.basketball import (
     BasketballGameCardPayload,
@@ -24,8 +24,9 @@ from omni.core.clock import ClockReading, FakeClock, MonotonicTime
 from omni.core.enum import DisplayPriority, GameStatus, HomeAway, League, SeasonStage
 from omni.core.ids import LeagueScopedId
 from omni.core.time import DurationSeconds
-from omni.domain.baseball import WinLossRecord
+from omni.domain.baseball import WinLossRecord, WinProbability
 from omni.domain.basketball import (
+    FavoriteLine,
     BasketballGameState,
     BasketballPhase,
     BasketballSide,
@@ -101,6 +102,8 @@ class _Feeds:
     waiting: dict[LeagueScopedId, list[NbaReading]] = field(default_factory=dict)
     newest: dict[LeagueScopedId, NbaReading] = field(default_factory=dict)
     results: SeasonResults | None = None
+    odds: FavoriteLine | None = None
+    market: list[MeterReading] = field(default_factory=list)  # the market's readings, as they arrived
 
     def take(self, game: TeamGame) -> list[NbaReading]:
         return self.waiting.pop(game.id, [])
@@ -113,6 +116,13 @@ class _Feeds:
 
     def season(self) -> SeasonResults | None:
         return self.results
+
+    def line(self, game: TeamGame) -> FavoriteLine | None:
+        return self.odds
+
+    def win_probability(self, game: TeamGame, as_of: ClockReading) -> MeterReading | None:
+        arrived = [reading for reading in self.market if reading.received.monotonic <= as_of.monotonic]
+        return arrived[-1] if arrived else None
 
 
 class _Board:
@@ -585,3 +595,36 @@ def test_the_policy_reads_a_timeout_s_break_once_its_read_clears_the_delay_and_a
     caught.refresh(31 * S)
     facts = caught.refresh(S).policy.facts(_game().id)
     assert facts is None or facts.breaks == ()
+
+
+def test_the_pregame_card_carries_the_favorite_s_line_when_the_sportsbook_has_one() -> None:
+    board = _Board()
+    board.feeds.odds = FavoriteLine(favorite=H, moneyline=-260, spread=-6.5)
+    game = _game(status=GameStatus.SCHEDULED)
+    board.feeds.rows[game.id] = SlateGame(
+        game=game,
+        status=FeedStatus.SCHEDULED,
+        phase=BasketballPhase.SCHEDULED,
+        pregame=Pregame(phase=BasketballPhase.SCHEDULED, tip=T0),
+    )
+    board.refresh(timedelta(0), game)
+    card = board.card("pregame", game)
+    assert card is not None and card.payload.line == board.feeds.odds
+
+
+def test_the_meter_stands_beside_a_state_only_with_a_reading_no_newer_than_it_and_ages_out() -> None:
+    board = _Board()
+    early = MeterReading(WinProbability(home=60.0, away=40.0), board.clock.read())
+    board.feeds.market.append(early)
+    board.slate(_state())
+    board.clock.advance(5 * S)
+    board.feeds.market.append(MeterReading(WinProbability(home=70.0, away=30.0), board.clock.read()))  # after it
+    board.refresh(26 * S)
+    card = board.card()
+    assert card is not None and card.payload.win_probability == early.value  # not the later one
+    older = ClockReading(T0 - S, MonotonicTime(-1.0))
+    board.feeds.market.append(MeterReading(WinProbability(home=55.0, away=45.0), older))  # handed on late
+    board.refresh(S)
+    assert board.card().payload.win_probability == early.value  # type: ignore[union-attr]  # an older one doesn't replace it
+    board.refresh(4 * 60 * S)  # past the delay and three minutes since it arrived
+    assert board.card().payload.win_probability is None  # type: ignore[union-attr]

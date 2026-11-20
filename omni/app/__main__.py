@@ -42,9 +42,11 @@ The trace opens with what the run decides with (`omni.app.versions`): the board 
 settings that change its decisions (spelled out on the line under it), the rule table, and the commit.
 
 The live win meter is off unless ``--meter`` is given. With it, and with ``OMNI_CLOUD_URL`` and
-``OMNI_CLOUD_TOKEN`` in the environment or a git-ignored ``.env``, the meter reads Omni's market
+``OMNI_CLOUD_TOKEN`` in the environment or a git-ignored ``.env``, MLB's meter reads Omni's market
 service (``cloud/``); without them it reads Polymarket's public quotes. Either way MLB's model takes
-over when the market has nothing.
+over when the market has nothing. NBA's meter always reads Polymarket's public quotes: the market service files
+NBA's games under its own listing's ids, which aren't the board's. The pregame odds (Bovada's coupon, MLB's and NBA's)
+are on unless ``--no-odds``.
 
 Every request is counted against its provider account's quota (`omni.app.quota`), and the month's counts
 are kept under ``--state-dir`` so a restart doesn't forget them. ``--nflmeta-plan`` names the plan of the
@@ -54,6 +56,7 @@ NFLMeta key, free unless you say otherwise.
 from __future__ import annotations
 
 import argparse
+import functools
 import os
 import shlex
 from collections.abc import Callable, Collection, Iterable
@@ -84,9 +87,15 @@ from omni.tower.board import BoardPolicy
 from omni.tower.interruption import InterruptionPolicy
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from omni.app.planned_mlb import OddsReader
+    from omni.app.planned_nba import MarketReader as NbaMarketReader
+    from omni.app.planned_nba import NbaOddsReader
     from omni.app.poll_plan import AccountMap
     from omni.app.quota import QuotaLedger
+    from omni.domain.basketball import FavoriteLine
+    from omni.domain.contest import TeamGame
     from omni.providers.market_service import ServiceTransport
     from omni.providers.mlb_statsapi import MlbStatsApiProvider
 
@@ -403,8 +412,16 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
 
         nba_key = keys.get(League.NBA)
         assert nba_key is not None  # NBA runs only with a key
+        odds, market = _nba_market(args, clock, ledger)
         planned_nba = planned_nba_source(
-            plan, clock, BalldontlieHttp(nba_key), ledger=ledger, tier=tier, log=lambda line: print(line, flush=True)
+            plan,
+            clock,
+            BalldontlieHttp(nba_key),
+            ledger=ledger,
+            tier=tier,
+            odds=odds,
+            market=market,
+            log=lambda line: print(line, flush=True),
         )
         nba = NbaSource.of(planned_nba)
 
@@ -449,7 +466,8 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
     print(
         f"omni.app: {profile.value}, leagues {on}, delay {args.delay}s (nfl {args.nfl_delay}s, nba {args.nba_delay}s),"
         f" nba {tier.label}, favorites"
-        f" {args.favorites}, meter {mlb.meter if mlb is not None else 'off'} — {target}"
+        f" {args.favorites}, meter {mlb.meter if mlb is not None else 'off'}"
+        f"{' (nba: Polymarket public quotes)' if nba is not None and args.meter else ''} — {target}"
     )
     if board is not None:
         board.start()
@@ -525,6 +543,33 @@ def _mlb(
             market, meter = PolymarketUsProvider(fetch=quotes).win_probability, "Polymarket public quotes"
     accounts = mlb_accounts(provider.source, market=market_account)
     return _Mlb(provider, odds.lines_for if odds is not None else None, market, meter, accounts)
+
+
+def _nba_market(
+    args: argparse.Namespace, clock: SystemClock, ledger: QuotaLedger
+) -> tuple[NbaOddsReader | None, NbaMarketReader | None]:  # pragma: no cover - drives the network
+    """NBA's pregame line from Bovada's NBA coupon unless ``--no-odds``, and with ``--meter`` its win meter from
+    Polymarket's public quotes, each request counted."""
+    from omni.providers import bovada_odds
+    from omni.providers.bovada_odds import BovadaCoupon, BovadaOddsProvider, favorite_line
+    from omni.providers.polymarket_us import PolymarketUsProvider, fetch_market_data
+
+    odds: NbaOddsReader | None = None
+    if not args.no_odds:
+        coupon = Meter(ledger, ProviderAccount.BOVADA, clock).counted(
+            functools.partial(bovada_odds._default_fetch, BovadaCoupon.NBA)
+        )
+        sportsbook = BovadaOddsProvider(fetch=coupon, coupon=BovadaCoupon.NBA)
+
+        def odds(game: TeamGame, now: datetime) -> FavoriteLine | None:
+            lines = sportsbook.lines_for(game, now)
+            return favorite_line(lines) if lines is not None else None
+
+    market: NbaMarketReader | None = None
+    if args.meter:
+        quotes = Meter(ledger, ProviderAccount.POLYMARKET_US, clock).counted(fetch_market_data)
+        market = PolymarketUsProvider(fetch=quotes).win_probability
+    return odds, market
 
 
 class _CountedTransport:  # pragma: no cover - wraps the real network

@@ -16,6 +16,8 @@ from omni.app.nba_feeds import NbaReading
 from omni.app.planned_mlb import mlb_accounts
 from omni.app.planned_nba import (
     EASTERN,
+    MarketReader,
+    NbaOddsReader,
     MeteredBdl,
     NbaSchedulePolicy,
     PlannedNba,
@@ -27,10 +29,11 @@ from omni.app.poll_plan import AccountMap, Demand, PollKey, PollPlan, PollPriori
 from omni.app.poller import Poller
 from omni.app.quota import BalldontliePlan, Meter, ProviderAccount, QuotaLedger, Refusal, account_limits
 from omni.app.runner import board_plan, planned_nba_source
-from omni.core.clock import FakeClock
-from omni.core.enum import League
+from omni.core.clock import ClockReading, FakeClock, MonotonicTime
+from omni.core.enum import HomeAway, League
 from omni.core.ids import LeagueScopedId
-from omni.domain.basketball import BasketballPhase
+from omni.domain.baseball import WinProbability
+from omni.domain.basketball import BasketballPhase, FavoriteLine
 from omni.domain.basketball_reads import LinesRead, SlateRead
 from omni.domain.contest import TeamGame
 from omni.providers.balldontlie import BALLDONTLIE_SOURCE, BalldontlieProvider, BdlAnswer, BdlQuery
@@ -151,13 +154,15 @@ def _board(
     days: dict[date, list[dict[str, Any]]] | None = None,
     season: list[dict[str, Any]] | None = None,
     ledger: QuotaLedger | None = None,
+    odds: NbaOddsReader | None = None,
+    market: MarketReader | None = None,
 ) -> _Board:
     clock = FakeClock(at)
     bdl = _Bdl(clock, days={day.isoformat(): rows for day, rows in (days or {}).items()}, season=season or [])
     ledger = ledger if ledger is not None else QuotaLedger(account_limits(balldontlie=tier))
     plan = board_plan(ledger=ledger, mlb=None, nfl=False, nba=tier)
     said: list[str] = []
-    nba = planned_nba_source(plan, clock, bdl, ledger=ledger, tier=tier, log=said.append)
+    nba = planned_nba_source(plan, clock, bdl, ledger=ledger, tier=tier, odds=odds, market=market, log=said.append)
     return _Board(clock, bdl, plan, Poller(plan, clock), nba, ledger, said)
 
 
@@ -556,3 +561,50 @@ def test_a_read_filed_after_a_newer_one_is_taken_in_its_place_but_never_the_newe
     board.nba._keep(board.nba._games[game.id], first)  # as a worker that raced another files it late
     assert board.nba.latest(game) == newest
     assert board.nba.take(game)[0] == first  # handed over in its place by when it arrived
+
+
+# --- the odds and the meter ----------------------------------------------------------------------------------------
+
+
+def test_an_upcoming_game_s_line_and_a_game_s_meter_are_read_on_their_own_accounts_as_the_card_asks() -> None:
+    tip = _tip(WEDNESDAY, 19)
+    line = FavoriteLine(favorite=HomeAway.HOME, moneyline=-150, spread=-3.5)
+    quotes: list[WinProbability | None] = [WinProbability(home=58.0, away=42.0), None]
+
+    def odds(game: TeamGame, now: datetime) -> FavoriteLine | None:
+        return line
+
+    def market(game: TeamGame, now: datetime) -> WinProbability | None:
+        return quotes.pop(0)
+
+    board = _board(_et(WEDNESDAY, 19, 30), days={WEDNESDAY: [_live(1, "UTA", "LAL", tip)]}, odds=odds, market=market)
+    board.step()
+    game = board.game(1)
+    assert board.nba.line(game) is None and board.nba.win_probability(game, board.clock.read()) is None  # asked
+    board.poller.run_due()
+    assert board.nba.line(game) == line
+    reading = board.nba.win_probability(game, board.clock.read())
+    assert reading is not None and reading.value.home == 58.0
+    assert board.nba.win_probability(game, ClockReading(_et(WEDNESDAY, 19), MonotonicTime(-1.0))) is None  # not yet
+    accounts = board.plan.accounts
+    assert accounts is not None
+    assert accounts.account(PollSource.GAME_LINES, BALLDONTLIE_SOURCE) is ProviderAccount.BOVADA
+    assert accounts.account(PollSource.PUBLIC_MARKET, BALLDONTLIE_SOURCE) is ProviderAccount.POLYMARKET_US
+    board.clock.advance(15 * S)
+    board.nba.win_probability(game, board.clock.read())
+    board.poller.run_due()
+    assert board.nba.win_probability(game, board.clock.read()) is None  # the market has nothing now
+    gap = Interruption(
+        serial=1, reason=InterruptionReason.PROCESS_STALL, before=board.clock.read(), after=board.clock.read()
+    )
+    board.nba.interrupted(gap, held=(), contests=(game.id, LeagueScopedId(League.MLB, MLB_STATSAPI_SOURCE, "1")))
+    assert board.plan.latest(PollKey(PollSource.PUBLIC_MARKET, game.id), board.clock.read()) is None
+    assert board.nba.line(game) == line  # the odds stand
+
+
+def test_without_a_sportsbook_or_a_market_nothing_is_asked() -> None:
+    board = _board(_et(WEDNESDAY, 19, 30), days={WEDNESDAY: [_live(1, "UTA", "LAL", _tip(WEDNESDAY, 19))]})
+    board.step()
+    game = board.game(1)
+    assert board.nba.line(game) is None and board.nba.win_probability(game, board.clock.read()) is None
+    assert PollKey(PollSource.GAME_LINES, game.id) not in board.plan._entries

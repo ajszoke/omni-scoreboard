@@ -7,7 +7,9 @@ that only re-reads the same answer. With a key, a `QuoteStream` sharpens those r
 
 Each game has one moneyline market, named for its matchup and its date. The market's price is for one
 side of it, so which club that is gets read from the market itself rather than assumed from the name;
-getting it backward would show every game's meter leaning the wrong way. A game is joined to a market
+getting it backward would show every game's meter leaning the wrong way. A market's name and its sides
+name each club by a code: its abbreviation in lower case, but for the clubs a league's markets name their own way
+(`MarketCodes`: NBA's ``gs``, ``no``, ``ny``, ``pho`` and ``sa``). A game is joined to a market
 (a `MarketLink`) only when the market also starts when the game does, and each join is kept under the
 game's full identity, so neither another league's game with the same raw id nor the other game of a
 doubleheader can read a market that isn't its own. A doubleheader's own markets are named some other
@@ -17,20 +19,25 @@ way, so those games simply find no market here and the caller falls back.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+from types import MappingProxyType
 from typing import Any, Protocol
 from urllib.error import HTTPError
 from zoneinfo import ZoneInfo
 
+from omni.core.enum import League
 from omni.core.ids import LeagueScopedId
 from omni.core.time import DurationSeconds
 from omni.domain.baseball import WinProbability
 from omni.domain.contest import TeamGame
+from omni.domain.teams import Team
 from omni.providers.base import ProviderError
 
 __all__ = [
+    "MARKET_CODES",
+    "MarketCodes",
     "MarketFetcher",
     "MarketLink",
     "MarketQuote",
@@ -38,6 +45,7 @@ __all__ = [
     "PolymarketUsProvider",
     "QuoteStream",
     "fetch_market_data",
+    "market_code",
     "parse_price",
 ]
 
@@ -53,6 +61,37 @@ _MARKET_DATE_ZONE = ZoneInfo("America/Los_Angeles")
 
 # How the provider reads a path off the API: the parsed response, or None if there is no such thing.
 MarketFetcher = Callable[[str], Any]
+
+
+@dataclass(frozen=True, slots=True)
+class MarketCodes:
+    """How one league's markets name its clubs: each by its abbreviation in lower case, but for those ``named`` some
+    other way (by abbreviation)."""
+
+    league: League
+    named: Mapping[str, str]
+
+    def code(self, team: Team) -> str:
+        if team.league is not self.league:
+            raise ValueError(f"{team.abbreviation} isn't a {self.league.value} club")
+        return self.named.get(team.abbreviation, team.abbreviation.lower())
+
+
+# The leagues whose markets name a club other than by its abbreviation, as the exchange listed every NBA club on the
+# 2026-11-16..19 slates. A league not here names each club by its abbreviation in lower case.
+MARKET_CODES: Mapping[League, MarketCodes] = MappingProxyType(
+    {
+        League.NBA: MarketCodes(
+            League.NBA, MappingProxyType({"GSW": "gs", "NOP": "no", "NYK": "ny", "PHX": "pho", "SAS": "sa"})
+        ),
+    }
+)
+
+
+def market_code(team: Team) -> str:
+    """A club's code in its league's market names and sides."""
+    codes = MARKET_CODES.get(team.league)
+    return codes.code(team) if codes is not None else team.abbreviation.lower()
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,9 +220,9 @@ class PolymarketUsProvider:
             ),
             None,
         )
-        if long_team == game.away.abbreviation.lower():
+        if long_team == market_code(game.away):
             return MarketLink(contest=game.id, slug=slug, away_is_long=True)
-        if long_team == game.home.abbreviation.lower():
+        if long_team == market_code(game.home):
             return MarketLink(contest=game.id, slug=slug, away_is_long=False)
         return None
 
@@ -200,7 +239,7 @@ def _market_date(game: TeamGame) -> date:
 
 
 def _market_slug(game: TeamGame) -> str:
-    away, home = game.away.abbreviation.lower(), game.home.abbreviation.lower()
+    away, home = market_code(game.away), market_code(game.home)
     return f"aec-{game.league.value}-{away}-{home}-{_market_date(game).isoformat()}"
 
 

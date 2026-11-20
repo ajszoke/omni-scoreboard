@@ -5,9 +5,12 @@ the loop hands it the board's NBA games and a reading of the clock. It takes eac
 each once and in arrival order, through the game's own `BasketballFeedDeriver`, and cards the game for where it stands:
 
 - **upcoming** (the slate's row has it scheduled or postponed): a `PREGAME` card, the tip (or ``PPD``), each club's
-  record and standing ranks once the season's finals are read, and no score to spoil, so no delay.
+  record and standing ranks once the season's finals are read, the favorite's line when the sportsbook has one, and no
+  score to spoil, so no delay.
 - **live** (the slate has it under way): a `LIVE_GAME` card from the newest slate state to have cleared the TV delay,
-  each club's record (as of the tip: the night's own final isn't counted until it's revealed), a halftime counting down
+  each club's record (as of the tip: the night's own final isn't counted until it's revealed), the win meter when the
+  board reads one (the newest reading that arrived no later than the state beside it, aged from its own arrival and
+  dropped `NbaCardPolicy.meter_expiry` past the delay, so it never knows more than the score), a halftime counting down
   to 15 minutes after the first halftime read (on the viewer's clock), and the bottom panel (`omni.app.nba_panel`):
   the play queue and the stat rotation, its stat panels from the newest players' lines to have cleared the delay.
   - **The captions** come from the deriver, each held through the delay from the arrival of the read that told it, then
@@ -58,7 +61,7 @@ from typing import Any, Generic, TypeVar
 
 from omni.app.nba_feeds import NbaFeeds, NbaReading
 from omni.app.nba_panel import BottomPanelQueue, PanelPolicy, PanelView, QueuedCaption
-from omni.app.pipeline import STALE_FOR, PipelineResult
+from omni.app.pipeline import STALE_FOR, MeterReading, PipelineResult
 from omni.app.policy_facts import ReleasedBreaks
 from omni.cards.base import CardId, CardKind, CardPriority, DedupeKey, DisplayTiming, EndBasis, GameEnd, ScoreboardCard
 from omni.cards.basketball import (
@@ -75,7 +78,7 @@ from omni.core.clock import ClockReading, MonotonicTime
 from omni.core.enum import DisplayPriority, HomeAway
 from omni.core.ids import LeagueScopedId
 from omni.core.time import DurationSeconds
-from omni.domain.baseball import WinLossRecord
+from omni.domain.baseball import WinLossRecord, WinProbability
 from omni.domain.basketball import BasketballGameState, BasketballPhase, BySide, PlayerLine, StandingRanks
 from omni.domain.basketball_reads import LinesRead, SlateRead
 from omni.domain.contest import TeamGame
@@ -115,6 +118,7 @@ class NbaCardPolicy:
     pregame_max_display: DurationSeconds = DurationSeconds(20)
     postgame_window: timedelta = timedelta(minutes=30)
     halftime: timedelta = timedelta(minutes=15)  # the rule's halftime, which its countdown runs down
+    meter_expiry: timedelta = timedelta(minutes=3)  # a meter reading stands this long past the delay since it arrived
     stale_for: timedelta = STALE_FOR
     panel: PanelPolicy = PanelPolicy()
 
@@ -138,6 +142,28 @@ class _Holding(Generic[T]):
         return min((held.release for held in self._held), default=None)
 
 
+class _Meter:
+    """One game's meter: the newest reading that arrived no later than the state on the card, held until it's too old
+    to stand beside the score."""
+
+    def __init__(self, max_age: timedelta) -> None:
+        self._max_age = max_age
+        self._held: MeterReading | None = None
+
+    def admit(self, reading: MeterReading | None, visible: ClockReading) -> None:
+        """Take ``reading`` beside a state whose read arrived at ``visible``, unless it arrived later."""
+        if reading is None or reading.received.monotonic > visible.monotonic:
+            return
+        if self._held is None or reading.received.monotonic >= self._held.received.monotonic:
+            self._held = reading
+
+    def current(self, at: ClockReading) -> WinProbability | None:
+        held = self._held
+        if held is not None and at.monotonic.since(held.received.monotonic) >= self._max_age:
+            self._held = held = None
+        return held.value if held is not None else None
+
+
 @dataclass(frozen=True, slots=True)
 class _Told:
     """A caption the deriver told, and the arrival of the players' lines that told it (None for a slate read's)."""
@@ -157,6 +183,7 @@ class _Live:
     timeouts: _Holding[TimeoutOnset | TimeoutEnd]
     breaks: ReleasedBreaks  # its break evidence, held with the reads that showed it
     detector: NbaBreaks
+    meter: _Meter
     deriver: BasketballFeedDeriver = field(default_factory=BasketballFeedDeriver)
     panel: BottomPanelQueue = field(default_factory=BottomPanelQueue)
     told: int = 0  # captions staged so far: each one's place
@@ -357,7 +384,7 @@ class LiveBasketballPipeline:
         if self._season is not None:
             ranks = BySide(self._standings.ranks(game.away), self._standings.ranks(game.home))
         payload = BasketballPregameCardPayload(
-            phase=pregame.phase, tip=pregame.tip, records=self._records(game), ranks=ranks
+            phase=pregame.phase, tip=pregame.tip, records=self._records(game), ranks=ranks, line=self._feeds.line(game)
         )
         key = f"{game.id}:pregame"
         card = ScoreboardCard(
@@ -398,6 +425,7 @@ class LiveBasketballPipeline:
                 _Holding(self._guard),
                 ReleasedBreaks(self._guard),
                 NbaBreaks(game.id),
+                _Meter(self._guard.policy.broadcast_lag.as_timedelta() + self._policy.meter_expiry),
                 panel=BottomPanelQueue(self._policy.panel),
             )
         live.game = game
@@ -507,9 +535,12 @@ class LiveBasketballPipeline:
             shown=shown.arrival.received.monotonic,
         )
         live.view = view
+        visible = shown.arrival.received
+        live.meter.admit(self._feeds.win_probability(game, visible), visible)
         payload = BasketballGameCardPayload(
             state=state,
             records=self._records(game),
+            win_probability=live.meter.current(at),
             bottom=live.panel.bottom(at.monotonic, view),
             break_ends_at=self._halftime_ends(live.halftime),
         )

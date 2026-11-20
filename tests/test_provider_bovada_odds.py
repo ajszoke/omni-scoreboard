@@ -7,14 +7,23 @@ from typing import Any
 
 import pytest
 
-from omni.core.enum import GameStatus, League
+from omni.core.enum import GameStatus, HomeAway, League
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.core.time import DurationSeconds
 from omni.domain.baseball import BettingLine, GameLines
+from omni.domain.basketball import FavoriteLine
 from omni.domain.contest import TeamGame
 from omni.providers.base import ProviderError
-from omni.providers.bovada_odds import BovadaOddsProvider, _american, _handicap, _parse_coupon
+from omni.providers.bovada_odds import (
+    BovadaCoupon,
+    BovadaOddsProvider,
+    _american,
+    _handicap,
+    _parse_coupon,
+    favorite_line,
+)
 from omni.providers.mlb_teams import MlbTeamRegistry
+from omni.providers.nba_teams import NbaTeamRegistry
 
 REG = MlbTeamRegistry.from_color_file()
 SOURCE = SourceRef("mlb_statsapi")
@@ -189,3 +198,82 @@ def test_american_odds_parse(raw: Any, value: int | None) -> None:
 @pytest.mark.parametrize("raw, value", [("1.5", 1.5), ("-1.5", -1.5), ("n/a", None), (None, None)])
 def test_handicaps_parse(raw: Any, value: float | None) -> None:
     assert _handicap(raw) == value
+
+
+# --- NBA: its own coupon, its point spread, and the favorite's line -------------------------------------------------
+
+_NBA = NbaTeamRegistry.default()
+
+
+def _nba_game() -> TeamGame:
+    return TeamGame(
+        id=LeagueScopedId(League.NBA, SourceRef("balldontlie"), "21718141"),
+        league=League.NBA,
+        status=GameStatus.SCHEDULED,
+        scheduled_start=START,
+        away=_NBA.resolve("UTA"),
+        home=_NBA.resolve("LAL"),
+    )
+
+
+def _nba_event(
+    away_ml: str = "+210", home_ml: str = "-260", spreads: tuple[str, str] = ("6.5", "-6.5")
+) -> dict[str, Any]:
+    """A synthetic NBA event shaped like MLB's coupon, the point spread where MLB's run line is."""
+    event = _event(away="Utah Jazz", home="Los Angeles Lakers", away_ml=away_ml, home_ml=home_ml)
+    spread, moneyline, total = event["displayGroups"][0]["markets"]
+    spread["descriptionKey"] = "Main Dynamic Asian Handicap"
+    spread["outcomes"] = [_outcome("A", "-110", spreads[0]), _outcome("H", "-110", spreads[1])]
+    return event
+
+
+def test_nba_s_coupon_is_its_own_and_its_point_spread_reads_where_mlb_s_run_line_does() -> None:
+    assert BovadaCoupon.NBA.url.startswith(
+        "https://www.bovada.lv/services/sports/event/coupon/events/A/description/basketball/nba?"
+    )
+    assert "/baseball/mlb?" in BovadaCoupon.MLB.url
+    provider = BovadaOddsProvider(fetch=_Fetch(_coupon(_nba_event())), coupon=BovadaCoupon.NBA)
+    lines = provider.lines_for(_nba_game(), NOW)
+    assert lines == GameLines(
+        away=BettingLine(moneyline=210, runline=6.5, runline_price=-110),
+        home=BettingLine(moneyline=-260, runline=-6.5, runline_price=-110),
+    )
+    assert favorite_line(lines) == FavoriteLine(favorite=HomeAway.HOME, moneyline=-260, spread=-6.5)
+    mlb_reading = BovadaOddsProvider(fetch=_Fetch(_coupon(_nba_event())))  # MLB's key finds no point spread
+    assert mlb_reading.lines_for(_nba_game(), NOW) == GameLines(
+        away=BettingLine(moneyline=210), home=BettingLine(moneyline=-260)
+    )
+
+
+def test_an_empty_answer_is_a_coupon_with_no_games_and_no_error() -> None:
+    for coupon in BovadaCoupon:
+        assert BovadaOddsProvider(fetch=_Fetch({}), coupon=coupon).lines_for(_nba_game(), NOW) is None
+    assert _parse_coupon({}) == ()
+
+
+@pytest.mark.parametrize(
+    ("lines", "expected"),
+    [
+        (
+            GameLines(away=BettingLine(moneyline=-150, runline=-3.5), home=BettingLine(moneyline=130, runline=3.5)),
+            (HomeAway.AWAY, -150, -3.5),
+        ),
+        (
+            GameLines(away=BettingLine(moneyline=-110, runline=0.0), home=BettingLine(moneyline=-110, runline=-1.0)),
+            (HomeAway.HOME, -110, -1.0),
+        ),
+        (GameLines(away=BettingLine(moneyline=-110, runline=0.0), home=BettingLine(moneyline=-110, runline=0.0)), None),
+        (GameLines(away=BettingLine(moneyline=-150), home=BettingLine(moneyline=130, runline=3.5)), None),
+        (GameLines(away=BettingLine(moneyline=-150, runline=2.5), home=BettingLine(moneyline=130, runline=-2.5)), None),
+        (GameLines(away=BettingLine(moneyline=-150, runline=-3.5)), None),
+        (GameLines(home=BettingLine(moneyline=-150, runline=-3.5)), None),
+    ],
+)
+def test_the_favorite_s_line_is_the_shorter_moneyline_and_the_points_it_gives(
+    lines: GameLines, expected: tuple[HomeAway, int, float] | None
+) -> None:
+    line = favorite_line(lines)
+    if expected is None:
+        assert line is None
+    else:
+        assert line == FavoriteLine(favorite=expected[0], moneyline=expected[1], spread=expected[2])
