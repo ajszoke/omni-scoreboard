@@ -36,6 +36,7 @@ from typing import Any
 
 from omni.app.display import RecordingDisplaySink
 from omni.app.loop import Painted, Refresh
+from omni.app.quota import BalldontliePlan
 from omni.app.runner import build_loop
 from omni.app.contest_store import ProviderStatus
 from omni.app.supervisor import BackoffPolicy
@@ -231,13 +232,16 @@ def replay_versions(
     policy: BoardPolicy = BoardPolicy(),
     settings: PolicySettings | None = None,
     nfl_delay: DurationSeconds | None = None,
+    nba_delay: DurationSeconds | None = None,
+    nba_plan: BalldontliePlan | None = None,
 ) -> Versions:
     """What a replay of the shared board decides with. A replay wires no win meter, no odds and no clock
     zone: the meter and odds are off, and its marquees scroll at the default speed.
 
     Without ``settings`` the board decides by the queue's bands (`omni-board-policy/1`) and the header is as it
     always was. With them, it names their policy, and the config covers their turn, mutes, league weights and
-    promotions, as the running app's does; ``nfl_delay`` is NFL's own delay, when the replay has NFL."""
+    promotions, as the running app's does; ``nfl_delay`` is NFL's own delay, when the replay has NFL, and ``nba_delay``
+    and ``nba_plan`` NBA's delay and BALLDONTLIE tier, when it has NBA."""
     if settings is None:
         return Versions(
             policy=PolicyName.BOARD_V1,
@@ -250,6 +254,8 @@ def replay_versions(
                 meter=False,
                 odds=False,
                 scroll_speed=ScrollSpeed.SLOW,
+                nba_delay=nba_delay.as_timedelta() if nba_delay is not None else None,
+                nba_plan=nba_plan,
             ),
             rules=RULES,
         )
@@ -269,6 +275,8 @@ def replay_versions(
             league_weights=settings.league_weights,
             promotions=settings.promotions,
             nfl_delay=nfl_delay.as_timedelta() if nfl_delay is not None else None,
+            nba_delay=nba_delay.as_timedelta() if nba_delay is not None else None,
+            nba_plan=nba_plan,
         ),
         rules=RULES,
     )

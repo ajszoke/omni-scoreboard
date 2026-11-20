@@ -8,10 +8,12 @@ each once and in arrival order, through the game's own `BasketballFeedDeriver`, 
   record and standing ranks once the season's finals are read, the favorite's line when the sportsbook has one, and no
   score to spoil, so no delay.
 - **live** (the slate has it under way): a `LIVE_GAME` card from the newest slate state to have cleared the TV delay,
-  each club's record (as of the tip: the night's own final isn't counted until it's revealed), the win meter when the
-  board reads one (the newest reading that arrived no later than the state beside it, aged from its own arrival and
-  dropped `NbaCardPolicy.meter_expiry` past the delay, so it never knows more than the score), a halftime counting down
-  to 15 minutes after the first halftime read (on the viewer's clock), and the bottom panel (`omni.app.nba_panel`):
+  the side whose timeout is on while one is (released through the delay, until the clock runs again: the single
+  board shows ``TO`` for it), each club's record (as of the tip: the night's own final isn't counted until it's
+  revealed), the win meter when the board reads one (the newest reading that arrived no later than the state beside
+  it, aged from its own arrival and dropped `NbaCardPolicy.meter_expiry` past the delay, so it never knows more than
+  the score), a halftime counting down to 15 minutes after the first halftime read (on the viewer's clock), and the
+  bottom panel (`omni.app.nba_panel`):
   the play queue and the stat rotation, its stat panels from the newest players' lines to have cleared the delay.
   - **The captions** come from the deriver, each held through the delay from the arrival of the read that told it, then
     staged on the panel with its bounds. They start only when a frame carrying them is confirmed shown (`presented`),
@@ -524,6 +526,9 @@ class LiveBasketballPipeline:
         if since is not None and at.monotonic.since(since) >= self._policy.stale_for:
             return  # its card is down for staleness: nothing goes back up until a newer state clears the delay
         state = shown.value
+        if state.phase is BasketballPhase.LIVE and live.open:
+            side, _ = max(live.open, key=lambda timeout: timeout[1])
+            state = replace(state, timeout=side)  # the newest timeout on: the single board shows TO for it
         if state.phase is not BasketballPhase.HALFTIME:
             live.halftime = None
         elif live.halftime is None:

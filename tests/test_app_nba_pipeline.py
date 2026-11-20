@@ -359,9 +359,11 @@ def test_a_timeout_s_caption_holds_its_turn_and_the_stat_panels_rotate_while_it_
         (115, "PlayerLinesPanel"),
     ]
     assert isinstance(timeout, CaptionPanel) and timeout.caption == TimeoutTaken(side=H, left=6)
+    assert board.card().payload.state.timeout is H  # type: ignore[union-attr]  # the single board's TO
     board.slate(_state(clock=5600, timeouts=(7, 6)))  # the clock runs again: the timeout is over
     board.run(31)
     assert board.pipeline._live[_game().id].open == set()
+    assert board.card().payload.state.timeout is None  # type: ignore[union-attr]
 
 
 def _other_card() -> ScoreboardCard[Any]:
