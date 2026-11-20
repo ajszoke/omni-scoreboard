@@ -392,9 +392,15 @@ class LiveFootballRenderer:
             _draw_pieces_centered(canvas, left, right, _QUAD_SPOT_Y, spot, _RED if state.in_red_zone else _YELLOW)
 
     def _play_strip(self, canvas: Canvas, play: PlaySummary, *, now: datetime, marquee: Marquee) -> None:
-        """The last play across the bottom: its headline in the play's color, the detail a size down in white."""
+        """The last play across the bottom: its headline in the play's color, the detail a size down in white.
+
+        A headline one letter too long for the strip ("24 YARD PASS, 1ST DOWN") would scroll, so one that overflows
+        says its yardage short ("24 YD PASS, 1ST DOWN") and scrolls only if it still doesn't fit."""
         headline = TextLane(x=0, y=_QUAD_HEADLINE_Y, width=128, font=_SCORE_FONT, style=marquee.style)
-        draw_text_lane(canvas, headline, play.headline, _TONE_COLOR[play.tone], now=now, clock=marquee.clock)
+        words = play.headline
+        if text_width(words, _SCORE_FONT) > headline.width:
+            words = play.short_headline
+        draw_text_lane(canvas, headline, words, _TONE_COLOR[play.tone], now=now, clock=marquee.clock)
         if play.detail:
             detail = TextLane(x=0, y=_QUAD_DETAIL_Y, width=128, font=_SMALL_FONT, style=marquee.style)
             draw_text_lane(canvas, detail, play.detail, _WHITE, now=now, clock=marquee.clock)

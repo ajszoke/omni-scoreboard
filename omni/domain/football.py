@@ -69,6 +69,12 @@ class PlaySummary:
         if not self.headline:
             raise ValueError("a play summary needs a headline")
 
+    @property
+    def short_headline(self) -> str:
+        """The headline in fewer letters, for a lane too narrow for it: each ``YARD`` as ``YD``
+        (``24 YD PASS, 1ST DOWN``). A headline with no yardage reads the same."""
+        return self.headline.replace(" YARD ", " YD ")
+
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class TeamTimeouts:
