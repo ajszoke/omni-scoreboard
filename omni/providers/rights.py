@@ -435,6 +435,7 @@ MANIFEST: Mapping[DataSource, SourceRights] = {entry.source: entry for entry in 
 # provider packages has an entry, an empty one when it reads none, so a new provider can't go unlisted.
 READS: Mapping[str, frozenset[DataSource]] = {
     "omni/providers/__init__.py": frozenset(),
+    "omni/providers/balldontlie.py": frozenset({DataSource.BALLDONTLIE}),
     "omni/providers/base.py": frozenset(),
     "omni/providers/bovada_odds.py": frozenset({DataSource.BOVADA}),
     "omni/providers/market_service.py": frozenset({DataSource.OMNI_MARKET_SERVICE}),
@@ -442,6 +443,7 @@ READS: Mapping[str, frozenset[DataSource]] = {
     "omni/providers/mlb_statsapi.py": frozenset({DataSource.MLB_STATSAPI}),
     "omni/providers/mlb_teams.py": frozenset({DataSource.MLB_STATSAPI}),
     "omni/providers/nba_palette.py": frozenset({DataSource.WIKIPEDIA_COLORS}),
+    "omni/providers/nba_standings.py": frozenset(),  # counts the results a provider hands it
     "omni/providers/nba_teams.py": frozenset({DataSource.BALLDONTLIE}),  # names, conferences, divisions
     "omni/providers/nfl_palette.py": frozenset({DataSource.NFLVERSE}),
     "omni/providers/nfl_teams.py": frozenset({DataSource.NFLVERSE}),
