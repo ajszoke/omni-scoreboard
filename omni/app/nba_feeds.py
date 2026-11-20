@@ -6,8 +6,9 @@ so far. Each read is taken once, in arrival order, so the feed deriver sees ever
 newest stays readable for the card's freshness.
 
 Beside the reads it hands on what a card shows besides the game itself: the slate's own row for the game (its tip,
-its phase, its NBA Cup stage), the newest complete read of the season's finals, for the records and ranks, and whether
-the players' lines are read at all (only BALLDONTLIE's ALL-STAR tier has them).
+its phase, its NBA Cup stage), the newest complete read of the season's finals, for the records and ranks, whether
+the players' lines are read at all (only BALLDONTLIE's ALL-STAR tier has them), an upcoming game's favorite line, and a
+game's win probability as it stood when a read arrived, each None when nothing is read for it.
 """
 
 from __future__ import annotations
@@ -16,7 +17,9 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import Protocol
 
+from omni.app.pipeline import MeterReading
 from omni.core.clock import ClockReading
+from omni.domain.basketball import FavoriteLine
 from omni.domain.basketball_reads import LinesRead, SlateRead
 from omni.domain.contest import TeamGame
 from omni.providers.balldontlie import SlateGame
@@ -68,4 +71,13 @@ class NbaFeeds(Protocol):
 
     def season(self) -> SeasonResults | None:
         """The newest complete read of the season's finals; None before the first."""
+        ...  # pragma: no cover
+
+    def line(self, game: TeamGame) -> FavoriteLine | None:
+        """An upcoming game's favorite line, as last heard; None without one."""
+        ...  # pragma: no cover
+
+    def win_probability(self, game: TeamGame, as_of: ClockReading) -> MeterReading | None:
+        """``game``'s win probability as it stood at ``as_of``: the newest reading that arrived by then; None without
+        one."""
         ...  # pragma: no cover

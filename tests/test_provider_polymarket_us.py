@@ -15,7 +15,15 @@ from omni.domain.contest import TeamGame
 from omni.providers.base import ProviderError
 from omni.providers.mlb_teams import MlbTeamRegistry
 from omni.providers.nfl_teams import NflTeamRegistry
-from omni.providers.polymarket_us import MarketLink, PolymarketUsProvider, _open_quote, _reading_from
+from omni.providers.nba_teams import NbaTeamRegistry
+from omni.providers.polymarket_us import (
+    MARKET_CODES,
+    MarketLink,
+    PolymarketUsProvider,
+    _open_quote,
+    _reading_from,
+    market_code,
+)
 
 REG = MlbTeamRegistry.from_color_file()
 SOURCE = SourceRef("mlb_statsapi")
@@ -233,3 +241,50 @@ def test_a_price_is_unreadable_rather_than_fatal() -> None:
 
 def test_prices_outside_the_range_are_clamped_to_a_valid_probability() -> None:
     assert _parse_quote(_quote(bid="1.02", ask="1.04"), away_is_long=True) == WinProbability(home=0.0, away=100.0)
+
+
+_NBA = NbaTeamRegistry.default()
+
+
+def _nba(away: str, home: str) -> TeamGame:
+    return TeamGame(
+        id=LeagueScopedId(League.NBA, SourceRef("balldontlie"), "21718141"),
+        league=League.NBA,
+        status=GameStatus.LIVE,
+        scheduled_start=START,
+        away=_NBA.resolve(away),
+        home=_NBA.resolve(home),
+    )
+
+
+@pytest.mark.parametrize(
+    ("away", "home", "slug", "long_team"),
+    [
+        ("GSW", "NOP", "aec-nba-gs-no-2026-09-16", "gs"),  # two clubs the exchange names its own way
+        ("NYK", "PHX", "aec-nba-ny-pho-2026-09-16", "ny"),
+        ("SAS", "UTA", "aec-nba-sa-uta-2026-09-16", "sa"),
+        ("UTA", "LAL", "aec-nba-uta-lal-2026-09-16", "uta"),  # every other club by its abbreviation
+    ],
+)
+def test_an_nba_market_names_each_club_by_the_exchange_s_own_code_and_its_sides_are_read_by_it(
+    away: str, home: str, slug: str, long_team: str
+) -> None:
+    short = slug.split("-")[3]
+    api = _Exchange({slug: (_market(long_team=long_team, short_team=short, slug=slug), _quote())})
+    sample = PolymarketUsProvider(fetch=api).sample(_nba(away, home), NOW)
+    assert sample is not None and sample.slug == slug
+    assert sample.probability is not None and sample.probability.away == pytest.approx(31.0)
+
+
+def test_the_codes_are_the_league_s_own_and_mlb_s_and_nfl_s_are_their_abbreviations() -> None:
+    assert [market_code(_NBA.resolve(club)) for club in ("GSW", "NOP", "NYK", "PHX", "SAS", "CHA")] == [
+        "gs",
+        "no",
+        "ny",
+        "pho",
+        "sa",
+        "cha",
+    ]
+    assert market_code(REG.resolve(115)) == "col" and market_code(NflTeamRegistry.default().resolve("PIT")) == "pit"
+    with pytest.raises(ValueError, match="isn't a nba club"):
+        MARKET_CODES[League.NBA].code(REG.resolve(115))

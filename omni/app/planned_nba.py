@@ -40,6 +40,12 @@ slate's next read.
 
 **Feeds.** Each read of a game, of either kind, is kept as it arrived: `take` hands each over once, in arrival order,
 and `latest` gives the newest. Each counts as current for two of its own read's cadence.
+
+**Odds and the meter**, when the board has them, are read as the pipeline asks for them, each its own account's:
+an upcoming game's favorite line from the sportsbook (`PollSource.GAME_LINES`, backfill, every 5 minutes: the coupon
+barely moves before the tip), and a game's win probability from the exchange's public quotes
+(`PollSource.PUBLIC_MARKET`, every 15 s while the game is wanted), read as of a moment: the newest reading that arrived
+by then, so the meter never knows more than the score beside it. A failed read just leaves the card without it.
 """
 
 from __future__ import annotations
@@ -53,13 +59,15 @@ from typing import Any, TypeVar
 from zoneinfo import ZoneInfo
 
 from omni.app.nba_feeds import NbaReading, SeasonResults
-from omni.app.poll_plan import AccountMap, PollKey, PollPlan, PollPolicy, PollPriority, PollSource
+from omni.app.pipeline import MeterReading
+from omni.app.poll_plan import AccountMap, Answer, PollKey, PollPlan, PollPolicy, PollPriority, PollSource
 from omni.app.quota import BalldontliePlan, Meter, ProviderAccount
 from omni.core.clock import Clock, ClockReading, MonotonicTime
 from omni.core.enum import League
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.core.time import local_date
-from omni.domain.basketball import BasketballPhase
+from omni.domain.baseball import WinProbability
+from omni.domain.basketball import BasketballPhase, FavoriteLine
 from omni.domain.contest import TeamGame
 from omni.providers.balldontlie import (
     BALLDONTLIE_SOURCE,
@@ -90,7 +98,9 @@ from omni.tower.interruption import Interruption
 __all__ = [
     "EASTERN",
     "LINES_EVERY",
+    "MarketReader",
     "MeteredBdl",
+    "NbaOddsReader",
     "NbaSchedulePolicy",
     "PlannedNba",
     "QUIET_EVERY",
@@ -111,6 +121,13 @@ _READS = (PollSource.SLATE_STATES, PollSource.PLAYER_LINES, PollSource.SEASON_RE
 _OVER = frozenset({BasketballPhase.FINAL, BasketballPhase.POSTPONED})
 
 PollT = TypeVar("PollT", bound=Poll)
+T = TypeVar("T")
+
+# How the plan asks a sportsbook for an upcoming game's favorite line as of a UTC instant.
+NbaOddsReader = Callable[[TeamGame, datetime], FavoriteLine | None]
+
+# How the plan asks a market for one game's win probability as of a UTC instant.
+MarketReader = Callable[[TeamGame, datetime], WinProbability | None]
 
 
 def nba_policies(tier: BalldontliePlan) -> dict[PollSource, PollPolicy]:
@@ -122,12 +139,21 @@ def nba_policies(tier: BalldontliePlan) -> dict[PollSource, PollPolicy]:
         ),
         PollSource.PLAYER_LINES: PollPolicy(every=LINES_EVERY, keep_for=timedelta(seconds=90)),
         PollSource.SEASON_RESULTS: PollPolicy(every=_SEASON_PAGE_EVERY, keep_for=timedelta(minutes=10)),
+        PollSource.GAME_LINES: PollPolicy(every=timedelta(minutes=5), keep_for=timedelta(minutes=30), per_minute=12),
+        # A reading must still stand when the state beside it clears the delay.
+        PollSource.PUBLIC_MARKET: PollPolicy(
+            every=timedelta(seconds=15), keep_for=timedelta(minutes=10), per_minute=120
+        ),
     }
 
 
 def nba_accounts(source: SourceRef = BALLDONTLIE_SOURCE) -> AccountMap:
-    """The account NBA's reads spend: every one of them BALLDONTLIE's."""
-    return AccountMap(sources={source: ProviderAccount.BALLDONTLIE})
+    """The accounts NBA's reads spend: BALLDONTLIE's for the game and the season, the sportsbook's for the odds, and
+    the exchange's public quotes for the meter."""
+    return AccountMap(
+        sources={source: ProviderAccount.BALLDONTLIE},
+        kinds={PollSource.GAME_LINES: ProviderAccount.BOVADA, PollSource.PUBLIC_MARKET: ProviderAccount.POLYMARKET_US},
+    )
 
 
 def season_of(day: date) -> int:
@@ -257,6 +283,8 @@ class PlannedNba:
         *,
         tier: BalldontliePlan = BalldontliePlan.FREE,
         policy: NbaSchedulePolicy = NbaSchedulePolicy(),
+        odds: NbaOddsReader | None = None,
+        market: MarketReader | None = None,
         log: Callable[[str], None] = print,
     ) -> None:
         missing = [kind.value for kind in _READS if kind not in plan.capacity()]
@@ -272,6 +300,8 @@ class PlannedNba:
         self._clock = clock
         self._provider = provider
         self._policy = policy
+        self._odds = odds
+        self._market = market
         self._log = log
         self._lines = tier.lines
         self._games: dict[LeagueScopedId, _Game] = {}
@@ -354,13 +384,42 @@ class PlannedNba:
         with self._lock:
             return self._results
 
+    def line(self, game: TeamGame) -> FavoriteLine | None:
+        """An upcoming game's favorite line, as last heard; None without a sportsbook, or until an answer stands."""
+        odds = self._odds
+        if odds is None:
+            return None
+        key: PollKey[FavoriteLine | None] = PollKey(PollSource.GAME_LINES, game.id)
+        answer = self._asked(key, lambda asked: odds(game, asked), PollPriority.BACKFILL)
+        return answer.value if answer is not None else None
+
+    def win_probability(self, game: TeamGame, as_of: ClockReading) -> MeterReading | None:
+        """``game``'s win probability as it stood at ``as_of``: the newest reading that arrived by then; None without a
+        market, or with no reading by then."""
+        market = self._market
+        if market is None:
+            return None
+        key: PollKey[WinProbability | None] = PollKey(PollSource.PUBLIC_MARKET, game.id)
+        answer = self._asked(key, lambda asked: market(game, asked), PollPriority.NORMAL, by=as_of)
+        if answer is None or answer.value is None:
+            return None
+        return MeterReading(answer.value, answer.received)
+
+    def _asked(
+        self, key: PollKey[T], fetch: Callable[[datetime], T], priority: PollPriority, *, by: ClockReading | None = None
+    ) -> Answer[T] | None:
+        """Want ``key`` read, and its standing answer: the newest, or the newest that arrived ``by`` a moment."""
+        at = self._clock.read()
+        self._plan.want(key, fetch, priority=priority, at=at)
+        return self._plan.latest(key, at) if by is None else self._plan.latest_by(key, by.monotonic, at)
+
     def interrupted(
         self, interruption: Interruption, *, held: Collection[PollScope], contests: Collection[LeagueScopedId]
     ) -> None:
         """The host slept or stalled: every read NBA wants is dropped from the plan (what an ask out for it brings back
         is ignored) and wanted afresh at the next pass, due at once; an ask begun before the gap files nothing when it
-        returns; and the reads not yet taken go. Each game's slate row and newest read stay known, for its schedule;
-        the pipeline judges its freshness."""
+        returns; and the reads not yet taken go, with each game's market readings. Each game's slate row and newest
+        read stay known, for its schedule; the pipeline judges its freshness. The odds stand."""
         with self._lock:
             self._epoch += 1
             for key in self._wanted:
@@ -368,6 +427,9 @@ class PlannedNba:
             self._wanted = {}
             for game in self._games.values():
                 game.untaken.clear()
+        for contest in contests:
+            if contest.league is self.league:
+                self._plan.drop(PollKey(PollSource.PUBLIC_MARKET, contest))
 
     # --- what to read --------------------------------------------------------------------------------------
 

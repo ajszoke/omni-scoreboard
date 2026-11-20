@@ -41,7 +41,14 @@ from omni.app.nba_pipeline import LiveBasketballPipeline
 from omni.app.nfl_feeds import NflFeeds
 from omni.app.nfl_pipeline import LiveFootballPipeline
 from omni.app.planned_mlb import MLB_POLICIES, PlannedMlb
-from omni.app.planned_nba import MeteredBdl, PlannedNba, nba_accounts, nba_policies
+from omni.app.planned_nba import (
+    MarketReader,
+    MeteredBdl,
+    NbaOddsReader,
+    PlannedNba,
+    nba_accounts,
+    nba_policies,
+)
 from omni.app.planned_nfl import NFL_POLICIES, PlannedNfl, nfl_accounts
 from omni.app.poll_plan import AccountMap, PollPlan
 from omni.app.poller import Poller
@@ -336,7 +343,7 @@ def board_plan(
         **(nfl_accounts().sources if nfl else {}),
         **(nba_accounts().sources if nba is not None else {}),
     }
-    kinds = mlb.kinds if mlb is not None else {}
+    kinds = {**(mlb.kinds if mlb is not None else {}), **(nba_accounts().kinds if nba is not None else {})}
     return PollPlan(policies, ledger=ledger, accounts=AccountMap(sources=sources, kinds=kinds))
 
 
@@ -363,13 +370,16 @@ def planned_nba_source(
     *,
     ledger: QuotaLedger,
     tier: BalldontliePlan,
+    odds: NbaOddsReader | None = None,
+    market: MarketReader | None = None,
     log: Callable[[str], None] = print,
 ) -> PlannedNba:
     """NBA on the board: BALLDONTLIE read through ``fetch`` on ``plan`` at ``tier``'s pace, each request charged to
-    BALLDONTLIE's account on the ``ledger``, and its word on its minute heeded (`omni.app.planned_nba.MeteredBdl`)."""
+    BALLDONTLIE's account on the ``ledger``, and its word on its minute heeded (`omni.app.planned_nba.MeteredBdl`);
+    and, when given, the pregame line from ``odds`` and the meter from ``market``."""
     meter = Meter(ledger, ProviderAccount.BALLDONTLIE, clock)
     provider = BalldontlieProvider(NbaTeamRegistry.default(), fetch=MeteredBdl(fetch, meter, clock), clock=clock)
-    return PlannedNba(plan, clock, provider, tier=tier, log=log)
+    return PlannedNba(plan, clock, provider, tier=tier, odds=odds, market=market, log=log)
 
 
 def warm_up(loop: AppLoop, poller: Poller, clock: Clock) -> None:
