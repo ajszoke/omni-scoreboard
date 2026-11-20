@@ -20,8 +20,9 @@ from __future__ import annotations
 import gzip
 import json
 from collections.abc import Iterator
+from bisect import bisect_right
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -130,3 +131,56 @@ def _step(kind: Kind, record: dict[str, Any], body: Any) -> Step:
         headers=dict(record["headers"]),
         body=body,
     )
+
+
+class RecordedNight:
+    """The recorded games of one night, served as the live feed would have answered at each moment of the replay's
+    clock, whatever is asked and whenever.
+
+    The replay's clock starts at the first record, on the recorder's own monotonic clock, so a moment of the replay is a
+    moment of the night. A slate read of the night's date answers each game's newest row recorded by then; a stat read
+    answers each game asked for with its newest full page recorded by then, every row in one page; a season read
+    answers no games. Every answer carries the rate-limit window of the newest record it came from. Each request is
+    kept, with when it was made.
+    """
+
+    def __init__(self, names: tuple[str, ...] = GAMES) -> None:
+        steps = {name: _steps(name) for name in names}
+        self._slates = {name: [step for step in each if step.kind is Kind.SLATE] for name, each in steps.items()}
+        self._lines = {name: [step for step in each if step.kind is Kind.LINES] for name, each in steps.items()}
+        first = min((each[0] for each in steps.values()), key=lambda step: step.at)
+        last = max((each[-1] for each in steps.values()), key=lambda step: step.at)
+        self.start = first.received
+        self.end = first.received + timedelta(seconds=last.at - first.at)
+        self.clock = FakeClock(first.received, elapsed=MonotonicTime(first.at))
+        self.asked: list[tuple[float, str, BdlQuery]] = []
+
+    def fetch(self, path: str, query: BdlQuery) -> BdlAnswer:
+        """The answer the feed would have given at the clock's moment."""
+        now = self.clock.monotonic().seconds
+        self.asked.append((now, path, query))
+        asked = dict(query)
+        if path == "/v1/stats":
+            games = {value for name, value in query if name == "game_ids[]"}
+            newest = [_newest(steps, now) for steps in self._lines.values()]
+            used = [step for step in newest if step is not None and step.game.raw in games]
+            return _answer([row for step in used for row in step.body], used)
+        if "seasons[]" in asked:
+            return _answer([], [])
+        newest = [_newest(steps, now) for steps in self._slates.values()]
+        used = [step for step in newest if step is not None and step.body["data"][0]["date"] == asked["dates[]"]]
+        return _answer([step.body["data"][0] for step in used], used)
+
+
+def _newest(steps: list[Step], now: float) -> Step | None:
+    """The newest of a game's records (in arrival order) that had arrived by ``now``."""
+    index = bisect_right([step.at for step in steps], now)
+    return steps[index - 1] if index else None
+
+
+def _answer(rows: list[Any], used: list[Step]) -> BdlAnswer:
+    """A one-page answer of ``rows``, with the rate-limit window of the newest record they came from."""
+    newest = max(used, key=lambda step: step.at, default=None)
+    headers = newest.headers if newest is not None else {}
+    window = {name: value for name, value in headers.items() if name.startswith("x-ratelimit")}
+    return BdlAnswer(200, json.dumps({"data": rows, "meta": {"per_page": PAGE_SIZE}}), window)
