@@ -10,9 +10,11 @@ hands the board its scopes itself.
 and the live win meter off unless asked for. The plan does the retrying: nothing backs off on top of it,
 and while its quota ledger holds a date's slate back, the league's health says why.
 Either builder takes NFL too (`NflSource`): its slate beside MLB's, and its games carded from the answers its
-feeds hold, held back for NFL's own TV delay. Without one, the board is MLB's alone; without MLB's, NFL's.
+feeds hold, held back for NFL's own TV delay; and NBA (`NbaSource`) the same way, held back for NBA's own delay.
+Without either, the board is MLB's alone; without MLB's, the others'.
 `board_plan` is the one `PollPlan` both leagues ask through, each ask spending its own provider's account, and
-`planned_nfl_source` puts NFLMeta on it (`PlannedNfl`), metered against the quota ledger.
+`planned_nfl_source` puts NFLMeta on it (`PlannedNfl`), metered against the quota ledger, and `planned_nba_source`
+BALLDONTLIE (`PlannedNba`).
 Both builders take the board policy's user settings (`omni.policy.settings.PolicySettings`) for the board.
 `run_forever` is the thin real-time wrapper: refreshes on a thread of their own, and frames on
 this one at a steady rate, so a slow fetch never freezes the panel. Each frame (`paint_frame`)
@@ -34,6 +36,8 @@ from omni.app.contest_store import ContestStore
 from omni.app.display import DisplaySink
 from omni.app.frame_stream import AcknowledgingSink
 from omni.app.loop import AppLoop, Painted, QuotaNote
+from omni.app.nba_feeds import NbaFeeds
+from omni.app.nba_pipeline import LiveBasketballPipeline
 from omni.app.nfl_feeds import NflFeeds
 from omni.app.nfl_pipeline import LiveFootballPipeline
 from omni.app.planned_mlb import MLB_POLICIES, PlannedMlb
@@ -82,6 +86,7 @@ from omni.tower.interruption import InterruptionPolicy
 from omni.policy.settings import PolicySettings
 
 __all__ = [
+    "NbaSource",
     "NflSource",
     "board_plan",
     "build_loop",
@@ -95,6 +100,23 @@ __all__ = [
 
 _WARM_UP_PASSES = 3  # the slate, then its games' feeds, then a pass that can show them
 _REFRESH_AT_LEAST_EVERY = timedelta(seconds=5)  # for what changes with nothing to wake it (an answer expiring)
+
+
+@dataclass(frozen=True, slots=True)
+class NbaSource:
+    """NBA on the board: the scope source that hands it NBA's slate, and the feeds that hold its games' reads.
+
+    ``held_back``, when given, says why a quota is holding one of NBA's scopes back, for the league's health.
+    """
+
+    schedule: ScopeSource
+    feeds: NbaFeeds
+    held_back: QuotaNote | None = None
+
+    @classmethod
+    def of(cls, planned: PlannedNba) -> NbaSource:
+        """NBA on the board from its planned source, which is its schedule and its feeds."""
+        return cls(schedule=planned, feeds=planned, held_back=planned.held_back)
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,6 +152,8 @@ def build_loop(
     quota: QuotaNote | None = None,
     nfl: NflSource | None = None,
     nfl_delay: DurationSeconds = DurationSeconds(0),
+    nba: NbaSource | None = None,
+    nba_delay: DurationSeconds = DurationSeconds(0),
     settings: PolicySettings | None = None,
     interruptions: InterruptionPolicy | None = None,
 ) -> AppLoop:
@@ -154,7 +178,8 @@ def build_loop(
     `quota` says why a quota holds a scope back, for its league's health.
     `nfl`, when given, puts NFL on the board: its slate beside ``schedule``, and its games carded through the same
     queue, held back for `nfl_delay` (`broadcast_lag` is baseball's). Its favorites are ``favorites``' NFL clubs.
-    With no ``schedule`` the board is NFL's alone. `settings` are the board policy's user settings (the defaults
+    `nba`, when given, puts NBA on the board the same way, held back for `nba_delay`.
+    With no ``schedule`` the board is the other leagues'. `settings` are the board policy's user settings (the defaults
     when left out). `interruptions`, when given, has the loop watch for its host sleeping or stalling, and wake at
     least every health tick (`omni.tower.interruption`); the running board always does.
     """
@@ -175,6 +200,13 @@ def build_loop(
             feeds=nfl.feeds, delay_policy=DelayPolicy(broadcast_lag=nfl_delay), queue=queue, favorites=favorites
         )
         quota = _first_note(quota, nfl.held_back)
+    basketball = None
+    if nba is not None:
+        schedules += (nba.schedule,)
+        basketball = LiveBasketballPipeline(
+            feeds=nba.feeds, delay_policy=DelayPolicy(broadcast_lag=nba_delay), queue=queue, favorites=favorites
+        )
+        quota = _first_note(quota, nba.held_back)
     return AppLoop(
         schedules=schedules,
         store=ContestStore(),
@@ -193,6 +225,7 @@ def build_loop(
         policy=policy,
         quota=quota,
         football=football,
+        basketball=basketball,
         settings=settings,
         favorites=favorites,
         interruptions=interruptions,
@@ -223,6 +256,8 @@ def build_planned_loop(
     registry: RendererRegistry | None = None,
     nfl: NflSource | None = None,
     nfl_delay: DurationSeconds = DurationSeconds(0),
+    nba: NbaSource | None = None,
+    nba_delay: DurationSeconds = DurationSeconds(0),
     settings: PolicySettings | None = None,
     interruptions: InterruptionPolicy | None = None,
 ) -> AppLoop:
@@ -247,6 +282,8 @@ def build_planned_loop(
             registry=registry,
             nfl=nfl,
             nfl_delay=nfl_delay,
+            nba=nba,
+            nba_delay=nba_delay,
             settings=settings,
             interruptions=interruptions,
         )
@@ -268,6 +305,8 @@ def build_planned_loop(
         quota=planned.held_back,
         nfl=nfl,
         nfl_delay=nfl_delay,
+        nba=nba,
+        nba_delay=nba_delay,
         settings=settings,
         interruptions=interruptions,
     )

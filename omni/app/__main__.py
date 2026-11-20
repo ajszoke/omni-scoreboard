@@ -10,11 +10,14 @@ the frame loop with a heartbeat at least every 2 s, and a card's time on the boa
 word that its first frame is on the panel (`omni.app.frame_stream`). This is the thin I/O shell around the
 deterministic `AppLoop`; everything testable lives in `runner.py` / `loop.py`.
 
-``--leagues`` names the leagues that run, ``mlb`` unless you say otherwise: NFL on the shared board is opt-in
-(``--leagues mlb,nfl``) until its live path has passed a staffed dogfood, and the NFL runner (`omni.app.football`)
-stays its fallback. NFL reads NFLMeta with ``NFLMETA_API_KEY`` from the environment or the git-ignored ``.env``;
-without one, the app says once that NFL is off and why, and runs MLB alone. NFL's games are held back by ``--nfl-delay``, MLB's by ``--delay``. Both leagues
-ask through one poll plan, each ask spending its own provider's account.
+``--leagues`` names the leagues that run, ``mlb`` unless you say otherwise: NFL and NBA on the shared board are opt-in
+(``--leagues mlb,nfl,nba``) until their live paths have passed a staffed dogfood, and the NFL runner
+(`omni.app.football`) stays NFL's fallback. NFL reads NFLMeta with ``NFLMETA_API_KEY``, NBA BALLDONTLIE with
+``BALLDONTLIE_API_KEY``, each from the environment or the git-ignored ``.env``; without its key, the app says once that
+the league is off and why, and runs the others. NFL's games are held back by ``--nfl-delay``, NBA's by
+``--nba-delay``, MLB's by ``--delay``. Every league asks through one poll plan, each ask spending its own provider's
+account. ``--balldontlie-plan`` names the BALLDONTLIE tier the key is on, free unless you say otherwise: Free reads
+the day's games alone, so NBA's cards have no captions or stat panels; ALL-STAR adds the players' lines.
 
 The board policy's settings (`omni.policy.settings.PolicySettings`): ``--board-policy`` picks the policy
 (``1``, `omni-board-policy/1`, unless you say ``2``: policy 2 is opt-in until its live path has passed a staffed
@@ -90,7 +93,7 @@ if TYPE_CHECKING:
 __all__ = ["main"]
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_BOARD_LEAGUES = (League.MLB, League.NFL)  # the leagues the shared board can run
+_BOARD_LEAGUES = (League.MLB, League.NFL, League.NBA)  # the leagues the shared board can run
 _POLICIES = {"1": PolicyName.BOARD_V1, "2": PolicyName.BOARD_V2}
 # Each league that reads a keyed source, and the key's name in the environment or .env.
 _KEYS = {League.NFL: "NFLMETA_API_KEY", League.NBA: "BALLDONTLIE_API_KEY"}
@@ -118,7 +121,8 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         "--leagues",
         default="mlb",
         metavar="LEAGUE,...",
-        help="the leagues on the board, of mlb and nfl (default mlb; NFL is opt-in and needs NFLMETA_API_KEY)",
+        help="the leagues on the board, of mlb, nfl and nba (default mlb; NFL needs NFLMETA_API_KEY, NBA"
+        " BALLDONTLIE_API_KEY)",
     )
     parser.add_argument("--delay", type=int, default=45, help="TV broadcast delay in seconds (default 45)")
     parser.add_argument(
@@ -243,7 +247,7 @@ def _parse_leagues(entry: str) -> frozenset[League]:
         raise ValueError("--leagues: name at least one league")
     beyond = sorted(league.value for league in leagues - set(_BOARD_LEAGUES))
     if beyond:
-        raise ValueError(f"--leagues {entry}: the board can't run {', '.join(beyond)} yet (only mlb and nfl)")
+        raise ValueError(f"--leagues {entry}: the board can't run {', '.join(beyond)} yet (only mlb, nfl and nba)")
     return leagues
 
 
@@ -356,18 +360,28 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
     from omni.app.planned_mlb import PlannedMlb
     from omni.app.poller import Poller
     from omni.app.quota_store import default_state_dir, open_ledger
-    from omni.app.runner import board_plan, planned_nfl_source
+    from omni.app.runner import NbaSource, board_plan, planned_nba_source, planned_nfl_source
 
     clock = SystemClock()
     state_dir = args.state_dir if args.state_dir is not None else default_state_dir(os.environ, Path.home())
+    tier = BalldontliePlan(args.balldontlie_plan)
     ledger = open_ledger(
-        state_dir, NflMetaPlan(args.nflmeta_plan), log=lambda line: print(line, flush=True), who="omni.app"
+        state_dir,
+        NflMetaPlan(args.nflmeta_plan),
+        balldontlie=tier,
+        log=lambda line: print(line, flush=True),
+        who="omni.app",
     )
     zone = ZoneInfo(args.timezone)
     source = read_source_revision(_REPO_ROOT)
 
     mlb: _Mlb | None = _mlb(args, clock, ledger, zone, source) if League.MLB in leagues else None
-    plan = board_plan(ledger=ledger, mlb=mlb.accounts if mlb is not None else None, nfl=League.NFL in leagues)
+    plan = board_plan(
+        ledger=ledger,
+        mlb=mlb.accounts if mlb is not None else None,
+        nfl=League.NFL in leagues,
+        nba=tier if League.NBA in leagues else None,
+    )
     planned = None
     if mlb is not None:
         planned = PlannedMlb(
@@ -383,6 +397,16 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
     if League.NFL in leagues:
         assert key is not None  # NFL runs only with a key
         nfl = planned_nfl_source(plan, clock, NflMetaHttp(key, None).get, ledger=ledger, favorites=args.favorites)
+    nba = None
+    if League.NBA in leagues:
+        from omni.providers.balldontlie import BalldontlieHttp
+
+        nba_key = keys.get(League.NBA)
+        assert nba_key is not None  # NBA runs only with a key
+        planned_nba = planned_nba_source(
+            plan, clock, BalldontlieHttp(nba_key), ledger=ledger, tier=tier, log=lambda line: print(line, flush=True)
+        )
+        nba = NbaSource.of(planned_nba)
 
     board: StreamDisplay | None = None
     sink: MatrixDisplaySink | StreamDisplaySink
@@ -411,6 +435,8 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
         broadcast_lag=DurationSeconds(args.delay),
         nfl=nfl,
         nfl_delay=DurationSeconds(args.nfl_delay),
+        nba=nba,
+        nba_delay=DurationSeconds(args.nba_delay),
         logos=LogoStore(),  # resolve committed team tiles from assets/ (lazy, cached)
         display_timezone=zone,
         marquee=DEFAULT_MARQUEE.at(ScrollSpeed(args.scroll_speed)),
@@ -421,7 +447,8 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
     on = ", ".join(league.value for league in League if league in leagues)
     target = f"the board's receiver ({args.sink_command})" if board is not None else "http://localhost:8888/"
     print(
-        f"omni.app: {profile.value}, leagues {on}, delay {args.delay}s (nfl {args.nfl_delay}s), favorites"
+        f"omni.app: {profile.value}, leagues {on}, delay {args.delay}s (nfl {args.nfl_delay}s, nba {args.nba_delay}s),"
+        f" nba {tier.label}, favorites"
         f" {args.favorites}, meter {mlb.meter if mlb is not None else 'off'} — {target}"
     )
     if board is not None:
