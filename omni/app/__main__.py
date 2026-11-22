@@ -44,9 +44,9 @@ settings that change its decisions (spelled out on the line under it), the rule 
 The live win meter is off unless ``--meter`` is given. With it, and with ``OMNI_CLOUD_URL`` and
 ``OMNI_CLOUD_TOKEN`` in the environment or a git-ignored ``.env``, MLB's meter reads Omni's market
 service (``cloud/``); without them it reads Polymarket's public quotes. Either way MLB's model takes
-over when the market has nothing. NBA's meter always reads Polymarket's public quotes: the market service files
-NBA's games under its own listing's ids, which aren't the board's. The pregame odds (Bovada's coupon, MLB's and NBA's)
-are on unless ``--no-odds``.
+over when the market has nothing. NFL's and NBA's meters always read Polymarket's public quotes, through one reader
+the two leagues share: the market service files their games under its own listing's ids, which aren't the board's.
+The pregame odds (Bovada's coupon, MLB's and NBA's) are on unless ``--no-odds``.
 
 Every request is counted against its provider account's quota (`omni.app.quota`), and the month's counts
 are kept under ``--state-dir`` so a restart doesn't forget them. ``--nflmeta-plan`` names the plan of the
@@ -189,7 +189,7 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--meter",
         action="store_true",
-        help="show the live win meter (the market, then MLB's model); off by default",
+        help="show the live win meter (MLB's market, then its model; NFL's and NBA's market); off by default",
     )
     parser.add_argument(
         "--scroll-speed",
@@ -402,25 +402,28 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
             favorites=args.favorites,
             meter=Meter(ledger, ProviderAccount.MLB_STATSAPI, clock),
         )
+    # NFL's and NBA's meter: one reader of the public quotes, asked one game at a time through the plan's one policy.
+    quotes = _public_quotes(clock, ledger) if args.meter and leagues & {League.NFL, League.NBA} else None
     nfl = None
     if League.NFL in leagues:
         assert key is not None  # NFL runs only with a key
-        nfl = planned_nfl_source(plan, clock, NflMetaHttp(key, None).get, ledger=ledger, favorites=args.favorites)
+        nfl = planned_nfl_source(
+            plan, clock, NflMetaHttp(key, None).get, ledger=ledger, favorites=args.favorites, market=quotes
+        )
     nba = None
     if League.NBA in leagues:
         from omni.providers.balldontlie import BalldontlieHttp
 
         nba_key = keys.get(League.NBA)
         assert nba_key is not None  # NBA runs only with a key
-        odds, market = _nba_market(args, clock, ledger)
         planned_nba = planned_nba_source(
             plan,
             clock,
             BalldontlieHttp(nba_key),
             ledger=ledger,
             tier=tier,
-            odds=odds,
-            market=market,
+            odds=_nba_odds(args, clock, ledger),
+            market=quotes,
             log=lambda line: print(line, flush=True),
         )
         nba = NbaSource.of(planned_nba)
@@ -464,11 +467,12 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
     on = ", ".join(league.value for league in League if league in leagues)
     target = f"the board's receiver ({args.sink_command})" if board is not None else "http://localhost:8888/"
     meter = mlb.meter if mlb is not None else ("on" if args.meter else "off")  # MLB's says which market it reads
-    nba_meter = " (nba: Polymarket public quotes)" if nba is not None and args.meter else ""
+    quoted = ", ".join(league.value for league in (League.NFL, League.NBA) if league in leagues)
+    quoted_meter = f" ({quoted}: Polymarket public quotes)" if quotes is not None else ""
     nba_tier = f" nba {tier.label}," if nba is not None else ""
     print(
         f"omni.app: {profile.value}, leagues {on}, delay {args.delay}s (nfl {args.nfl_delay}s, nba {args.nba_delay}s),"
-        f"{nba_tier} favorites {args.favorites}, meter {meter}{nba_meter} — {target}"
+        f"{nba_tier} favorites {args.favorites}, meter {meter}{quoted_meter} — {target}"
     )
     if board is not None:
         board.start()
@@ -546,31 +550,33 @@ def _mlb(
     return _Mlb(provider, odds.lines_for if odds is not None else None, market, meter, accounts)
 
 
-def _nba_market(
+def _nba_odds(
     args: argparse.Namespace, clock: SystemClock, ledger: QuotaLedger
-) -> tuple[NbaOddsReader | None, NbaMarketReader | None]:  # pragma: no cover - drives the network
-    """NBA's pregame line from Bovada's NBA coupon unless ``--no-odds``, and with ``--meter`` its win meter from
-    Polymarket's public quotes, each request counted."""
+) -> NbaOddsReader | None:  # pragma: no cover - drives the network
+    """NBA's pregame line from Bovada's NBA coupon unless ``--no-odds``, each request counted."""
     from omni.providers import bovada_odds
     from omni.providers.bovada_odds import BovadaCoupon, BovadaOddsProvider, favorite_line
+
+    if args.no_odds:
+        return None
+    coupon = Meter(ledger, ProviderAccount.BOVADA, clock).counted(
+        functools.partial(bovada_odds._default_fetch, BovadaCoupon.NBA)
+    )
+    sportsbook = BovadaOddsProvider(fetch=coupon, coupon=BovadaCoupon.NBA)
+
+    def odds(game: TeamGame, now: datetime) -> FavoriteLine | None:
+        lines = sportsbook.lines_for(game, now)
+        return favorite_line(lines) if lines is not None else None
+
+    return odds
+
+
+def _public_quotes(clock: SystemClock, ledger: QuotaLedger) -> NbaMarketReader:  # pragma: no cover - drives the network
+    """A game's win probability from Polymarket's public quotes, each request counted: NFL's and NBA's meter."""
     from omni.providers.polymarket_us import PolymarketUsProvider, fetch_market_data
 
-    odds: NbaOddsReader | None = None
-    if not args.no_odds:
-        coupon = Meter(ledger, ProviderAccount.BOVADA, clock).counted(
-            functools.partial(bovada_odds._default_fetch, BovadaCoupon.NBA)
-        )
-        sportsbook = BovadaOddsProvider(fetch=coupon, coupon=BovadaCoupon.NBA)
-
-        def odds(game: TeamGame, now: datetime) -> FavoriteLine | None:
-            lines = sportsbook.lines_for(game, now)
-            return favorite_line(lines) if lines is not None else None
-
-    market: NbaMarketReader | None = None
-    if args.meter:
-        quotes = Meter(ledger, ProviderAccount.POLYMARKET_US, clock).counted(fetch_market_data)
-        market = PolymarketUsProvider(fetch=quotes).win_probability
-    return odds, market
+    quotes = Meter(ledger, ProviderAccount.POLYMARKET_US, clock).counted(fetch_market_data)
+    return PolymarketUsProvider(fetch=quotes).win_probability
 
 
 class _CountedTransport:  # pragma: no cover - wraps the real network

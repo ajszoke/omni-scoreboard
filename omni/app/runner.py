@@ -272,7 +272,8 @@ def build_planned_loop(
 
     The live win meter (the market, then MLB's model) is on only with ``meter``. Each reading stands
     beside a score only if it arrived no later than that score's feed answer. ``nfl``, when given, puts NFL
-    on the board beside it, held back for ``nfl_delay``; with no ``planned``, the board is NFL's alone.
+    on the board beside it, held back for ``nfl_delay``, its meter its own source's market's (`planned_nfl_source`);
+    with no ``planned``, the board is NFL's alone.
     ``settings`` are the board policy's user settings, and ``interruptions`` as `build_loop` takes them.
     """
     if planned is None:
@@ -343,7 +344,11 @@ def board_plan(
         **(nfl_accounts().sources if nfl else {}),
         **(nba_accounts().sources if nba is not None else {}),
     }
-    kinds = {**(mlb.kinds if mlb is not None else {}), **(nba_accounts().kinds if nba is not None else {})}
+    kinds = {
+        **(mlb.kinds if mlb is not None else {}),
+        **(nfl_accounts().kinds if nfl else {}),
+        **(nba_accounts().kinds if nba is not None else {}),
+    }
     return PollPlan(policies, ledger=ledger, accounts=AccountMap(sources=sources, kinds=kinds))
 
 
@@ -354,12 +359,14 @@ def planned_nfl_source(
     *,
     ledger: QuotaLedger,
     favorites: Favorites = Favorites(),
+    market: MarketReader | None = None,
 ) -> NflSource:
     """NFL on the board: NFLMeta read through ``get`` on ``plan``, each response charged to NFLMeta's account on
-    the ``ledger`` (rows and all, from its headers), as the NFL runner reads it."""
+    the ``ledger`` (rows and all, from its headers), as the NFL runner reads it; and, when given, the meter from
+    ``market``."""
     meter = Meter(ledger, ProviderAccount.NFLMETA, clock, billed=nflmeta_billed)
     provider = NflMetaLiveProvider(NflTeamRegistry.default(source=NFLMETA_SOURCE), fetch=MeteredHttp(get, meter))
-    planned = PlannedNfl(plan, clock, provider, favorites=favorites)
+    planned = PlannedNfl(plan, clock, provider, favorites=favorites, market=market)
     return NflSource(schedule=planned, feeds=planned, held_back=planned.held_back)
 
 

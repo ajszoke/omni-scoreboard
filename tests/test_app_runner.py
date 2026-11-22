@@ -445,6 +445,39 @@ def test_a_board_without_mlb_runs_nfl_alone_and_never_reads_a_baseball_feed() ->
         board_plan(ledger=ledger, mlb=None, nfl=False)
 
 
+def test_with_a_market_the_board_s_nfl_cards_carry_the_meter_read_through_the_plan_on_the_exchange_s_account() -> None:
+    clock = FakeClock(_et(SUNDAY, 13, 5))
+    ledger = QuotaLedger(account_limits(NflMetaPlan.BUILDER))
+    plan = board_plan(ledger=ledger, mlb=mlb_accounts(_FakeMlb.source), nfl=True)
+    assert plan.accounts is not None
+    assert plan.accounts.account(PollSource.PUBLIC_MARKET, NFLMETA_SOURCE) is ProviderAccount.POLYMARKET_US
+    nflmeta = _NflMeta(clock)
+    nflmeta.rows[102] = _row(102, "PIT", "CIN", _et(SUNDAY, 13), phase="in")
+    asked: list[datetime] = []
+
+    def market(game: TeamGame, now: datetime) -> WinProbability | None:
+        asked.append(now)
+        return WinProbability(home=64.0, away=36.0)
+
+    nfl = planned_nfl_source(plan, clock, nflmeta, ledger=ledger, market=market)
+    loop = build_planned_loop(None, RecordingDisplaySink(PanelProfile.QUAD_128X64), nfl=nfl)
+    poller = Poller(plan, clock)
+    key = f"{LeagueScopedId(League.NFL, NFLMETA_SOURCE, '102')}:live"
+    for _ in range(3):
+        loop.refresh(clock.read())
+        poller.run_due()
+        clock.advance(timedelta(seconds=5))
+    card = loop._queue.card(key)
+    assert card is not None and card.payload.win_probability is None  # the first reading is too new for the score
+    assert asked  # the card asked for it
+    clock.advance(timedelta(seconds=45))  # the others' next read
+    for _ in range(2):
+        loop.refresh(clock.read())
+        poller.run_due()
+    card = loop._queue.card(key)
+    assert card is not None and card.payload.win_probability == WinProbability(home=64.0, away=36.0)
+
+
 def test_the_board_s_receiver_is_driven_by_a_sink_command_and_the_emulator_stays_the_default(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

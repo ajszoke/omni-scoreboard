@@ -51,6 +51,10 @@ once, oldest first, and `latest` gives the newest. An answer the plan had given 
 provider has already moved past the plays it brought. Each counts as current for two of its own read's cadence
 (`NflReading.current_for`): a favorite's game read every 10 s for 20 s, the others' read together every 45 s for
 90 s, so a card read at the others' pace isn't dimmed between its reads.
+
+**The meter**, when the board has a market, is read as the pipeline asks for it, on the exchange's own account: a
+game's win probability from its public quotes (`PollSource.PUBLIC_MARKET`, every 15 s while the game is wanted), read
+as of a moment: the newest reading that arrived by then. A failed read just leaves the card without it.
 """
 
 from __future__ import annotations
@@ -63,12 +67,15 @@ from datetime import date, datetime, time, timedelta
 from typing import Any
 
 from omni.app.nfl_feeds import NflReading
+from omni.app.pipeline import MeterReading
+from omni.app.planned_nba import PUBLIC_MARKET_POLICY, MarketReader
 from omni.app.poll_plan import AccountMap, PollKey, PollPlan, PollPolicy, PollPriority, PollSource
 from omni.app.quota import ProviderAccount
 from omni.core.clock import Clock, ClockReading, MonotonicTime
 from omni.core.enum import League
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.core.time import local_date
+from omni.domain.baseball import WinProbability
 from omni.domain.contest import TeamGame
 from omni.preferences.favorites import Favorites
 from omni.providers.base import LocalDate, PollScope, ProviderUpdate, ScopeObservation, ScopeReport, ScopeSpan
@@ -89,14 +96,16 @@ _CURRENT_CADENCES = 2  # an answer counts as current for this many of its read's
 _KEEP = 2048  # answers kept per game until taken: hours of a followed game's; a game nobody takes from keeps no more
 
 # The day list and a final's read are each made once; their cadence is only how often a failing one is asked
-# again, once its quick retries are spent.
+# again, once its quick retries are spent. The exchange's quotes are the meter's, asked as NBA's are: a plan holds
+# one policy a source.
 NFL_POLICIES = {
     PollSource.DAY_LIST: PollPolicy(every=timedelta(minutes=1), keep_for=timedelta(minutes=5), rows=16),
     PollSource.LIVE_SCORES: PollPolicy(every=LIVE_EVERY, keep_for=timedelta(minutes=3)),
     PollSource.FOLLOWED_GAME: PollPolicy(every=DEFAULT_POLL.as_timedelta(), keep_for=timedelta(seconds=90), at_once=2),
     PollSource.FINAL_SCORE: PollPolicy(every=timedelta(minutes=1), keep_for=timedelta(minutes=5), at_once=2),
+    PollSource.PUBLIC_MARKET: PUBLIC_MARKET_POLICY,
 }
-_READS = tuple(NFL_POLICIES)
+_READS = (PollSource.DAY_LIST, PollSource.LIVE_SCORES, PollSource.FOLLOWED_GAME, PollSource.FINAL_SCORE)  # NFLMeta's
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -118,8 +127,10 @@ class NflSchedulePolicy:
 
 
 def nfl_accounts(source: SourceRef = NFLMETA_SOURCE) -> AccountMap:
-    """The account NFL's asks spend: every one of them NFLMeta's."""
-    return AccountMap(sources={source: ProviderAccount.NFLMETA})
+    """The accounts NFL's asks spend: NFLMeta's for the games, and the exchange's public quotes for the meter."""
+    return AccountMap(
+        sources={source: ProviderAccount.NFLMETA}, kinds={PollSource.PUBLIC_MARKET: ProviderAccount.POLYMARKET_US}
+    )
 
 
 @dataclass(slots=True)
@@ -177,6 +188,7 @@ class PlannedNfl:
         *,
         favorites: Favorites = Favorites(),
         policy: NflSchedulePolicy = NflSchedulePolicy(),
+        market: MarketReader | None = None,
     ) -> None:
         missing = [kind.value for kind in _READS if kind not in plan.capacity()]
         if missing:
@@ -192,6 +204,7 @@ class PlannedNfl:
         self._provider = provider
         self._favorites = favorites
         self._policy = policy
+        self._market = market
         # Until the day's list answers, no game is known to read: on a board with an NFL favorite it's what focus
         # reads need, so it goes as focus.
         self._listing = PollPriority.FOCUS if favorites.teams(League.NFL) else PollPriority.NORMAL
@@ -261,13 +274,27 @@ class PlannedNfl:
             known = self._games.get(game.id)
             return known.latest if known is not None else None
 
+    def win_probability(self, game: TeamGame, as_of: ClockReading) -> MeterReading | None:
+        """``game``'s win probability as it stood at ``as_of``: the newest reading that arrived by then; None without a
+        market, or with no reading by then."""
+        market = self._market
+        if market is None:
+            return None
+        key: PollKey[WinProbability | None] = PollKey(PollSource.PUBLIC_MARKET, game.id)
+        at = self._clock.read()
+        self._plan.want(key, lambda asked: market(game, asked), priority=PollPriority.NORMAL, at=at)
+        answer = self._plan.latest_by(key, as_of.monotonic, at)
+        if answer is None or answer.value is None:
+            return None
+        return MeterReading(answer.value, answer.received)
+
     def interrupted(
         self, interruption: Interruption, *, held: Collection[PollScope], contests: Collection[LeagueScopedId]
     ) -> None:
         """The host slept or stalled: every read NFL wants is dropped from the plan (what an ask out for it brings back
         is ignored) and wanted afresh at the next pass, due at once, within the account's budget; an ask begun before
-        the gap files nothing when it returns; and the answers not yet taken go. Each game's newest answer stays
-        known, for its schedule; the pipeline judges its freshness."""
+        the gap files nothing when it returns; and the answers not yet taken go, with each game's market readings.
+        Each game's newest answer stays known, for its schedule; the pipeline judges its freshness."""
         with self._lock:
             self._epoch += 1
             for key in self._wanted:
@@ -275,6 +302,9 @@ class PlannedNfl:
             self._wanted = {}
             for game in self._games.values():
                 game.untaken.clear()
+        for contest in contests:
+            if contest.league is self.league:
+                self._plan.drop(PollKey(PollSource.PUBLIC_MARKET, contest))
 
     # --- what to read --------------------------------------------------------------------------------------
 

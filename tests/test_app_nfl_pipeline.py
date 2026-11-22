@@ -12,15 +12,17 @@ from typing import Any
 
 import pytest
 
+from omni.app.football_board import METER_LAG, METER_MAX_AGE
 from omni.app.nfl_feeds import NflReading
 from omni.app.nfl_pipeline import LiveFootballPipeline, NflCardPolicy
-from omni.app.pipeline import PipelineResult
+from omni.app.pipeline import MeterReading, PipelineResult
 from omni.cards.base import CardId, CardKind, DedupeKey, EndBasis, GameEnd, ScoreboardCard
 from omni.cards.football import LiveFootballCardPayload
 from omni.core.clock import ClockReading, FakeClock, MonotonicTime
 from omni.core.enum import DisplayPriority, GameStatus, HomeAway, League, PanelProfile
 from omni.core.ids import LeagueScopedId
 from omni.core.time import DurationSeconds
+from omni.domain.baseball import WinProbability
 from omni.domain.contest import TeamGame
 from omni.domain.football import FootballGameState, FootballInterval, PlaySummary, PlayTone, SetPiece
 from omni.events.football import EntryLabel, FootballEvent, FootballEventKind
@@ -29,6 +31,7 @@ from omni.providers.nfl_teams import NflTeamRegistry
 from omni.providers.nflmeta import NFLMETA_SOURCE, FeedNote, FeedNoteKind, NflLiveSnapshot, NflPhase
 from omni.queue.delay_policy import DelayPolicy
 from omni.queue.scheduler import InterleavedCardQueue
+from omni.tower.interruption import Interruption, InterruptionReason
 
 T = datetime(2026, 11, 22, 18, 0, tzinfo=timezone.utc)
 LAG = 45
@@ -95,12 +98,14 @@ def play(key: str, written: datetime, *, major: bool = False, headline: str = "R
 
 
 class FakeNflFeeds:
-    """NFL feeds a test hands answers to: each taken once, oldest first; the newest stays readable."""
+    """NFL feeds a test hands answers to: each taken once, oldest first; the newest stays readable. The market's
+    readings, as they arrived, are read as of a moment."""
 
     def __init__(self) -> None:
         self.waiting: dict[LeagueScopedId, list[NflReading]] = defaultdict(list)
         self.newest: dict[LeagueScopedId, NflReading] = {}
         self.taken: list[LeagueScopedId] = []
+        self.market: list[MeterReading] = []
 
     def answer(
         self,
@@ -137,6 +142,10 @@ class FakeNflFeeds:
 
     def latest(self, game: TeamGame) -> NflReading | None:
         return self.newest.get(game.id)
+
+    def win_probability(self, game: TeamGame, as_of: ClockReading) -> MeterReading | None:
+        arrived = [reading for reading in self.market if reading.received.monotonic <= as_of.monotonic]
+        return arrived[-1] if arrived else None
 
 
 class Board:
@@ -673,3 +682,105 @@ def test_the_card_policy_s_defaults_are_the_documented_bounds() -> None:
     assert policy.caption_bounds(False) == (timedelta(seconds=60), timedelta(seconds=90))
     assert policy.caption_bounds(True) == (timedelta(seconds=120), timedelta(seconds=150))
     assert policy.postgame_window == timedelta(minutes=30) and policy.stale_for == timedelta(minutes=2)
+
+
+# --- the meter -------------------------------------------------------------------------------------------------------
+
+EVEN = WinProbability(home=50.0, away=50.0)
+HOME_UP = WinProbability(home=70.0, away=30.0)
+
+
+def _quote(board: Board, value: WinProbability) -> None:
+    """The market's reading of the game, arriving now."""
+    board.feeds.market.append(MeterReading(value, board.now))
+
+
+def test_the_meter_s_lag_and_max_age_are_the_nfl_runner_s() -> None:
+    policy = NflCardPolicy()
+    assert (policy.meter_lag, policy.meter_max_age) == (METER_LAG, METER_MAX_AGE)
+    assert (METER_LAG, METER_MAX_AGE) == (timedelta(seconds=15), timedelta(seconds=60))
+
+
+def test_the_meter_shows_the_market_as_it_stood_fifteen_seconds_before_the_answer_on_the_card() -> None:
+    board = Board()
+    _quote(board, EVEN)
+    board.to(10)
+    _quote(board, HOME_UP)
+    board.to(20)
+    board.answer(GAME, KICKOFF)  # the reading at 10 is newer than 5 s: it may know of a play this answer doesn't
+    board.to(24.9)
+    board.answer(GAME, drive(clock=890))  # 9.9 s: still too new
+    board.to(25)
+    board.answer(GAME, drive(clock=880))  # 10 s: the reading at 10 is old enough
+    board.at(65, GAME)
+    assert board.payload(GAME) == LiveFootballCardPayload(state=KICKOFF, win_probability=EVEN)
+    board.at(69.9, GAME)
+    assert board.payload(GAME) == LiveFootballCardPayload(state=drive(clock=890), win_probability=EVEN)
+    board.at(70, GAME)
+    assert board.payload(GAME) == LiveFootballCardPayload(state=drive(clock=880), win_probability=HOME_UP)
+
+
+def test_the_meter_goes_once_its_reading_is_a_minute_older_than_its_lag_on_the_broadcast_s_clock() -> None:
+    board = Board()
+    _quote(board, HOME_UP)
+    board.to(20)
+    board.answer(GAME, KICKOFF)
+    board.at(65, GAME)
+    assert board.payload(GAME).win_probability == HOME_UP
+    assert board.at(119.9, GAME).ingested == ()  # the delay, the lag and a minute: 120 s past its arrival
+    assert board.at(120, GAME).ingested == (CardId(LIVE_KEY),)
+    card = board.card(GAME)
+    assert card is not None and card.stale_since is None and card.payload.win_probability is None
+
+
+def test_a_card_that_goes_stale_loses_its_meter_until_it_s_current_again() -> None:
+    board = Board()
+    _quote(board, HOME_UP)
+    board.to(20)
+    board.answer(GAME, KICKOFF, current_for=timedelta(seconds=60))  # out of date from 80
+    board.at(65, GAME)
+    assert board.payload(GAME).win_probability == HOME_UP
+    board.at(80, GAME)
+    card = board.card(GAME)
+    assert card is not None and card.stale_since == T + timedelta(seconds=80) and card.payload.win_probability is None
+    _quote(board, EVEN)
+    board.to(95)
+    board.answer(GAME, drive(clock=880))
+    board.at(139.9, GAME)
+    assert board.payload(GAME).win_probability is None  # still the stale field
+    board.at(140, GAME)
+    card = board.card(GAME)
+    assert card is not None and card.stale_since is None
+    assert card.payload == LiveFootballCardPayload(state=drive(clock=880), win_probability=EVEN)
+
+
+def test_after_a_host_s_gap_the_meter_s_reading_from_before_it_is_gone() -> None:
+    board = Board()
+    _quote(board, HOME_UP)
+    board.to(20)
+    board.answer(GAME, KICKOFF)
+    board.at(65, GAME)
+    assert board.payload(GAME).win_probability == HOME_UP
+    before = board.now
+    board.to(70)
+    board.pipeline.interrupted(
+        Interruption(serial=1, reason=InterruptionReason.PROCESS_STALL, before=before, after=board.now)
+    )
+    board.feeds.market.clear()  # the source drops its readings from before the gap too
+    board.answer(GAME, drive(clock=880))
+    board.at(115, GAME)
+    card = board.card(GAME)
+    assert card is not None and card.stale_since is None
+    assert card.payload == LiveFootballCardPayload(state=drive(clock=880))  # 115 s old: it would still have stood
+
+
+def test_a_final_carries_no_meter() -> None:
+    board = Board()
+    _quote(board, HOME_UP)
+    board.to(20)
+    board.answer(GAME, KICKOFF)
+    board.at(65, GAME)
+    assert board.payload(GAME).win_probability == HOME_UP
+    board.answer(GAME, FINAL_STATE, phase=NflPhase.POST)
+    board.at(110, GAME)
+    assert board.payload(GAME, "final").win_probability is None

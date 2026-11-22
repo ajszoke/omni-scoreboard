@@ -122,7 +122,7 @@ def _sunday_through_planned_nfl() -> tuple[_ModelSunday, int]:
     end = datetime.combine(TYPICAL_SUNDAY + timedelta(days=1), time(), EASTERN)
     clock = FakeClock(start)
     world = _ModelSunday(clock, games)
-    ledger = QuotaLedger({NFL: UNLIMITED})
+    ledger = QuotaLedger({NFL: UNLIMITED, ProviderAccount.POLYMARKET_US: UNLIMITED})  # the meter's reads nothing here
     plan = PollPlan(NFL_POLICIES, ledger=ledger, accounts=nfl_accounts())
     meter = Meter(ledger, NFL, clock, billed=nflmeta_billed)
     provider = NflMetaLiveProvider(NflTeamRegistry.default(source=NFLMETA_SOURCE), fetch=MeteredHttp(world, meter))

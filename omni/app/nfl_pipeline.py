@@ -8,7 +8,12 @@ the game for its phase:
 - **upcoming** — no card yet. No renderer draws an upcoming NFL game as it is: the pregame card is baseball's (it
   counts down to a "first pitch"), and the football card's kickoff state is a game already under way.
 - **live** — a `LIVE_GAME` card drawn by the live football renderer, from the newest state to have cleared the TV
-  delay, with when a halftime ends (delayed to the viewer's clock) so the break counts down. No win meter yet.
+  delay, with when a halftime ends (delayed to the viewer's clock) so the break counts down.
+  - **The win meter**, when the board reads one. The market moves on a play as it happens, while the feed reports it
+    20 to 30 seconds later, so a price as fresh as the feed's answer would give the play away early. The meter takes
+    the newest reading that arrived no later than `NflCardPolicy.meter_lag` before the answer whose state is on the
+    card, and drops it once it's `meter_max_age` older than that on the broadcast's clock: the delay, the lag and the
+    max age past its own arrival. A stale card shows no meter, and a final has none.
   - **The caption** (`last_play`) is the newest released play, staged with which entry it is and its bounds
     (`StagedCaption`). It starts only when a frame that carried it is confirmed shown (`presented`): a routine entry
     must start within 60 s of its release and is gone by 90 s; a major one (a score, a turnover, a ruling) by 120 s
@@ -78,9 +83,16 @@ from enum import Enum
 from types import MappingProxyType
 from typing import Any, Iterable
 
-from omni.app.football_board import MAJOR_HARD_END, MAJOR_START_WITHIN, ROUTINE_HARD_END, ROUTINE_START_WITHIN
+from omni.app.football_board import (
+    MAJOR_HARD_END,
+    MAJOR_START_WITHIN,
+    METER_LAG,
+    METER_MAX_AGE,
+    ROUTINE_HARD_END,
+    ROUTINE_START_WITHIN,
+)
 from omni.app.nfl_feeds import NflFeeds, NflReading
-from omni.app.pipeline import CONFIRM_WITHIN, STALE_FOR, PipelineResult
+from omni.app.pipeline import CONFIRM_WITHIN, STALE_FOR, GameMeter, PipelineResult
 from omni.app.policy_facts import (
     OFFER_LIFETIME,
     AwaitingSuccessor,
@@ -106,6 +118,7 @@ from omni.core.clock import ClockReading, MonotonicTime
 from omni.core.enum import DisplayPriority, GameStatus, PanelProfile, StrEnumMixin
 from omni.core.ids import LeagueScopedId
 from omni.core.time import DurationSeconds
+from omni.domain.baseball import WinProbability
 from omni.domain.contest import TeamGame
 from omni.domain.football import FootballGameState
 from omni.events.football import FootballEvent, FootballEventKind
@@ -141,8 +154,8 @@ class CaptionMiss(StrEnumMixin, str, Enum):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class NflCardPolicy:
-    """How NFL's cards are timed: their turns, the caption's lifetimes, a play's own card, and when a quiet feed's
-    card dims and goes."""
+    """How NFL's cards are timed: their turns, the caption's lifetimes, a play's own card, how old the meter's
+    reading may be, and when a quiet feed's card dims and goes."""
 
     live_min_display: DurationSeconds = DurationSeconds(8)
     live_max_display: DurationSeconds = DurationSeconds(30)
@@ -159,6 +172,8 @@ class NflCardPolicy:
     current_cadences: int = 2  # an answer that doesn't say how long it's current is current for this many cadences
     stale_for: timedelta = STALE_FOR  # a stale live card comes down this long after it went stale
     confirm_within: timedelta = CONFIRM_WITHIN  # how long the schedule may call a game final before its feed must
+    meter_lag: timedelta = METER_LAG  # the meter's reading arrived at least this long before the answer on the card
+    meter_max_age: timedelta = METER_MAX_AGE  # a reading this much older than its lag is no reading at all
 
     def caption_bounds(self, major: bool) -> tuple[timedelta, timedelta]:
         """How long after its release a caption may first go up, and when it's gone."""
@@ -235,6 +250,7 @@ class _Live:
     states: DelayedFeed[_Field]
     plays: DelayedEventStream[_Play]
     breaks: ReleasedBreaks  # its break and action evidence, held with the states
+    meter: GameMeter  # the market's reading beside the field
     primed: bool = False  # its first answer's plays were set aside as from before the board tuned in
     last: FootballGameState | None = None  # the newest live answer's state: the one before the next answer's plays
     rulings: dict[str, int] = field(default_factory=dict)  # each play's rulings so far, by the play it's about
@@ -391,7 +407,13 @@ class LiveFootballPipeline:
             return
         live = self._live.get(game.id)
         if live is None:
-            live = _Live(game, DelayedFeed(self._guard), DelayedEventStream(self._guard), ReleasedBreaks(self._guard))
+            live = _Live(
+                game,
+                DelayedFeed(self._guard),
+                DelayedEventStream(self._guard),
+                ReleasedBreaks(self._guard),
+                self._meter(),
+            )
             self._live[game.id] = live
         live.game = game
         # Answers taken while its feed is out of date end an outage: what they bring is a catch-up.
@@ -549,8 +571,13 @@ class LiveFootballPipeline:
         since = self._recover(game.id, shown)
         if since is not None and at.monotonic.since(since) >= self._policy.stale_for:
             return  # its card is down for staleness: nothing goes back up until a newer state clears the delay
-        caption = self._caption(game, live, shown, at, out, stale=since is not None)
-        card = self._live_card(game, shown.value, caption, at)
+        stale = since is not None
+        caption = self._caption(game, live, shown, at, out, stale=stale)
+        lag, received = self._policy.meter_lag, shown.arrival.received
+        as_of = ClockReading(received.utc - lag, received.monotonic + -lag)  # the market, lag before the shown answer
+        live.meter.admit(self._feeds.win_probability(game, as_of), as_of)
+        meter = live.meter.current(at)
+        card = self._live_card(game, shown.value, caption, None if stale else meter, at)
         current = self._queue.card(card.dedupe_key.raw)
         recovered = current is not None and current.stale_since is not None and since is None and safe is not None
         if current is None or current.payload != card.payload or current.priority != card.priority or recovered:
@@ -859,10 +886,15 @@ class LiveFootballPipeline:
         return _Caption(play, staged)
 
     def _live_card(
-        self, game: TeamGame, shown: _Field, caption: _Caption | None, at: ClockReading
+        self,
+        game: TeamGame,
+        shown: _Field,
+        caption: _Caption | None,
+        meter: WinProbability | None,
+        at: ClockReading,
     ) -> ScoreboardCard[LiveFootballCardPayload]:
-        """A live card for ``game`` showing ``shown`` and ``caption``, its halftime counting down on the viewer's
-        clock."""
+        """A live card for ``game`` showing ``shown``, ``caption`` and ``meter``, its halftime counting down on the
+        viewer's clock."""
         ends = shown.break_ends_at
         lag = self._guard.policy.broadcast_lag.as_timedelta()
         key = f"{game.id}:live"
@@ -883,6 +915,7 @@ class LiveFootballPipeline:
                 last_play=caption.play.event.summary if caption is not None else None,
                 break_ends_at=ends + lag if ends is not None else None,
                 caption=caption.staged if caption is not None else None,
+                win_probability=meter,
             ),
         )
 
@@ -913,6 +946,12 @@ class LiveFootballPipeline:
             ),
         )
 
+    def _meter(self) -> GameMeter:
+        """A game's meter, its reading standing until it's `NflCardPolicy.meter_max_age` older than the lag on the
+        broadcast's clock."""
+        delay = self._guard.policy.broadcast_lag.as_timedelta()
+        return GameMeter(delay + self._policy.meter_lag + self._policy.meter_max_age)
+
     def _priority(self, game: TeamGame) -> CardPriority:
         """The favorite band for a game with one of NFL's favorites in it, naming the better-ranked; else normal."""
         rank = self._favorites.of(game)
@@ -933,7 +972,8 @@ class LiveFootballPipeline:
         and the offers waiting; its next answer's plays are set aside, as a first answer's are, so a batch the gap
         held back can't caption or promote; and the field its card shows, released before the gap, is drawn stale
         from the gap's end (coming down `stale_for` later) until a state answered after it clears the delay. A final
-        stands. (An output loss is the display's: the loop tells the pipelines only of a host's gap.)"""
+        stands. Its meter's reading goes too. (An output loss is the display's: the loop tells the pipelines only of a
+        host's gap.)"""
         self._guard.distrust(interruption.after)  # what a wake admits waits its full delay until the clock settles
         self._woke = interruption.after.monotonic
         for game_id, live in self._live.items():
@@ -941,7 +981,7 @@ class LiveFootballPipeline:
             live.states, live.plays = DelayedFeed(self._guard), DelayedEventStream(self._guard)
             live.breaks = ReleasedBreaks(self._guard)
             live.primed, live.last, live.caption = False, None, None
-            live.awaiting = AwaitingSuccessor()
+            live.awaiting, live.meter = AwaitingSuccessor(), self._meter()
             self._woken[game_id] = live.shown
         self._offers = StandingOffers()
         with self._lock:

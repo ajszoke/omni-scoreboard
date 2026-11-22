@@ -67,7 +67,7 @@ from omni.app.contest_store import ContestStore, ProviderStatus
 from omni.app.loop import AppLoop, Painted, Refresh
 from omni.app.nfl_feeds import NflReading
 from omni.app.nfl_pipeline import LiveFootballPipeline
-from omni.app.pipeline import LiveBaseballPipeline
+from omni.app.pipeline import LiveBaseballPipeline, MeterReading
 from omni.app.planned_mlb import MLB_POLICIES, PlannedMlb
 from omni.app.poll_plan import PollKey, PollPlan, PollPriority, PollSource
 from omni.app.poller import Poller
@@ -718,6 +718,9 @@ class _ReplayNfl:
 
     def latest(self, game: TeamGame) -> NflReading | None:
         return self._latest.get(game.id)
+
+    def win_probability(self, game: TeamGame, as_of: ClockReading) -> MeterReading | None:
+        return None  # the replay reads no market for NFL
 
     def _read(self, game_id: LeagueScopedId, at: ClockReading) -> None:
         """One read of a game: its answer, unless the source is out or has nothing to say."""

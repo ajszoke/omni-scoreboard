@@ -102,6 +102,7 @@ __all__ = [
     "MeteredBdl",
     "NbaOddsReader",
     "NbaSchedulePolicy",
+    "PUBLIC_MARKET_POLICY",
     "PlannedNba",
     "QUIET_EVERY",
     "nba_accounts",
@@ -129,6 +130,10 @@ NbaOddsReader = Callable[[TeamGame, datetime], FavoriteLine | None]
 # How the plan asks a market for one game's win probability as of a UTC instant.
 MarketReader = Callable[[TeamGame, datetime], WinProbability | None]
 
+# How a game's win probability is read from the exchange's public quotes, NBA's and NFL's alike: one plan holds one
+# policy a source. A reading must still stand when the state beside it clears the delay.
+PUBLIC_MARKET_POLICY = PollPolicy(every=timedelta(seconds=15), keep_for=timedelta(minutes=10), per_minute=120)
+
 
 def nba_policies(tier: BalldontliePlan) -> dict[PollSource, PollPolicy]:
     """How NBA's reads are asked on ``tier``: the slate at its live pace and once a minute when nothing presses, the
@@ -140,10 +145,7 @@ def nba_policies(tier: BalldontliePlan) -> dict[PollSource, PollPolicy]:
         PollSource.PLAYER_LINES: PollPolicy(every=LINES_EVERY, keep_for=timedelta(seconds=90)),
         PollSource.SEASON_RESULTS: PollPolicy(every=_SEASON_PAGE_EVERY, keep_for=timedelta(minutes=10)),
         PollSource.GAME_LINES: PollPolicy(every=timedelta(minutes=5), keep_for=timedelta(minutes=30), per_minute=12),
-        # A reading must still stand when the state beside it clears the delay.
-        PollSource.PUBLIC_MARKET: PollPolicy(
-            every=timedelta(seconds=15), keep_for=timedelta(minutes=10), per_minute=120
-        ),
+        PollSource.PUBLIC_MARKET: PUBLIC_MARKET_POLICY,
     }
 
 
