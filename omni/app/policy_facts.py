@@ -171,12 +171,15 @@ def _after(action: ActionEvidence, evidence: BreakEvidence) -> bool:
 @dataclass(frozen=True, slots=True)
 class PlayContext(Generic[StateT]):
     """A play's place in its game: the states of the answer before the one that brought it and of that answer, when
-    that answer's state clears the delay, and where the play came from."""
+    that answer's state clears the delay, where the play came from, and, where a league reads the market either side
+    of a play, when those two answers arrived."""
 
     before: StateT | None
     after: StateT | None
     settled: MonotonicTime  # when the state after it clears the delay
     origin: CandidateOrigin = CandidateOrigin.LIVE
+    before_arrived: ClockReading | None = None  # when the answer before arrived; None when there wasn't one
+    after_arrived: ClockReading | None = None  # when the answer that brought it arrived
 
 
 class AwaitingSuccessor(Generic[T]):

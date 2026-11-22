@@ -53,8 +53,10 @@ provider has already moved past the plays it brought. Each counts as current for
 90 s, so a card read at the others' pace isn't dimmed between its reads.
 
 **The meter**, when the board has a market, is read as the pipeline asks for it, on the exchange's own account: a
-game's win probability from its public quotes (`PollSource.PUBLIC_MARKET`, every 15 s while the game is wanted), read
-as of a moment: the newest reading that arrived by then. A failed read just leaves the card without it.
+game's win probability from its public quotes (`PollSource.PLAY_MARKET`, every 5 s while the game is wanted), read
+as of a moment: the newest reading that arrived by then. A failed read just leaves the card without it. The pipeline
+also rates each play by how far the market moved across it, so a reading should sit close to each side of a play:
+hence NFL's own pace, three times NBA's.
 """
 
 from __future__ import annotations
@@ -68,7 +70,7 @@ from typing import Any
 
 from omni.app.nfl_feeds import NflReading
 from omni.app.pipeline import MeterReading
-from omni.app.planned_nba import PUBLIC_MARKET_POLICY, MarketReader
+from omni.app.planned_nba import MarketReader
 from omni.app.poll_plan import AccountMap, PollKey, PollPlan, PollPolicy, PollPriority, PollSource
 from omni.app.quota import ProviderAccount
 from omni.core.clock import Clock, ClockReading, MonotonicTime
@@ -89,21 +91,27 @@ from omni.providers.nflmeta import (
     NflSlate,
 )
 
-__all__ = ["LIVE_EVERY", "NFL_POLICIES", "NflSchedulePolicy", "PlannedNfl", "nfl_accounts"]
+__all__ = ["LIVE_EVERY", "NFL_POLICIES", "PLAY_MARKET_POLICY", "NflSchedulePolicy", "PlannedNfl", "nfl_accounts"]
 
 LIVE_EVERY = timedelta(seconds=45)  # the other games' scores: each live score within 45 s
 _CURRENT_CADENCES = 2  # an answer counts as current for this many of its read's cadence
 _KEEP = 2048  # answers kept per game until taken: hours of a followed game's; a game nobody takes from keeps no more
 
+# The meter's quotes, every 5 s while a game is wanted: each play is rated by how far the market moved across it, so a
+# reading should sit close to each side of it. A plan holds one policy a source, so this is a source of NFL's own
+# (NBA's quotes go every 15 s). Even a week's sixteen games at once would make 192 asks a minute, well inside the
+# exchange's 25 a second. The 64 answers a key keeps span 5 min 20 s at this pace, so each stands 5 min: long enough
+# that the reading before a play still stands once the play has cleared the delay and its class is read.
+PLAY_MARKET_POLICY = PollPolicy(every=timedelta(seconds=5), keep_for=timedelta(minutes=5), per_minute=240)
+
 # The day list and a final's read are each made once; their cadence is only how often a failing one is asked
-# again, once its quick retries are spent. The exchange's quotes are the meter's, asked as NBA's are: a plan holds
-# one policy a source.
+# again, once its quick retries are spent.
 NFL_POLICIES = {
     PollSource.DAY_LIST: PollPolicy(every=timedelta(minutes=1), keep_for=timedelta(minutes=5), rows=16),
     PollSource.LIVE_SCORES: PollPolicy(every=LIVE_EVERY, keep_for=timedelta(minutes=3)),
     PollSource.FOLLOWED_GAME: PollPolicy(every=DEFAULT_POLL.as_timedelta(), keep_for=timedelta(seconds=90), at_once=2),
     PollSource.FINAL_SCORE: PollPolicy(every=timedelta(minutes=1), keep_for=timedelta(minutes=5), at_once=2),
-    PollSource.PUBLIC_MARKET: PUBLIC_MARKET_POLICY,
+    PollSource.PLAY_MARKET: PLAY_MARKET_POLICY,
 }
 _READS = (PollSource.DAY_LIST, PollSource.LIVE_SCORES, PollSource.FOLLOWED_GAME, PollSource.FINAL_SCORE)  # NFLMeta's
 
@@ -129,7 +137,7 @@ class NflSchedulePolicy:
 def nfl_accounts(source: SourceRef = NFLMETA_SOURCE) -> AccountMap:
     """The accounts NFL's asks spend: NFLMeta's for the games, and the exchange's public quotes for the meter."""
     return AccountMap(
-        sources={source: ProviderAccount.NFLMETA}, kinds={PollSource.PUBLIC_MARKET: ProviderAccount.POLYMARKET_US}
+        sources={source: ProviderAccount.NFLMETA}, kinds={PollSource.PLAY_MARKET: ProviderAccount.POLYMARKET_US}
     )
 
 
@@ -280,7 +288,7 @@ class PlannedNfl:
         market = self._market
         if market is None:
             return None
-        key: PollKey[WinProbability | None] = PollKey(PollSource.PUBLIC_MARKET, game.id)
+        key: PollKey[WinProbability | None] = PollKey(PollSource.PLAY_MARKET, game.id)
         at = self._clock.read()
         self._plan.want(key, lambda asked: market(game, asked), priority=PollPriority.NORMAL, at=at)
         answer = self._plan.latest_by(key, as_of.monotonic, at)
@@ -304,7 +312,7 @@ class PlannedNfl:
                 game.untaken.clear()
         for contest in contests:
             if contest.league is self.league:
-                self._plan.drop(PollKey(PollSource.PUBLIC_MARKET, contest))
+                self._plan.drop(PollKey(PollSource.PLAY_MARKET, contest))
 
     # --- what to read --------------------------------------------------------------------------------------
 

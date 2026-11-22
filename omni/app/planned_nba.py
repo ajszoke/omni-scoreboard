@@ -130,8 +130,8 @@ NbaOddsReader = Callable[[TeamGame, datetime], FavoriteLine | None]
 # How the plan asks a market for one game's win probability as of a UTC instant.
 MarketReader = Callable[[TeamGame, datetime], WinProbability | None]
 
-# How a game's win probability is read from the exchange's public quotes, NBA's and NFL's alike: one plan holds one
-# policy a source. A reading must still stand when the state beside it clears the delay.
+# How NBA's win probability is read from the exchange's public quotes; NFL's goes at its own pace
+# (`PollSource.PLAY_MARKET`). A reading must still stand when the state beside it clears the delay.
 PUBLIC_MARKET_POLICY = PollPolicy(every=timedelta(seconds=15), keep_for=timedelta(minutes=10), per_minute=120)
 
 

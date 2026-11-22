@@ -10,12 +10,16 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import Any
 
+import pytest
+
+from omni.app.pipeline import MeterReading
 from omni.cards.base import DedupeKey
 from omni.core.clock import ClockReading, MonotonicTime
+from omni.domain.baseball import WinProbability
 from omni.domain.breaks import BreakEvidence, BreakKind
 from omni.domain.football import FootballGameState, FootballInterval, PlaySummary, PlayTone
 from omni.events.football import FootballEvent, FootballEventKind
-from omni.policy.interrupts import InterruptClass, Stakes, interrupt_value
+from omni.policy.interrupts import InterruptClass, LeverageBasis, Stakes, interrupt_value
 from omni.policy.leverage import football_proxy
 from omni.policy.promotion import PromotionCandidate, PromotionKey, PromotionKind
 from omni.policy.view import GameFacts, PolicyView
@@ -43,7 +47,9 @@ def _arrived(seconds: float) -> ClockReading:
     return ClockReading(T + timedelta(seconds=seconds), MonotonicTime(float(seconds)))
 
 
-def _answer(board: Board, seconds: float, state: FootballGameState, *events: FootballEvent, **kwargs: Any) -> None:
+def _answer(
+    board: Board, seconds: float, state: FootballGameState | None, *events: FootballEvent, **kwargs: Any
+) -> None:
     """An answer arriving ``seconds`` past ``T``, taken by a refresh then."""
     board.to(seconds)
     board.answer(GAME, state, events=events, **kwargs)
@@ -179,3 +185,94 @@ def test_a_game_whose_final_has_revealed_is_no_longer_carded_live() -> None:
     final = drive(away=24, home=17, interval=FootballInterval.FINAL)
     _answer(board, 10, final, phase=NflPhase.POST)
     assert _view(board, 10) == PolicyView()
+
+
+# --- the swing --------------------------------------------------------------------------------------------------------
+
+
+def _quote(board: Board, seconds: float, away: float) -> None:
+    """The market's reading of the game, the away side at ``away`` points, arriving ``seconds`` past ``T``."""
+    board.to(seconds)
+    board.feeds.market.append(MeterReading(WinProbability(home=100.0 - away, away=away), board.now))
+
+
+SECOND = drive(period=2, clock=560)  # a tied second quarter
+DOWNFIELD = drive(period=2, clock=520, to_go=15)
+
+
+def _pick_then_long_completion(board: Board, *, market: bool = True) -> None:
+    """A second-quarter pick (play 31, its state after it released at 85), with no reading from before the answer
+    before it; then a long completion (play 32, released at 103, the state after it at 105), the market reading 30
+    before it and 42 after it."""
+    if market:
+        _quote(board, 10, 50.0)
+    _answer(board, 20, drive(period=2, clock=600), _row(30, 15))  # the first look
+    if market:
+        _quote(board, 24, 30.0)  # the market moves on the pick before the feed reports it
+    _answer(board, 40, SECOND, _row(31, 38, major=True))  # read from 5 (the first look's arrival, less the lag) to 25
+    if market:
+        _quote(board, 44, 42.0)
+    _answer(board, 60, DOWNFIELD, _row(32, 58))  # from 25 to 45
+
+
+def test_an_early_play_that_moved_the_market_ten_points_is_offered_as_a_win_swing_and_only_in_a_break() -> None:
+    board = Board()
+    _pick_then_long_completion(board)
+    assert _view(board, 85).offers == ()  # the pick: no reading by 5, so no swing, and early it's routine
+    assert _view(board, 104.9).offers == ()  # the completion is out; the state after it isn't
+    [swing] = _view(board, 105).offers
+    assert swing == PromotionCandidate(
+        key=PromotionKey(GAME.id, "32"),
+        kind=PromotionKind.MAJOR,
+        eligible=MonotonicTime(103.0),
+        card=DedupeKey(f"{GAME.id}:play:32:r0"),
+        value=interrupt_value(InterruptClass.WIN_SWING, predecessor=football_proxy(SECOND), stakes=Stakes()),
+    )
+    worth = swing.value
+    assert worth is not None and worth.event_class is InterruptClass.WIN_SWING
+    assert worth.z_pre == 1.0 and worth.value == pytest.approx(1.2 * 1.0 * 0.65)  # B, z_pre = 1, unknown records
+    assert worth.basis is LeverageBasis.PROXY and not worth.action_evidence  # the proxy's: break-only
+    card = board.queue.card(f"{GAME.id}:play:32:r0")
+    assert card is not None and card.payload.state == DOWNFIELD and card.payload.last_play == _row(32, 58).summary
+
+
+def test_without_a_market_the_same_plays_are_routine() -> None:
+    board = Board()
+    _pick_then_long_completion(board, market=False)
+    assert _view(board, 105).offers == ()
+
+
+def test_a_play_with_no_answer_before_it_takes_no_swing() -> None:
+    board = Board(lag=0)
+    _quote(board, 0, 50.0)
+    _answer(board, 20, None)  # the first look, before kickoff
+    _quote(board, 30, 70.0)
+    _answer(board, 60, SECOND, _row(1, 58))  # no state before it: no swing, and no class but routine
+    assert _view(board, 60).offers == ()
+
+
+def test_one_answer_s_swing_is_put_down_to_its_first_score_turnover_or_ruling_else_its_last_play() -> None:
+    board = Board()
+    _quote(board, 0, 50.0)
+    _answer(board, 20, drive(period=2, clock=600))  # the first look
+    _quote(board, 24, 35.0)
+    turnover = _row(32, 35, major=True)  # a second-quarter turnover: a major event, but early
+    snaps = (_row(31, 32), turnover, _row(33, 38, kind=FootballEventKind.TIMEOUT))
+    _answer(board, 40, SECOND, *snaps)  # the market from 50 at 5 to 35 at 25
+    _quote(board, 50, 20.0)
+    runs = (_row(34, 60), _row(35, 66), _row(36, 68, kind=FootballEventKind.OFFICIAL_TIMEOUT))
+    _answer(board, 70, DOWNFIELD, *runs)  # from 35 at 25 to 20 at 55
+    assert [offer.key.play for offer in _view(board, 85).offers] == ["32"]
+    offers = _view(board, 115).offers
+    assert [offer.key.play for offer in offers] == ["32", "35"]  # no major among the runs: the last of them
+    assert all(offer.value is not None and offer.value.event_class is InterruptClass.WIN_SWING for offer in offers)
+
+
+def test_a_swing_in_an_outage_s_catch_up_is_never_offered() -> None:
+    board = Board(lag=0)
+    _quote(board, 0, 50.0)
+    _answer(board, 20, drive(period=2, clock=600), current_for=timedelta(seconds=5))
+    board.at(30, GAME)  # stale from 25
+    _quote(board, 35, 80.0)
+    _answer(board, 60, SECOND, _row(57, 55, major=True))  # 30 points across it, but history
+    assert _view(board, 60).offers == () and _view(board, 70).offers == ()

@@ -95,6 +95,7 @@ class PollSource(StrEnumMixin, str, Enum):
     PLAYER_LINES = "player_lines"  # every player's line so far in the games under way, read together
     SEASON_RESULTS = "season_results"  # a page of the season's finals, for the records and ranks
     PUBLIC_MARKET = "public_market"  # one game's price off an exchange's public quotes, for a league the service lacks
+    PLAY_MARKET = "play_market"  # the same, read close enough beside each play to tell how far it moved the price
 
 
 class PollPriority(IntEnum):

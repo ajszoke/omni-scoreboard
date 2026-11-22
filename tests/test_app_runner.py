@@ -14,7 +14,7 @@ from omni.app.pipeline import MeterReading
 from omni.app.planned_mlb import PlannedMlb, mlb_accounts
 from omni.app.poll_plan import PollSource
 from omni.app.poller import Poller
-from omni.app.quota import NflMetaPlan, ProviderAccount, QuotaLedger, account_limits
+from omni.app.quota import BalldontliePlan, NflMetaPlan, ProviderAccount, QuotaLedger, account_limits
 from omni.app.runner import _no_baseball, board_plan, build_loop, build_planned_loop, paint_frame, planned_nfl_source
 from omni.app.versions import PolicyName
 from omni.cards.base import ScoreboardCard
@@ -445,12 +445,22 @@ def test_a_board_without_mlb_runs_nfl_alone_and_never_reads_a_baseball_feed() ->
         board_plan(ledger=ledger, mlb=None, nfl=False)
 
 
+def test_on_one_plan_nfl_s_quotes_go_every_5_s_and_nba_s_every_15_s_each_on_the_exchange_s_account() -> None:
+    ledger = QuotaLedger(account_limits(NflMetaPlan.BUILDER))
+    plan = board_plan(ledger=ledger, mlb=None, nfl=True, nba=BalldontliePlan.FREE)
+    assert plan.policy(PollSource.PLAY_MARKET).every == timedelta(seconds=5)
+    assert plan.policy(PollSource.PUBLIC_MARKET).every == timedelta(seconds=15)
+    assert plan.accounts is not None
+    assert plan.accounts.account(PollSource.PLAY_MARKET, NFLMETA_SOURCE) is ProviderAccount.POLYMARKET_US
+    assert plan.accounts.account(PollSource.PUBLIC_MARKET, NFLMETA_SOURCE) is ProviderAccount.POLYMARKET_US
+
+
 def test_with_a_market_the_board_s_nfl_cards_carry_the_meter_read_through_the_plan_on_the_exchange_s_account() -> None:
     clock = FakeClock(_et(SUNDAY, 13, 5))
     ledger = QuotaLedger(account_limits(NflMetaPlan.BUILDER))
     plan = board_plan(ledger=ledger, mlb=mlb_accounts(_FakeMlb.source), nfl=True)
     assert plan.accounts is not None
-    assert plan.accounts.account(PollSource.PUBLIC_MARKET, NFLMETA_SOURCE) is ProviderAccount.POLYMARKET_US
+    assert plan.accounts.account(PollSource.PLAY_MARKET, NFLMETA_SOURCE) is ProviderAccount.POLYMARKET_US
     nflmeta = _NflMeta(clock)
     nflmeta.rows[102] = _row(102, "PIT", "CIN", _et(SUNDAY, 13), phase="in")
     asked: list[datetime] = []

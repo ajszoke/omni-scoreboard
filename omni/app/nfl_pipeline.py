@@ -62,6 +62,11 @@ released state only (`omni.app.policy_facts`):
   play's revision: the field its answer showed, with the play as its caption (a `BIG_PLAY` card the live football
   renderer draws). Its moment is the play it's about: a review's ruling is that play's next revision, and a try
   merges into its touchdown. Once a ruling on a play is released, the play's older card and offer are withdrawn.
+  - **The swing.** When the board reads a market, a play's class also reads how far the market moved across it
+    (`omni.policy.interrupts.win_swing`): from its reading `meter_lag` before the answer before the play's, to its
+    reading `meter_lag` before the play's own answer, as the meter reads each. Ten points or more is a win swing at
+    any point in the game (`InterruptClass.WIN_SWING`). Those readings span every play one answer brought, so the
+    swing is put down to one of them: the answer's first score, turnover or ruling, else its last play.
 
 **Notes.** What the feed says about a poll reaches the warnings in our own words alone (`FeedNote.ours`): its kind,
 how many, and which entry by our own label. The feed's own words go only to a log stamped to expire.
@@ -123,7 +128,7 @@ from omni.domain.contest import TeamGame
 from omni.domain.football import FootballGameState
 from omni.events.football import FootballEvent, FootballEventKind
 from omni.events.nfl_breaks import nfl_break_evidence, nfl_latest_action
-from omni.policy.interrupts import InterruptClass, classify_football_event
+from omni.policy.interrupts import SWING_KINDS, InterruptClass, classify_football_event, win_swing
 from omni.policy.leverage import football_proxy
 from omni.policy.promotion import CandidateOrigin, PromotionKey
 from omni.policy.view import GameFacts, PolicyView
@@ -253,6 +258,7 @@ class _Live:
     meter: GameMeter  # the market's reading beside the field
     primed: bool = False  # its first answer's plays were set aside as from before the board tuned in
     last: FootballGameState | None = None  # the newest live answer's state: the one before the next answer's plays
+    last_arrived: ClockReading | None = None  # when that answer arrived
     rulings: dict[str, int] = field(default_factory=dict)  # each play's rulings so far, by the play it's about
     offered: int = 0  # plays offered so far: each one's place in the feed
     shown: Held[_Field] | None = None  # the newest state to have cleared the delay
@@ -447,7 +453,9 @@ class LiveFootballPipeline:
         out.warnings.extend(_noted(game.id, snapshot.notes))
         arrival = Arrival(received=reading.arrived, as_of=snapshot.observed_at)
         state = snapshot.state
-        context = PlayContext(live.last, state, self._guard.pin(arrival, at), origin)
+        context = PlayContext(
+            live.last, state, self._guard.pin(arrival, at), origin, live.last_arrived, reading.arrived
+        )
         self._offer_plays(
             game, live, snapshot.events, _field_of(state) if state is not None else None, arrival, at, context
         )
@@ -456,7 +464,8 @@ class LiveFootballPipeline:
         if snapshot.phase is NflPhase.POST:
             self._confirm_final(game, state, arrival, at)
         elif game.id not in self._finals:
-            live.last = state  # a final's plays are read against the last live state
+            # A final's plays are read against the last live state; the next answer's read the market from its arrival.
+            live.last, live.last_arrived = state, reading.arrived
             live.states.push(_Field(state, snapshot.break_ends_at), arrival, at)
             evidence = nfl_break_evidence(snapshot, reading.arrived)
             live.breaks.push(evidence, nfl_latest_action(snapshot, reading.arrived), arrival, at)
@@ -524,14 +533,20 @@ class LiveFootballPipeline:
 
     def _settle_plays(self, game: TeamGame, live: _Live, at: ClockReading, out: _Pass) -> None:
         """Each released play whose successor has cleared too: offered if its class scores, naming a card of its own
-        (the field its answer showed, with the play as its caption), unless a ruling on it is out already."""
-        for released in live.awaiting.ready(at.monotonic):
+        (the field its answer showed, with the play as its caption), unless a ruling on it is out already. The play
+        each answer's market swing is put down to (`_swung`) is classed with that swing."""
+        settled = live.awaiting.ready(at.monotonic)
+        # A play a ruling on it has overtaken no longer stands: it's neither offered nor put down for a swing.
+        standing = [each for each in settled if each.play.revision >= live.released[each.play.moment.play]]
+        swung = _swung(standing)
+        for released in standing:
             play = released.play
             moment = play.moment.play
-            if play.revision < live.released[moment]:
-                continue  # a ruling on it is out: it no longer stands
             context = play.context
-            classification = classify_football_event(play.event, before=context.before, after=context.after)
+            swing = self._swing(game, context) if play.event.key in swung else None
+            classification = classify_football_event(
+                play.event, before=context.before, after=context.after, swing=swing
+            )
             staged = live.cards.get(moment)
             key = staged.key if staged is not None else _play_key(game, play)
             offer = major_offer(
@@ -573,8 +588,7 @@ class LiveFootballPipeline:
             return  # its card is down for staleness: nothing goes back up until a newer state clears the delay
         stale = since is not None
         caption = self._caption(game, live, shown, at, out, stale=stale)
-        lag, received = self._policy.meter_lag, shown.arrival.received
-        as_of = ClockReading(received.utc - lag, received.monotonic + -lag)  # the market, lag before the shown answer
+        as_of = self._lagged(shown.arrival.received)  # the market, lag before the shown answer
         live.meter.admit(self._feeds.win_probability(game, as_of), as_of)
         meter = live.meter.current(at)
         card = self._live_card(game, shown.value, caption, None if stale else meter, at)
@@ -946,6 +960,21 @@ class LiveFootballPipeline:
             ),
         )
 
+    def _lagged(self, arrived: ClockReading) -> ClockReading:
+        """`NflCardPolicy.meter_lag` before an answer that arrived at ``arrived``: the market's newest reading by then
+        can't know of a play the answer doesn't."""
+        lag = self._policy.meter_lag
+        return ClockReading(arrived.utc - lag, arrived.monotonic + -lag)
+
+    def _swing(self, game: TeamGame, context: PlayContext[FootballGameState]) -> float | None:
+        """How far the market moved across a play (`win_swing`): from its reading the lag before the answer before the
+        play's, to its reading the lag before the play's own answer, as the meter reads each. None without both."""
+        if context.before_arrived is None or context.after_arrived is None:
+            return None
+        before = self._feeds.win_probability(game, self._lagged(context.before_arrived))
+        after = self._feeds.win_probability(game, self._lagged(context.after_arrived))
+        return win_swing(before.value if before is not None else None, after.value if after is not None else None)
+
     def _meter(self) -> GameMeter:
         """A game's meter, its reading standing until it's `NflCardPolicy.meter_max_age` older than the lag on the
         broadcast's clock."""
@@ -980,7 +1009,7 @@ class LiveFootballPipeline:
             self._forget_plays(live)  # a play's own card from before the gap is history, as its offer is
             live.states, live.plays = DelayedFeed(self._guard), DelayedEventStream(self._guard)
             live.breaks = ReleasedBreaks(self._guard)
-            live.primed, live.last, live.caption = False, None, None
+            live.primed, live.last, live.last_arrived, live.caption = False, None, None, None
             live.awaiting, live.meter = AwaitingSuccessor(), self._meter()
             self._woken[game_id] = live.shown
         self._offers = StandingOffers()
@@ -1006,6 +1035,17 @@ class LiveFootballPipeline:
 def _play_key(game: TeamGame, play: _Play) -> str:
     """The dedupe key of a play's own card: its game, the play it's about, and the revision."""
     return f"{game.id}:play:{play.moment.play}:r{play.revision}"
+
+
+def _swung(plays: Iterable[_ReleasedPlay]) -> set[str]:
+    """Of the plays settled together, the one each answer's market swing is put down to, by its key: the answer's
+    first score, turnover or ruling, else its last play (`SWING_KINDS`). The readings either side of an answer span
+    every play it brought, so the swing is one play's, and the big one is likeliest to have made it."""
+    answers: dict[MonotonicTime, list[FootballEvent]] = {}
+    for released in plays:
+        if released.play.event.kind in SWING_KINDS:
+            answers.setdefault(released.play.answer, []).append(released.play.event)
+    return {next((event for event in events if event.major), events[-1]).key for events in answers.values()}
 
 
 def _bounds(caption: _Caption | None) -> list[MonotonicTime]:
