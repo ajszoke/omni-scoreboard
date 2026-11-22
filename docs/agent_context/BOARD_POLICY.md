@@ -381,7 +381,7 @@ recovery survives an outage, and a short or failed one stays owed.
 | Card | Behavior |
 |---|---|
 | Live base | 12 s (minimum 8). Weight applies during favorite action as well as breaks. Same-game updates refresh in place |
-| NFL strip in rotation (quad) | at most one compatible 10 s caption, if the turn's runway fits it; otherwise the field only |
+| NFL strip in rotation (quad) | the game's newest play line (the user's rule, 2026-11-22). It shows while it still describes the field and the score, up to 5 min after its release, and starts only with at least 4 s of the turn left. Once up, it holds to the turn's end; a newer play replaces it in place. It may show on every turn of its game. Otherwise the field only |
 | NFL strip, focused | the current field plus the newest compatible major. At most three waiting routines. No backlog on return. A first start by +60/+120 s, gone by +90/+150 s |
 | Pregame | 8 s, from 90 min before the start. Due every 300/120/60/30 s across the ramps at 90–30/30–10/10–2/2–0 min. With live games, at most one per four base turns, in a break or open rotation |
 | Initial final | one 8 s turn, in confirmed end order. An unseen decisive predecessor goes first. While a favorite acts, unrelated finals wait for a break unless promoted |
