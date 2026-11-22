@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 
-from omni.app.quota import NFLMETA_FREE, UNLIMITED
+from omni.app.quota import NFLMETA_BUILDER, NFLMETA_FREE, UNLIMITED
 from omni.providers.nflmeta import HALFTIME_HOLD
 from omni.replay.nfl_budget import (
     EASTERN,
@@ -15,6 +15,7 @@ from omni.replay.nfl_budget import (
     STRATEGIES,
     TYPICAL_SUNDAY,
     Game,
+    ReadKind,
     budget_report,
     month_games,
     replay,
@@ -79,3 +80,23 @@ def test_on_free_no_minute_ever_goes_past_its_limit_and_what_it_holds_back_waits
     held = replay(sunday, full, NFLMETA_FREE)
     assert asked.peak_minute > 20 and asked.waits == 0
     assert held.peak_minute <= 20 and held.waits > 0
+
+
+def test_a_game_s_plays_read_after_a_slower_scoreboard_come_with_its_reads_and_bill_the_same_rows() -> None:
+    game = Game(day=TYPICAL_SUNDAY, kickoff=KICKOFF)
+    every = timedelta(seconds=30)
+    reads = game.plays_every(every)
+    assert len(reads) == PLAY_READS  # its changes are about 39 s apart: each comes with a read of its own
+    assert all((at - KICKOFF) % every == timedelta(0) for at, _ in reads) and reads[-1][0] == game.final
+    slower = game.plays_every(timedelta(minutes=5))
+    assert len(slower) < 50 and sum(rows for _, rows in slower) == sum(rows for _, rows in reads) == PLAY_ROWS
+
+
+def test_builder_carries_each_other_game_read_on_its_own_with_room_to_spare() -> None:
+    every_game = next(strategy for strategy in STRATEGIES if strategy.key == "F")
+    start, end = datetime(2026, 11, 1, tzinfo=timezone.utc), datetime(2026, 12, 1, tzinfo=timezone.utc)
+    month = replay(month_games(), every_game, UNLIMITED, start=start, end=end)
+    assert NFLMETA_BUILDER.requests_a_month and NFLMETA_BUILDER.rows_a_month and NFLMETA_BUILDER.per_minute
+    assert month.requests < 0.7 * NFLMETA_BUILDER.requests_a_month and month.rows < 0.7 * NFLMETA_BUILDER.rows_a_month
+    assert month.peak_minute < NFLMETA_BUILDER.per_minute / 2
+    assert ReadKind.LIVE_GAMES not in month.asked and ReadKind.DRAIN not in month.asked  # each read on its own

@@ -1,4 +1,5 @@
-"""PlannedNfl through the budget replay's typical Sunday, beside the requests and rows strategy E models for it.
+"""PlannedNfl through the budget replay's typical Sunday, beside the requests and rows strategy E models for it on Free
+and strategy F on Builder.
 
 The world is the budget replay's (`omni.replay.nfl_budget`): its games, kickoffs, halftime holds, finals, injury
 entries and play changes, served as NFLMeta would serve them and billed as `nflmeta_billed` reads its header. The
@@ -16,7 +17,16 @@ from typing import Any
 from omni.app.planned_nfl import NFL_POLICIES, PlannedNfl, nfl_accounts
 from omni.app.poll_plan import PollPlan
 from omni.app.poller import Poller
-from omni.app.quota import UNLIMITED, HttpAnswer, MeteredHttp, Meter, ProviderAccount, QuotaLedger, nflmeta_billed
+from omni.app.quota import (
+    UNLIMITED,
+    HttpAnswer,
+    MeteredHttp,
+    Meter,
+    NflMetaPlan,
+    ProviderAccount,
+    QuotaLedger,
+    nflmeta_billed,
+)
 from omni.core.clock import FakeClock
 from omni.core.enum import League
 from omni.preferences.favorites import Favorites
@@ -40,10 +50,12 @@ _TEAMS += ("KC", "LV", "DEN", "LAC", "BAL", "CLE", "HOU", "IND", "JAX", "TEN", "
 class _ModelSunday:
     """NFLMeta over the budget replay's games, as of the clock: each game's scoreboard row (its phase, its
     halftime, its injury entries, its latest play) and its play changes, billing one row a game listed, one an
-    injury entry and one a change. Each request is counted by the read it is, with the rows it billed."""
+    injury entry and one a change. Each request is counted by the read it is, with the rows it billed: a read by id of
+    a game not the favorite's is ``alone``, its final's read unless the board reads each game on its own."""
 
-    def __init__(self, clock: FakeClock, games: list[Game]) -> None:
+    def __init__(self, clock: FakeClock, games: list[Game], alone: ReadKind = ReadKind.DRAIN) -> None:
         self.clock = clock
+        self.alone = alone
         self.games = {1000 + n: game for n, game in enumerate(games)}
         self.teams = {game_id: (_TEAMS[2 * n], _TEAMS[2 * n + 1]) for n, game_id in enumerate(self.games)}
         self.favorite = next(game_id for game_id, game in self.games.items() if game.favorite)
@@ -61,18 +73,20 @@ class _ModelSunday:
     def __call__(self, path: str, query: Mapping[str, str | int]) -> HttpAnswer:
         now = self.clock.now()
         if path.endswith("/play-changes"):
-            written = [change for at, change in self.changes[int(path.split("/")[4])] if at <= now]
+            game_id = int(path.split("/")[4])
+            written = [change for at, change in self.changes[game_id] if at <= now]
             start = int(query.get("cursor", 0))
             page = written[start : start + int(query["limit"])]
             meta = {"has_more": start + len(page) < len(written), "next_cursor": str(start + len(page))}
-            return self._billed(ReadKind.FAVORITE_PLAYS, {"data": page, "meta": meta}, len(page))
+            kind = ReadKind.FAVORITE_PLAYS if game_id == self.favorite else ReadKind.OTHER_PLAYS
+            return self._billed(kind, {"data": page, "meta": meta}, len(page))
         if "game_ids" in query:
             named = {int(each) for each in str(query["game_ids"]).split(",")}
             listed = [game_id for game_id in named if self.games[game_id].live(now)]
             kind = ReadKind.LIVE_GAMES
         elif "game_id" in query:
             listed = [int(query["game_id"])]
-            kind = ReadKind.FAVORITE if listed == [self.favorite] else ReadKind.DRAIN
+            kind = ReadKind.FAVORITE if listed == [self.favorite] else self.alone
         else:
             listed, kind = list(self.games), ReadKind.DAY_LIST
         rows = [self._row(game_id, now) for game_id in sorted(listed)]
@@ -114,19 +128,19 @@ class _ModelSunday:
         }
 
 
-def _sunday_through_planned_nfl() -> tuple[_ModelSunday, int]:
-    """The typical Sunday read by the production board from an hour before its first kickoff to midnight; returns
-    the world, with its counts, and the requests the ledger counted."""
+def _sunday_through_planned_nfl(tier: NflMetaPlan = NflMetaPlan.FREE) -> tuple[_ModelSunday, int]:
+    """The typical Sunday read by the production board on ``tier`` from an hour before its first kickoff to midnight;
+    returns the world, with its counts, and the requests the ledger counted."""
     games = [game for game in month_games() if game.day == TYPICAL_SUNDAY]
     start = min(game.kickoff for game in games) - timedelta(hours=1)
     end = datetime.combine(TYPICAL_SUNDAY + timedelta(days=1), time(), EASTERN)
     clock = FakeClock(start)
-    world = _ModelSunday(clock, games)
+    world = _ModelSunday(clock, games, ReadKind.OTHER_GAMES if tier.every_game else ReadKind.DRAIN)
     ledger = QuotaLedger({NFL: UNLIMITED, ProviderAccount.POLYMARKET_US: UNLIMITED})  # the meter's reads nothing here
     plan = PollPlan(NFL_POLICIES, ledger=ledger, accounts=nfl_accounts())
     meter = Meter(ledger, NFL, clock, billed=nflmeta_billed)
     provider = NflMetaLiveProvider(NflTeamRegistry.default(source=NFLMETA_SOURCE), fetch=MeteredHttp(world, meter))
-    planned = PlannedNfl(plan, clock, provider, favorites=Favorites({League.NFL: ["CAR"]}))
+    planned = PlannedNfl(plan, clock, provider, favorites=Favorites({League.NFL: ["CAR"]}), tier=tier)
     poller = Poller(plan, clock)
     kickoffs = sorted({game.kickoff for game in games})
     while clock.now() < end:
@@ -139,9 +153,8 @@ def _sunday_through_planned_nfl() -> tuple[_ModelSunday, int]:
         now = clock.read()
         ahead = [now.utc + due.since(now.monotonic)] if due is not None else []
         ahead += [kickoff for kickoff in kickoffs if kickoff > now.utc]
-        hold = provider.hold_ends(world.favorite)
-        if hold is not None and hold > now.monotonic:
-            ahead.append(now.utc + hold.since(now.monotonic))
+        holds = [provider.hold_ends(game_id) for game_id in world.games]
+        ahead += [now.utc + hold.since(now.monotonic) for hold in holds if hold is not None and hold > now.monotonic]
         clock.advance(min([*ahead, end]) - now.utc)
     return world, ledger.usage(NFL, clock.read()).requests
 
@@ -175,3 +188,34 @@ def test_planned_nfl_reads_a_typical_sunday_as_strategy_e_models_it_but_for_read
     assert (requests, rows) == (model.requests + 18, model.rows + 68) == (2_162, 11_392)
     assert requests <= model.requests * 1.01 and rows <= model.rows * 1.01  # within 1% of the model's budget
     assert metered == requests  # every request reached the ledger
+
+
+def test_on_builder_planned_nfl_reads_a_typical_sunday_as_strategy_f_models_it_but_for_reads_the_model_leaves_out() -> (
+    None
+):
+    games = [game for game in month_games() if game.day == TYPICAL_SUNDAY]
+    model = replay(games, next(strategy for strategy in STRATEGIES if strategy.key == "F"), UNLIMITED)
+    assert (model.requests, model.rows) == (9_579, 18_484)  # the budget report's Sunday for F
+    world, metered = _sunday_through_planned_nfl(NflMetaPlan.BUILDER)
+    modeled, others = model.asked, sum(1 for game in games if not game.favorite)
+    assert ReadKind.LIVE_GAMES not in world.requests and ReadKind.DRAIN not in world.requests  # each read on its own
+    assert dict(world.requests) == {
+        ReadKind.DAY_LIST: modeled[ReadKind.DAY_LIST] + 2,  # the listings again, as on Free
+        ReadKind.FAVORITE: modeled[ReadKind.FAVORITE] + 1,  # the read that finds halftime
+        ReadKind.FAVORITE_PLAYS: modeled[ReadKind.FAVORITE_PLAYS] + 13,  # the first look, and through the drain
+        # Each other game as the favorite: the read that finds halftime; the first look at kickoff and a read each
+        # poll through the final's drain (four, at its 30 s), none of which bills a row.
+        ReadKind.OTHER_GAMES: modeled[ReadKind.OTHER_GAMES] + others,
+        ReadKind.OTHER_PLAYS: modeled[ReadKind.OTHER_PLAYS] + 5 * others,
+    }
+    assert dict(world.rows) == {
+        ReadKind.DAY_LIST: 14 + 14 + 52,
+        ReadKind.FAVORITE: 2_720 + 2,
+        ReadKind.FAVORITE_PLAYS: 280,
+        ReadKind.OTHER_GAMES: 11_830 + 2 * others,  # the read that finds halftime: a game and an injury
+        ReadKind.OTHER_PLAYS: 280 * others,
+    }
+    requests, rows = sum(world.requests.values()), sum(world.rows.values())
+    assert (requests, rows) == (model.requests + 94, model.rows + 94) == (9_673, 18_578)
+    assert requests <= model.requests * 1.01 and rows <= model.rows * 1.01  # within 1% of the model's budget
+    assert metered == requests

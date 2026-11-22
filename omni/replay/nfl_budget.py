@@ -28,7 +28,8 @@ strategies, and what each costs on each plan.
 **The strategies** (`STRATEGIES`): A, today's solo favorite; B, the shared board with one unfiltered slate
 read every 30 s or 45 s while any game is live, the favorite filtered at 10 s with its plays, and a drain
 for each final; C, B with each live game read filtered instead; D, B with plays for every live game; E,
-the cheapest found that keeps every live game's score within 45 s and the favorite's within 10 s.
+the cheapest found that keeps every live game's score within 45 s and the favorite's within 10 s; F, Builder's: E
+with every other live game read by id every 30 s, with its plays on change, as the favorite is at its own pace.
 
 Each read is admitted, or not, by the real `QuotaLedger` under a `QuotaPolicy`, as the plan would, and
 charged what the model bills: a refused read is skipped (its plays come with the next read of that game),
@@ -192,6 +193,15 @@ class Game:
             reads.append((self.kickoff + offset + held, rows))
         return reads
 
+    def plays_every(self, every: timedelta) -> list[tuple[datetime, int]]:
+        """Its play-feed reads on change when its scoreboard is read every ``every`` from kickoff: each read follows
+        the first scoreboard read at or after a change, so the changes written between two reads come in one."""
+        reads: dict[datetime, int] = {}
+        for written, rows in self.plays():
+            at = self.kickoff + every * math.ceil((written - self.kickoff) / every)
+            reads[at] = reads.get(at, 0) + rows
+        return sorted(reads.items())
+
     def rows_by(self, at: datetime) -> int:
         """Its play rows written by ``at``: what reading its whole history then would bill."""
         return sum(rows for when, rows in self.plays() if when <= at)
@@ -245,6 +255,8 @@ class Strategy:
     plays: PlayScope = PlayScope.FAVORITE
     drain: Drain = Drain.NONE
     day_list: bool = False  # one unfiltered read before the day's first kickoff, for the day's game ids
+    every_game: timedelta | None = None  # each other live game read by id at this pace, its plays on change, out of
+    # the slate, through its final's drain at that pace
 
 
 _S = timedelta(seconds=1)
@@ -285,6 +297,15 @@ STRATEGIES: tuple[Strategy, ...] = (
         drain=Drain.ONE,
         day_list=True,
     ),
+    Strategy(
+        "F",
+        "E with every other live game read by id every 30 s at normal, its plays on change, through its final's"
+        " drain at that pace; with none left to read together, no phase=in read",
+        SlateRead.LIVE_ONLY,
+        45 * _S,
+        day_list=True,
+        every_game=30 * _S,
+    ),
 )
 
 
@@ -294,6 +315,7 @@ class ReadKind(StrEnumMixin, str, Enum):
     FAVORITE = "favorite score reads"
     FAVORITE_PLAYS = "favorite play reads"
     DRAIN = "final drain reads"
+    OTHER_GAMES = "other games' own score reads"
     OTHER_PLAYS = "other games' play reads"
     SLATE = "slate reads"
     GAME_SCORES = "other games' score reads"
@@ -309,6 +331,7 @@ _CLASSES = {
     ReadKind.FAVORITE: PollPriority.FOCUS,
     ReadKind.FAVORITE_PLAYS: PollPriority.FOCUS,
     ReadKind.DRAIN: PollPriority.FOCUS,
+    ReadKind.OTHER_GAMES: PollPriority.NORMAL,
     ReadKind.OTHER_PLAYS: PollPriority.NORMAL,
     ReadKind.SLATE: PollPriority.BACKGROUND,
     ReadKind.GAME_SCORES: PollPriority.BACKGROUND,
@@ -411,6 +434,12 @@ def _readers(games: Sequence[Game], strategy: Strategy) -> list[_Reader]:
             readers.append(_Periodic(ReadKind.FAVORITE, windows, LIVE_PACE, game.row))
             readers.append(_Scheduled(ReadKind.FAVORITE_PLAYS, game.plays()))
             continue
+        if strategy.every_game is not None:
+            start, end = game.halftime
+            windows = [(game.kickoff, start), (end, game.final + drain_end)]
+            readers.append(_Periodic(ReadKind.OTHER_GAMES, windows, strategy.every_game, game.row))
+            readers.append(_Scheduled(ReadKind.OTHER_PLAYS, game.plays_every(strategy.every_game)))
+            continue
         if strategy.plays is PlayScope.EVERY_LIVE:
             readers.append(_Scheduled(ReadKind.OTHER_PLAYS, game.plays()))
         if strategy.drain is Drain.FULL:
@@ -427,7 +456,7 @@ def _readers(games: Sequence[Game], strategy: Strategy) -> list[_Reader]:
         if strategy.slate is SlateRead.UNFILTERED:
             windows = _merged((game.kickoff, game.final) for game in day_games)
             readers.append(_Periodic(ReadKind.SLATE, windows, strategy.slate_every, _listing(day_games)))
-        elif strategy.slate is SlateRead.LIVE_ONLY:
+        elif strategy.slate is SlateRead.LIVE_ONLY and strategy.every_game is None:
             others = [game for game in day_games if not game.favorite]
             windows = _merged((game.kickoff, game.final) for game in others)
             readers.append(_Periodic(ReadKind.LIVE_GAMES, windows, strategy.slate_every, _live(others)))
@@ -663,8 +692,9 @@ def budget_report(policy: QuotaPolicy = SHEDDING) -> str:
         f" A followed game's plays bill {PLAY_ROWS} rows over {PLAY_READS} reads on change. A followed game is"
         f" read every {int(LIVE_PACE.total_seconds())} s outside its {int(HALFTIME_HOLD.total_seconds()) // 60}"
         f"-minute halftime hold, through a {int(FINAL_DRAIN.total_seconds())} s drain after its final.",
-        "- **Classes:** the favorite's score and plays and every final's drain are focus; other games' plays"
-        " normal; the slate, the per-game and live-games reads background; the day's game list backfill.",
+        "- **Classes:** the favorite's score and plays, and each other final's drain or read (B to E), are focus;"
+        " other games' own score reads (F's, their drains included) and their plays normal; the slate, the per-game"
+        " and live-games reads background; the day's game list backfill.",
         "- **NFLMeta's docs** (https://nflmeta.org/api-docs/core-endpoints, https://nflmeta.org/openapi.yaml):"
         " live-scores takes `phase` (pre, in, post), `game_id`, and `game_ids` (up to 100), and has no way to"
         " leave injuries out. They say each game listed bills a row; on PIT@CIN each injury entry billed one too,"

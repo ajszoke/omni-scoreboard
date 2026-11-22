@@ -64,6 +64,7 @@ from omni.app.quota import (
     HttpAnswer,
     Meter,
     MeteredHttp,
+    NflMetaPlan,
     ProviderAccount,
     QuotaLedger,
     nflmeta_billed,
@@ -360,13 +361,14 @@ def planned_nfl_source(
     ledger: QuotaLedger,
     favorites: Favorites = Favorites(),
     market: MarketReader | None = None,
+    tier: NflMetaPlan = NflMetaPlan.FREE,
 ) -> NflSource:
-    """NFL on the board: NFLMeta read through ``get`` on ``plan``, each response charged to NFLMeta's account on
-    the ``ledger`` (rows and all, from its headers), as the NFL runner reads it; and, when given, the meter from
-    ``market``."""
+    """NFL on the board: NFLMeta read through ``get`` on ``plan`` as ``tier``'s month allows, each response charged to
+    NFLMeta's account on the ``ledger`` (rows and all, from its headers), as the NFL runner reads it; and, when given,
+    the meter from ``market``."""
     meter = Meter(ledger, ProviderAccount.NFLMETA, clock, billed=nflmeta_billed)
     provider = NflMetaLiveProvider(NflTeamRegistry.default(source=NFLMETA_SOURCE), fetch=MeteredHttp(get, meter))
-    planned = PlannedNfl(plan, clock, provider, favorites=favorites, market=market)
+    planned = PlannedNfl(plan, clock, provider, favorites=favorites, market=market, tier=tier)
     return NflSource(schedule=planned, feeds=planned, held_back=planned.held_back)
 
 

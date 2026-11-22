@@ -194,14 +194,16 @@ def _board(
     ledger: QuotaLedger | None = None,
     policy: NflSchedulePolicy = NflSchedulePolicy(),
     market: MarketReader | None = None,
+    tier: NflMetaPlan = NflMetaPlan.FREE,
 ) -> _Board:
+    """A board whose reads are paced for ``tier``, on a ledger with Builder's room unless ``ledger`` says."""
     clock = FakeClock(start)
     nflmeta = _NflMeta(clock)
     ledger = ledger if ledger is not None else QuotaLedger(account_limits(NflMetaPlan.BUILDER))
     plan = PollPlan(NFL_POLICIES, ledger=ledger, accounts=nfl_accounts())
     meter = Meter(ledger, NFL, clock, billed=nflmeta_billed)
     provider = NflMetaLiveProvider(NflTeamRegistry.default(source=NFLMETA_SOURCE), fetch=MeteredHttp(nflmeta, meter))
-    planned = PlannedNfl(plan, clock, provider, favorites=favorites, policy=policy, market=market)
+    planned = PlannedNfl(plan, clock, provider, favorites=favorites, policy=policy, market=market, tier=tier)
     return _Board(planned, plan, clock, nflmeta, ledger, Poller(plan, clock))
 
 

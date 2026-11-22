@@ -169,6 +169,12 @@ class NflMetaPlan(StrEnumMixin, str, Enum):
         return NFLMETA_BUILDER if self is NflMetaPlan.BUILDER else NFLMETA_FREE
 
     @property
+    def every_game(self) -> bool:
+        """Whether the plan's month carries each live game read on its own, plays and all (strategy F of
+        `omni.replay.nfl_budget`): Builder's does, with room to spare; Free's carries a favorite's alone."""
+        return self is NflMetaPlan.BUILDER
+
+    @property
     def label(self) -> str:
         """The plan's name, as NFLMeta writes it: "Free", "Builder"."""
         return str(self).capitalize()

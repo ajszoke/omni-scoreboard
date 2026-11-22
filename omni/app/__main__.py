@@ -51,7 +51,8 @@ The pregame odds (Bovada's coupon, MLB's and NBA's) are on unless ``--no-odds``.
 
 Every request is counted against its provider account's quota (`omni.app.quota`), and the month's counts
 are kept under ``--state-dir`` so a restart doesn't forget them. ``--nflmeta-plan`` names the plan of the
-NFLMeta key, free unless you say otherwise.
+NFLMeta key, free unless you say otherwise. On Builder every live NFL game's plays are read, so each card has its
+timeouts, challenges and play line; on Free only a favorite's are.
 """
 
 from __future__ import annotations
@@ -412,7 +413,13 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
         assert key is not None  # NFL runs only with a key
         nfl_quotes = _public_quotes(clock, ledger, PLAY_MARKET_POLICY.every) if args.meter else None
         nfl = planned_nfl_source(
-            plan, clock, NflMetaHttp(key, None).get, ledger=ledger, favorites=args.favorites, market=nfl_quotes
+            plan,
+            clock,
+            NflMetaHttp(key, None).get,
+            ledger=ledger,
+            favorites=args.favorites,
+            market=nfl_quotes,
+            tier=NflMetaPlan(args.nflmeta_plan),
         )
     nba = None
     if League.NBA in leagues:
