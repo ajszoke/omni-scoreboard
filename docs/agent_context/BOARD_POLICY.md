@@ -457,11 +457,12 @@ acceptance runs them through real adapters, released generations and sink receip
 | MNF + 8 NBA, no favorite, `G` = .4 | NFL 22.50% |
 | 1 NFL + 15 MLB, no favorite | NFL 18.39% |
 | 4 high-leverage NBA, one postseason | 27.71% for the postseason game, 24.10% for each other |
-| CHA high leverage + 2 high-leverage others | CHA **70.00%** (the floor binds), others 15.00% each |
-| CHA blowout + 2 high-leverage others | CHA 44.44%, others 27.78% each |
-| ATL + 14 high-leverage MLB: ATL blowout / ATL close | ATL **30.00%** / **70.00%** |
-| September Sunday (9 NFL, 10 MLB, `G` = .4): both favorites acting | CAR 28.24%, ATL 17.76% (46% combined); NFL 59.87% |
-| The same, only CAR acting / only ATL acting | CAR 46.00% / ATL 46.00% |
+| CHA high leverage + 2 high-leverage others | CHA **90.00%** (the floor binds), others 5.00% each |
+| CHA blowout + 2 high-leverage others | CHA **60.00%** (the floor binds; 44.44% before it), others 20.00% each |
+| CHA blowout + 1 high-leverage other | CHA 61.54%, the other 38.46% (the floor doesn't bind) |
+| ATL + 14 high-leverage MLB: ATL blowout / ATL close | ATL **60.00%** / **90.00%** |
+| September Sunday (9 NFL, 10 MLB, `G` = .4): both favorites acting | CAR 44.21%, ATL 27.79% (72% combined); NFL 60.61% |
+| The same, only CAR acting / only ATL acting | CAR 72.00% / ATL 72.00% |
 
 **Interrupt values:**
 - the NBA example: 0.78;
