@@ -10,6 +10,7 @@ from omni.providers.mlb_teams import _TEAM_ID_INFO
 from omni.renderers.image import LogoImage
 
 _FLOOR = 25.0  # delta_e below which two backgrounds blur together on a small panel
+_FLOOR_DE2000 = 20.0  # delta_e_2000 below which two backgrounds blur together, whatever CIE76 says
 
 
 def _corner(abbr: str, suffix: str = "") -> "LogoImage":
@@ -32,8 +33,9 @@ def test_palette_matches_the_committed_tiles(team_id: int, info: tuple[str, str]
 
 @pytest.mark.parametrize("team_id, info", sorted(_TEAM_ID_INFO.items()))
 def test_base_and_alt_are_distinct(team_id: int, info: tuple[str, str]) -> None:
-    distance = LOGO_BASE_COLOR[team_id].delta_e(LOGO_ALT_COLOR[team_id])
-    assert distance >= _FLOOR, f"{info[0]}: base/alt only {distance:.0f} apart"
+    base, alt = LOGO_BASE_COLOR[team_id], LOGO_ALT_COLOR[team_id]
+    assert base.delta_e(alt) >= _FLOOR, f"{info[0]}: base/alt only {base.delta_e(alt):.0f} apart"
+    assert base.delta_e_2000(alt) >= _FLOOR_DE2000, f"{info[0]}: base/alt only {base.delta_e_2000(alt):.0f} apart"
 
 
 def test_every_team_has_20x20_base_and_alt_tiles() -> None:

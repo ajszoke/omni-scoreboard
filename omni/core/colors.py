@@ -2,7 +2,7 @@
 
 Used to pick legible text colors on team-colored backgrounds across the three
 panel profiles without hand-tuning per team, and to measure how *distinct* two
-team colors are (`delta_e`) so clashing matchups can be told apart.
+team colors are (`delta_e`, `delta_e_2000`) so clashing matchups can be told apart.
 """
 
 from __future__ import annotations
@@ -49,13 +49,24 @@ class RGBColor:
     def delta_e(self, other: RGBColor) -> float:
         """CIE76 color difference in L*a*b* (symmetric, 0.0 for identical colors).
 
-        Measures *perceived* distance, not raw RGB distance: ~2.3 is the just-
-        noticeable difference, and two team backgrounds within a small threshold
-        (~20) read as "the same color" on a small panel and need disambiguating.
+        Measures *perceived* distance, not raw RGB distance: ~2.3 is the just-noticeable
+        difference, and two team backgrounds within a threshold read as "the same color" on a
+        small panel. It overstates how far apart two saturated colors of nearly the same hue
+        look, so the clash check asks `delta_e_2000` too (`renderers.logo_clash.clash_metric`).
         """
         l1 = _to_lab(self)
         l2 = _to_lab(other)
         return math.sqrt(sum((a - b) ** 2 for a, b in zip(l1, l2)))
+
+    def delta_e_2000(self, other: RGBColor) -> float:
+        """CIEDE2000 color difference (symmetric, 0.0 for identical colors).
+
+        CIE76 is a straight line through L*a*b*, which overstates how far apart two saturated
+        colors of nearly the same hue look: a deep red and a bright red score as distinct there,
+        yet read as one red on a lit panel. CIEDE2000 weights lightness, chroma and hue the way the
+        eye does, so it catches the pairs CIE76 calls apart that still read as one color.
+        """
+        return _ciede2000(_to_lab(self), _to_lab(other))
 
     def value_lifted(self, *, on: RGBColor | None = None, min_contrast: float = _LEGIBLE_CONTRAST) -> RGBColor:
         """Brighten this colour just enough to read against a dark background.
@@ -105,7 +116,7 @@ class RGBColor:
 
 
 def _to_lab(color: RGBColor) -> tuple[float, float, float]:
-    """sRGB → CIE L*a*b* (D65) — the perceptually-uniform space `delta_e` measures in.
+    """sRGB → CIE L*a*b* (D65) — the space `delta_e` and `delta_e_2000` measure in.
 
     The XYZ luminance row carries the same 0.2126/0.7152/0.0722 human-perception
     weighting as `relative_luminance`, so L* is a perceptual lightness (green reads
@@ -127,3 +138,62 @@ def _to_lab(color: RGBColor) -> tuple[float, float, float]:
 
     fx, fy, fz = pivot(x), pivot(y), pivot(z)
     return (116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz))
+
+
+def _ciede2000(lab1: tuple[float, float, float], lab2: tuple[float, float, float]) -> float:
+    """The CIEDE2000 difference between two L*a*b* colors (Sharma, Wu and Dalal 2005), with unit
+    weights kL = kC = kH = 1.
+
+    Neutral colors pull a* out a little (G) so greys sit apart from faintly tinted ones; the
+    lightness, chroma and hue differences are then each scaled by how sensitive the eye is to that
+    difference at the pair's mean lightness, chroma and hue (S_L, S_C, S_H), and the rotation term
+    R_T corrects the blue region, where hue and chroma differences interact.
+    """
+    l1, a1, b1 = lab1
+    l2, a2, b2 = lab2
+    chroma_mean = (math.hypot(a1, b1) + math.hypot(a2, b2)) / 2
+    g = 0.5 * (1 - _chroma_weight(chroma_mean))
+    a1p, a2p = (1 + g) * a1, (1 + g) * a2
+    c1p, c2p = math.hypot(a1p, b1), math.hypot(a2p, b2)
+    h1p = math.degrees(math.atan2(b1, a1p)) % 360
+    h2p = math.degrees(math.atan2(b2, a2p)) % 360
+
+    # Hue difference and mean hue go the short way round the circle; an achromatic color has no
+    # hue, so a pair with one contributes no hue difference and its mean hue is the other's.
+    if c1p * c2p == 0:
+        dhp = 0.0
+        hp_mean = h1p + h2p
+    else:
+        dhp = h2p - h1p
+        hp_mean = (h1p + h2p) / 2
+        if abs(dhp) > 180:
+            dhp -= math.copysign(360, dhp)
+            hp_mean += 180 if hp_mean < 180 else -180
+
+    dlp = l2 - l1
+    dcp = c2p - c1p
+    dhp_big = 2 * math.sqrt(c1p * c2p) * math.sin(math.radians(dhp / 2))
+
+    lp_mean = (l1 + l2) / 2
+    cp_mean = (c1p + c2p) / 2
+    t = (
+        1
+        - 0.17 * math.cos(math.radians(hp_mean - 30))
+        + 0.24 * math.cos(math.radians(2 * hp_mean))
+        + 0.32 * math.cos(math.radians(3 * hp_mean + 6))
+        - 0.20 * math.cos(math.radians(4 * hp_mean - 63))
+    )
+    s_l = 1 + 0.015 * (lp_mean - 50) ** 2 / math.sqrt(20 + (lp_mean - 50) ** 2)
+    s_c = 1 + 0.045 * cp_mean
+    s_h = 1 + 0.015 * cp_mean * t
+    rotation = 30 * math.exp(-(((hp_mean - 275) / 25) ** 2))
+    r_t = -2 * _chroma_weight(cp_mean) * math.sin(math.radians(2 * rotation))
+
+    lightness, chroma, hue = dlp / s_l, dcp / s_c, dhp_big / s_h
+    return math.sqrt(lightness**2 + chroma**2 + hue**2 + r_t * chroma * hue)
+
+
+def _chroma_weight(chroma: float) -> float:
+    """sqrt(C^7 / (C^7 + 25^7)): near 0 for neutral colors, near 1 for saturated ones."""
+    c7 = chroma**7
+    return math.sqrt(c7 / (c7 + 25**7))

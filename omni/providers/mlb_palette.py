@@ -3,7 +3,7 @@
 Every club has two committed tiles — a base (its primary colour) and an alt (a
 distinct second colour). When two clubs in a matchup share a near-identical base,
 one renders its alt instead so they stay distinct on a small panel. These maps are
-the runtime source of truth for that decision (`delta_e` between the two clubs'
+the runtime source of truth for that decision (`clash_metric` between the two clubs'
 backgrounds) and they mirror the committed tiles exactly — `tests/test_mlb_palette.py`
 asserts each tile's corner pixel equals its entry here, so the two cannot drift.
 

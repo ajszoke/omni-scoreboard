@@ -10,6 +10,7 @@ from omni.providers.nfl_teams import NFL_TEAMS
 from omni.renderers.image import LogoImage
 
 _FLOOR = 25.0  # delta_e below which two backgrounds blur together on a small panel
+_FLOOR_DE2000 = 20.0  # delta_e_2000 below which two backgrounds blur together, whatever CIE76 says
 _CLUBS = sorted(NFL_TEAMS)
 
 
@@ -34,8 +35,9 @@ def test_palette_matches_the_committed_tiles(abbreviation: str) -> None:
 
 @pytest.mark.parametrize("abbreviation", _CLUBS)
 def test_base_and_alt_are_distinct(abbreviation: str) -> None:
-    distance = LOGO_BASE_COLOR[abbreviation].delta_e(LOGO_ALT_COLOR[abbreviation])
-    assert distance >= _FLOOR, f"{abbreviation}: base/alt only {distance:.0f} apart"
+    base, alt = LOGO_BASE_COLOR[abbreviation], LOGO_ALT_COLOR[abbreviation]
+    assert base.delta_e(alt) >= _FLOOR, f"{abbreviation}: base/alt only {base.delta_e(alt):.0f} apart"
+    assert base.delta_e_2000(alt) >= _FLOOR_DE2000, f"{abbreviation}: base/alt only {base.delta_e_2000(alt):.0f} apart"
 
 
 @pytest.mark.parametrize("abbreviation", _CLUBS)
