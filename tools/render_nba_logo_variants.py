@@ -80,6 +80,9 @@ def _on(abbreviation: str, slot: str, **changes: object) -> Treatment:
 # fixes a mark drawn in its own background color, which would vanish into the tile.
 _BASE_TREAT: dict[str, Treatment] = {
     "CHI": _on("CHI", "base", outline=_BLACK),  # the bull stroked black: its red melts into the red tile
+    # Pistons: the ball and its white ring alone, without the logo's own blue rim and silver edge, so the ball fills
+    # the blue tile. The white ring starts about 8.5% in from the logo's edge.
+    "DET": _on("DET", "base", crop=(0.08, 0.08, 0.92, 0.92), crop_round=True),
     "HOU": _on("HOU", "base", recolors=((RGBColor(206, 14, 45), _WHITE, 60),)),  # white R on red
     "IND": _on("IND", "base", recolors=((RGBColor(12, 35, 64), _WHITE, 40),)),  # white P on navy
     # Bucks: the green buck and its cream markings trade colors, so the buck shows on green.
