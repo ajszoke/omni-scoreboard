@@ -174,7 +174,7 @@ When favorites are in action, their **combined** share has a floor that rises wi
 important favorite game:
 
 ```text
-floor_F = 0.30 + 0.40 * max(G of the acting favorites)        # 30% in a blowout .. 70% close and late
+floor_F = 0.60 + 0.30 * max(G of the acting favorites)        # 60% in a blowout .. 90% close and late
 if Q_F = sum(q_g of acting favorites) < floor_F:
     favorite q'_g    = floor_F     * q_g / Q_F
     nonfavorite q'_g = (1-floor_F) * q_g / (1 - Q_F)
@@ -183,8 +183,9 @@ if Q_F = sum(q_g of acting favorites) < floor_F:
 - Recompute `Q_l = sum(q'_g in l)` and `p_g = q'_g / Q_l`. Don't reapply the league blend.
 - **No projection** is needed when every candidate is a favorite.
 - **A favorite's confirmed break** suspends its membership in the floor.
-- **On a full slate** (ATL plus 14 other games, or CAR plus 8 others), an acting favorite gets about 70% when
-  its game is close and late, 46% when typical, and 30% in a blowout.
+- **On a full slate** (ATL plus 14 other games, or CAR plus 8 others), an acting favorite gets about 90% when
+  its game is close and late, 70% when typical, and 60% in a blowout. The user raised the floor from 30–70% to
+  60–90% on 2026-11-22, after watching a full NFL Sunday slate.
 - **With few games on,** the multiplier usually gives it more than the floor anyway.
 - The floor applies to eligible base airtime, not sleep, unavailable output or auxiliary cards.
 

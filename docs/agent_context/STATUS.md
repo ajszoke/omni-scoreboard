@@ -95,7 +95,7 @@ _Living status doc. Keep it short; update whenever project state changes (branch
 - **2026-11-17, external review round 7: policy v2 ratified, and two fixes (PR #113, merged).** Details: `~/omni-review/plans/omni-build-fidelity-REVIEWS.md` (round 7).
   - **The board policy is `BOARD_POLICY.md`**, `omni-board-policy/2`:
     - leverage (LI) per league on offline-built models, with a labeled proxy until each passes validation;
-    - ranked favorites as weights (×4, ×2.5) with a combined floor that scales with leverage: 30% in a blowout to 70% close and late (the user's pick);
+    - ranked favorites as weights (×4, ×2.5) with a combined floor that scales with leverage: 60% in a blowout to 90% close and late (the user's pick, raised from 30–70% on 2026-11-22);
     - interrupt bars of 1.10 in a favorite's action, 0.85 in a micro-break and 0.35 in a break, one promoted card per 60 s, and a 24 s hold;
     - per-league break leases as ceilings.
   - **MLB:** a perfect-game bid needs a complete play log showing no batter reached. The counts alone miss a batter who reached on a dropped third strike.
