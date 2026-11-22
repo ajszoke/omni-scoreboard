@@ -62,8 +62,12 @@ its card is handed to the board, and is checked again when its first frame is co
 short by then discards the guest unseen (`grant_refusal`, `started`). A guest whose break closes after a valid start
 keeps its protected minimum, then gives the board back. On an outage the lease book and the ledger start over.
 
-**NFL's caption in rotation:** within a base turn, a live football card shows a caption once, for 10 s, only if the
-turn has 10 s of runway left for it; otherwise it's drawn as the field alone (its payload without ``last_play``).
+**NFL's line in rotation:** in a base turn, a live football card shows its game's line (``last_play``: the newest
+released play, while the pipeline still pairs it with the field) on every turn that may start it: before the line's
+latest start (`StagedCaption.latest_start`, while it's recent) and with `DirectorPolicy.line_runway` of the turn left.
+Once up, it holds to the turn's end, a newer play the card brings taking its place; the turn's end, the card leaving,
+or the card no longer carrying a line ends it. A line that may not start leaves the card drawn as the field alone (its
+payload without ``last_play``). Any other card, a play's own among them, is drawn as it is.
 """
 
 from __future__ import annotations
@@ -82,7 +86,6 @@ from omni.core.enum import League, PanelProfile
 from omni.core.ids import LeagueScopedId
 from omni.domain.breaks import BreakId
 from omni.domain.contest import Contest, TeamGame
-from omni.domain.football import PlaySummary
 from omni.policy.allocation import AllocationPolicy, AllocationSettings, SetAsideReason, Targets, targets
 from omni.policy.interrupts import BarContext
 from omni.policy.ladder import (
@@ -156,9 +159,9 @@ _SHORT = frozenset({LeaseRefusal.NO_ROOM, LeaseRefusal.TURNS_SPENT})  # the brea
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class DirectorPolicy:
-    """The policy objects the director runs, and what the board adds to them: the NFL caption's run in rotation, a
-    status card's turn, the poll interval that comes off a break whose onset is uncertain, and the leverage
-    weights the "why" sentence calls a close late game, or a lopsided one."""
+    """The policy objects the director runs, and what the board adds to them: the runway an NFL line needs to start
+    in rotation, a status card's turn, the poll interval that comes off a break whose onset is uncertain, and the
+    leverage weights the "why" sentence calls a close late game, or a lopsided one."""
 
     allocation: AllocationPolicy = AllocationPolicy()
     promotion: PromotionPolicy = PromotionPolicy()
@@ -166,7 +169,7 @@ class DirectorPolicy:
     ladder: LadderPolicy = LadderPolicy()
     timing: CardTimingPolicy = CardTimingPolicy()
     summary: SummaryPolicy = SummaryPolicy()
-    caption: timedelta = timedelta(seconds=10)
+    line_runway: timedelta = timedelta(seconds=4)  # an NFL line starts only with this much of its turn left
     status: timedelta = timedelta(seconds=8)
     # How often each league's live game feed is read: MLB's every 15 s, NFL's favorite every 10 s.
     poll_intervals: tuple[tuple[League, timedelta], ...] = (
@@ -179,8 +182,8 @@ class DirectorPolicy:
     lopsided: float = 0.15  # G below this reads as a lopsided game
 
     def __post_init__(self) -> None:
-        if self.caption <= _ZERO or self.status <= _ZERO:
-            raise ValueError("a caption's and a status card's runs must be positive")
+        if self.line_runway <= _ZERO or self.status <= _ZERO:
+            raise ValueError("a line's runway and a status card's run must be positive")
 
     def poll_interval(self, league: League) -> timedelta:
         """How long one read of a league's live game feed can lag."""
@@ -217,7 +220,6 @@ class Turn:
     accounted: MonotonicTime | None = None  # a base turn: credited up to here
     live_base: bool = False  # a live base card was on hand when it was chosen: its airtime runs up the non-base cap
     ended: bool = False
-    captioned: bool = False  # a caption has aired in it
     yield_at: MonotonicTime | None = None  # a guest whose host's break closed: when it gives the board back
 
     @property
@@ -236,7 +238,7 @@ class Air:
     turn: Turn
     since: MonotonicTime | None = None  # its first confirmed frame
     protected: MonotonicTime | None = None  # until when nothing ordinary may take its place
-    caption_until: MonotonicTime | None = None
+    line_up: bool = False  # a live football card in a base turn: its game's line is up, until the turn ends
     summary: ResultSummary | None = None  # a final first presented as its unseen deciding play's story
 
     @property
@@ -343,7 +345,6 @@ class PolicyDirector:
         self._finals: dict[str, _Final] = {}  # each final that has gone up, from its first start
         self._open: dict[str, OpenTime] = {}  # each status card's open time since it last showed
         self._base_turns: int | None = None  # base turns started since the last pregame; None until one shows
-        self._captions: dict[LeagueScopedId, PlaySummary] = {}  # each game's caption that has aired
         self._bids: dict[LeagueScopedId, _Bid] = {}  # each standing no-hit bid's reminders
         self._waits: dict[PromotionKey, tuple[int, PromotionRefusal | OfferSkip]] = {}  # last reason written
         self._offered: dict[PromotionKey, _Offered] = {}  # each scored offer's event, as its revision first showed it
@@ -448,11 +449,7 @@ class PolicyDirector:
             air.protected = turn.started + turn.minimum
             self._card_noted(turn, air, at)
         self._showing(air, now)
-        caption = _caption(air.shown)
-        if caption is not None and turn.base:
-            self._caption_from(air, caption, now)
-        elif caption is not None:  # a promoted card shows its caption whole: it has aired
-            self._captions[air.card.contest.id] = caption
+        air.line_up = turn.base and _line(air.shown) is not None  # drawn with its line: it holds to the turn's end
         return True
 
     def review(self, air: Air, view: CardView, at: ClockReading, *, skip: frozenset[str]) -> EndReason | None:
@@ -461,9 +458,6 @@ class PolicyDirector:
         now = at.monotonic
         turn = air.turn
         assert air.since is not None and air.protected is not None and turn.started is not None
-        if air.caption_until is not None and now >= air.caption_until:
-            air.caption_until = None
-            air.shown = _without_caption(air.card)
         if turn.tenure is Tenure.BREAK_GUEST:
             closed = self._closed(turn)
             if closed is not None:
@@ -504,6 +498,7 @@ class PolicyDirector:
         start = turn.started + turn.length
         self._begin(renewed, air, at, start, again=again)
         self._showing(air, start)  # its new turn counts as a showing: a repeat, a status's mark, its last airing
+        air.line_up = False  # the line the last turn held ends with it: this one may start it afresh
         air.shown = self._present(air, air.card, now)
         return None
 
@@ -530,12 +525,12 @@ class PolicyDirector:
             self._end(air.turn, at)
 
     def deadline(self, air: Air, at: ClockReading) -> MonotonicTime | None:
-        """When the card on air next needs a decision by itself: its caption ending, its protection ending, its
-        handover within its turn, its turn's end, or a guest's yield."""
+        """When the card on air next needs a decision by itself: its protection ending, its handover within its turn,
+        its turn's end, or a guest's yield."""
         turn = air.turn
         assert air.since is not None and turn.started is not None  # asked only once its first frame committed
         handover = air.since + air.minimum if air.role is CardRole.PLAY_IN_TURN else None
-        instants = (air.caption_until, air.protected, handover, turn.started + turn.length, turn.yield_at)
+        instants = (air.protected, handover, turn.started + turn.length, turn.yield_at)
         return earliest(instant for instant in instants if instant is not None and instant > at.monotonic)
 
     def next_deadline(self, at: ClockReading) -> MonotonicTime | None:
@@ -921,26 +916,25 @@ class PolicyDirector:
         return air
 
     def _present(self, air: Air, card: ScoreboardCard[Any], now: MonotonicTime) -> ScoreboardCard[Any]:
-        """How a card is drawn in its turn: a live football card in a base turn shows a caption it hasn't shown, once
-        and only if the turn has room for all of it; otherwise the field alone."""
+        """How a card is drawn in its turn. A live football card in a base turn keeps a line that's up to the turn's
+        end, a newer play in its place, and starts one only before its latest start with the runway for it; otherwise
+        it's the field alone."""
         if air.summary is not None:  # a final led by its unseen deciding play: drawn as that story, its score current
             return air.summary.drawn(card) or card
-        caption = _caption(card)
+        line = _line(card)
         turn = air.turn
-        if caption is None or not turn.base or air.caption_until is not None:
-            return card  # no caption, or it isn't the game's base turn, or its caption is airing
+        if line is None or not turn.base:
+            air.line_up = False
+            return card  # no line, or it isn't the game's base turn: drawn as it is
+        if air.line_up:
+            return card  # up: it holds, whichever play the card now brings
         started = turn.started if turn.started is not None else now
         runway = (started + turn.length).since(now)
-        if turn.captioned or self._captions.get(card.contest.id) == caption or runway < self._policy.caption:
-            return _without_caption(card)
-        if air.since is not None:  # up already: the caption starts now
-            self._caption_from(air, caption, now)
+        recent = line.caption is None or now < line.caption.latest_start
+        if not recent or runway < self._policy.line_runway:
+            return replace(card, payload=replace(line, last_play=None))  # the field alone
+        air.line_up = air.since is not None  # up already: the line starts now
         return card
-
-    def _caption_from(self, air: Air, caption: PlaySummary, now: MonotonicTime) -> None:
-        air.caption_until = now + self._policy.caption
-        air.turn.captioned = True
-        self._captions[air.card.contest.id] = caption
 
     def _begin(self, turn: Turn, air: Air, at: ClockReading, start: MonotonicTime, *, again: bool = False) -> None:
         """A turn's first frame (or its card's frame staying up for it): the run, its guests, the trace. A card
@@ -1055,8 +1049,6 @@ class PolicyDirector:
         self._stories = {
             key: story for key, story in self._stories.items() if key.contest in present and now < story.until
         }
-        for contest in [contest for contest in self._captions if contest not in view.games]:
-            del self._captions[contest]
         bidding = {offer.key.contest for offer in view.offers if offer.kind is PromotionKind.REMINDER}
         self._bids = {contest: bid for contest, bid in self._bids.items() if contest in bidding}
         self._lapsed = {id for id in self._lapsed if id.contest in view.games}
@@ -1417,17 +1409,16 @@ class PolicyDirector:
 
     def interrupted(self, interruption: Interruption, at: ClockReading) -> None:
         """The board was interrupted (`BOARD_POLICY.md` §6, "Wake or output loss"). The turn on air ends at ``at``,
-        the last moment its display is known to have shown it, credited to there; nothing queued carries over, nor
-        any caption that aired. After a host's gap (a sleep, a stall) what the policy read before it is history: its
-        leases close, its action markers go, and the promotions waiting are withdrawn. An output loss keeps them, and
-        keeps what the policy has decided: cooldowns, debt and an owed recovery."""
+        the last moment its display is known to have shown it, credited to there; nothing queued carries over. After
+        a host's gap (a sleep, a stall) what the policy read before it is history: its leases close, its action markers
+        go, and the promotions waiting are withdrawn. An output loss keeps them, and keeps what the policy has decided:
+        cooldowns, debt and an owed recovery."""
         self._next = None
         current = self._current
         if current is not None:
             started = current.started
             assert started is not None  # a turn is current from its start
             self._end(current, at if at.monotonic >= started else ClockReading(at.project(started), started))
-        self._captions.clear()
         if not interruption.host:
             return
         self._leases = LeaseBook(self._policy.leases)
@@ -1489,14 +1480,9 @@ def _same_event(offered: ScoreboardCard[Any], card: ScoreboardCard[Any]) -> bool
     return offered.kind is card.kind and offered.payload == card.payload
 
 
-def _caption(card: ScoreboardCard[Any]) -> PlaySummary | None:
+def _line(card: ScoreboardCard[Any]) -> LiveFootballCardPayload | None:
+    """A live football card's payload, when it carries its game's line."""
     payload = card.payload
-    return payload.last_play if isinstance(payload, LiveFootballCardPayload) else None
-
-
-def _without_caption(card: ScoreboardCard[Any]) -> ScoreboardCard[Any]:
-    """A live football card drawn as the field alone."""
-    payload = card.payload
-    if not isinstance(payload, LiveFootballCardPayload) or payload.last_play is None:
-        return card
-    return replace(card, payload=replace(payload, last_play=None))
+    if card.kind is not CardKind.LIVE_GAME or not isinstance(payload, LiveFootballCardPayload):
+        return None
+    return payload if payload.last_play is not None else None

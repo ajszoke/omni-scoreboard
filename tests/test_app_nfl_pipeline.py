@@ -292,55 +292,38 @@ def test_an_older_play_released_after_a_newer_one_never_takes_its_place() -> Non
     assert board.caption(GAME) == "NEWER"
 
 
-# --- the caption's lifetime ------------------------------------------------------------------------------------------
+# --- the line's lifetime ---------------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(("major", "gone"), [(False, 90), (True, 150)])
-def test_a_caption_is_gone_by_its_hard_end(major: bool, gone: int) -> None:
+@pytest.mark.parametrize("major", [False, True])
+def test_a_line_stays_on_the_card_from_its_release_until_its_hard_end_routine_or_major(major: bool) -> None:
     board = Board()
     board.answer(GAME, drive())
     board.at(5, GAME)
     board.answer(GAME, drive(clock=590), events=(play("p", board.now.utc, major=major),))
     board.at(50, GAME)
     assert board.caption(GAME) == "RUN +4"
-    board.show(GAME)  # a frame with the caption on it is shown: it has started
-    board.refresh(GAME)
-    assert _seconds(board.pipeline.next_deadline(board.now)) == 50 + gone
-    board.at(50 + gone - 0.1, GAME)
+    assert _seconds(board.pipeline.next_deadline(board.now)) == 50 + 330  # 5 minutes, then a turn of its card
+    board.at(50 + 330 - 0.1, GAME)
     assert board.caption(GAME) == "RUN +4"
-    assert board.at(50 + gone, GAME).ingested == (CardId(LIVE_KEY),)
+    gone = board.at(50 + 330, GAME)
+    assert gone.ingested == (CardId(LIVE_KEY),) and gone.skipped == ()
     assert board.caption(GAME) is None
 
 
-@pytest.mark.parametrize(("major", "start_within"), [(False, 60), (True, 120)])
-def test_a_caption_that_can_t_start_within_its_bound_never_goes_up(major: bool, start_within: int) -> None:
-    board = Board(policy=NflCardPolicy(stale_for=timedelta(minutes=5)))  # a quiet card stays up, dimmed
+def test_a_line_released_while_the_feed_is_quiet_shows_once_it_s_current_again_within_its_bounds() -> None:
+    board = Board(policy=NflCardPolicy(stale_for=timedelta(minutes=10)))  # a quiet card stays up, dimmed
     board.answer(GAME, drive(), current_for=timedelta(seconds=20))
     board.at(5, GAME)
-    board.answer(GAME, drive(), events=(play("p", board.now.utc, major=major),), current_for=timedelta(seconds=20))
-    board.at(50, GAME)  # released, but the feed went quiet at 25 s: the card is dimmed, the field alone
-    assert board.caption(GAME) is None and board.pipeline.next_deadline(board.now) == MonotonicTime(50 + start_within)
-    board.at(50 + start_within, GAME)
-    board.answer(GAME, drive(), current_for=LONG)  # current again, but too late to start
-    board.refresh(GAME)
-    assert board.caption(GAME) is None
-
-
-def test_a_caption_that_started_in_time_stays_until_its_hard_end_through_a_quiet_spell() -> None:
-    board = Board(lag=0)
-    board.answer(GAME, drive())
-    board.at(0, GAME)
     board.answer(GAME, drive(), events=(play("p", board.now.utc),), current_for=timedelta(seconds=20))
-    board.at(5, GAME)
-    board.show(GAME)  # shown at 5: started
-    board.answer(GAME, drive(), current_for=timedelta(seconds=1))
-    board.at(30, GAME)
-    assert board.caption(GAME) is None  # quiet: the field alone, but its time still runs
-    board.answer(GAME, drive(), current_for=LONG)
-    board.at(70, GAME)
-    assert board.caption(GAME) == "RUN +4"  # current again past its start bound, but it had started
-    board.at(95, GAME)
-    assert board.caption(GAME) is None  # its hard end
+    board.at(50, GAME)  # released, but the feed went quiet at 25 s: the card is dimmed, the field alone
+    assert board.caption(GAME) is None and board.pipeline.next_deadline(board.now) == MonotonicTime(380)
+    board.at(250, GAME)
+    board.answer(GAME, drive(), current_for=LONG)  # the feed answers again
+    assert board.at(294.9, GAME).stale == (GAME.id,) and board.caption(GAME) is None
+    current = board.at(295, GAME)  # current again once that answer clears the delay, 4:05 after the line's release
+    assert current.stale == () and current.skipped == () and board.caption(GAME) == "RUN +4"
+    assert board.at(380, GAME).skipped == () and board.caption(GAME) is None  # its hard end
 
 
 def test_a_caption_goes_once_a_newer_answer_s_field_moves_on_and_stays_while_only_the_clock_runs() -> None:

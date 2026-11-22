@@ -14,14 +14,14 @@ the game for its phase:
     the newest reading that arrived no later than `NflCardPolicy.meter_lag` before the answer whose state is on the
     card, and drops it once it's `meter_max_age` older than that on the broadcast's clock: the delay, the lag and the
     max age past its own arrival. A stale card shows no meter, and a final has none.
-  - **The caption** (`last_play`) is the newest released play, staged with which entry it is and its bounds
-    (`StagedCaption`). It starts only when a frame that carried it is confirmed shown (`presented`): a routine entry
-    must start within 60 s of its release and is gone by 90 s; a major one (a score, a turnover, a ruling) by 120 s
-    and 150 s (`NflCardPolicy`; `CLOCK_AND_SCHEDULING.md`, the strip's hard ends). One no confirmed frame carried by
-    its latest start is dropped, and the pass says so (`CaptionMiss`): it's never shown late. Once a newer answer's
-    field has moved on from the one the play's own answer showed, the play no longer describes the field, and goes.
-    It airs only beside a field whose score agrees with its own answer's: until that field is released, the card
-    shows the field alone, as it does in a break or while the feed has gone quiet.
+  - **The caption** (`last_play`) is the game's line: the newest released play, staged with which entry it is and its
+    bounds (`StagedCaption`). It may first go up until it's `NflCardPolicy.recent_line` (5 minutes) past its release,
+    routine or major, and is gone one of the live card's longest turns after that, so a line up by then holds to its
+    turn's end; the board's policy picks the turns that show it (`omni.tower.director`). It needs no confirmed frame,
+    and none is said to have missed. Once a newer answer's field has moved on from the one the play's own answer
+    showed, the play no longer describes the field, and goes. It airs only beside a field whose score agrees with its
+    own answer's: until that field is released, the card shows the field alone, as it does in a break or while the
+    feed has gone quiet.
   - The plays in a game's first answer are from before the board tuned in, and what an outage's catch-up brings is
     history: none of them captions the card, nor is offered.
 - **final** — a result comes only from an answer that itself says the game is over. The first is held for the TV
@@ -37,7 +37,11 @@ the game for its phase:
   - **The drain.** The feed is read for a while after the final, for late plays and fixes. A play it brings that
     decided the game (`InterruptClass.DECISIVE_LATE_WINNER`, read against the last live state) updates the revealed
     final once, as its caption and the play that decided it; one that can't (the final's window is over, or it
-    already names one) is dropped, and the pass says why. Nothing the drain brings is offered for promotion.
+    already names one) is dropped, and the pass says why. Nothing the drain brings is offered for promotion. That
+    caption keeps the strip's bounds (`NflCardPolicy`; `CLOCK_AND_SCHEDULING.md`, the strip's hard ends): it starts
+    only when a frame that carried it is confirmed shown (`presented`), a routine entry within 60 s of its release
+    and a major one (a score, a turnover, a ruling) within 120 s, and is gone by 90 s and 150 s. One no confirmed
+    frame carried by its latest start is dropped, and the pass says so (`CaptionMiss`): it's never shown late.
 
 **Release.** Every hold (a state, a play, a result) is pinned when it is admitted, on the monotonic clock, by the
 board's `ReleaseGuard` for NFL's own delay: a play whose write time is credible at receipt + the delay less its age,
@@ -159,8 +163,8 @@ class CaptionMiss(StrEnumMixin, str, Enum):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class NflCardPolicy:
-    """How NFL's cards are timed: their turns, the caption's lifetimes, a play's own card, how old the meter's
-    reading may be, and when a quiet feed's card dims and goes."""
+    """How NFL's cards are timed: their turns, the live card's line and the other captions' lifetimes, a play's own
+    card, how old the meter's reading may be, and when a quiet feed's card dims and goes."""
 
     live_min_display: DurationSeconds = DurationSeconds(8)
     live_max_display: DurationSeconds = DurationSeconds(30)
@@ -170,6 +174,8 @@ class NflCardPolicy:
     play_max_display: DurationSeconds = DurationSeconds(12)
     play_window: timedelta = OFFER_LIFETIME  # and it's staged as long as its offer stands
     postgame_window: timedelta = timedelta(minutes=30)  # how long a final lingers after its reveal
+    recent_line: timedelta = timedelta(minutes=5)  # the live card's line may first go up until it's this old
+    # A play's own card and a final's deciding play keep the strip's bounds:
     routine_start_within: timedelta = ROUTINE_START_WITHIN  # a routine caption not up by then never goes up
     routine_hard_end: timedelta = ROUTINE_HARD_END  # and is gone by then, up or not
     major_start_within: timedelta = MAJOR_START_WITHIN  # a score, a turnover, a ruling
@@ -181,10 +187,15 @@ class NflCardPolicy:
     meter_max_age: timedelta = METER_MAX_AGE  # a reading this much older than its lag is no reading at all
 
     def caption_bounds(self, major: bool) -> tuple[timedelta, timedelta]:
-        """How long after its release a caption may first go up, and when it's gone."""
+        """How long after its release a play's own caption, or a final's, may first go up, and when it's gone."""
         if major:
             return self.major_start_within, self.major_hard_end
         return self.routine_start_within, self.routine_hard_end
+
+    def line_bounds(self) -> tuple[timedelta, timedelta]:
+        """How long after its release the live card's line may first go up, and when it's gone: one of the card's
+        longest turns later, so a line up by its latest start holds to its turn's end."""
+        return self.recent_line, self.recent_line + self.live_max_display.as_timedelta()
 
 
 @dataclass(frozen=True, slots=True)
@@ -229,8 +240,8 @@ class _ReleasedPlay:
 
 @dataclass(slots=True)
 class _Caption:
-    """An entry staged to caption a card, from its release until it's gone; started once a confirmed frame carried it
-    by its latest start."""
+    """An entry staged to caption a card, from its release until it's gone; a final's is started once a confirmed
+    frame carried it by its latest start."""
 
     play: _Play
     staged: StagedCaption
@@ -364,8 +375,8 @@ class LiveFootballPipeline:
         )
 
     def presented(self, card: ScoreboardCard[Any], at: ClockReading) -> None:
-        """The display confirmed a frame of ``card`` shown at ``at``: a caption it carried first went up then, if that
-        was before its latest start. Safe from the frame thread; the next refresh takes it in."""
+        """The display confirmed a frame of ``card`` shown at ``at``: a final's caption it carried first went up then,
+        if that was before its latest start. Safe from the frame thread; the next refresh takes it in."""
         payload = card.payload
         if not isinstance(payload, LiveFootballCardPayload) or payload.last_play is None or payload.caption is None:
             return
@@ -374,11 +385,12 @@ class LiveFootballPipeline:
 
     def next_deadline(self, at: ClockReading) -> MonotonicTime | None:
         """When the pipeline would next surface or drop something by itself, as of ``at``: a state, a play or a
-        result clearing the delay, a caption's latest start or hard end, a live card going stale, or a stale card
-        coming down."""
+        result clearing the delay, a line's end, a final's caption's latest start or hard end, a live card going
+        stale, or a stale card coming down."""
         instants: list[MonotonicTime | None] = []
         for live in self._live.values():
-            instants += [live.states.next_eligible(at), live.plays.next_eligible(), *_bounds(live.caption)]
+            line = live.caption.staged.hard_end if live.caption is not None else None  # it has no start to miss
+            instants += [live.states.next_eligible(at), live.plays.next_eligible(), line]
         for final in self._finals.values():
             instants += [final.answers.next_eligible(at), *_bounds(final.caption)]
             if final.live is not None:
@@ -393,14 +405,14 @@ class LiveFootballPipeline:
         return min((instant for instant in instants if instant is not None and instant > at.monotonic), default=None)
 
     def _take_presented(self) -> None:
-        """Start each staged caption a confirmed frame carried by its latest start."""
+        """Start each final's staged caption a confirmed frame carried by its latest start."""
         with self._lock:
             presented, self._presented = self._presented, {}
         for (game_id, play), shown in presented.items():
-            for kept in (self._live.get(game_id), self._finals.get(game_id)):
-                caption = kept.caption if kept is not None else None
-                if caption is not None and caption.staged.play == play and shown < caption.staged.latest_start:
-                    caption.started = True
+            final = self._finals.get(game_id)
+            caption = final.caption if final is not None else None
+            if caption is not None and caption.staged.play == play and shown < caption.staged.latest_start:
+                caption.started = True
 
     # --- one game -----------------------------------------------------------------------------------------------
 
@@ -500,7 +512,7 @@ class LiveFootballPipeline:
                 live.rulings[about] = revision
 
     def _release_plays(self, game: TeamGame, live: _Live, at: ClockReading, out: _Pass) -> None:
-        """The newest play to clear the delay becomes the caption; an older one never takes a newer one's place. A
+        """The newest play to clear the delay becomes the line; an older one never takes a newer one's place. A
         ruling withdraws what stood for the play it rules on. Each live play waits for the state after it to clear
         too, to be offered for promotion; an outage's catch-up is history, and set aside."""
         caught_up = 0
@@ -510,7 +522,7 @@ class LiveFootballPipeline:
             current = play.context.origin is CandidateOrigin.LIVE
             if play.order > live.captioned:
                 live.captioned = play.order
-                live.caption = self._caption_of(play, held.release) if current else None
+                live.caption = self._line_of(play, held.release) if current else None
             if current:
                 live.awaiting.add(play.context.settled, _ReleasedPlay(game, play, held.release))
             else:
@@ -587,7 +599,7 @@ class LiveFootballPipeline:
         if since is not None and at.monotonic.since(since) >= self._policy.stale_for:
             return  # its card is down for staleness: nothing goes back up until a newer state clears the delay
         stale = since is not None
-        caption = self._caption(game, live, shown, at, out, stale=stale)
+        caption = self._caption(live, shown, at, stale=stale)
         as_of = self._lagged(shown.arrival.received)  # the market, lag before the shown answer
         live.meter.admit(self._feeds.win_probability(game, as_of), as_of)
         meter = live.meter.current(at)
@@ -609,26 +621,21 @@ class LiveFootballPipeline:
         self._answering.discard(game_id)
         return None
 
-    def _caption(
-        self, game: TeamGame, live: _Live, shown: Held[_Field], at: ClockReading, out: _Pass, *, stale: bool
-    ) -> _Caption | None:
-        """The play to caption the card beside ``shown``, or None for the field alone.
+    @staticmethod
+    def _caption(live: _Live, shown: Held[_Field], at: ClockReading, *, stale: bool) -> _Caption | None:
+        """The line to caption the card beside ``shown``, or None for the field alone.
 
-        A caption goes for good once it has run out its lifetime, a newer answer's field has moved on from its own
-        answer's, or no confirmed frame carried it by its latest start (said so). While the feed is quiet, in a
-        break, or before the field that agrees with its score is released, the card shows the field alone.
+        A line goes for good at its hard end, or once a newer answer's field has moved on from its own answer's. While
+        the feed is quiet, in a break, or before the field that agrees with its score is released, the card shows the
+        field alone.
         """
         caption = live.caption
         if caption is None:
             return None
-        now = at.monotonic
         state = shown.value.state
         moved = shown.arrival.received.monotonic > caption.play.answer and _field_of(state) != caption.play.field
-        late = not caption.started and now >= caption.staged.latest_start
-        if late or moved or now >= caption.staged.hard_end:
+        if moved or at.monotonic >= caption.staged.hard_end:
             live.caption = None
-            if late:
-                self._missed(game, caption.play, CaptionMiss.TOO_LATE, out)
             return None
         if stale or state.interval is not None or _score(state) != caption.play.score:
             return None
@@ -895,7 +902,15 @@ class LiveFootballPipeline:
 
     def _caption_of(self, play: _Play, release: MonotonicTime) -> _Caption:
         """``play`` staged as a caption from its ``release``, with its bounds."""
-        start_within, hard_end = self._policy.caption_bounds(play.event.major)
+        return self._staged(play, release, self._policy.caption_bounds(play.event.major))
+
+    def _line_of(self, play: _Play, release: MonotonicTime) -> _Caption:
+        """``play`` staged as the live card's line from its ``release``, with its bounds."""
+        return self._staged(play, release, self._policy.line_bounds())
+
+    @staticmethod
+    def _staged(play: _Play, release: MonotonicTime, bounds: tuple[timedelta, timedelta]) -> _Caption:
+        start_within, hard_end = bounds
         staged = StagedCaption(play=play.ref, latest_start=release + start_within, hard_end=release + hard_end)
         return _Caption(play, staged)
 
@@ -1049,7 +1064,8 @@ def _swung(plays: Iterable[_ReleasedPlay]) -> set[str]:
 
 
 def _bounds(caption: _Caption | None) -> list[MonotonicTime]:
-    """When a staged caption next changes by itself: its latest start while it hasn't started, and its hard end."""
+    """When a final's staged caption next changes by itself: its latest start while it hasn't started, and its hard
+    end."""
     if caption is None:
         return []
     staged = caption.staged

@@ -1,23 +1,39 @@
-"""NFL's caption on the shared board: staged with its entry and bounds, started only by a confirmed frame, never shown
-late, never history, and only beside a field that agrees with it; and a stale card current again only once a state
-sent after the outage clears the delay.
+"""NFL's line on the shared board: staged with its entry and bounds, recent for 5 minutes from its release with no
+confirmed frame needed, never history, and only beside a field that agrees with it; on each of its game's turns while
+it's recent, held to the turn's end; and a stale card current again only once a state sent after the outage clears
+the delay. A final's caption, by contrast, is started by a confirmed frame the board took.
 
-Every test drives `LiveFootballPipeline.refresh` (and `presented`, the display's word that a frame was shown) over a
-fake `NflFeeds` (`tests.test_app_nfl_pipeline`) on a fake clock, with a 45 s NFL delay unless it says otherwise.
+Most tests drive `LiveFootballPipeline.refresh` (and `presented`, the display's word that a frame was shown) over a
+fake `NflFeeds` (`tests.test_app_nfl_pipeline`) on a fake clock, with a 45 s NFL delay unless they say otherwise; the
+board's own run through `AppLoop` has none.
 """
 
 from __future__ import annotations
 
-import dataclasses
 from datetime import timedelta
 
 import pytest
 
+from omni.app.contest_store import ContestStore
+from omni.app.display import RecordingDisplaySink
+from omni.app.loop import AppLoop
+from omni.app.nfl_pipeline import LiveFootballPipeline
+from omni.app.pipeline import LiveBaseballPipeline
+from omni.cards.factory import CardFactory
 from omni.cards.football import LiveFootballCardPayload, PlayRef, StagedCaption
-from omni.core.clock import MonotonicTime
-from tests.test_app_loop_nfl import _Board, nfl_slate
-from tests.test_app_nfl_pipeline import KICKOFF, Board, drive, nfl_game, play
-from tests.test_renderer_registry import _live_card
+from omni.core.clock import FakeClock, MonotonicTime
+from omni.core.enum import PanelProfile
+from omni.core.time import DurationSeconds
+from omni.policy.settings import PolicySettings
+from omni.providers.nflmeta import NflPhase
+from omni.queue.delay_policy import DelayPolicy
+from omni.queue.priority import PriorityScorer
+from omni.queue.scheduler import InterleavedCardQueue
+from omni.tower.decisions import BaseTurnNote
+from tests.test_app_loop_nfl import _Board, _mlb_feed, nfl_slate
+from tests.test_app_nfl_final_drain import TIED, WON
+from tests.test_app_nfl_pipeline import Board, FakeNflFeeds, T, drive, nfl_game, play
+from tests.test_app_nfl_play_cards import _Drawn
 
 GAME = nfl_game()
 S = timedelta(seconds=1)
@@ -32,82 +48,114 @@ def _staged(board: Board, release: float, *, major: bool = False) -> None:
     board.at(release, GAME)
 
 
-# --- the first start is the confirmed frame -------------------------------------------------------------------------
+# --- the line's bounds ---------------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(("major", "start_within", "label"), [(False, 60, "routine play"), (True, 120, "major play")])
-def test_a_caption_no_confirmed_frame_carried_is_dropped_at_its_latest_start_and_said_so(
-    major: bool, start_within: int, label: str
-) -> None:
+@pytest.mark.parametrize("major", [False, True])
+def test_a_line_is_staged_with_its_entry_and_one_set_of_bounds_and_needs_no_confirmed_frame(major: bool) -> None:
     board = Board()
     _staged(board, 50, major=major)
-    payload = board.payload(GAME)
-    assert payload.caption == StagedCaption(
-        play=PlayRef("p", "p", 0),
-        latest_start=MonotonicTime(50 + start_within),
-        hard_end=MonotonicTime(50 + start_within + 30),
-    )
-    assert board.pipeline.next_deadline(board.now) == MonotonicTime(50 + start_within)
-    assert board.at(50 + start_within - 0.1, GAME).skipped == () and board.caption(GAME) == "RUN +4"
-    dropped = board.at(50 + start_within, GAME)
-    assert board.caption(GAME) is None and board.payload(GAME).caption is None
-    assert dropped.skipped == (f"{GAME.id}: {label} unseen (too late to start)",)
-
-
-def test_a_caption_a_confirmed_frame_carried_in_time_stays_until_its_hard_end() -> None:
-    board = Board()
-    _staged(board, 50)
+    assert board.payload(GAME).caption == StagedCaption(
+        play=PlayRef("p", "p", 0), latest_start=MonotonicTime(350), hard_end=MonotonicTime(380)
+    )  # it may first go up until 5 minutes after its release, and a turn of its card later it's gone
     board.to(55)
-    board.show(GAME)  # the display's word: a frame with the caption on it was shown at 55
+    board.show(GAME)  # the display's word that a frame carried it changes nothing: it has no start to miss
     board.refresh(GAME)
-    assert board.pipeline.next_deadline(board.now) == MonotonicTime(140)  # no latest start left to wait on
-    assert board.at(139.9, GAME).skipped == () and board.caption(GAME) == "RUN +4"
-    assert board.at(140, GAME).skipped == () and board.caption(GAME) is None
+    assert board.pipeline.next_deadline(board.now) == MonotonicTime(380)
+    assert board.at(350, GAME).skipped == () and board.caption(GAME) == "RUN +4"  # its latest start: still carried
 
 
-def test_a_frame_shown_only_after_the_latest_start_starts_nothing() -> None:
-    board = Board()
-    _staged(board, 50)
-    board.to(110)  # drawn before its latest start, shown at it
-    board.show(GAME)
-    assert board.refresh(GAME).skipped == (f"{GAME.id}: routine play unseen (too late to start)",)
-    assert board.caption(GAME) is None
-
-
-def test_a_frame_without_the_caption_or_with_another_entry_or_another_card_starts_nothing() -> None:
-    board = Board()
-    _staged(board, 50)
-    card = board.card(GAME)
-    assert card is not None and isinstance(card.payload, LiveFootballCardPayload)
-    alone = dataclasses.replace(card, payload=dataclasses.replace(card.payload, last_play=None))  # the field alone
-    staged = card.payload.caption
-    assert staged is not None
-    other = dataclasses.replace(staged, play=PlayRef("q", "q", 0))
-    elsewhere = dataclasses.replace(card, payload=dataclasses.replace(card.payload, caption=other))
-    board.to(55)
-    for shown in (alone, elsewhere, _live_card()):
-        board.pipeline.presented(shown, board.now)
-    board.refresh(GAME)
-    assert board.at(110, GAME).skipped == (f"{GAME.id}: routine play unseen (too late to start)",)
-
-
-def test_the_board_s_confirmed_frames_start_the_caption_they_carried() -> None:
-    """`AppLoop.paint` tells the pipeline what each frame the display took carried."""
+def test_the_board_s_confirmed_frames_start_the_final_s_caption_they_carried() -> None:
+    """`AppLoop.paint` tells the pipeline what each frame the display took carried: the final's deciding play, shown
+    before its latest start, stays past it."""
     board = _Board(nfl_slate(GAME))  # no delay
     at = board.to(0)
     board.loop.refresh(at)
     assert board.loop.paint(at).frame is not None  # nothing to show yet: an explicit frame
-    board.feeds.answer(GAME, KICKOFF, at)
+    board.feeds.answer(GAME, TIED, at)
     board.loop.refresh(at)
     board.loop.paint(at)
     at = board.to(5)
-    board.feeds.answer(GAME, drive(clock=880), at, events=(play("p", at.utc),), current_for=timedelta(minutes=5))
+    board.feeds.answer(GAME, WON, at, phase=NflPhase.POST)  # the scoreboard says final before the kick is in
     board.loop.refresh(at)
-    board.loop.paint(at)  # the live card on the panel, with its caption
-    at = board.to(70)
+    board.loop.paint(at)
+    at = board.to(10)
+    kick = play("kick", at.utc - 2 * S, major=True, headline="FIELD GOAL")  # the play that decided it
+    board.feeds.answer(GAME, WON, at, phase=NflPhase.POST, events=(kick,))
+    board.loop.refresh(at)
+    board.loop.paint(at)  # the final on the panel, with its deciding play
+    at = board.to(140)
     assert board.loop.refresh(at).pipeline.skipped == ()
-    card = board.queue.card(f"{GAME.id}:live")
-    assert card is not None and card.payload.last_play is not None  # past its latest start: it had started
+    card = board.queue.card(f"{GAME.id}:final")
+    assert card is not None and card.payload.last_play is not None  # past its latest start (130): it had started
+
+
+# --- on the shared board -----------------------------------------------------------------------------------------------
+
+
+def _rotation(release: int) -> dict[int, set[str | None]]:
+    """`AppLoop` under `omni-board-policy/2`, with no delay: DAL@PHI and MIN@GB share the board in 12 s turns, and
+    DAL@PHI's play clears at ``release``, and after it only its clock runs. Each of DAL@PHI's turns by its first
+    second, with the lines its frames drew."""
+    other = nfl_game("402", "MIN", "GB")
+    clock = FakeClock(T)
+    feeds = FakeNflFeeds()
+    queue = InterleavedCardQueue()
+    drawn = _Drawn()
+    loop = AppLoop(
+        schedules=(nfl_slate(GAME, other),),
+        store=ContestStore(),
+        pipeline=LiveBaseballPipeline(
+            scorer=PriorityScorer(),
+            delay_policy=DelayPolicy(broadcast_lag=DurationSeconds(0)),
+            factory=CardFactory(),
+            queue=queue,
+        ),
+        queue=queue,
+        registry=drawn,
+        sink=RecordingDisplaySink(PanelProfile.QUAD_128X64),
+        fetch_feed=_mlb_feed,
+        football=LiveFootballPipeline(
+            feeds=feeds, delay_policy=DelayPolicy(broadcast_lag=DurationSeconds(0)), queue=queue
+        ),
+        settings=PolicySettings(),
+    )
+    turns: dict[int, set[str | None]] = {}
+    turn: int | None = None
+    for second in range(400):
+        at = clock.read()
+        if second == 0:
+            feeds.answer(GAME, drive(), at)
+            feeds.answer(other, drive(), at)
+        elif second == release:
+            feeds.answer(GAME, drive(clock=590), at, events=(play("p", at.utc),))
+        elif second > release and second % 5 == 0:  # only the clock runs: the card is drawn anew, its field the same
+            feeds.answer(GAME, drive(clock=590 - second // 5), at)
+        loop.refresh(at)
+        painted = loop.paint(at)
+        for note in painted.decisions:
+            if isinstance(note, BaseTurnNote):
+                turn = second if note.contest == GAME.id else None
+        card = drawn.card
+        if turn is not None and card is not None and isinstance(card.payload, LiveFootballCardPayload):
+            line = card.payload.last_play
+            turns.setdefault(turn, set()).add(line.headline if line is not None else None)
+        clock.advance(timedelta(seconds=1))
+    return turns
+
+
+@pytest.mark.parametrize(
+    "release",
+    [
+        11,  # its turns start at 3:49, 4:13 and 4:37 after it, then at 5:01
+        17,  # its turn at 4:55 holds it to that turn's last frame, at 5:06; its next, at 5:19, doesn't start it
+    ],
+)
+def test_the_shared_board_shows_a_game_s_line_on_each_of_its_turns_until_it_s_5_minutes_old(release: int) -> None:
+    # Every other turn is DAL@PHI's. One that starts after the release and before the line is 5 minutes old draws it
+    # on every frame; one before the release (or with too little of it left when the play cleared), or after, none.
+    expected = {start: {"RUN +4"} if release < start < release + 300 else {None} for start in range(0, 400, 24)}
+    assert _rotation(release) == expected
 
 
 # --- history is never a current caption ------------------------------------------------------------------------------
