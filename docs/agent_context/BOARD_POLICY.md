@@ -231,6 +231,7 @@ I = B * (0.5 + 0.5*z_pre) * (0.65 + 0.35*Q + 0.35*J + 0.25*C_season)      # Q = 
 | Confirmed perfect game | 3.5 | a complete outcome and a complete reach ledger; never inferred from partial stats |
 | Confirmed no-hitter | 2.8 | a complete final with verified hit totals |
 | A decisive late winner: an eligible walk-off, or a result-changing reversal | 1.2 | a typed event with a coherent predecessor and successor. NFL: Q4 ≤ 5:00 or OT. MLB: the 9th or extras |
+| A win swing (the user's rule, 2026-11-22): a play that moved either side's win probability by 10 points or more, at any time. It takes `z_pre = 1`, because the swing is the evidence of what was at stake, and keeps its predecessor's leverage basis, so on NFL's proxy it waits for a break | 1.2 | the meter's readings around its answer: as of `METER_LAG` before the predecessor's arrival and before its own. One play per answer gets the swing: its first score, turnover or ruling, else its last play. A decisive late winner keeps its own class. NFL only, for now |
 | Another major competitive event (a close-game HR, a late one-score turnover) | 0.8 | typed and coherent |
 | Routine scoring, bookkeeping, an injury notice | 0 | the normal field, strip and status |
 
