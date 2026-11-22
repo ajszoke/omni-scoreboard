@@ -115,6 +115,10 @@ M_MLB = 1 + 2r      M_NFL = 3 + 11r      M_NBA = 3 + 15*sqrt(r)
 - **MLB:** progress is completed scheduled outs, counting each half transition once. Extras set `r = 0`.
 - **NFL:** 3,600 regulation seconds. **NBA:** 2,880.
 - **Overtime:** `P = 1`, and the margin scale uses the remaining OT seconds over regulation.
+- **The first half's last two minutes** (NFL and NBA; the user's rule, 2026-11-22) get the game's own late boost at the same score.
+  - **How it's computed:** `G` is the higher of two readings, the half's own and the one with `P` and `r` read as if the same clock were in the fourth quarter.
+  - **Why the higher:** a lead that would all but settle the game that late doesn't settle it at the half, so it never weighs less than it did.
+  - **Where it starts and stops:** in the NFL it starts at the two-minute warning. The half's own 0:00, and the break after it, weigh as before.
 - **Without score, time or progress:** `G = 0.2`, and nothing model-derived.
 
 ### 3.2 Favorites, rank and stakes

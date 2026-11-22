@@ -104,6 +104,9 @@ class LeveragePolicy:
     mlb_scheduled_innings: int = 9  # 54 scheduled outs
     nfl_regulation: timedelta = timedelta(seconds=3600)
     nba_regulation: timedelta = timedelta(seconds=2880)
+    # The first half's last minutes get the game's own last minutes' boost: a drive or a possession against the half's
+    # clock is worth watching the way one against the game's is. The NFL's two-minute warning; the NBA's last two.
+    half_end: timedelta = timedelta(seconds=120)
     mlb_margin: MarginScale = MarginScale(base=1.0, slope=2.0)  # 1 + 2r
     nfl_margin: MarginScale = MarginScale(base=3.0, slope=11.0)  # 3 + 11r
     nba_margin: MarginScale = MarginScale(base=3.0, slope=15.0, exponent=0.5)  # 3 + 15*sqrt(r)
@@ -121,6 +124,8 @@ class LeveragePolicy:
             raise ValueError("a game is scheduled for at least one inning")
         if self.nfl_regulation <= timedelta(0) or self.nba_regulation <= timedelta(0):
             raise ValueError("regulation must be positive")
+        if self.half_end < timedelta(0):
+            raise ValueError("the half's last minutes can't be negative")
         if self.li_span <= 0 or self.half_life <= timedelta(0) or self.uncertain_cap < timedelta(0):
             raise ValueError("the leverage index's span and the average's half-life must be positive")
 
@@ -197,7 +202,15 @@ def _timed_proxy(
     if period > _PERIODS:  # overtime: regulation is complete, and the scale reads the overtime left
         return proxy_leverage(margin=margin, progress=1.0, remaining=left / total, scale=scale, policy=policy)
     progress = ((period - 1) * quarter + quarter - left) / total
-    return proxy_leverage(margin=margin, progress=progress, remaining=1.0 - progress, scale=scale, policy=policy)
+    reading = proxy_leverage(margin=margin, progress=progress, remaining=1.0 - progress, scale=scale, policy=policy)
+    if period == _PERIODS // 2 and 0 < left <= policy.half_end.total_seconds():
+        # The half's last minutes get the boost the game's own last minutes would at the same score (the same clock
+        # read in the last quarter), and never less than the half's own weight: a lead that would all but settle the
+        # game that late doesn't settle it at the half. The half's own end (0:00, and the break after it) is as before.
+        late = (total - left) / total
+        boosted = proxy_leverage(margin=margin, progress=late, remaining=1.0 - late, scale=scale, policy=policy)
+        return boosted if boosted.g > reading.g else reading
+    return reading
 
 
 def football_proxy(state: FootballGameState, *, policy: LeveragePolicy = _DEFAULT) -> Leverage:
