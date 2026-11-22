@@ -1,28 +1,28 @@
 # The mixed day under omni-board-policy/2
 
-Confirmed base airtime: 16889.8 s.
+Confirmed base airtime: 16889.2 s.
 
 ## Leagues
 
 | League | Target | Actual |
 |---|---:|---:|
-| mlb | 7002.6 s (41.46%) | 7069.8 s (41.86%) |
-| nfl | 9887.2 s (58.54%) | 9819.9 s (58.14%) |
+| mlb | 7322.1 s (43.35%) | 7371.3 s (43.65%) |
+| nfl | 9567.1 s (56.65%) | 9517.9 s (56.35%) |
 
 ## Games
 
 | Game | Favorite | Target | Actual | Longest wait | Missed turns |
 |---|---|---:|---:|---:|---:|
-| mlb:mlb_statsapi:401 | - | 240.5 s (1.42%) | 252.3 s (1.49%) | 192.2 s | 0 |
+| mlb:mlb_statsapi:401 | - | 219.4 s (1.30%) | 216.2 s (1.28%) | 180.2 s | 0 |
 | mlb:mlb_statsapi:776102 | - | 1500.0 s (8.88%) | 1500.0 s (8.88%) | 0.0 s | 0 |
-| mlb:mlb_statsapi:776201 | - | 166.0 s (0.98%) | 156.2 s (0.92%) | 156.2 s | 0 |
-| mlb:mlb_statsapi:776203 | - | 551.3 s (3.26%) | 564.7 s (3.34%) | 72.1 s | 0 |
-| mlb:mlb_statsapi:776205 | 1 | 1971.7 s (11.67%) | 1978.4 s (11.71%) | 72.1 s | 0 |
-| mlb:mlb_statsapi:776206 | 2 | 2573.0 s (15.23%) | 2618.3 s (15.50%) | 96.1 s | 0 |
-| nfl:nflmeta:401 | - | 1660.8 s (9.83%) | 1598.0 s (9.46%) | 144.2 s | 5 |
-| nfl:nflmeta:402 | - | 1409.9 s (8.35%) | 1417.8 s (8.39%) | 156.2 s | 0 |
-| nfl:nflmeta:403 | - | 1856.1 s (10.99%) | 1859.7 s (11.01%) | 24.0 s | 0 |
-| nfl:nflmeta:404 | 1 | 4960.4 s (29.37%) | 4944.3 s (29.27%) | 48.1 s | 1 |
+| mlb:mlb_statsapi:776201 | - | 127.2 s (0.75%) | 132.2 s (0.78%) | 156.2 s | 0 |
+| mlb:mlb_statsapi:776203 | - | 532.2 s (3.15%) | 540.7 s (3.20%) | 96.1 s | 0 |
+| mlb:mlb_statsapi:776205 | 1 | 2090.3 s (12.38%) | 2090.3 s (12.38%) | 72.1 s | 0 |
+| mlb:mlb_statsapi:776206 | 2 | 2853.0 s (16.89%) | 2891.9 s (17.12%) | 84.1 s | 0 |
+| nfl:nflmeta:401 | - | 1439.4 s (8.52%) | 1405.8 s (8.32%) | 144.1 s | 2 |
+| nfl:nflmeta:402 | - | 1257.3 s (7.44%) | 1261.6 s (7.47%) | 168.2 s | 0 |
+| nfl:nflmeta:403 | - | 1683.6 s (9.97%) | 1690.4 s (10.01%) | 48.0 s | 0 |
+| nfl:nflmeta:404 | 1 | 5186.8 s (30.71%) | 5160.0 s (30.55%) | 36.0 s | 2 |
 
 ## Whole board
 
@@ -32,12 +32,12 @@ Confirmed base airtime: 16889.8 s.
 | final | 168.3 |
 | frame held | 45.0 |
 | frame idle | 38631.2 |
-| live_game | 16863.7 |
-| pregame | 65.7 |
+| live_game | 16863.2 |
+| pregame | 66.3 |
 
 ## Decisions
 
-- Base turns while the favorite floor bound: 4; debts clamped: 3; rescues: 8.
+- Base turns while the favorite floor bound: 554; debts clamped: 3; rescues: 8.
 - Promotions made: none. Held for a better moment: 0. Ran out of time: 3.
 - Candidates' reasons: already_shown 1, below_bar 1, below_every_bar 3, expired 3.
 - Leases: lapsed 32, opened 33, revoked 31; opened by kind: mlb inning break 25, mlb mound visit 1, nfl halftime 3, nfl official timeout 1, nfl quarter break 1, nfl team timeout 1, nfl two-minute warning 1; evidence refused: none.

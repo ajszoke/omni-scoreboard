@@ -75,8 +75,8 @@ def test_two_same_league_non_favorites_at_g_1_and_0_share_confirmed_base_airtime
     assert (airtime[_key(live(high))], airtime[_key(live(low))]) == (3000.0, 1200.0)  # 2.5:1, all confirmed
 
 
-@pytest.mark.parametrize("g, turns", [(0.0, 30), (1.0, 70)])
-def test_atl_against_14_high_leverage_games_gets_30_percent_in_a_blowout_and_70_close(g: float, turns: int) -> None:
+@pytest.mark.parametrize("g, turns", [(0.0, 60), (1.0, 90)])
+def test_atl_against_14_high_leverage_games_gets_60_percent_in_a_blowout_and_90_close(g: float, turns: int) -> None:
     slate = games(15)
     run = Run()
     run.stage(*(live(each) for each in slate))
