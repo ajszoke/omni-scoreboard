@@ -239,6 +239,20 @@ def test_a_player_line_reads_an_even_plus_minus_in_gray_and_its_field_goals_alon
     assert any("8 PTS 4/5 FG" in op.text for op in texts)
 
 
+_LONG = player("N.Alexander-Walker", 12, 6, 11, 2, 5, 2, 2, 0, 3, 4, 1, 0, 1, 2)  # 18 letters, a two-digit +/-
+
+
+def test_a_name_too_long_for_the_quads_player_row_scrolls_and_leaves_the_stats_their_room() -> None:
+    panel = PlayerLinesPanel(rank=0, players=BySide(_LONG, _EVEN))
+    ops = _ops(_live(bottom=panel), QUAD).texts()  # drew: a name this long used to leave the stats no width at all
+    plus_minus = next(op for op in ops if op.text.strip() == "+12")
+    stats = next(op for op in ops if "PTS" in op.text and op.y == plus_minus.y)
+    assert stats.x <= 128 - 30  # the stats keep their least
+    assert plus_minus.x < stats.x
+    even = next(op for op in ops if op.text == "J.Doe")  # a short name holds still, as before
+    assert even.x == 18
+
+
 @pytest.mark.parametrize("profile", PROFILES)
 def test_a_non_team_contest_is_refused(profile: PanelProfile) -> None:
     golf = GolfTournament(

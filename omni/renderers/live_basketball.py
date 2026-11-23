@@ -320,6 +320,7 @@ _Q_DIVIDER_Y = 40
 _Q_LINE_CENTERS = (30, 45, 60, 75, 90, 105, 120)  # the line score's columns: Q1-Q4 and three overtimes
 _Q_BOX_COLUMNS = (("FG%", 44), ("3PT", 72), ("REB", 90), ("AST", 108), ("TOV", 126))  # label, right edge
 _Q_NAME_X = 18
+_Q_STATS_LEAST = 30  # the width a player row keeps for its stats, however long the name before them
 
 
 def _quad(canvas: Canvas, context: RenderContext, card: _Card) -> None:
@@ -448,16 +449,25 @@ def _quad_box(canvas: Canvas, card: _Card, panel: TeamBoxPanel) -> None:
 
 def _quad_player_lines(canvas: Canvas, context: RenderContext, card: _Card, panel: PlayerLinesPanel) -> None:
     """One player a team, away over home. Each row runs on its own: the code, the name, the plus-minus, then the
-    stats, which scroll when they overflow while everything before them holds still."""
+    stats, which scroll when they overflow while everything before them holds still. A name so long it would leave
+    the stats less than `_Q_STATS_LEAST` scrolls too, in the room left before the plus-minus."""
     marquee = context.marquee
     for which, y in ((HomeAway.AWAY, 44), (HomeAway.HOME, 55)):
         canvas.text(3, y + 1, card.team(which).abbreviation, _SECONDARY, font="4x6")
         line = panel.players[which]
         if line is None:
             continue
-        canvas.text(_Q_NAME_X, y, line.name, _WHITE, font="5x7")
         plus_minus = _plus_minus_text(line)
-        pm_x = _Q_NAME_X + text_width(f"{line.name} ", "5x7")
+        # The name holds still unless it would leave the stats less than their least: then it scrolls in what's left.
+        room = 128 - _Q_NAME_X - text_width(f"{plus_minus} ", "5x7") - _Q_STATS_LEAST
+        name_width = text_width(f"{line.name} ", "5x7")
+        if name_width <= room:
+            canvas.text(_Q_NAME_X, y, line.name, _WHITE, font="5x7")
+        else:
+            name = TextLane(x=_Q_NAME_X, y=y, width=room - text_width(" ", "5x7"), font="5x7", style=marquee.style)
+            draw_text_lane(canvas, name, line.name, _WHITE, now=context.now, clock=marquee.clock)
+            name_width = room
+        pm_x = _Q_NAME_X + name_width
         canvas.text(pm_x, y, plus_minus, _plus_minus_color(line), font="5x7")
         stats_x = pm_x + text_width(f"{plus_minus} ", "5x7")
         lane = TextLane(x=stats_x, y=y, width=128 - stats_x, font="5x7", style=marquee.style)
