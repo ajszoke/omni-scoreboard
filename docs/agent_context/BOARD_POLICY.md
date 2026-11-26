@@ -115,6 +115,10 @@ M_MLB = 1 + 2r      M_NFL = 3 + 11r      M_NBA = 3 + 15*sqrt(r)
 - **MLB:** progress is completed scheduled outs, counting each half transition once. Extras set `r = 0`.
 - **NFL:** 3,600 regulation seconds. **NBA:** 2,880.
 - **Overtime:** `P = 1`, and the margin scale uses the remaining OT seconds over regulation.
+- **The first half's last two minutes** (NFL and NBA; the user's rule, 2026-11-22) get the game's own late boost at the same score.
+  - **How it's computed:** `G` is the higher of two readings, the half's own and the one with `P` and `r` read as if the same clock were in the fourth quarter.
+  - **Why the higher:** a lead that would all but settle the game that late doesn't settle it at the half, so it never weighs less than it did.
+  - **Where it starts and stops:** in the NFL it starts at the two-minute warning. The half's own 0:00, and the break after it, weigh as before.
 - **Without score, time or progress:** `G = 0.2`, and nothing model-derived.
 
 ### 3.2 Favorites, rank and stakes
@@ -170,7 +174,7 @@ When favorites are in action, their **combined** share has a floor that rises wi
 important favorite game:
 
 ```text
-floor_F = 0.30 + 0.40 * max(G of the acting favorites)        # 30% in a blowout .. 70% close and late
+floor_F = 0.60 + 0.30 * max(G of the acting favorites)        # 60% in a blowout .. 90% close and late
 if Q_F = sum(q_g of acting favorites) < floor_F:
     favorite q'_g    = floor_F     * q_g / Q_F
     nonfavorite q'_g = (1-floor_F) * q_g / (1 - Q_F)
@@ -179,8 +183,9 @@ if Q_F = sum(q_g of acting favorites) < floor_F:
 - Recompute `Q_l = sum(q'_g in l)` and `p_g = q'_g / Q_l`. Don't reapply the league blend.
 - **No projection** is needed when every candidate is a favorite.
 - **A favorite's confirmed break** suspends its membership in the floor.
-- **On a full slate** (ATL plus 14 other games, or CAR plus 8 others), an acting favorite gets about 70% when
-  its game is close and late, 46% when typical, and 30% in a blowout.
+- **On a full slate** (ATL plus 14 other games, or CAR plus 8 others), an acting favorite gets about 90% when
+  its game is close and late, 70% when typical, and 60% in a blowout. The user raised the floor from 30–70% to
+  60–90% on 2026-11-22, after watching a full NFL Sunday slate.
 - **With few games on,** the multiplier usually gives it more than the floor anyway.
 - The floor applies to eligible base airtime, not sleep, unavailable output or auxiliary cards.
 
@@ -231,6 +236,7 @@ I = B * (0.5 + 0.5*z_pre) * (0.65 + 0.35*Q + 0.35*J + 0.25*C_season)      # Q = 
 | Confirmed perfect game | 3.5 | a complete outcome and a complete reach ledger; never inferred from partial stats |
 | Confirmed no-hitter | 2.8 | a complete final with verified hit totals |
 | A decisive late winner: an eligible walk-off, or a result-changing reversal | 1.2 | a typed event with a coherent predecessor and successor. NFL: Q4 ≤ 5:00 or OT. MLB: the 9th or extras |
+| A win swing (the user's rule, 2026-11-22): a play that moved either side's win probability by 10 points or more, at any time. It takes `z_pre = 1`, because the swing is the evidence of what was at stake, and keeps its predecessor's leverage basis, so on NFL's proxy it waits for a break | 1.2 | the meter's readings around its answer: as of `METER_LAG` before the predecessor's arrival and before its own. One play per answer gets the swing: its first score, turnover or ruling, else its last play. A decisive late winner keeps its own class. NFL only, for now |
 | Another major competitive event (a close-game HR, a late one-score turnover) | 0.8 | typed and coherent |
 | Routine scoring, bookkeeping, an injury notice | 0 | the normal field, strip and status |
 
@@ -376,7 +382,7 @@ recovery survives an outage, and a short or failed one stays owed.
 | Card | Behavior |
 |---|---|
 | Live base | 12 s (minimum 8). Weight applies during favorite action as well as breaks. Same-game updates refresh in place |
-| NFL strip in rotation (quad) | at most one compatible 10 s caption, if the turn's runway fits it; otherwise the field only |
+| NFL strip in rotation (quad) | the game's newest play line (the user's rule, 2026-11-22). It shows while it still describes the field and the score, up to 5 min after its release, and starts only with at least 4 s of the turn left. Once up, it holds to the turn's end; a newer play replaces it in place. It may show on every turn of its game. Otherwise the field only |
 | NFL strip, focused | the current field plus the newest compatible major. At most three waiting routines. No backlog on return. A first start by +60/+120 s, gone by +90/+150 s |
 | Pregame | 8 s, from 90 min before the start. Due every 300/120/60/30 s across the ramps at 90–30/30–10/10–2/2–0 min. With live games, at most one per four base turns, in a break or open rotation |
 | Initial final | one 8 s turn, in confirmed end order. An unseen decisive predecessor goes first. While a favorite acts, unrelated finals wait for a break unless promoted |
@@ -451,11 +457,12 @@ acceptance runs them through real adapters, released generations and sink receip
 | MNF + 8 NBA, no favorite, `G` = .4 | NFL 22.50% |
 | 1 NFL + 15 MLB, no favorite | NFL 18.39% |
 | 4 high-leverage NBA, one postseason | 27.71% for the postseason game, 24.10% for each other |
-| CHA high leverage + 2 high-leverage others | CHA **70.00%** (the floor binds), others 15.00% each |
-| CHA blowout + 2 high-leverage others | CHA 44.44%, others 27.78% each |
-| ATL + 14 high-leverage MLB: ATL blowout / ATL close | ATL **30.00%** / **70.00%** |
-| September Sunday (9 NFL, 10 MLB, `G` = .4): both favorites acting | CAR 28.24%, ATL 17.76% (46% combined); NFL 59.87% |
-| The same, only CAR acting / only ATL acting | CAR 46.00% / ATL 46.00% |
+| CHA high leverage + 2 high-leverage others | CHA **90.00%** (the floor binds), others 5.00% each |
+| CHA blowout + 2 high-leverage others | CHA **60.00%** (the floor binds; 44.44% before it), others 20.00% each |
+| CHA blowout + 1 high-leverage other | CHA 61.54%, the other 38.46% (the floor doesn't bind) |
+| ATL + 14 high-leverage MLB: ATL blowout / ATL close | ATL **60.00%** / **90.00%** |
+| September Sunday (9 NFL, 10 MLB, `G` = .4): both favorites acting | CAR 44.21%, ATL 27.79% (72% combined); NFL 60.61% |
+| The same, only CAR acting / only ATL acting | CAR 72.00% / ATL 72.00% |
 
 **Interrupt values:**
 - the NBA example: 0.78;

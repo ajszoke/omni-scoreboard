@@ -19,10 +19,16 @@ from omni.domain.breaks import BreakConfidence, BreakEvidence, BreakId, BreakKin
 from omni.events.break_detection import BREAK_CAPABILITIES, BreakCapability, onset_age
 from omni.events.football import FootballEventKind
 from omni.events.mlb_breaks import mlb_break_evidence
+from omni.domain.basketball import BasketballGameState, BasketballPhase
 from omni.events.nfl_breaks import nfl_break_evidence
 from omni.providers.nfl_teams import NflTeamRegistry
 from omni.providers.nflmeta import HALFTIME_HOLD, NFLMETA_SOURCE, NflLiveSnapshot, NflMetaLiveProvider, PlayFeedPace
 from tests.mlb_break_feeds import RECEIVED, SOURCE, T, action, answer, game, pitch, play, read
+from tests.test_nba_breaks import GAME as NBA_GAME
+from tests.test_nba_breaks import T0 as NBA_T0
+from tests.test_nba_breaks import _state as nba_state
+from tests.test_nba_breaks import at as nba_at
+from tests.test_nba_breaks import watch as nba_watch
 
 S = timedelta(seconds=1)
 _MLB_GAME = LeagueScopedId(League.MLB, SOURCE, "700001")
@@ -207,6 +213,58 @@ _EXAMPLES: dict[BreakKind, _Example] = {
         ),
     ),
 }
+
+
+def _nba(*reads: tuple[float, BasketballGameState]) -> Callable[[], tuple[BreakEvidence, ...]]:
+    """Synthetic slate reads of one game, a second apart as given, through the feed deriver and the NBA detector: the
+    evidence the last read showed."""
+    return lambda: nba_watch(*reads)[-1]
+
+
+def _nba_expect(kind: BreakKind, marker: str, seconds: float, *, onset: float | None = None) -> BreakEvidence:
+    """The evidence an NBA example becomes: received with its last read; a timeout's onset is its inferred one."""
+    return BreakEvidence(
+        id=BreakId(NBA_GAME, kind, marker),
+        received=nba_at(seconds),
+        confidence=BreakConfidence.INFERRED if onset is not None else _EXPLICIT,
+        onset=NBA_T0 + onset * S if onset is not None else None,
+        onset_basis=OnsetBasis.LOCAL_READ if onset is not None else OnsetBasis.EVENT,
+    )
+
+
+_END = BasketballPhase.END_OF_PERIOD
+_NBA_EXAMPLES: dict[BreakKind, _Example] = {
+    # UTA's timeouts_remaining 7 -> 6 in the first quarter, its first: the clock stopped at 7:23 five seconds in.
+    BreakKind.NBA_TV_TIMEOUT: _Example(
+        _nba((0, nba_state(1, 4440)), (5, nba_state(1, 4430)), (20, nba_state(1, 4430, timeouts=(6, 7)))),
+        _nba_expect(BreakKind.NBA_TV_TIMEOUT, "timeout period 1 7:23 away", 20, onset=5),
+    ),
+    # LAL's 2 -> 1 in overtime, where every timeout is short.
+    BreakKind.NBA_TEAM_TIMEOUT: _Example(
+        _nba(
+            (0, nba_state(5, 3000, timeouts=(2, 2), scores=(100, 100))),
+            (5, nba_state(5, 2990, timeouts=(2, 2), scores=(100, 100))),
+            (9, nba_state(5, 2990, timeouts=(2, 1), scores=(100, 100))),
+        ),
+        _nba_expect(BreakKind.NBA_TEAM_TIMEOUT, "timeout period 5 4:59 home", 9, onset=5),
+    ),
+    # {"time": "END Q1", "period": 1}.
+    BreakKind.NBA_QUARTER_BREAK: _Example(
+        _nba((0, nba_state(1, 100)), (10, nba_state(1, None, phase=_END))),
+        _nba_expect(BreakKind.NBA_QUARTER_BREAK, "end of period 1", 10),
+    ),
+    # {"time": "Half", "period": 2}.
+    BreakKind.NBA_HALFTIME: _Example(
+        _nba((0, nba_state(2, 50)), (10, nba_state(2, None, phase=BasketballPhase.HALFTIME))),
+        _nba_expect(BreakKind.NBA_HALFTIME, "halftime", 10),
+    ),
+    # {"time": "END Q4", "period": 4} with the score tied.
+    BreakKind.NBA_BEFORE_OVERTIME: _Example(
+        _nba((0, nba_state(4, 10, scores=(99, 99))), (5, nba_state(4, None, phase=_END, scores=(99, 99)))),
+        _nba_expect(BreakKind.NBA_BEFORE_OVERTIME, "end of period 4", 5),
+    ),
+}
+_EXAMPLES.update(_NBA_EXAMPLES)
 
 _REVIEWED = "J.Burrow pass short right to J.Chase to PIT 26 for 4 yards (J.Dean)."
 _RULING = " The Replay Official reviewed the pass completion ruling, and the play was REVERSED."

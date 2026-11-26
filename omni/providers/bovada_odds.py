@@ -1,4 +1,4 @@
-"""Pregame MLB odds from Bovada's public coupon endpoint.
+"""Pregame MLB and NBA odds from Bovada's public coupon endpoint.
 
 The endpoint needs no key and costs nothing, but it is an undocumented site service rather than a
 published API, so it may change or go away without notice. Everything about its shape stays in this
@@ -8,8 +8,15 @@ Its responses sit behind a CDN for up to ten minutes. That's fine for a pregame 
 for a live game, which is why the in-game meter reads a different source.
 
 The coupon lists one event per game, each naming its home and away competitors, with a moneyline
-market and a run line market whose outcomes are tagged by side. Events are held between fetches, so
-callers can ask about a game every pass while the endpoint is only hit every few minutes.
+market and a handicap market (MLB's run line, NBA's point spread) whose outcomes are tagged by side. Events are held
+between fetches, so callers can ask about a game every pass while the endpoint is only hit every few minutes. Each
+league has a coupon of its own (`BovadaCoupon`); NBA's is read the same way as MLB's, its point spread where MLB's run
+line is, and `favorite_line` reads a game's two sides as the favorite's line an NBA pregame card shows. The live NBA
+coupon's shape hasn't been seen: it's read as MLB's coupon is, with the handicap market its key names
+(``Main Dynamic Asian Handicap``), and a game it doesn't carry just shows no line.
+
+An answer of ``{}`` (seen for every sport at once, when the coupon has nothing to say) is a coupon with no games: no
+lines, and no error.
 """
 
 from __future__ import annotations
@@ -18,22 +25,40 @@ import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from enum import Enum
 from typing import Any
 
+from omni.core.enum import HomeAway, StrEnumMixin
 from omni.core.time import DurationSeconds
 from omni.domain.baseball import BettingLine, GameLines
+from omni.domain.basketball import FavoriteLine
 from omni.domain.contest import TeamGame
 from omni.domain.teams import Team
 from omni.providers.base import ProviderError
 
-__all__ = ["BovadaOddsProvider", "OddsFetcher"]
+__all__ = ["BovadaCoupon", "BovadaOddsProvider", "OddsFetcher", "favorite_line"]
 
-_URL = (
-    "https://www.bovada.lv/services/sports/event/coupon/events/A/description/baseball/mlb"
-    "?marketFilterId=def&preMatchOnly=true&eventsLimit=50&lang=en"
-)
+_COUPON = "https://www.bovada.lv/services/sports/event/coupon/events/A/description/{path}"
+_QUERY = "?marketFilterId=def&preMatchOnly=true&eventsLimit=50&lang=en"
 _MONEYLINE_MARKET = "Head To Head"
-_RUNLINE_MARKET = "Main Dynamic Asian Runline"
+
+
+class BovadaCoupon(StrEnumMixin, str, Enum):
+    """A league's coupon: where it's read, and its handicap market's key."""
+
+    MLB = "baseball/mlb"
+    NBA = "basketball/nba"
+
+    @property
+    def url(self) -> str:
+        return _COUPON.format(path=self.value) + _QUERY
+
+    @property
+    def handicap(self) -> str:
+        """The key of the market whose outcomes give each side's handicap: MLB's run line, NBA's point spread."""
+        return "Main Dynamic Asian Handicap" if self is BovadaCoupon.NBA else "Main Dynamic Asian Runline"
+
+
 _AWAY, _HOME = "A", "H"  # how an outcome names its side
 _EVEN = "EVEN"  # how the coupon writes +100
 _OPEN = "O"  # any other market or outcome status means its price isn't being offered right now
@@ -63,8 +88,10 @@ class BovadaOddsProvider:
         *,
         fetch: OddsFetcher | None = None,
         refresh_every: DurationSeconds = DurationSeconds(300),
+        coupon: BovadaCoupon = BovadaCoupon.MLB,
     ) -> None:
         self._fetch = fetch if fetch is not None else _default_fetch
+        self._coupon = coupon
         self._refresh_every = refresh_every.as_timedelta()
         self._events: tuple[_Event, ...] = ()
         self._next_fetch: datetime | None = None
@@ -93,7 +120,7 @@ class BovadaOddsProvider:
             return
         self._next_fetch = now + self._refresh_every
         try:
-            self._events = _parse_coupon(self._fetch())
+            self._events = _parse_coupon(self._fetch(), self._coupon)
         except Exception as exc:
             raise ProviderError(f"Bovada odds fetch failed: {exc}") from exc
 
@@ -108,20 +135,23 @@ def _normalized(name: str) -> str:
     return "".join(ch for ch in name.casefold() if ch.isalnum())
 
 
-def _parse_coupon(raw: Any) -> tuple[_Event, ...]:
-    """Every usable game on the coupon; one that can't be read is left off rather than failing the rest."""
+def _parse_coupon(raw: Any, coupon: BovadaCoupon = BovadaCoupon.MLB) -> tuple[_Event, ...]:
+    """Every usable game on the coupon; one that can't be read is left off rather than failing the rest. An empty
+    object is a coupon with no games."""
+    if raw == {}:
+        return ()
     if not isinstance(raw, list):
         raise ValueError("expected a list of coupon groups")
     events = []
     for group in raw:
         for event in group.get("events") or []:
-            parsed = _parse_event(event)
+            parsed = _parse_event(event, coupon)
             if parsed is not None:
                 events.append(parsed)
     return tuple(events)
 
 
-def _parse_event(event: dict[str, Any]) -> _Event | None:
+def _parse_event(event: dict[str, Any], coupon: BovadaCoupon) -> _Event | None:
     competitors = event.get("competitors") or []
     away = next((c.get("name") for c in competitors if c.get("home") is False), None)
     home = next((c.get("name") for c in competitors if c.get("home") is True), None)
@@ -135,16 +165,18 @@ def _parse_event(event: dict[str, Any]) -> _Event | None:
         away_name=away,
         home_name=home,
         start=start,
-        lines=GameLines(away=_side_line(markets, _AWAY), home=_side_line(markets, _HOME)),
+        lines=GameLines(
+            away=_side_line(markets, _AWAY, coupon.handicap), home=_side_line(markets, _HOME, coupon.handicap)
+        ),
     )
 
 
-def _side_line(markets: list[dict[str, Any]], side: str) -> BettingLine | None:
-    """One side's line from a game's markets; no moneyline means no line, and a run line is a bonus."""
+def _side_line(markets: list[dict[str, Any]], side: str, handicap: str) -> BettingLine | None:
+    """One side's line from a game's markets; no moneyline means no line, and a handicap is a bonus."""
     moneyline = _american(_outcome_price(markets, _MONEYLINE_MARKET, side).get("american"))
     if moneyline is None:
         return None
-    runline_price = _outcome_price(markets, _RUNLINE_MARKET, side)
+    runline_price = _outcome_price(markets, handicap, side)
     runline = _handicap(runline_price.get("handicap"))
     price = _american(runline_price.get("american"))
     if runline is None or price is None:
@@ -179,9 +211,27 @@ def _handicap(raw: Any) -> float | None:
         return None
 
 
-def _default_fetch() -> Any:  # pragma: no cover - real network
+def favorite_line(lines: GameLines) -> FavoriteLine | None:
+    """The favorite's line from a game's two sides: the side with the shorter moneyline, its moneyline and the points
+    its handicap gives. None without both sides' lines, without the favorite's handicap, or with no favorite to tell
+    (the same moneyline both ways, and no side giving points)."""
+    away, home = lines.away, lines.home
+    if away is None or home is None:
+        return None
+    sides = sorted(
+        ((HomeAway.AWAY, away), (HomeAway.HOME, home)),
+        key=lambda each: (each[1].moneyline, each[1].runline if each[1].runline is not None else 0.0),
+    )
+    side, line = sides[0]
+    spread = line.runline
+    if spread is None or spread > 0 or (line.moneyline == sides[1][1].moneyline and spread == 0):
+        return None
+    return FavoriteLine(favorite=side, moneyline=line.moneyline, spread=spread)
+
+
+def _default_fetch(coupon: BovadaCoupon = BovadaCoupon.MLB) -> Any:  # pragma: no cover - real network
     from urllib.request import Request, urlopen
 
-    request = Request(_URL, headers={"User-Agent": "omni-scoreboard"})
+    request = Request(coupon.url, headers={"User-Agent": "omni-scoreboard"})
     with urlopen(request, timeout=10) as response:
         return json.load(response)

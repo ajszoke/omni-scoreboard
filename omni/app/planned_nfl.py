@@ -2,8 +2,9 @@
 
 `PlannedNfl` stands between the board's decision pass and NFLMeta. It is NFL's schedule (a `ScopeSource`) and
 NFL's feeds (`NflFeeds`). Each pass (`observe`) it decides what NFLMeta should be asked, and the poller asks it, so
-nothing here waits on the network. NFLMeta bills requests and rows by the month, so the reads are the cheapest
-that keep every live score current (strategy E of `omni.replay.nfl_budget`):
+nothing here waits on the network. NFLMeta bills requests and rows by the month, so on Free the reads are the
+cheapest that keep every live score current (strategy E of `omni.replay.nfl_budget`), and Builder adds each other
+live game's plays (strategy F):
 
 - **The day's games** (`PollSource.DAY_LIST`): one unfiltered read once the date is current, for its games and their
   ids. It bills every game it lists. Until it answers no game is known, so nothing else can be read: it goes as
@@ -21,11 +22,20 @@ that keep every live score current (strategy E of `omni.replay.nfl_budget`):
   never takes the date stale.
 - **A favorite's game** (`PollSource.FOLLOWED_GAME`, focus): read by id at the live pace with its plays on change,
   by the provider's `poll`, as the single-game runner reads its game. Nothing is asked through its halftime hold,
-  and nothing once its final has settled.
+  and nothing once its final has settled, past the drain the provider reads it through.
+- **Each other game, on Builder** (`PollSource.FOLLOWED_GAME`, normal): read the same way, every
+  `NflSchedulePolicy.every_game`, so its card has its timeouts, challenges and play line too, which only the plays
+  tell. The read needs the scoreboard: it says when the feed has a new play, when halftime and the final begin, and
+  it is the field each answer's plays are paired with. So the game is left out of the others' read, and its score
+  is read once.
 - **The other games** (`PollSource.LIVE_SCORES`, normal): one ``phase=in`` read of the date's other games that
-  have kicked off, named by id, every 45 s while any is in progress. A game it stops listing has ended.
-- **Each other final** (`PollSource.FINAL_SCORE`, background): one read of the game by id once it has ended,
-  for its final score.
+  have kicked off and aren't read on their own, named by id, every 45 s while any is in progress. A game it stops
+  listing has ended.
+- **Each other final** (`PollSource.FINAL_SCORE`, background): one read by id of a game the others' read has
+  stopped listing, for its final score.
+
+A game's first read on its own reads its plays so far, in pages: they are from before the board read it, so its
+answer hands none of them over, however the board saw the game before.
 
 Nothing is read before a game's kickoff, or after its final. Each read is a key the plan asks at its own cadence
 (`NFL_POLICIES`), dropped as soon as it isn't needed, so a read made once is asked once.
@@ -49,12 +59,19 @@ age, and its health goes stale naming the quota. MLB's asks spend their own acco
 **Feeds.** Each answer about a game is kept as its read returns, with when it arrived: `take` hands each over
 once, oldest first, and `latest` gives the newest. An answer the plan had given up on still counts, since the
 provider has already moved past the plays it brought. Each counts as current for two of its own read's cadence
-(`NflReading.current_for`): a favorite's game read every 10 s for 20 s, the others' read together every 45 s for
-90 s, so a card read at the others' pace isn't dimmed between its reads.
+(`NflReading.current_for`): a favorite's game read every 10 s for 20 s, another game read on its own every 30 s for
+60 s, the others' read together every 45 s for 90 s, so a card read at a slower pace isn't dimmed between its reads.
+
+**The meter**, when the board has a market, is read as the pipeline asks for it, on the exchange's own account: a
+game's win probability from its public quotes (`PollSource.PLAY_MARKET`, every 5 s while the game is wanted), read
+as of a moment: the newest reading that arrived by then. A failed read just leaves the card without it. The pipeline
+also rates each play by how far the market moved across it, so a reading should sit close to each side of a play:
+hence NFL's own pace, three times NBA's.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import threading
 from collections import deque
 from collections.abc import Callable, Collection
@@ -63,12 +80,15 @@ from datetime import date, datetime, time, timedelta
 from typing import Any
 
 from omni.app.nfl_feeds import NflReading
+from omni.app.pipeline import MeterReading
+from omni.app.planned_nba import MarketReader
 from omni.app.poll_plan import AccountMap, PollKey, PollPlan, PollPolicy, PollPriority, PollSource
-from omni.app.quota import ProviderAccount
+from omni.app.quota import NflMetaPlan, ProviderAccount
 from omni.core.clock import Clock, ClockReading, MonotonicTime
 from omni.core.enum import League
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.core.time import local_date
+from omni.domain.baseball import WinProbability
 from omni.domain.contest import TeamGame
 from omni.preferences.favorites import Favorites
 from omni.providers.base import LocalDate, PollScope, ProviderUpdate, ScopeObservation, ScopeReport, ScopeSpan
@@ -82,27 +102,39 @@ from omni.providers.nflmeta import (
     NflSlate,
 )
 
-__all__ = ["LIVE_EVERY", "NFL_POLICIES", "NflSchedulePolicy", "PlannedNfl", "nfl_accounts"]
+__all__ = ["LIVE_EVERY", "NFL_POLICIES", "PLAY_MARKET_POLICY", "NflSchedulePolicy", "PlannedNfl", "nfl_accounts"]
 
 LIVE_EVERY = timedelta(seconds=45)  # the other games' scores: each live score within 45 s
+_EVERY_GAME = timedelta(seconds=30)  # on Builder, each other live game's own reads, plays and all
 _CURRENT_CADENCES = 2  # an answer counts as current for this many of its read's cadence
 _KEEP = 2048  # answers kept per game until taken: hours of a followed game's; a game nobody takes from keeps no more
+
+# The meter's quotes, every 5 s while a game is wanted: each play is rated by how far the market moved across it, so a
+# reading should sit close to each side of it. A plan holds one policy a source, so this is a source of NFL's own
+# (NBA's quotes go every 15 s). Even a week's sixteen games at once would make 192 asks a minute, well inside the
+# exchange's 25 a second. The 64 answers a key keeps span 5 min 20 s at this pace, so each stands 5 min: long enough
+# that the reading before a play still stands once the play has cleared the delay and its class is read.
+PLAY_MARKET_POLICY = PollPolicy(every=timedelta(seconds=5), keep_for=timedelta(minutes=5), per_minute=240)
 
 # The day list and a final's read are each made once; their cadence is only how often a failing one is asked
 # again, once its quick retries are spent.
 NFL_POLICIES = {
     PollSource.DAY_LIST: PollPolicy(every=timedelta(minutes=1), keep_for=timedelta(minutes=5), rows=16),
     PollSource.LIVE_SCORES: PollPolicy(every=LIVE_EVERY, keep_for=timedelta(minutes=3)),
-    PollSource.FOLLOWED_GAME: PollPolicy(every=DEFAULT_POLL.as_timedelta(), keep_for=timedelta(seconds=90), at_once=2),
+    PollSource.FOLLOWED_GAME: PollPolicy(
+        every=_EVERY_GAME, focus_every=DEFAULT_POLL.as_timedelta(), keep_for=timedelta(seconds=90), at_once=2
+    ),
     PollSource.FINAL_SCORE: PollPolicy(every=timedelta(minutes=1), keep_for=timedelta(minutes=5), at_once=2),
+    PollSource.PLAY_MARKET: PLAY_MARKET_POLICY,
 }
-_READS = tuple(NFL_POLICIES)
+_READS = (PollSource.DAY_LIST, PollSource.LIVE_SCORES, PollSource.FOLLOWED_GAME, PollSource.FINAL_SCORE)  # NFLMeta's
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class NflSchedulePolicy:
     """How NFL's scopes are judged: how long an answer counts as fresh once a read falls due, when a date that listed
-    no game of its own is listed again, and when a date's games are listed again to see its schedule move."""
+    no game of its own is listed again, and when a date's games are listed again to see its schedule move; and, on a
+    plan that reads each live game on its own, how often a game that isn't a favorite's is read."""
 
     fresh_for: timedelta = timedelta(minutes=2)
     recheck_empty: timedelta = timedelta(hours=2)
@@ -110,16 +142,26 @@ class NflSchedulePolicy:
     recheck_from: timedelta = timedelta(hours=3)  # from this long before it
     recheck_after: timedelta = timedelta(minutes=30)  # and this long past each window's last kickoff; kickoffs this
     # close together are one window
+    every_game: timedelta = _EVERY_GAME  # on Builder, each other live game is read on its own this often
 
     def __post_init__(self) -> None:
-        spans = (self.fresh_for, self.recheck_empty, self.recheck_before, self.recheck_from, self.recheck_after)
+        spans = (
+            self.fresh_for,
+            self.recheck_empty,
+            self.recheck_before,
+            self.recheck_from,
+            self.recheck_after,
+            self.every_game,
+        )
         if any(span <= timedelta(0) for span in spans):
             raise ValueError("a schedule policy's spans must be positive")
 
 
 def nfl_accounts(source: SourceRef = NFLMETA_SOURCE) -> AccountMap:
-    """The account NFL's asks spend: every one of them NFLMeta's."""
-    return AccountMap(sources={source: ProviderAccount.NFLMETA})
+    """The accounts NFL's asks spend: NFLMeta's for the games, and the exchange's public quotes for the meter."""
+    return AccountMap(
+        sources={source: ProviderAccount.NFLMETA}, kinds={PollSource.PLAY_MARKET: ProviderAccount.POLYMARKET_US}
+    )
 
 
 @dataclass(slots=True)
@@ -136,6 +178,7 @@ class _Game:
     ended: bool = False  # it has left the games in progress since: its final is to be read, once
     done: bool = False  # its final is in hand and settled: nothing is left to read
     hold_ends: MonotonicTime | None = None  # a followed game's halftime hold, once it has begun
+    read_alone: bool = False  # a read of it on its own has answered: the plays the next brings are news
 
     @property
     def started(self) -> bool:
@@ -177,10 +220,18 @@ class PlannedNfl:
         *,
         favorites: Favorites = Favorites(),
         policy: NflSchedulePolicy = NflSchedulePolicy(),
+        market: MarketReader | None = None,
+        tier: NflMetaPlan = NflMetaPlan.FREE,
     ) -> None:
         missing = [kind.value for kind in _READS if kind not in plan.capacity()]
         if missing:
             raise ValueError(f"the plan has no policy for NFL's {', '.join(missing)} asks")
+        every_game = plan.policy(PollSource.FOLLOWED_GAME).cadence(PollPriority.NORMAL)
+        if tier.every_game and every_game != policy.every_game:
+            raise ValueError(
+                f"the plan reads a game on its own every {every_game.total_seconds():g} s, not every"
+                f" {policy.every_game.total_seconds():g} s as NFL's policy says"
+            )
         accounts = plan.accounts
         if accounts is not None:
             for kind in _READS:  # every ask NFL makes spends NFLMeta's account, or the board isn't built
@@ -192,6 +243,8 @@ class PlannedNfl:
         self._provider = provider
         self._favorites = favorites
         self._policy = policy
+        self._market = market
+        self._every_game = tier.every_game  # each live game read on its own, plays and all
         # Until the day's list answers, no game is known to read: on a board with an NFL favorite it's what focus
         # reads need, so it goes as focus.
         self._listing = PollPriority.FOCUS if favorites.teams(League.NFL) else PollPriority.NORMAL
@@ -261,13 +314,27 @@ class PlannedNfl:
             known = self._games.get(game.id)
             return known.latest if known is not None else None
 
+    def win_probability(self, game: TeamGame, as_of: ClockReading) -> MeterReading | None:
+        """``game``'s win probability as it stood at ``as_of``: the newest reading that arrived by then; None without a
+        market, or with no reading by then."""
+        market = self._market
+        if market is None:
+            return None
+        key: PollKey[WinProbability | None] = PollKey(PollSource.PLAY_MARKET, game.id)
+        at = self._clock.read()
+        self._plan.want(key, lambda asked: market(game, asked), priority=PollPriority.NORMAL, at=at)
+        answer = self._plan.latest_by(key, as_of.monotonic, at)
+        if answer is None or answer.value is None:
+            return None
+        return MeterReading(answer.value, answer.received)
+
     def interrupted(
         self, interruption: Interruption, *, held: Collection[PollScope], contests: Collection[LeagueScopedId]
     ) -> None:
         """The host slept or stalled: every read NFL wants is dropped from the plan (what an ask out for it brings back
         is ignored) and wanted afresh at the next pass, due at once, within the account's budget; an ask begun before
-        the gap files nothing when it returns; and the answers not yet taken go. Each game's newest answer stays
-        known, for its schedule; the pipeline judges its freshness."""
+        the gap files nothing when it returns; and the answers not yet taken go, with each game's market readings.
+        Each game's newest answer stays known, for its schedule; the pipeline judges its freshness."""
         with self._lock:
             self._epoch += 1
             for key in self._wanted:
@@ -275,6 +342,9 @@ class PlannedNfl:
             self._wanted = {}
             for game in self._games.values():
                 game.untaken.clear()
+        for contest in contests:
+            if contest.league is self.league:
+                self._plan.drop(PollKey(PollSource.PLAY_MARKET, contest))
 
     # --- what to read --------------------------------------------------------------------------------------
 
@@ -295,12 +365,11 @@ class PlannedNfl:
             for game in self._filed(day):
                 if game.done or not (game.seen_in or game.contest.scheduled_start <= at.utc):
                     continue  # nothing left to read, or not kicked off yet
-                if game.favorite:
+                if game.favorite or self._every_game:
                     if game.hold_ends is None or at.monotonic >= game.hold_ends:
                         key = PollKey(PollSource.FOLLOWED_GAME, game.contest.id)
-                        wants[key] = _Want(
-                            self._followed(game, self._current_for(key, PollPriority.FOCUS)), PollPriority.FOCUS, day
-                        )
+                        priority = PollPriority.FOCUS if game.favorite else PollPriority.NORMAL
+                        wants[key] = _Want(self._followed(game, self._current_for(key, priority)), priority, day)
                 elif game.ended:
                     key = PollKey(PollSource.FINAL_SCORE, game.contest.id)
                     wants[key] = _Want(
@@ -503,9 +572,13 @@ class PlannedNfl:
             with self._lock:
                 if epoch != self._epoch:
                     return snapshot  # asked before the host's gap: its answer is history
-                followed = self._update(snapshot, arrived, current_for)
+                known = self._games.get(snapshot.game.id)
+                filed = snapshot
+                if known is not None and not known.read_alone:
+                    filed = dataclasses.replace(snapshot, events=())  # its plays so far: from before the board read it
+                followed = self._update(filed, arrived, current_for)
                 if followed is not None:
-                    followed.hold_ends = hold_ends
+                    followed.hold_ends, followed.read_alone = hold_ends, True
             return snapshot
 
         return fetch

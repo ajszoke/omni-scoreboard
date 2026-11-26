@@ -4,13 +4,15 @@ An event's interrupt value is
 
     I = B * (0.5 + 0.5*z_pre) * (0.65 + 0.35*Q + 0.35*J + 0.25*C_season)
 
-- ``B`` is its class's weight: a confirmed perfect game, a no-hitter, a decisive late winner, another major
-  competitive event, or routine (worth nothing).
-- ``z_pre`` is the leverage of the released state just before it, never the terminal state's.
+- ``B`` is its class's weight: a confirmed perfect game, a no-hitter, a decisive late winner, a win swing, another
+  major competitive event, or routine (worth nothing).
+- ``z_pre`` is the leverage of the released state just before it, never the terminal state's. A win swing takes
+  ``z_pre = 1``: the swing it made is the evidence of what was at stake, so the time left doesn't discount it.
 - ``Q`` is the matchup's quality (0 when either record is unknown); ``J`` and ``C_season`` its stakes.
 
-The classifiers read our typed events and the released states on either side of them. Wherever the evidence a
-class needs isn't there, they classify lower and say why (`ClassBasis`), so the trace can print it.
+The classifiers read our typed events and the released states on either side of them, and NFL's also reads how far
+the market's win probability moved across the event (`win_swing`). Wherever the evidence a class needs isn't there,
+they classify lower and say why (`ClassBasis`), so the trace can print it.
 
 The bar an event must clear depends on what the healthy live favorites are doing: 1.10 while any is in action,
 0.85 while none is and one is in a valid micro-break, 0.35 when all are in ordinary breaks or none is live.
@@ -24,7 +26,13 @@ from datetime import timedelta
 from enum import Enum
 
 from omni.core.enum import HomeAway, StrEnumMixin
-from omni.domain.baseball import BaseballField, BaseballGameState, InningPhase, pitching_feat_progress
+from omni.domain.baseball import (
+    BaseballField,
+    BaseballGameState,
+    InningPhase,
+    WinProbability,
+    pitching_feat_progress,
+)
 from omni.domain.football import FootballField, FootballGameState, FootballInterval
 from omni.events.baseball import BaseballGameEvent, BaseballGameEventType, BaseballPlayPayload
 from omni.events.football import FootballEvent, FootballEventKind
@@ -40,12 +48,14 @@ __all__ = [
     "InterruptPolicy",
     "InterruptValue",
     "LeverageBasis",
+    "SWING_KINDS",
     "Stakes",
     "bar_context",
     "classify_baseball_final",
     "classify_baseball_play",
     "classify_football_event",
     "interrupt_value",
+    "win_swing",
 ]
 
 
@@ -55,6 +65,7 @@ class InterruptClass(StrEnumMixin, str, Enum):
     PERFECT_GAME = "perfect_game"  # confirmed: a complete final and a complete reach ledger
     NO_HITTER = "no_hitter"  # confirmed: a complete final with verified hit totals
     DECISIVE_LATE_WINNER = "decisive_late_winner"  # an eligible walk-off, or a result-changing reversal
+    WIN_SWING = "win_swing"  # a play that moved the market's win probability by the policy's points, whenever it came
     MAJOR = "major"  # another major competitive event: a close-game home run, a late one-score turnover
     ROUTINE = "routine"  # routine scoring, bookkeeping, an injury notice: the normal field, strip and status
 
@@ -81,6 +92,7 @@ class ClassBasis(StrEnumMixin, str, Enum):
     LATE_ONE_SCORE = (
         "late_one_score"  # a score, turnover or ruling in the fourth quarter or overtime of a one-score game
     )
+    WIN_SWING = "win_swing"  # the market's win probability moved by the policy's points or more across it
     NOT_SCORING = "not_scoring"  # the play drove in no run, or its scoring wasn't worked out
     NOT_MAJOR = "not_major"  # the strip's routine: a play, a stoppage, a flag
     NOT_CLOSE = "not_close"  # neither late and close nor a lead change
@@ -121,6 +133,7 @@ class InterruptPolicy:
     perfect_game: float = 3.5
     no_hitter: float = 2.8
     decisive_late_winner: float = 1.2
+    win_swing: float = 1.2
     major: float = 0.8
     routine: float = 0.0
     leverage_floor: float = 0.5  # the leverage factor is floor + span * z_pre
@@ -135,13 +148,23 @@ class InterruptPolicy:
     nfl_regulation_periods: int = 4
     nfl_late_clock: timedelta = timedelta(minutes=5)  # NFL's late: the fourth quarter at or under this, or overtime
     nfl_one_score: int = 8  # NFL's one-score margin
+    win_swing_points: float = 10.0  # a play that moves the win probability this many points is a win swing
 
     def __post_init__(self) -> None:
-        weights = (self.perfect_game, self.no_hitter, self.decisive_late_winner, self.major, self.routine)
+        weights = (
+            self.perfect_game,
+            self.no_hitter,
+            self.decisive_late_winner,
+            self.win_swing,
+            self.major,
+            self.routine,
+        )
         if any(weight < 0 for weight in weights):
             raise ValueError("an interrupt class's weight can't be negative")
         if self.feat_innings < 1 or self.mlb_late_inning < 1 or self.nfl_regulation_periods < 1:
             raise ValueError("innings and periods count from one")
+        if self.win_swing_points <= 0:
+            raise ValueError("a win swing's threshold must be positive")
 
     def weight(self, event_class: InterruptClass) -> float:
         """``B`` for a class."""
@@ -149,6 +172,7 @@ class InterruptPolicy:
             InterruptClass.PERFECT_GAME: self.perfect_game,
             InterruptClass.NO_HITTER: self.no_hitter,
             InterruptClass.DECISIVE_LATE_WINNER: self.decisive_late_winner,
+            InterruptClass.WIN_SWING: self.win_swing,
             InterruptClass.MAJOR: self.major,
             InterruptClass.ROUTINE: self.routine,
         }[event_class]
@@ -195,6 +219,15 @@ _BREAK_ONLY_G = {ModelStatus.PROXY: LeverageBasis.PROXY, ModelStatus.REDUCED: Le
 def _z_pre(event_class: InterruptClass, predecessor: Leverage | None) -> tuple[float, LeverageBasis]:
     if event_class.feat:
         return 0.0, LeverageBasis.FEAT
+    z_pre, basis = _predecessor_z(predecessor)
+    if event_class is InterruptClass.WIN_SWING:
+        # The swing it made is the evidence of what was at stake. Its predecessor's basis still decides whether it
+        # may cut into a favorite's action.
+        return 1.0, basis
+    return z_pre, basis
+
+
+def _predecessor_z(predecessor: Leverage | None) -> tuple[float, LeverageBasis]:
     if predecessor is None:
         return 0.0, LeverageBasis.NONE
     if predecessor.status is ModelStatus.VALIDATED:
@@ -216,7 +249,8 @@ def interrupt_value(
     """``I`` for an event of ``event_class`` whose released predecessor read ``predecessor``.
 
     A rare feat uses ``z_pre = 0``. Otherwise a validated model's ``z`` counts and may qualify a cut into action;
-    a proxy's or a partial model's ``g`` stands in for break-only scoring; an unknown reading counts as 0.
+    a proxy's or a partial model's ``g`` stands in for break-only scoring; an unknown reading counts as 0. A win
+    swing uses ``z_pre = 1`` on its predecessor's basis.
     """
     z_pre, basis = _z_pre(event_class, predecessor)
     quality = stakes.quality if stakes.quality is not None else 0.0  # unknown records count as 0 for an interrupt
@@ -333,6 +367,20 @@ def classify_baseball_play(
 
 # --- NFL -----------------------------------------------------------------------------------------------------------
 
+# What a win swing can be put down to: the game's plays (a play, a score the feed reported without one, a try, a
+# ruling), never a stoppage, a timeout or an injury. A period's end is no strip entry at all.
+SWING_KINDS = frozenset(
+    {FootballEventKind.PLAY, FootballEventKind.SCORE, FootballEventKind.CONVERSION, FootballEventKind.REVIEW}
+)
+
+
+def win_swing(before: WinProbability | None, after: WinProbability | None) -> float | None:
+    """How many points the away side's win probability moved from ``before`` to ``after``, either way; None without
+    both readings. It's read to a millionth of a point, so a price's float noise can't move it across a threshold."""
+    if before is None or after is None:
+        return None
+    return round(abs(after.away - before.away), 6)
+
 
 def _leader(state: FootballGameState) -> HomeAway | None:
     if state.home_score == state.away_score:
@@ -361,20 +409,25 @@ def classify_football_event(
     *,
     before: FootballGameState | None,
     after: FootballGameState | None,
+    swing: float | None = None,
     policy: InterruptPolicy = InterruptPolicy(),
 ) -> Classification:
-    """A strip event's class, from the released states just before and after it.
+    """A strip event's class, from the released states just before and after it, and the market's ``swing`` across
+    it (`win_swing`; None when it wasn't read).
 
     - Late (the fourth quarter at 5:00 or under, or overtime), a major event that puts a side ahead and ends the
       game is a decisive late winner; so is a ruling there that changes who leads.
+    - Otherwise a play (`SWING_KINDS`, major or not: a long completion can swing a game) that moved the win
+      probability by `InterruptPolicy.win_swing_points` or more is a win swing, whatever the period or the clock.
     - In the fourth quarter or overtime of a one-score game, any other major event (a score, a turnover, a
       ruling) is another major event.
     - Everything else is routine, and so is any event whose surrounding states are missing or don't line up.
 
-    A late go-ahead score that doesn't end the game is only a major event: whether it decided the game isn't known
-    until the final, long after the alert's lifetime.
+    A late go-ahead score that doesn't end the game is only a major event (or a win swing): whether it decided the
+    game isn't known until the final, long after the alert's lifetime.
     """
-    if not event.major:
+    swung = event.kind in SWING_KINDS and swing is not None and swing >= policy.win_swing_points
+    if not event.major and not swung:
         return Classification(InterruptClass.ROUTINE, ClassBasis.NOT_MAJOR)
     if before is None or after is None or not _coherent_football(event, before, after):
         return Classification(InterruptClass.ROUTINE, ClassBasis.INCOHERENT)
@@ -382,12 +435,14 @@ def classify_football_event(
     late_clock = before.known(FootballField.CLOCK) and before.clock_seconds <= policy.nfl_late_clock.total_seconds()
     late = before.period > regulation or (before.period == regulation and late_clock)
     took_lead = _leader(after) is not None and _leader(after) is not _leader(before)
-    if late and took_lead:
+    if event.major and late and took_lead:
         ended = after.known(FootballField.INTERVAL) and after.interval is FootballInterval.FINAL
         if ended:
             return Classification(InterruptClass.DECISIVE_LATE_WINNER, ClassBasis.GAME_ENDING_LEAD_CHANGE)
         if event.kind is FootballEventKind.REVIEW:
             return Classification(InterruptClass.DECISIVE_LATE_WINNER, ClassBasis.REVERSAL)
+    if swung:
+        return Classification(InterruptClass.WIN_SWING, ClassBasis.WIN_SWING)
     one_score = abs(before.home_score - before.away_score) <= policy.nfl_one_score
     if before.period >= regulation and one_score:
         return Classification(InterruptClass.MAJOR, ClassBasis.LATE_ONE_SCORE)

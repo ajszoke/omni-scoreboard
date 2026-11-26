@@ -91,6 +91,11 @@ class PollSource(StrEnumMixin, str, Enum):
     LIVE_SCORES = "live_scores"  # the scores of one scope's games in progress, read together
     FOLLOWED_GAME = "followed_game"  # one game's score and its plays, at the live pace: a favorite's
     FINAL_SCORE = "final_score"  # one game's score once it has ended, read once
+    SLATE_STATES = "slate_states"  # one scope's games with the state of each under way or over, read together
+    PLAYER_LINES = "player_lines"  # every player's line so far in the games under way, read together
+    SEASON_RESULTS = "season_results"  # a page of the season's finals, for the records and ranks
+    PUBLIC_MARKET = "public_market"  # one game's price off an exchange's public quotes, for a league the service lacks
+    PLAY_MARKET = "play_market"  # the same, read close enough beside each play to tell how far it moved the price
 
 
 class PollPriority(IntEnum):

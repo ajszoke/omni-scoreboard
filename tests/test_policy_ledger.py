@@ -153,10 +153,10 @@ def test_four_high_leverage_nba_games_one_postseason_take_22_20_19_19_of_80_turn
     _healthy(run)
 
 
-def test_an_atl_blowout_against_fourteen_high_leverage_games_takes_its_floor_of_100_turns() -> None:
-    run = _simulate([_entry(League.MLB, "g01", 0.0, rank=1), *_numbered(League.MLB, 2, 14, 1.0)], 100)
-    assert run.share("g01") == "30.0000%" and {run.share(f"g{n:02}") for n in range(2, 16)} == {"5.0000%"}
-    assert run.grants["mlb:g01"] == 30 and {run.grants[f"mlb:g{n:02}"] for n in range(2, 16)} == {5}
+def test_an_atl_blowout_against_fourteen_high_leverage_games_takes_its_sixty_percent_floor_42_of_70_turns() -> None:
+    run = _simulate([_entry(League.MLB, "g01", 0.0, rank=1), *_numbered(League.MLB, 2, 14, 1.0)], 70)
+    assert run.share("g01") == "60.0000%" and {run.share(f"g{n:02}") for n in range(2, 16)} == {"2.8571%"}
+    assert run.grants["mlb:g01"] == 42 and {run.grants[f"mlb:g{n:02}"] for n in range(2, 16)} == {2}
     _healthy(run)
 
 

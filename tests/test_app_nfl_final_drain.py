@@ -8,6 +8,7 @@ deciding field goal is in; the drain brings it at 110, written at 108: out at 15
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import timedelta
 
 from omni.app.nfl_pipeline import NflCardPolicy
@@ -133,6 +134,38 @@ def test_the_final_s_caption_a_confirmed_frame_carried_stays_until_its_hard_end(
     assert board.pipeline.next_deadline(board.now) == MonotonicTime(303)
     assert board.at(302.9, GAME).skipped == () and board.payload(GAME, "final").last_play is not None
     assert board.at(303, GAME).skipped == () and board.payload(GAME, "final").last_play is None
+
+
+def test_a_frame_shown_only_at_the_final_s_caption_s_latest_start_starts_nothing() -> None:
+    board = Board()
+    _final_up(board)
+    board.to(110)
+    _drained(board, _kick(board))
+    board.at(155, GAME)
+    board.to(273)  # drawn before its latest start, shown at it
+    board.show(GAME, "final")
+    assert board.refresh(GAME).skipped == (f"{GAME.id}: major play #88 unseen (too late to start)",)
+    assert board.payload(GAME, "final").last_play is None
+
+
+def test_a_frame_without_the_final_s_caption_or_with_another_entry_or_another_game_s_starts_nothing() -> None:
+    board = Board()
+    _final_up(board)
+    board.to(110)
+    _drained(board, _kick(board))
+    board.at(155, GAME)
+    card = board.card(GAME, "final")
+    assert card is not None and isinstance(card.payload, LiveFootballCardPayload)
+    staged = card.payload.caption
+    assert staged is not None
+    alone = replace(card, payload=replace(card.payload, last_play=None))
+    another = replace(card, payload=replace(card.payload, caption=replace(staged, play=PlayRef("q", "q", 0))))
+    elsewhere = replace(card, contest=nfl_game("402", "MIN", "GB"))
+    board.to(160)
+    for shown in (alone, another, elsewhere):
+        board.pipeline.presented(shown, board.now)
+    board.refresh(GAME)
+    assert board.at(273, GAME).skipped == (f"{GAME.id}: major play #88 unseen (too late to start)",)
 
 
 def test_a_correction_that_changes_the_final_s_score_takes_its_caption_down() -> None:

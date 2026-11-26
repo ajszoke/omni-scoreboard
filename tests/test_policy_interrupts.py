@@ -15,6 +15,7 @@ from omni.domain.baseball import (
     BaseballField,
     BaseballGameState,
     InningPhase,
+    WinProbability,
     scoring_impact,
 )
 from omni.domain.contest import Contest
@@ -33,14 +34,18 @@ from omni.policy.interrupts import (
     InterruptPolicy,
     InterruptValue,
     LeverageBasis,
+    SWING_KINDS,
     Stakes,
     bar_context,
     classify_baseball_final,
     classify_baseball_play,
     classify_football_event,
     interrupt_value,
+    win_swing,
 )
 from omni.policy.leverage import Leverage, ModelStatus
+from omni.policy.promotion import PromotionKind
+from omni.tower.decisions import event_words
 
 T = datetime(2026, 9, 20, 23, 0, tzinfo=timezone.utc)
 MLB = SourceRef("mlb_statsapi")
@@ -148,6 +153,8 @@ def test_a_policy_can_reweight_a_class() -> None:
         ),
         (lambda: InterruptValue(event_class=InterruptClass.MAJOR, value=1, z_pre=2, basis=LeverageBasis.NONE), "z_pre"),
         (lambda: InterruptPolicy(major=-0.1), "can't be negative"),
+        (lambda: InterruptPolicy(win_swing=-0.1), "can't be negative"),
+        (lambda: InterruptPolicy(win_swing_points=0.0), "threshold must be positive"),
         (lambda: InterruptPolicy(feat_innings=0), "count from one"),
         (lambda: InterruptBars(open=0.9, micro_break=0.85), "rise"),
     ],
@@ -531,3 +538,158 @@ def test_the_late_window_and_one_score_margin_are_policy() -> None:
         _RULING, before=_football(clock=330, away=24, home=20), after=_football(clock=330, away=17), policy=policy
     )
     assert result.event_class is InterruptClass.DECISIVE_LATE_WINNER
+
+
+# --- NFL's win swing -----------------------------------------------------------------------------------------------
+
+
+def _away(percent: float) -> WinProbability:
+    return WinProbability(home=100.0 - percent, away=percent)
+
+
+def _home_priced(price: float) -> WinProbability:
+    """A reading as the exchange's quote gives it: the home side's price, in points."""
+    home = price * 100.0
+    return WinProbability(home=home, away=100.0 - home)
+
+
+def test_a_win_swing_is_worth_1_2_whatever_the_leverage_on_its_predecessor_s_basis() -> None:
+    proxy = interrupt_value(InterruptClass.WIN_SWING, predecessor=Leverage(g=0.1, status=ModelStatus.PROXY))
+    assert proxy.z_pre == 1.0 and proxy.basis is LeverageBasis.PROXY and not proxy.action_evidence
+    assert proxy.value == pytest.approx(1.2 * 1.0 * 0.65)  # 0.78: above the open bar, below a micro-break's
+    bars = InterruptBars()
+    assert bars.for_context(BarContext.OPEN) <= proxy.value < bars.for_context(BarContext.MICRO_BREAK)
+    model = interrupt_value(InterruptClass.WIN_SWING, predecessor=_validated(0.1))
+    assert model.z_pre == 1.0 and model.basis is LeverageBasis.MODEL
+    assert interrupt_value(InterruptClass.WIN_SWING, predecessor=None).basis is LeverageBasis.NONE
+    reweighted = interrupt_value(InterruptClass.WIN_SWING, predecessor=None, policy=InterruptPolicy(win_swing=1.0))
+    assert reweighted.value == pytest.approx(0.65)
+
+
+def test_a_win_swing_is_how_far_the_away_side_moved_either_way_and_none_without_both_readings() -> None:
+    assert win_swing(_away(40.0), _away(52.5)) == 12.5
+    assert win_swing(_away(52.5), _away(40.0)) == 12.5
+    assert win_swing(None, _away(40.0)) is None and win_swing(_away(40.0), None) is None
+    before, after = _home_priced(0.182), _home_priced(0.282)  # a ten-cent move, as the quotes' floats give it
+    assert abs(after.away - before.away) < 10.0 and win_swing(before, after) == 10.0
+
+
+def test_a_win_swing_says_so_in_a_decision() -> None:
+    value = interrupt_value(InterruptClass.WIN_SWING, predecessor=None)
+    assert event_words(PromotionKind.MAJOR, value) == "win swing"
+
+
+_LONG_PASS = _strip(tone=PlayTone.STANDARD, headline="45 YARD PASS")
+_EARLY = _football(period=1, clock=600, away=0, home=0)
+_EARLY_AFTER = _football(period=1, clock=590, away=0, home=0)
+
+
+@pytest.mark.parametrize(
+    "event, before, after, swing, expected",
+    [
+        (  # a routine first-quarter play that moved the market ten points
+            _LONG_PASS,
+            _EARLY,
+            _EARLY_AFTER,
+            10.0,
+            Classification(InterruptClass.WIN_SWING, ClassBasis.WIN_SWING),
+        ),
+        (  # a tenth short
+            _LONG_PASS,
+            _EARLY,
+            _EARLY_AFTER,
+            9.9,
+            Classification(InterruptClass.ROUTINE, ClassBasis.NOT_MAJOR),
+        ),
+        (  # unread: as today
+            _LONG_PASS,
+            _EARLY,
+            _EARLY_AFTER,
+            None,
+            Classification(InterruptClass.ROUTINE, ClassBasis.NOT_MAJOR),
+        ),
+        (  # a second-quarter pick that swings the game
+            _PICK,
+            _football(period=2, clock=400, away=7, home=7),
+            _football(period=2, clock=395, away=7, home=7),
+            18.0,
+            Classification(InterruptClass.WIN_SWING, ClassBasis.WIN_SWING),
+        ),
+        (  # the same pick, a tenth short: early, it's routine
+            _PICK,
+            _football(period=2, clock=400, away=7, home=7),
+            _football(period=2, clock=395, away=7, home=7),
+            9.9,
+            Classification(InterruptClass.ROUTINE, ClassBasis.NOT_CLOSE),
+        ),
+        (  # a late one-score touchdown that swung it outranks a major event
+            _TOUCHDOWN,
+            _football(clock=240, away=17, home=20),
+            _football(clock=236, away=23, home=20),
+            25.0,
+            Classification(InterruptClass.WIN_SWING, ClassBasis.WIN_SWING),
+        ),
+        (  # a decisive late winner stays one, however far it swung
+            _strip(headline="FIELD GOAL GOOD"),
+            _football(period=5, clock=320, away=20, home=20),
+            _football(period=5, clock=310, away=23, home=20, interval=_FINAL),
+            45.0,
+            Classification(InterruptClass.DECISIVE_LATE_WINNER, ClassBasis.GAME_ENDING_LEAD_CHANGE),
+        ),
+        (  # a late routine play that ends the game ahead isn't decisive: only a major event can be
+            _LONG_PASS,
+            _football(period=5, clock=320, away=20, home=20),
+            _football(period=5, clock=310, away=26, home=20, interval=_FINAL),
+            45.0,
+            Classification(InterruptClass.WIN_SWING, ClassBasis.WIN_SWING),
+        ),
+        (  # a swing across states that don't line up is no evidence
+            _LONG_PASS,
+            _football(clock=200),
+            _football(clock=210),
+            30.0,
+            Classification(InterruptClass.ROUTINE, ClassBasis.INCOHERENT),
+        ),
+        (  # nor without the state before it
+            _LONG_PASS,
+            None,
+            _EARLY_AFTER,
+            30.0,
+            Classification(InterruptClass.ROUTINE, ClassBasis.INCOHERENT),
+        ),
+    ],
+)
+def test_a_play_that_moved_the_win_probability_ten_points_is_a_win_swing_whatever_the_clock(
+    event: FootballEvent,
+    before: FootballGameState | None,
+    after: FootballGameState,
+    swing: float | None,
+    expected: Classification,
+) -> None:
+    assert classify_football_event(event, before=before, after=after, swing=swing) == expected
+
+
+def test_a_win_swing_is_put_down_only_to_a_play_a_score_a_try_or_a_ruling() -> None:
+    assert SWING_KINDS == {
+        FootballEventKind.PLAY,
+        FootballEventKind.SCORE,
+        FootballEventKind.CONVERSION,
+        FootballEventKind.REVIEW,
+    }
+    for kind in SWING_KINDS:
+        swung = classify_football_event(_strip(kind, PlayTone.STANDARD), before=_EARLY, after=_EARLY_AFTER, swing=20.0)
+        assert swung.event_class is InterruptClass.WIN_SWING
+    for kind in set(FootballEventKind) - SWING_KINDS:  # a timeout, the officials', an injury, the two-minute warning
+        stoppage = _strip(kind, PlayTone.ALERT, kind.value.upper())
+        assert classify_football_event(stoppage, before=_EARLY, after=_EARLY_AFTER, swing=40.0) == Classification(
+            InterruptClass.ROUTINE, ClassBasis.NOT_MAJOR
+        )
+
+
+def test_the_win_swing_s_threshold_is_policy() -> None:
+    policy = InterruptPolicy(win_swing_points=15.0)
+    assert InterruptPolicy().win_swing_points == 10.0
+    result = classify_football_event(_LONG_PASS, before=_EARLY, after=_EARLY_AFTER, swing=14.9, policy=policy)
+    assert result.event_class is InterruptClass.ROUTINE
+    result = classify_football_event(_LONG_PASS, before=_EARLY, after=_EARLY_AFTER, swing=15.0, policy=policy)
+    assert result.event_class is InterruptClass.WIN_SWING

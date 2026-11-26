@@ -148,6 +148,7 @@ __all__ = [
     "CONFIRM_WITHIN",
     "STALE_FOR",
     "FeedFetcher",
+    "GameMeter",
     "MeterReading",
     "WinProbFetcher",
     "PregameDetailsFetcher",
@@ -167,6 +168,34 @@ class MeterReading:
 
     value: WinProbability
     received: ClockReading
+
+
+class GameMeter:
+    """One game's meter: the newest reading that arrived no later than the moment the state on the card allows,
+    held until it's too old to stand beside the score.
+
+    ``max_age`` is how long a reading stands from its own arrival. It should cover the delay, since a reading is
+    admitted beside a state that arrived after it and shown only once that state has cleared the delay.
+    """
+
+    def __init__(self, max_age: timedelta) -> None:
+        self._max_age = max_age
+        self._held: MeterReading | None = None
+
+    def admit(self, reading: MeterReading | None, visible: ClockReading) -> None:
+        """Take ``reading`` beside a state that allows readings that arrived by ``visible``, unless it arrived later
+        or is older than the one held."""
+        if reading is None or reading.received.monotonic > visible.monotonic:
+            return
+        if self._held is None or reading.received.monotonic >= self._held.received.monotonic:
+            self._held = reading
+
+    def current(self, at: ClockReading) -> WinProbability | None:
+        """The reading held, as of ``at``; None once it's ``max_age`` past its arrival, or before one is held."""
+        held = self._held
+        if held is not None and at.monotonic.since(held.received.monotonic) >= self._max_age:
+            self._held = held = None
+        return held.value if held is not None else None
 
 
 # How the pipeline reads one game's win probability as it stood at a moment (the arrival of the feed

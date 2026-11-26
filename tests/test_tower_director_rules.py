@@ -1,4 +1,4 @@
-"""The board under `omni-board-policy/2`, rule by rule: NFL's caption in rotation, a favorite's break and its guests,
+"""The board under `omni-board-policy/2`, rule by rule: NFL's line in rotation, a favorite's break and its guests,
 leases, promotion offers, the trace's records, and the settings under either policy."""
 
 from __future__ import annotations
@@ -11,7 +11,8 @@ import pytest
 
 from omni.app.versions import PolicyName
 from omni.cards.base import CardId, CardKind, CardPriority, DedupeKey, DisplayTiming, LayoutSupport, ScoreboardCard
-from omni.cards.football import LiveFootballCardPayload
+from omni.cards.football import LiveFootballCardPayload, PlayRef, StagedCaption
+from omni.core.clock import MonotonicTime
 from omni.core.enum import DisplayPriority, GameStatus, League, PanelProfile, SeasonStage
 from omni.core.ids import LeagueScopedId, SourceRef
 from omni.core.time import DurationSeconds
@@ -66,7 +67,13 @@ def _key(card: ScoreboardCard[Any]) -> str:
 
 
 def _football(
-    raw: str, away: str, home: str, *, caption: PlaySummary | None, available: float = 0
+    raw: str,
+    away: str,
+    home: str,
+    *,
+    caption: PlaySummary | None,
+    available: float = 0,
+    staged: StagedCaption | None = None,
 ) -> ScoreboardCard[Any]:
     contest = nfl_game(away, home, raw)
     key = f"{contest.id}:live"
@@ -82,7 +89,7 @@ def _football(
         priority=CardPriority(band=DisplayPriority.NORMAL, score=0.0),
         layout_support=LayoutSupport(profiles=frozenset(PROFILES)),
         dedupe_key=DedupeKey(key),
-        payload=LiveFootballCardPayload(state=_STATE, last_play=caption),
+        payload=LiveFootballCardPayload(state=_STATE, last_play=caption, caption=staged),
     )
 
 
@@ -92,41 +99,85 @@ def _caption(run: Run, seconds: float) -> PlaySummary | None:
     return payload.payload.last_play
 
 
-# --- NFL's caption in rotation -------------------------------------------------------------------------------------
+def _lines(run: Run, card: ScoreboardCard[Any], since: float, until: float) -> list[tuple[float, PlaySummary | None]]:
+    """Each frame ``card`` was cued with from ``since`` until (not at) ``until``, with the line it drew."""
+    drawn = []
+    for when, cue in run.cues:
+        payload = cue.payload
+        if since <= when < until and isinstance(payload, ScoreboardCard) and _key(payload) == _key(card):
+            assert isinstance(payload.payload, LiveFootballCardPayload)
+            drawn.append((when, payload.payload.last_play))
+    return drawn
 
 
-@pytest.mark.parametrize("profile", PROFILES)
-def test_an_nfl_card_shows_a_caption_once_for_10_s_and_only_with_the_runway_for_it(profile: PanelProfile) -> None:
-    card = _football("1", "PIT", "CIN", caption=_FIRST)
-    run = Run(profile=profile, favorites=NO_FAVORITES)
-    run.stage(card)
-    run.describe(facts(card.contest, 0.4))  # type: ignore[arg-type]
-    run.publish()
-    run.run(0, 14)
-    assert (_caption(run, 0), _caption(run, 10), _caption(run, 12)) == (_FIRST, None, None)
-    assert len({cue.occurrence for _, cue in run.cues}) == 1  # one frame throughout, drawn anew without its caption
-    newer = _football("1", "PIT", "CIN", caption=_SECOND, available=15)
-    run.stage(newer, when=15)
-    run.publish()
-    run.run(15, 40)
-    assert _caption(run, 15) is None  # 9 s of the turn left: too little for it
-    assert (_caption(run, 24), _caption(run, 34)) == (_SECOND, None)  # the next turn has its 10 s
-    assert [(up.at, up.key, up.down) for up in run.ups] == [(0.0, _key(card), None)]  # a lone card's one frame
-
-
-def test_a_new_caption_mid_turn_with_room_starts_at_once() -> None:
-    card = _football("1", "PIT", "CIN", caption=None)
+def _alone(card: ScoreboardCard[Any], *, when: float) -> Run:
+    """``card``'s game the only one on, its card up from 0, and the board run to ``when``."""
     run = Run(favorites=NO_FAVORITES)
     run.stage(card)
     run.describe(facts(card.contest, 0.4))  # type: ignore[arg-type]
     run.publish()
-    run.step(0)
-    run.stage(_football("1", "PIT", "CIN", caption=_FIRST, available=1), when=1)
+    run.run(0, when)
+    return run
+
+
+# --- NFL's line in rotation ----------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("profile", PROFILES)
+def test_an_nfl_line_holds_to_its_turn_s_end_and_shows_again_on_its_game_s_next_turn(profile: PanelProfile) -> None:
+    steelers = _football("1", "PIT", "CIN", caption=_FIRST)
+    ravens = _football("2", "BAL", "CLE", caption=None)
+    run = Run(profile=profile, favorites=NO_FAVORITES)
+    run.stage(steelers, ravens)
+    run.describe(facts(steelers.contest, 0.4), facts(ravens.contest, 0.4))  # type: ignore[arg-type]
     run.publish()
-    run.step(1)
-    assert _caption(run, 1) == _FIRST and run.board.next_deadline(at(1)) == at(8).monotonic
-    run.run(8, 12)
-    assert _caption(run, 11) is None
+    run.run(0, 40)
+    turns = run.shown(_key(steelers))
+    assert turns == [(0, 12), (24, 36)]  # the game's turn, and its next
+    for up, down in turns:
+        assert down is not None
+        drawn = _lines(run, steelers, up, down)
+        assert drawn[0][0] == up and drawn[-1][0] > up  # its first frame and a later one, the turn's last
+        assert {line for _, line in drawn} == {_FIRST}  # up at the turn's start, still up on its last frame
+
+
+def test_a_lone_nfl_card_shows_its_line_on_consecutive_turns_in_one_frame() -> None:
+    card = _football("1", "PIT", "CIN", caption=_FIRST)
+    run = _alone(card, when=30)
+    assert [(up.at, up.down) for up in run.ups] == [(0.0, None)]  # its game won again: its frame stayed up
+    assert _lines(run, card, 0, 30) == [(0, _FIRST), (8, _FIRST), (12, _FIRST), (24, _FIRST)]  # turns at 0, 12, 24
+
+
+def test_a_newer_play_mid_turn_takes_the_line_s_place_with_no_blank_frame_between() -> None:
+    card = _football("1", "PIT", "CIN", caption=_FIRST)
+    run = Run(favorites=NO_FAVORITES)
+    run.stage(card)
+    run.describe(facts(card.contest, 0.4))  # type: ignore[arg-type]
+    newer = _football("1", "PIT", "CIN", caption=_SECOND, available=10)
+    run.publish_at(10, lambda: run.stage(newer, when=10))  # 2 s of the turn left: too little to start one, not to swap
+    run.publish()
+    run.run(0, 11)
+    assert _lines(run, card, 0, 12) == [(0, _FIRST), (8, _FIRST), (10, _SECOND)]
+
+
+@pytest.mark.parametrize(("when", "line"), [(8, _FIRST), (8.5, None)])
+def test_a_line_starts_mid_turn_only_with_4_s_of_the_turn_left(when: float, line: PlaySummary | None) -> None:
+    card = _football("1", "PIT", "CIN", caption=None)
+    run = Run(favorites=NO_FAVORITES)
+    run.stage(card)
+    run.describe(facts(card.contest, 0.4))  # type: ignore[arg-type]
+    run.publish_at(when, lambda: run.stage(_football("1", "PIT", "CIN", caption=_FIRST, available=when), when=when))
+    run.publish()
+    run.run(0, 12)
+    assert (_caption(run, when), _caption(run, 11.9)) == (line, line)  # it starts at once, or not this turn
+    assert _caption(run, 12) == _FIRST  # the next turn has the runway
+
+
+def test_a_line_starts_no_turn_from_its_latest_start_but_one_up_by_then_holds_to_its_turn_s_end() -> None:
+    staged = StagedCaption(play=PlayRef("p", "p", 0), latest_start=MonotonicTime(6), hard_end=MonotonicTime(36))
+    card = _football("1", "PIT", "CIN", caption=_FIRST, staged=staged)
+    run = _alone(card, when=30)
+    assert _lines(run, card, 0, 30) == [(0, _FIRST), (8, _FIRST), (12, None), (24, None)]  # turns at 0, 12, 24
 
 
 # --- A favorite's break and its guests -----------------------------------------------------------------------------
@@ -308,7 +359,7 @@ def test_under_policy_v1_settings_mute_cards_and_set_the_turn() -> None:
 
 def test_a_director_policy_keeps_its_runs_positive_and_reads_a_poll_interval_for_any_league() -> None:
     with pytest.raises(ValueError, match="positive"):
-        DirectorPolicy(caption=timedelta(0))
+        DirectorPolicy(line_runway=timedelta(0))
     rules = DirectorPolicy()
     assert (rules.poll_interval(League.NFL), rules.poll_interval(League.NHL)) == (
         timedelta(seconds=10),
@@ -408,7 +459,7 @@ def test_a_postseason_game_s_turn_says_so() -> None:
     assert run.of(BaseTurnNote)[0].why == "Angels at D-backs: postseason, the only game on"
 
 
-def test_a_caption_dropped_while_it_airs_leaves_the_field_as_it_is() -> None:
+def test_a_line_dropped_while_it_airs_leaves_the_field_as_it_is() -> None:
     card = _football("1", "PIT", "CIN", caption=_FIRST)
     run = Run(favorites=NO_FAVORITES)
     run.stage(card)
@@ -443,7 +494,7 @@ def test_a_card_cued_but_not_yet_drawn_takes_its_newer_version_and_one_changed_w
     assert run.ups[0].at == 2.0
 
 
-def test_a_promoted_nfl_card_shows_its_caption_whole_and_the_game_s_next_turn_doesn_t_repeat_it() -> None:
+def test_a_promoted_nfl_card_shows_its_line_whole_and_the_game_s_next_turn_shows_it_again() -> None:
     scoring = _football("1", "PIT", "CIN", caption=_SECOND)
     other = _football("2", "BAL", "CLE", caption=None)
     run = Run(favorites=NO_FAVORITES)
@@ -453,14 +504,9 @@ def test_a_promoted_nfl_card_shows_its_caption_whole_and_the_game_s_next_turn_do
     run.publish()
     run.run(0, 40)
     assert run.promotions() == [(0.0, _key(scoring))]
-    assert (_caption(run, 0), _caption(run, 11)) == (_SECOND, _SECOND)  # its 12 s
-    later = [when for when, cue in run.cues if when >= 12 and cue.payload.dedupe_key.raw == _key(scoring)]  # type: ignore[union-attr]
-    assert later and all(_caption(run, when) is None for when in later)
-    run.queue.remove(_key(scoring))
-    del run.facts[scoring.contest.id]
-    run.publish()  # its game is over: what the board remembered of its caption goes with it
-    run.step(41)
-    assert run.cues[-1][1].payload.dedupe_key.raw == _key(other)  # type: ignore[union-attr]
+    assert _lines(run, scoring, 0, 12) == [(0, _SECOND), (8, _SECOND)]  # its 12 s
+    later = _lines(run, scoring, 12, 40)
+    assert later and {line for _, line in later} == {_SECOND}  # still its game's newest play: rotation shows it
 
 
 def test_what_the_board_remembers_of_cards_and_games_goes_with_them() -> None:

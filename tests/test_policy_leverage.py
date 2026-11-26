@@ -133,6 +133,41 @@ def test_an_nfl_game_s_proxy_reads_the_regulation_seconds_played(state: Football
     assert _is_proxy(football_proxy(state), g)
 
 
+_NO_HALF_END = LeveragePolicy(half_end=timedelta(0))
+
+
+def test_the_first_half_s_last_two_minutes_get_the_game_s_late_boost_at_the_same_score() -> None:
+    # The two-minute warning, a field goal between them: weighed as at 2:00 of the fourth quarter, more than before.
+    assert football_proxy(_nfl(2, 120, away=3)) == football_proxy(_nfl(4, 120, away=3))
+    assert football_proxy(_nfl(2, 120, away=3)).g > football_proxy(_nfl(2, 120, away=3), policy=_NO_HALF_END).g
+
+
+@pytest.mark.parametrize("state", [_nfl(2, 1, away=21), _nfl(2, 45, away=14, home=7)])
+def test_a_lead_that_would_settle_the_game_that_late_never_weighs_less_at_the_half(state: FootballGameState) -> None:
+    assert football_proxy(state) == football_proxy(state, policy=_NO_HALF_END)
+
+
+def test_before_the_two_minute_warning_and_at_the_half_s_end_the_first_half_weighs_by_the_game_s_clock() -> None:
+    assert _is_proxy(football_proxy(_nfl(2, 121, away=3)), 0.405836)  # one second before the window
+    assert _is_proxy(football_proxy(_nfl(2, 0, away=7)), 0.283041)  # 0:00: the half is over, its break weighs as before
+    for period in (1, 3):  # only the first half's own end
+        assert football_proxy(_nfl(period, 60, away=3)) == football_proxy(_nfl(period, 60, away=3), policy=_NO_HALF_END)
+
+
+def test_the_half_s_last_minutes_read_the_policy_s_window() -> None:
+    narrow = LeveragePolicy(half_end=timedelta(seconds=30))
+    assert football_proxy(_nfl(2, 60, away=3), policy=narrow) == football_proxy(
+        _nfl(2, 60, away=3), policy=_NO_HALF_END
+    )
+    assert football_proxy(_nfl(2, 30, away=3), policy=narrow) == football_proxy(_nfl(4, 30, away=3), policy=narrow)
+
+
+def test_an_nba_first_half_s_last_two_minutes_get_the_game_s_late_boost() -> None:
+    half = basketball_proxy(period=2, clock_seconds=60, away_score=50, home_score=52)
+    assert half == basketball_proxy(period=4, clock_seconds=60, away_score=50, home_score=52)
+    assert _is_proxy(basketball_proxy(period=2, clock_seconds=121, away_score=50, home_score=52), 0.437943)
+
+
 def test_at_an_nfl_break_an_unreported_clock_reads_the_period_s_end() -> None:
     halftime = _nfl(2, 0, away=7, interval=FootballInterval.HALFTIME, coverage={FootballField.CLOCK: _DEFAULTED})
     assert _is_proxy(football_proxy(halftime), 0.283041)
@@ -200,6 +235,7 @@ def test_a_margin_scale_refuses_one_that_could_shrink_to_nothing(base: float, sl
         ({"li_span": 0.0}, "half-life"),
         ({"half_life": timedelta(0)}, "half-life"),
         ({"uncertain_cap": timedelta(seconds=-1)}, "half-life"),
+        ({"half_end": timedelta(seconds=-1)}, "half's last minutes"),
     ],
 )
 def test_a_leverage_policy_refuses_constants_that_cant_work(changes: dict[str, object], message: str) -> None:

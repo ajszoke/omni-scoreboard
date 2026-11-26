@@ -134,24 +134,31 @@ def test_a_postseason_game_among_four_high_leverage_nba_games_gets_its_stakes() 
     assert [f"{game.share:.2%}" for game in result.games] == ["27.71%", "24.10%", "24.10%", "24.10%"]
 
 
-def test_cha_at_high_leverage_with_two_others_is_lifted_to_the_seventy_percent_floor() -> None:
+def test_cha_at_high_leverage_with_two_others_is_lifted_to_the_ninety_percent_floor() -> None:
     result = targets([_entry(League.NBA, "cha", 1.0, rank=1), *_others(League.NBA, 2, 1.0)])
-    assert [_share(result, League.NBA, raw) for raw in ("cha", "g01", "g02")] == ["70.00%", "15.00%", "15.00%"]
-    assert result.floor is not None and result.floor.projected and result.floor.level == pytest.approx(0.70)
+    assert [_share(result, League.NBA, raw) for raw in ("cha", "g01", "g02")] == ["90.00%", "5.00%", "5.00%"]
+    assert result.floor is not None and result.floor.projected and result.floor.level == pytest.approx(0.90)
 
 
-def test_a_cha_blowout_with_two_high_leverage_others_stays_above_its_thirty_percent_floor() -> None:
+def test_a_cha_blowout_with_two_high_leverage_others_is_lifted_to_its_sixty_percent_floor() -> None:
     result = targets([_entry(League.NBA, "cha", 0.0, rank=1), *_others(League.NBA, 2, 1.0)])
-    assert [_share(result, League.NBA, raw) for raw in ("cha", "g01", "g02")] == ["44.44%", "27.78%", "27.78%"]
-    assert result.floor is not None and not result.floor.projected and result.floor.level == pytest.approx(0.30)
+    assert [_share(result, League.NBA, raw) for raw in ("cha", "g01", "g02")] == ["60.00%", "20.00%", "20.00%"]
+    assert result.floor is not None and result.floor.projected and result.floor.level == pytest.approx(0.60)
+    assert f"{result.floor.before:.2%}" == "44.44%"  # before the floor: a weight of 4 against 2.5 and 2.5
 
 
-@pytest.mark.parametrize("g, share", [(0.0, "30.00%"), (1.0, "70.00%")])
+def test_a_cha_blowout_with_one_high_leverage_other_stays_above_its_sixty_percent_floor() -> None:
+    result = targets([_entry(League.NBA, "cha", 0.0, rank=1), *_others(League.NBA, 1, 1.0)])
+    assert [_share(result, League.NBA, raw) for raw in ("cha", "g01")] == ["61.54%", "38.46%"]
+    assert result.floor is not None and not result.floor.projected and result.floor.level == pytest.approx(0.60)
+
+
+@pytest.mark.parametrize("g, share", [(0.0, "60.00%"), (1.0, "90.00%")])
 def test_atl_against_fourteen_high_leverage_mlb_games_gets_the_floor_its_leverage_sets(g: float, share: str) -> None:
     result = targets([_entry(League.MLB, "atl", g, rank=1), *_others(League.MLB, 14, 1.0)])
     assert _share(result, League.MLB, "atl") == share
     others = {f"{game.share:.2%}" for game in result.games if game.contest.raw != "atl"}
-    assert others == {"5.00%" if g == 0.0 else "2.14%"}
+    assert others == {"2.86%" if g == 0.0 else "0.71%"}
 
 
 def _september_sunday(*, car_acting: bool = True, atl_acting: bool = True) -> Targets:
@@ -165,16 +172,16 @@ def _september_sunday(*, car_acting: bool = True, atl_acting: bool = True) -> Ta
     )
 
 
-def test_a_september_sunday_with_both_favorites_acting_shares_the_forty_six_percent_floor() -> None:
+def test_a_september_sunday_with_both_favorites_acting_shares_the_seventy_two_percent_floor() -> None:
     result = _september_sunday()
-    assert (_share(result, League.NFL, "car"), _share(result, League.MLB, "atl")) == ("28.24%", "17.76%")
-    assert _league(result, League.NFL) == "59.87%"
-    assert result.floor is not None and f"{result.floor.level:.2%}" == "46.00%"
+    assert (_share(result, League.NFL, "car"), _share(result, League.MLB, "atl")) == ("44.21%", "27.79%")
+    assert _league(result, League.NFL) == "60.61%"
+    assert result.floor is not None and f"{result.floor.level:.2%}" == "72.00%"
 
 
 def test_a_september_sunday_with_one_favorite_acting_gives_it_the_whole_floor() -> None:
-    assert _share(_september_sunday(atl_acting=False), League.NFL, "car") == "46.00%"
-    assert _share(_september_sunday(car_acting=False), League.MLB, "atl") == "46.00%"
+    assert _share(_september_sunday(atl_acting=False), League.NFL, "car") == "72.00%"
+    assert _share(_september_sunday(car_acting=False), League.MLB, "atl") == "72.00%"
 
 
 # --- weights: rank, matchup quality and stakes -------------------------------------------------------------------
@@ -298,8 +305,8 @@ def test_a_favorite_s_break_takes_it_out_of_the_pool_and_the_floor_while_others_
     )
     assert result.game(_id(League.MLB, "atl")) is None
     assert SetAside(_id(League.MLB, "atl"), SetAsideReason.FAVORITE_IN_BREAK) in result.set_aside
-    assert result.floor is not None and result.floor.level == pytest.approx(0.30)  # from COL's G alone
-    assert _share(result, League.MLB, "col") == "30.00%"
+    assert result.floor is not None and result.floor.level == pytest.approx(0.60)  # from COL's G alone
+    assert _share(result, League.MLB, "col") == "60.00%"
 
 
 def test_a_favorite_in_a_break_stays_when_nothing_else_can_be_shown_but_without_its_boost() -> None:

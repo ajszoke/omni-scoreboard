@@ -534,7 +534,9 @@ def test_once_nflmeta_free_is_spent_nfl_degrades_with_the_reason_and_mlb_keeps_i
             board.clock.advance(5 * S)
 
     until(start + 2 * M)
-    until(start + 2 * M + 30 * S, spend=10)  # NFLMeta says the month is nearly spent
+    # NFLMeta says the month is nearly spent. With eleven reads left, its answers age during a Panthers turn, so their
+    # card is on air, and dims, when they do; aging in MLB's turn would set the NFL games aside without airing them.
+    until(start + 2 * M + 30 * S, spend=11)
     until(start + 14 * M)
     assert board.ledger.exhausted(ProviderAccount.NFLMETA, board.clock.read())
     spent = "quota: NFLMeta Free spent for 2026-11: switch to Builder"

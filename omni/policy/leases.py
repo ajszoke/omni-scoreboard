@@ -95,7 +95,8 @@ class Ceiling:
 _MICRO, _ORDINARY = BreakScale.MICRO, BreakScale.ORDINARY
 
 # `BOARD_POLICY.md` §5's table. MLB's inning break uses the feed's stated length less a trim; this is its length
-# when unknown. NFL's halftime is the 13-minute polling quiet hold, then up to 120 s of grace.
+# when unknown. NFL's halftime is the 13-minute polling quiet hold, then up to 120 s of grace. An NBA timeout runs from
+# its inferred onset: a quarter's first or second (the TV timeouts) twelve 12 s turns, a later one three.
 CEILINGS: Mapping[BreakKind, Ceiling] = MappingProxyType(
     {
         BreakKind.MLB_INNING_BREAK: Ceiling(length=_seconds(60), scale=_ORDINARY),
@@ -113,7 +114,7 @@ CEILINGS: Mapping[BreakKind, Ceiling] = MappingProxyType(
         BreakKind.NFL_INJURY_TIMEOUT: Ceiling(length=_seconds(30), scale=_MICRO, turns=1),
         BreakKind.NFL_REVIEW: Ceiling(length=_seconds(36), scale=_MICRO, turns=1),
         BreakKind.NBA_TEAM_TIMEOUT: Ceiling(length=_seconds(60), scale=_MICRO),
-        BreakKind.NBA_TV_TIMEOUT: Ceiling(length=_seconds(135), scale=_ORDINARY, national=_seconds(165)),
+        BreakKind.NBA_TV_TIMEOUT: Ceiling(length=_seconds(165), scale=_ORDINARY),
         BreakKind.NBA_QUARTER_BREAK: Ceiling(length=_seconds(135), scale=_ORDINARY, national=_seconds(195)),
         BreakKind.NBA_HALFTIME: Ceiling(length=_seconds(840), scale=_ORDINARY),
         BreakKind.NBA_BEFORE_OVERTIME: Ceiling(length=_seconds(135), scale=_ORDINARY),

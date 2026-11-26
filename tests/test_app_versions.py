@@ -10,6 +10,8 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from omni.app.quota import BalldontliePlan
+
 from omni.app import __main__ as mlb_app
 from omni.app import football as nfl_app
 from omni.app.trace import DecisionTracer
@@ -167,6 +169,20 @@ def test_the_mlb_board_s_settings_render_the_board_policy_s_own() -> None:
         "timezone=America/New_York;turn=12s"
     )
     assert "league_weights=none;" in _mlb().config.canonical() and "mutes=none;" in _mlb().config.canonical()
+
+
+def test_nba_s_delay_and_tier_render_only_on_a_board_that_runs_nba() -> None:
+    nba = DecisionConfig(
+        profile=PanelProfile.QUAD_128X64,
+        delay=timedelta(0),
+        nba_delay=timedelta(seconds=20),
+        nba_plan=BalldontliePlan.ALL_STAR,
+    )
+    assert nba.canonical() == "delay=0s;nba_delay=20s;nba_plan=all-star;profile=quad_128x64"
+    assert "nba_" not in _mlb().config.canonical()
+    assert "nba_" not in _mlb("--nba-delay", "20").config.canonical()  # no NBA on the board: no NBA settings
+    board = _mlb("--leagues", "mlb,nba", "--nba-delay", "20", "--balldontlie-plan", "all-star").config.canonical()
+    assert "nba_delay=20s;nba_plan=all-star;" in board
 
 
 def test_a_board_policy_setting_given_as_its_default_is_the_default() -> None:

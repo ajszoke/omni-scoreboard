@@ -9,7 +9,7 @@ A game's weight is ``b = (1 + 1.5*G) * T * F``: its leverage ``G``, its stakes `
 action, its rank ``F``. Each league's mass is its games' weights, boosted a little for a short season and
 scaled by the user's league weight. A league's share blends its mass with an even split (80/20); a game takes
 its league's share in proportion to its weight. When favorites act, their combined share has a floor that
-rises with the leverage of the most important one, from 30% in a blowout to 70% close and late.
+rises with the leverage of the most important one, from 60% in a blowout to 90% close and late.
 
 A stale game (its released state isn't current) gets no share at all: it's set aside, so it earns no turns, credit,
 wait or floor, and a healthy game elsewhere never loses a turn to it. Its dim card is the board's last safe fallback,
@@ -81,9 +81,9 @@ class AllocationPolicy:
     blend: float = 0.80
     league_weight_low: float = 0.5
     league_weight_high: float = 2.0
-    # §3.4: floor_F = floor_base + floor_slope * max(G of the acting favorites).
-    floor_base: float = 0.30
-    floor_slope: float = 0.40
+    # §3.4: floor_F = floor_base + floor_slope * max(G of the acting favorites): 60% in a blowout, 90% close and late.
+    floor_base: float = 0.60
+    floor_slope: float = 0.30
     # §3.5: debts clamped to +-debt_limit; overdue at max(rescue_misses, L, ceil(rescue_turns/Q_l)) misses for
     # a league, max(n_l, ceil(rescue_turns/p_g)) for a game; debts compared to microseconds.
     debt_limit: timedelta = timedelta(seconds=24)

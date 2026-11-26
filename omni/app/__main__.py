@@ -10,11 +10,14 @@ the frame loop with a heartbeat at least every 2 s, and a card's time on the boa
 word that its first frame is on the panel (`omni.app.frame_stream`). This is the thin I/O shell around the
 deterministic `AppLoop`; everything testable lives in `runner.py` / `loop.py`.
 
-``--leagues`` names the leagues that run, ``mlb`` unless you say otherwise: NFL on the shared board is opt-in
-(``--leagues mlb,nfl``) until its live path has passed a staffed dogfood, and the NFL runner (`omni.app.football`)
-stays its fallback. NFL reads NFLMeta with ``NFLMETA_API_KEY`` from the environment or the git-ignored ``.env``;
-without one, the app says once that NFL is off and why, and runs MLB alone. NFL's games are held back by ``--nfl-delay``, MLB's by ``--delay``. Both leagues
-ask through one poll plan, each ask spending its own provider's account.
+``--leagues`` names the leagues that run, ``mlb`` unless you say otherwise: NFL and NBA on the shared board are opt-in
+(``--leagues mlb,nfl,nba``) until their live paths have passed a staffed dogfood, and the NFL runner
+(`omni.app.football`) stays NFL's fallback. NFL reads NFLMeta with ``NFLMETA_API_KEY``, NBA BALLDONTLIE with
+``BALLDONTLIE_API_KEY``, each from the environment or the git-ignored ``.env``; without its key, the app says once that
+the league is off and why, and runs the others. NFL's games are held back by ``--nfl-delay``, NBA's by
+``--nba-delay``, MLB's by ``--delay``. Every league asks through one poll plan, each ask spending its own provider's
+account. ``--balldontlie-plan`` names the BALLDONTLIE tier the key is on, free unless you say otherwise: Free reads
+the day's games alone, so NBA's cards have no captions or stat panels; ALL-STAR adds the players' lines.
 
 The board policy's settings (`omni.policy.settings.PolicySettings`): ``--board-policy`` picks the policy
 (``1``, `omni-board-policy/1`, unless you say ``2``: policy 2 is opt-in until its live path has passed a staffed
@@ -39,21 +42,26 @@ The trace opens with what the run decides with (`omni.app.versions`): the board 
 settings that change its decisions (spelled out on the line under it), the rule table, and the commit.
 
 The live win meter is off unless ``--meter`` is given. With it, and with ``OMNI_CLOUD_URL`` and
-``OMNI_CLOUD_TOKEN`` in the environment or a git-ignored ``.env``, the meter reads Omni's market
+``OMNI_CLOUD_TOKEN`` in the environment or a git-ignored ``.env``, MLB's meter reads Omni's market
 service (``cloud/``); without them it reads Polymarket's public quotes. Either way MLB's model takes
-over when the market has nothing.
+over when the market has nothing. NFL's and NBA's meters always read Polymarket's public quotes, each league through
+its own reader at its own pace (NFL's every 5 s, since each play is rated by how far the market moved across it): the
+market service files their games under its own listing's ids, which aren't the board's.
+The pregame odds (Bovada's coupon, MLB's and NBA's) are on unless ``--no-odds``.
 
 Every request is counted against its provider account's quota (`omni.app.quota`), and the month's counts
 are kept under ``--state-dir`` so a restart doesn't forget them. ``--nflmeta-plan`` names the plan of the
-NFLMeta key, free unless you say otherwise.
+NFLMeta key, free unless you say otherwise. On Builder every live NFL game's plays are read, so each card has its
+timeouts, challenges and play line; on Free only a favorite's are.
 """
 
 from __future__ import annotations
 
 import argparse
+import functools
 import os
 import shlex
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Collection, Iterable
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
@@ -65,7 +73,8 @@ from omni.core.clock import SystemClock
 from omni.app.display import MatrixDevice, MatrixDisplaySink
 from omni.app.frame_stream import StreamDisplay, StreamDisplaySink, stream_display
 from omni.app.planned_mlb import MarketReader
-from omni.app.quota import Meter, NflMetaPlan, ProviderAccount
+from omni.app.planned_nfl import PLAY_MARKET_POLICY
+from omni.app.quota import BalldontliePlan, Meter, NflMetaPlan, ProviderAccount
 from omni.app.runner import build_planned_loop, run_forever
 from omni.app.versions import DecisionConfig, PolicyName, SourceRevision, Versions, read_source_revision
 from omni.core.enum import League, PanelProfile
@@ -81,18 +90,25 @@ from omni.tower.board import BoardPolicy
 from omni.tower.interruption import InterruptionPolicy
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from omni.app.planned_mlb import OddsReader
+    from omni.app.planned_nba import MarketReader as NbaMarketReader
+    from omni.app.planned_nba import NbaOddsReader
     from omni.app.poll_plan import AccountMap
     from omni.app.quota import QuotaLedger
+    from omni.domain.basketball import FavoriteLine
+    from omni.domain.contest import TeamGame
     from omni.providers.market_service import ServiceTransport
     from omni.providers.mlb_statsapi import MlbStatsApiProvider
 
 __all__ = ["main"]
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_BOARD_LEAGUES = (League.MLB, League.NFL)  # the leagues the shared board can run
+_BOARD_LEAGUES = (League.MLB, League.NFL, League.NBA)  # the leagues the shared board can run
 _POLICIES = {"1": PolicyName.BOARD_V1, "2": PolicyName.BOARD_V2}
-_NO_KEY = "omni.app: NFL is off: set NFLMETA_API_KEY in the environment or .env to put NFL on the board"
+# Each league that reads a keyed source, and the key's name in the environment or .env.
+_KEYS = {League.NFL: "NFLMETA_API_KEY", League.NBA: "BALLDONTLIE_API_KEY"}
 
 
 def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
@@ -117,7 +133,8 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         "--leagues",
         default="mlb",
         metavar="LEAGUE,...",
-        help="the leagues on the board, of mlb and nfl (default mlb; NFL is opt-in and needs NFLMETA_API_KEY)",
+        help="the leagues on the board, of mlb, nfl and nba (default mlb; NFL needs NFLMETA_API_KEY, NBA"
+        " BALLDONTLIE_API_KEY)",
     )
     parser.add_argument("--delay", type=int, default=45, help="TV broadcast delay in seconds (default 45)")
     parser.add_argument(
@@ -125,6 +142,12 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         type=int,
         default=0,
         help="TV broadcast delay for NFL games in seconds (default 0, as the NFL runner's --delay)",
+    )
+    parser.add_argument(
+        "--nba-delay",
+        type=int,
+        default=0,
+        help="TV broadcast delay for NBA games in seconds (default 0, as NFL's)",
     )
     parser.add_argument(
         "--slot",
@@ -169,7 +192,7 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--meter",
         action="store_true",
-        help="show the live win meter (the market, then MLB's model); off by default",
+        help="show the live win meter (MLB's market, then its model; NFL's and NBA's market); off by default",
     )
     parser.add_argument(
         "--scroll-speed",
@@ -183,6 +206,13 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         choices=[plan.value for plan in NflMetaPlan],
         default=NflMetaPlan.FREE.value,
         help="the NFLMeta plan the key is on, whose limits the board keeps to (default free)",
+    )
+    parser.add_argument(
+        "--balldontlie-plan",
+        choices=[plan.value for plan in BalldontliePlan],
+        default=BalldontliePlan.FREE.value,
+        help="the BALLDONTLIE tier the key is on (default free: the day's games alone; all-star adds the players'"
+        " lines, so the captions and the stat panels)",
     )
     parser.add_argument(
         "--state-dir",
@@ -229,7 +259,7 @@ def _parse_leagues(entry: str) -> frozenset[League]:
         raise ValueError("--leagues: name at least one league")
     beyond = sorted(league.value for league in leagues - set(_BOARD_LEAGUES))
     if beyond:
-        raise ValueError(f"--leagues {entry}: the board can't run {', '.join(beyond)} yet (only mlb and nfl)")
+        raise ValueError(f"--leagues {entry}: the board can't run {', '.join(beyond)} yet (only mlb, nfl and nba)")
     return leagues
 
 
@@ -268,21 +298,31 @@ def _parse_weights(entries: Iterable[str]) -> dict[League, float]:
     return {league: weight for league, weight in weights.items() if weight != 1.0}
 
 
-def _leagues_on(args: argparse.Namespace, key: str | None, say: Callable[[str], None]) -> frozenset[League]:
-    """The leagues this run puts on the board: those asked for, less NFL without an NFLMeta key, which is said
-    once. With nothing left to run, the app stops, saying why."""
-    leagues: frozenset[League] = args.leagues
-    if League.NFL in leagues and not key:
-        leagues = leagues - {League.NFL}
+def _leagues_on(
+    args: argparse.Namespace, keys: Mapping[League, str | None], say: Callable[[str], None]
+) -> frozenset[League]:
+    """The leagues this run puts on the board: those asked for, less each keyed league whose key ``keys`` lacks,
+    which is said once. With nothing left to run, the app stops, saying why."""
+    asked: frozenset[League] = args.leagues
+    leagues = asked
+    for league, name in _KEYS.items():
+        if league not in asked or keys.get(league):
+            continue
+        leagues = leagues - {league}
+        code = league.value.upper()
+        off = f"omni.app: {code} is off: set {name} in the environment or .env to put {code} on the board"
         if not leagues:
-            raise SystemExit(f"{_NO_KEY}, and it's the only league asked for")
-        say(_NO_KEY)
+            left = "it's the only league asked for" if len(asked) == 1 else "no league asked for is left"
+            raise SystemExit(f"{off}, and {left}")
+        say(off)
     return leagues
 
 
-def _nflmeta_key() -> str | None:  # pragma: no cover - reads the environment and .env
-    """NFLMeta's key, from the environment or the git-ignored ``.env``, as the NFL runner reads it."""
-    return {**read_env_file(_REPO_ROOT / ".env"), **os.environ}.get("NFLMETA_API_KEY")
+def _keys(leagues: Collection[League]) -> dict[League, str | None]:  # pragma: no cover - reads the env and .env
+    """Each keyed league's key, for the leagues asked for, from the environment or the git-ignored ``.env``. The
+    keys are only handed on, never printed."""
+    env = {**read_env_file(_REPO_ROOT / ".env"), **os.environ}
+    return {league: env.get(name) for league, name in _KEYS.items() if league in leagues}
 
 
 def _versions(args: argparse.Namespace, source: SourceRevision) -> Versions:
@@ -307,6 +347,8 @@ def _versions(args: argparse.Namespace, source: SourceRevision) -> Versions:
             league_weights=settings.league_weights,
             promotions=settings.promotions,
             nfl_delay=timedelta(seconds=args.nfl_delay),
+            nba_delay=timedelta(seconds=args.nba_delay) if League.NBA in args.leagues else None,
+            nba_plan=BalldontliePlan(args.balldontlie_plan) if League.NBA in args.leagues else None,
         ),
         rules=RULES,
         source=source,
@@ -321,26 +363,37 @@ def _board_policy(args: argparse.Namespace) -> BoardPolicy:
 def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives the live emulator + network
     args = _parse_args(argv)
     profile = PanelProfile(args.profile)
-    key = _nflmeta_key() if League.NFL in args.leagues else None
-    leagues = _leagues_on(args, key, say=print)
+    keys = _keys(args.leagues)
+    leagues = _leagues_on(args, keys, say=print)
+    key = keys.get(League.NFL)
 
     # Lazy imports keep the network libraries and emulator out of import time and tests.
     from omni.app.football import NflMetaHttp
     from omni.app.planned_mlb import PlannedMlb
     from omni.app.poller import Poller
     from omni.app.quota_store import default_state_dir, open_ledger
-    from omni.app.runner import board_plan, planned_nfl_source
+    from omni.app.runner import NbaSource, board_plan, planned_nba_source, planned_nfl_source
 
     clock = SystemClock()
     state_dir = args.state_dir if args.state_dir is not None else default_state_dir(os.environ, Path.home())
+    tier = BalldontliePlan(args.balldontlie_plan)
     ledger = open_ledger(
-        state_dir, NflMetaPlan(args.nflmeta_plan), log=lambda line: print(line, flush=True), who="omni.app"
+        state_dir,
+        NflMetaPlan(args.nflmeta_plan),
+        balldontlie=tier,
+        log=lambda line: print(line, flush=True),
+        who="omni.app",
     )
     zone = ZoneInfo(args.timezone)
     source = read_source_revision(_REPO_ROOT)
 
     mlb: _Mlb | None = _mlb(args, clock, ledger, zone, source) if League.MLB in leagues else None
-    plan = board_plan(ledger=ledger, mlb=mlb.accounts if mlb is not None else None, nfl=League.NFL in leagues)
+    plan = board_plan(
+        ledger=ledger,
+        mlb=mlb.accounts if mlb is not None else None,
+        nfl=League.NFL in leagues,
+        nba=tier if League.NBA in leagues else None,
+    )
     planned = None
     if mlb is not None:
         planned = PlannedMlb(
@@ -352,10 +405,39 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
             favorites=args.favorites,
             meter=Meter(ledger, ProviderAccount.MLB_STATSAPI, clock),
         )
+    # NFL's and NBA's meters: the public quotes, each league's through a reader of its own. NFL's reads a game as often
+    # as its plan asks (every 5 s), so a reading sits close to each side of a play; NBA's at the provider's own pace.
+    quoted = [league for league in (League.NFL, League.NBA) if league in leagues] if args.meter else []
     nfl = None
     if League.NFL in leagues:
         assert key is not None  # NFL runs only with a key
-        nfl = planned_nfl_source(plan, clock, NflMetaHttp(key, None).get, ledger=ledger, favorites=args.favorites)
+        nfl_quotes = _public_quotes(clock, ledger, PLAY_MARKET_POLICY.every) if args.meter else None
+        nfl = planned_nfl_source(
+            plan,
+            clock,
+            NflMetaHttp(key, None).get,
+            ledger=ledger,
+            favorites=args.favorites,
+            market=nfl_quotes,
+            tier=NflMetaPlan(args.nflmeta_plan),
+        )
+    nba = None
+    if League.NBA in leagues:
+        from omni.providers.balldontlie import BalldontlieHttp
+
+        nba_key = keys.get(League.NBA)
+        assert nba_key is not None  # NBA runs only with a key
+        planned_nba = planned_nba_source(
+            plan,
+            clock,
+            BalldontlieHttp(nba_key),
+            ledger=ledger,
+            tier=tier,
+            odds=_nba_odds(args, clock, ledger),
+            market=_public_quotes(clock, ledger) if args.meter else None,
+            log=lambda line: print(line, flush=True),
+        )
+        nba = NbaSource.of(planned_nba)
 
     board: StreamDisplay | None = None
     sink: MatrixDisplaySink | StreamDisplaySink
@@ -384,6 +466,8 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
         broadcast_lag=DurationSeconds(args.delay),
         nfl=nfl,
         nfl_delay=DurationSeconds(args.nfl_delay),
+        nba=nba,
+        nba_delay=DurationSeconds(args.nba_delay),
         logos=LogoStore(),  # resolve committed team tiles from assets/ (lazy, cached)
         display_timezone=zone,
         marquee=DEFAULT_MARQUEE.at(ScrollSpeed(args.scroll_speed)),
@@ -393,9 +477,12 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
     )
     on = ", ".join(league.value for league in League if league in leagues)
     target = f"the board's receiver ({args.sink_command})" if board is not None else "http://localhost:8888/"
+    meter = mlb.meter if mlb is not None else ("on" if args.meter else "off")  # MLB's says which market it reads
+    quoted_meter = f" ({', '.join(league.value for league in quoted)}: Polymarket public quotes)" if quoted else ""
+    nba_tier = f" nba {tier.label}," if nba is not None else ""
     print(
-        f"omni.app: {profile.value}, leagues {on}, delay {args.delay}s (nfl {args.nfl_delay}s), favorites"
-        f" {args.favorites}, meter {mlb.meter if mlb is not None else 'off'} — {target}"
+        f"omni.app: {profile.value}, leagues {on}, delay {args.delay}s (nfl {args.nfl_delay}s, nba {args.nba_delay}s),"
+        f"{nba_tier} favorites {args.favorites}, meter {meter}{quoted_meter} — {target}"
     )
     if board is not None:
         board.start()
@@ -471,6 +558,41 @@ def _mlb(
             market, meter = PolymarketUsProvider(fetch=quotes).win_probability, "Polymarket public quotes"
     accounts = mlb_accounts(provider.source, market=market_account)
     return _Mlb(provider, odds.lines_for if odds is not None else None, market, meter, accounts)
+
+
+def _nba_odds(
+    args: argparse.Namespace, clock: SystemClock, ledger: QuotaLedger
+) -> NbaOddsReader | None:  # pragma: no cover - drives the network
+    """NBA's pregame line from Bovada's NBA coupon unless ``--no-odds``, each request counted."""
+    from omni.providers import bovada_odds
+    from omni.providers.bovada_odds import BovadaCoupon, BovadaOddsProvider, favorite_line
+
+    if args.no_odds:
+        return None
+    coupon = Meter(ledger, ProviderAccount.BOVADA, clock).counted(
+        functools.partial(bovada_odds._default_fetch, BovadaCoupon.NBA)
+    )
+    sportsbook = BovadaOddsProvider(fetch=coupon, coupon=BovadaCoupon.NBA)
+
+    def odds(game: TeamGame, now: datetime) -> FavoriteLine | None:
+        lines = sportsbook.lines_for(game, now)
+        return favorite_line(lines) if lines is not None else None
+
+    return odds
+
+
+def _public_quotes(
+    clock: SystemClock, ledger: QuotaLedger, every: timedelta | None = None
+) -> NbaMarketReader:  # pragma: no cover - drives the network
+    """A game's win probability from Polymarket's public quotes, each request counted: NFL's or NBA's meter. Each game
+    is read at most once ``every`` (the provider's own pace when None), however often it's asked."""
+    from omni.providers.polymarket_us import PolymarketUsProvider, fetch_market_data
+
+    quotes = Meter(ledger, ProviderAccount.POLYMARKET_US, clock).counted(fetch_market_data)
+    if every is None:
+        return PolymarketUsProvider(fetch=quotes).win_probability
+    pace = DurationSeconds(int(every.total_seconds()))
+    return PolymarketUsProvider(fetch=quotes, refresh_every=pace).win_probability
 
 
 class _CountedTransport:  # pragma: no cover - wraps the real network

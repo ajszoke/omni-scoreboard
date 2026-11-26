@@ -10,9 +10,11 @@ hands the board its scopes itself.
 and the live win meter off unless asked for. The plan does the retrying: nothing backs off on top of it,
 and while its quota ledger holds a date's slate back, the league's health says why.
 Either builder takes NFL too (`NflSource`): its slate beside MLB's, and its games carded from the answers its
-feeds hold, held back for NFL's own TV delay. Without one, the board is MLB's alone; without MLB's, NFL's.
+feeds hold, held back for NFL's own TV delay; and NBA (`NbaSource`) the same way, held back for NBA's own delay.
+Without either, the board is MLB's alone; without MLB's, the others'.
 `board_plan` is the one `PollPlan` both leagues ask through, each ask spending its own provider's account, and
-`planned_nfl_source` puts NFLMeta on it (`PlannedNfl`), metered against the quota ledger.
+`planned_nfl_source` puts NFLMeta on it (`PlannedNfl`), metered against the quota ledger, and `planned_nba_source`
+BALLDONTLIE (`PlannedNba`).
 Both builders take the board policy's user settings (`omni.policy.settings.PolicySettings`) for the board.
 `run_forever` is the thin real-time wrapper: refreshes on a thread of their own, and frames on
 this one at a steady rate, so a slow fetch never freezes the panel. Each frame (`paint_frame`)
@@ -34,9 +36,19 @@ from omni.app.contest_store import ContestStore
 from omni.app.display import DisplaySink
 from omni.app.frame_stream import AcknowledgingSink
 from omni.app.loop import AppLoop, Painted, QuotaNote
+from omni.app.nba_feeds import NbaFeeds
+from omni.app.nba_pipeline import LiveBasketballPipeline
 from omni.app.nfl_feeds import NflFeeds
 from omni.app.nfl_pipeline import LiveFootballPipeline
 from omni.app.planned_mlb import MLB_POLICIES, PlannedMlb
+from omni.app.planned_nba import (
+    MarketReader,
+    MeteredBdl,
+    NbaOddsReader,
+    PlannedNba,
+    nba_accounts,
+    nba_policies,
+)
 from omni.app.planned_nfl import NFL_POLICIES, PlannedNfl, nfl_accounts
 from omni.app.poll_plan import AccountMap, PollPlan
 from omni.app.poller import Poller
@@ -47,7 +59,16 @@ from omni.app.pipeline import (
     PregameDetailsFetcher,
     WinProbFetcher,
 )
-from omni.app.quota import HttpAnswer, Meter, MeteredHttp, ProviderAccount, QuotaLedger, nflmeta_billed
+from omni.app.quota import (
+    BalldontliePlan,
+    HttpAnswer,
+    Meter,
+    MeteredHttp,
+    NflMetaPlan,
+    ProviderAccount,
+    QuotaLedger,
+    nflmeta_billed,
+)
 from omni.app.supervisor import BackoffPolicy, ProviderSupervisor
 from omni.app.trace import DecisionTracer
 from omni.app.versions import Versions
@@ -57,7 +78,9 @@ from omni.core.time import DurationSeconds
 from omni.domain.contest import TeamGame
 from omni.events.baseball import LiveBaseballFeed
 from omni.preferences.favorites import Favorites
+from omni.providers.balldontlie import BalldontlieProvider, BdlFetch
 from omni.providers.base import PollScope, Provider, ProviderError, ScopeSource
+from omni.providers.nba_teams import NbaTeamRegistry
 from omni.providers.nfl_teams import NflTeamRegistry
 from omni.providers.nflmeta import NFLMETA_SOURCE, NflMetaLiveProvider
 from omni.queue.delay_policy import DelayPolicy
@@ -71,11 +94,13 @@ from omni.tower.interruption import InterruptionPolicy
 from omni.policy.settings import PolicySettings
 
 __all__ = [
+    "NbaSource",
     "NflSource",
     "board_plan",
     "build_loop",
     "build_planned_loop",
     "paint_frame",
+    "planned_nba_source",
     "planned_nfl_source",
     "run_forever",
     "warm_up",
@@ -83,6 +108,23 @@ __all__ = [
 
 _WARM_UP_PASSES = 3  # the slate, then its games' feeds, then a pass that can show them
 _REFRESH_AT_LEAST_EVERY = timedelta(seconds=5)  # for what changes with nothing to wake it (an answer expiring)
+
+
+@dataclass(frozen=True, slots=True)
+class NbaSource:
+    """NBA on the board: the scope source that hands it NBA's slate, and the feeds that hold its games' reads.
+
+    ``held_back``, when given, says why a quota is holding one of NBA's scopes back, for the league's health.
+    """
+
+    schedule: ScopeSource
+    feeds: NbaFeeds
+    held_back: QuotaNote | None = None
+
+    @classmethod
+    def of(cls, planned: PlannedNba) -> NbaSource:
+        """NBA on the board from its planned source, which is its schedule and its feeds."""
+        return cls(schedule=planned, feeds=planned, held_back=planned.held_back)
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,6 +160,8 @@ def build_loop(
     quota: QuotaNote | None = None,
     nfl: NflSource | None = None,
     nfl_delay: DurationSeconds = DurationSeconds(0),
+    nba: NbaSource | None = None,
+    nba_delay: DurationSeconds = DurationSeconds(0),
     settings: PolicySettings | None = None,
     interruptions: InterruptionPolicy | None = None,
 ) -> AppLoop:
@@ -142,7 +186,8 @@ def build_loop(
     `quota` says why a quota holds a scope back, for its league's health.
     `nfl`, when given, puts NFL on the board: its slate beside ``schedule``, and its games carded through the same
     queue, held back for `nfl_delay` (`broadcast_lag` is baseball's). Its favorites are ``favorites``' NFL clubs.
-    With no ``schedule`` the board is NFL's alone. `settings` are the board policy's user settings (the defaults
+    `nba`, when given, puts NBA on the board the same way, held back for `nba_delay`.
+    With no ``schedule`` the board is the other leagues'. `settings` are the board policy's user settings (the defaults
     when left out). `interruptions`, when given, has the loop watch for its host sleeping or stalling, and wake at
     least every health tick (`omni.tower.interruption`); the running board always does.
     """
@@ -163,6 +208,13 @@ def build_loop(
             feeds=nfl.feeds, delay_policy=DelayPolicy(broadcast_lag=nfl_delay), queue=queue, favorites=favorites
         )
         quota = _first_note(quota, nfl.held_back)
+    basketball = None
+    if nba is not None:
+        schedules += (nba.schedule,)
+        basketball = LiveBasketballPipeline(
+            feeds=nba.feeds, delay_policy=DelayPolicy(broadcast_lag=nba_delay), queue=queue, favorites=favorites
+        )
+        quota = _first_note(quota, nba.held_back)
     return AppLoop(
         schedules=schedules,
         store=ContestStore(),
@@ -181,6 +233,7 @@ def build_loop(
         policy=policy,
         quota=quota,
         football=football,
+        basketball=basketball,
         settings=settings,
         favorites=favorites,
         interruptions=interruptions,
@@ -211,6 +264,8 @@ def build_planned_loop(
     registry: RendererRegistry | None = None,
     nfl: NflSource | None = None,
     nfl_delay: DurationSeconds = DurationSeconds(0),
+    nba: NbaSource | None = None,
+    nba_delay: DurationSeconds = DurationSeconds(0),
     settings: PolicySettings | None = None,
     interruptions: InterruptionPolicy | None = None,
 ) -> AppLoop:
@@ -218,7 +273,8 @@ def build_planned_loop(
 
     The live win meter (the market, then MLB's model) is on only with ``meter``. Each reading stands
     beside a score only if it arrived no later than that score's feed answer. ``nfl``, when given, puts NFL
-    on the board beside it, held back for ``nfl_delay``; with no ``planned``, the board is NFL's alone.
+    on the board beside it, held back for ``nfl_delay``, its meter its own source's market's (`planned_nfl_source`);
+    with no ``planned``, the board is NFL's alone.
     ``settings`` are the board policy's user settings, and ``interruptions`` as `build_loop` takes them.
     """
     if planned is None:
@@ -235,6 +291,8 @@ def build_planned_loop(
             registry=registry,
             nfl=nfl,
             nfl_delay=nfl_delay,
+            nba=nba,
+            nba_delay=nba_delay,
             settings=settings,
             interruptions=interruptions,
         )
@@ -256,6 +314,8 @@ def build_planned_loop(
         quota=planned.held_back,
         nfl=nfl,
         nfl_delay=nfl_delay,
+        nba=nba,
+        nba_delay=nba_delay,
         settings=settings,
         interruptions=interruptions,
     )
@@ -266,15 +326,30 @@ def _no_baseball(game: TeamGame, now: datetime) -> LiveBaseballFeed:
     raise ProviderError(f"{game.id}: MLB isn't on this board")
 
 
-def board_plan(*, ledger: QuotaLedger | None, mlb: AccountMap | None, nfl: bool) -> PollPlan:
+def board_plan(
+    *, ledger: QuotaLedger | None, mlb: AccountMap | None, nfl: bool, nba: BalldontliePlan | None = None
+) -> PollPlan:
     """The one plan the board's leagues ask through: MLB's reads when ``mlb`` names the accounts they spend
-    (`omni.app.planned_mlb.mlb_accounts`), NFL's with ``nfl``, every NFL read spending NFLMeta's account. The
+    (`omni.app.planned_mlb.mlb_accounts`), NFL's with ``nfl``, every NFL read spending NFLMeta's account, and NBA's
+    when ``nba`` names the BALLDONTLIE tier they're paced for, every one spending BALLDONTLIE's account. The
     ``ledger`` admits each ask against its account's quota."""
-    if mlb is None and not nfl:
+    if mlb is None and not nfl and nba is None:
         raise ValueError("a board's plan needs at least one league")
-    policies = {**(MLB_POLICIES if mlb is not None else {}), **(NFL_POLICIES if nfl else {})}
-    sources = {**(mlb.sources if mlb is not None else {}), **(nfl_accounts().sources if nfl else {})}
-    kinds = mlb.kinds if mlb is not None else {}
+    policies = {
+        **(MLB_POLICIES if mlb is not None else {}),
+        **(NFL_POLICIES if nfl else {}),
+        **(nba_policies(nba) if nba is not None else {}),
+    }
+    sources = {
+        **(mlb.sources if mlb is not None else {}),
+        **(nfl_accounts().sources if nfl else {}),
+        **(nba_accounts().sources if nba is not None else {}),
+    }
+    kinds = {
+        **(mlb.kinds if mlb is not None else {}),
+        **(nfl_accounts().kinds if nfl else {}),
+        **(nba_accounts().kinds if nba is not None else {}),
+    }
     return PollPlan(policies, ledger=ledger, accounts=AccountMap(sources=sources, kinds=kinds))
 
 
@@ -285,13 +360,35 @@ def planned_nfl_source(
     *,
     ledger: QuotaLedger,
     favorites: Favorites = Favorites(),
+    market: MarketReader | None = None,
+    tier: NflMetaPlan = NflMetaPlan.FREE,
 ) -> NflSource:
-    """NFL on the board: NFLMeta read through ``get`` on ``plan``, each response charged to NFLMeta's account on
-    the ``ledger`` (rows and all, from its headers), as the NFL runner reads it."""
+    """NFL on the board: NFLMeta read through ``get`` on ``plan`` as ``tier``'s month allows, each response charged to
+    NFLMeta's account on the ``ledger`` (rows and all, from its headers), as the NFL runner reads it; and, when given,
+    the meter from ``market``."""
     meter = Meter(ledger, ProviderAccount.NFLMETA, clock, billed=nflmeta_billed)
     provider = NflMetaLiveProvider(NflTeamRegistry.default(source=NFLMETA_SOURCE), fetch=MeteredHttp(get, meter))
-    planned = PlannedNfl(plan, clock, provider, favorites=favorites)
+    planned = PlannedNfl(plan, clock, provider, favorites=favorites, market=market, tier=tier)
     return NflSource(schedule=planned, feeds=planned, held_back=planned.held_back)
+
+
+def planned_nba_source(
+    plan: PollPlan,
+    clock: Clock,
+    fetch: BdlFetch,
+    *,
+    ledger: QuotaLedger,
+    tier: BalldontliePlan,
+    odds: NbaOddsReader | None = None,
+    market: MarketReader | None = None,
+    log: Callable[[str], None] = print,
+) -> PlannedNba:
+    """NBA on the board: BALLDONTLIE read through ``fetch`` on ``plan`` at ``tier``'s pace, each request charged to
+    BALLDONTLIE's account on the ``ledger``, and its word on its minute heeded (`omni.app.planned_nba.MeteredBdl`);
+    and, when given, the pregame line from ``odds`` and the meter from ``market``."""
+    meter = Meter(ledger, ProviderAccount.BALLDONTLIE, clock)
+    provider = BalldontlieProvider(NbaTeamRegistry.default(), fetch=MeteredBdl(fetch, meter, clock), clock=clock)
+    return PlannedNba(plan, clock, provider, tier=tier, odds=odds, market=market, log=log)
 
 
 def warm_up(loop: AppLoop, poller: Poller, clock: Clock) -> None:

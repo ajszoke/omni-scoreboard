@@ -11,6 +11,8 @@ import pytest
 
 from omni.app.poll_plan import Demand, PollPolicy, PollPriority
 from omni.app.quota import (
+    BALLDONTLIE_ALL_STAR,
+    BalldontliePlan,
     BALLDONTLIE_FREE,
     NFLMETA_BUILDER,
     NFLMETA_FREE,
@@ -77,6 +79,9 @@ def test_every_account_is_declared_with_today_s_known_limits_and_nflmeta_s_plan_
     assert account_limits(NflMetaPlan.BUILDER)[NFL] == NFLMETA_BUILDER
     assert NFLMETA_BUILDER == AccountLimits(per_minute=120, requests_a_month=75_000, rows_a_month=250_000)
     assert free[ProviderAccount.BALLDONTLIE] == BALLDONTLIE_FREE == AccountLimits(per_minute=5)
+    assert account_limits(balldontlie=BalldontliePlan.ALL_STAR)[ProviderAccount.BALLDONTLIE] == AccountLimits(
+        per_minute=55
+    )
     assert free[ProviderAccount.POLYMARKET_US] == POLYMARKET_US_PUBLIC == AccountLimits(per_minute=1_500)
     for account in (ProviderAccount.MLB_STATSAPI, ProviderAccount.BOVADA, ProviderAccount.MARKET_SERVICE):
         assert free[account] == UNLIMITED
@@ -89,6 +94,15 @@ def test_every_account_is_declared_with_today_s_known_limits_and_nflmeta_s_plan_
         "Bovada",
         "the market service",
     ]
+
+
+def test_balldontlie_s_tiers_keep_a_twelfth_of_the_minute_in_hand_and_only_all_star_reads_the_lines() -> None:
+    free, all_star = BalldontliePlan.FREE, BalldontliePlan.ALL_STAR
+    assert (free.published, all_star.published) == (BALLDONTLIE_FREE, BALLDONTLIE_ALL_STAR)
+    assert BALLDONTLIE_ALL_STAR == AccountLimits(per_minute=60)
+    assert (free.limits, all_star.limits) == (AccountLimits(per_minute=5), AccountLimits(per_minute=55))
+    assert (free.lines, all_star.lines) == (False, True)
+    assert [(plan.value, plan.label) for plan in BalldontliePlan] == [("free", "Free"), ("all-star", "ALL-STAR")]
 
 
 def test_nflmeta_s_plans_go_free_then_builder_and_a_spent_free_month_says_what_to_do_next() -> None:
@@ -164,6 +178,18 @@ def test_the_minute_is_a_sliding_window_and_a_refusal_says_when_it_has_room() ->
     assert not _admit(ledger, clock, FOCUS).admitted
     clock.advance(S)
     assert _admit(ledger, clock, FOCUS).admitted
+
+
+def test_a_provider_that_says_to_wait_holds_every_class_back_until_then_and_the_later_wait_stands() -> None:
+    ledger, clock = _ledger(AccountLimits(per_minute=60))
+    meter = Meter(ledger, TEST, clock)
+    meter.pause(20 * S)
+    ledger.pause(TEST, clock.monotonic() + 5 * S)  # an earlier end changes nothing
+    refused = _admit(ledger, clock, FOCUS)
+    assert refused.refusal is Refusal.PROVIDER_WAIT and refused.retry_at == clock.monotonic() + 20 * S
+    assert refused.reason == "quota: BALLDONTLIE said to wait, focus waiting"
+    clock.advance(20 * S)
+    assert _admit(ledger, clock, BACKFILL).admitted
 
 
 def test_an_admitted_ask_holds_its_place_until_charged_and_extra_requests_take_more() -> None:

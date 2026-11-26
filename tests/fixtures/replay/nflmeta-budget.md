@@ -5,7 +5,7 @@ A synthetic month of NFL games read through the board's quota ledger (`omni.app.
 - **Plans:** Free is 20 requests a minute, 5,000 requests and 25,000 rows a month; Builder ($12 a month) is 120, 75,000 and 250,000. The month is the UTC calendar month.
 - **Schedule:** 72 games kick off in November (UTC): Sundays of 11, 11, 14, 14, 12 games, four Thursdays (Thanksgiving's three games included), and four Monday nights (Nov 30's bills to December). The favorite (CAR) plays at 13:00 ET every Sunday. The typical Sunday is Nov 15: 14 games.
 - **Billing model:** one row per game a live-scores read lists plus one per injury (up to 4 a game by its final); an unfiltered read lists the whole day, finals included. A followed game's plays bill 280 rows over 274 reads on change. A followed game is read every 10 s outside its 13-minute halftime hold, through a 120 s drain after its final.
-- **Classes:** the favorite's score and plays and every final's drain are focus; other games' plays normal; the slate, the per-game and live-games reads background; the day's game list backfill.
+- **Classes:** the favorite's score and plays, and each other final's drain or read (B to E), are focus; other games' own score reads (F's, their drains included) and their plays normal; the slate, the per-game and live-games reads background; the day's game list backfill.
 - **NFLMeta's docs** (https://nflmeta.org/api-docs/core-endpoints, https://nflmeta.org/openapi.yaml): live-scores takes `phase` (pre, in, post), `game_id`, and `game_ids` (up to 100), and has no way to leave injuries out. They say each game listed bills a row; on PIT@CIN each injury entry billed one too, which this model follows. Responses carry `X-Monthly-Quota-Remaining` and, on plans with a row ceiling, `X-Monthly-Row-Remaining`, both for the current UTC month.
 
 ## Strategies
@@ -17,6 +17,7 @@ A synthetic month of NFL games read through the board's quota ledger (`omni.app.
 - **C45:** C with each game read every 45 s.
 - **D30:** B30 with plays on change for every live game.
 - **E:** one phase=in read every 45 s while another game is live, the favorite left out by id; the day's game ids from one unfiltered read before its first kickoff; the favorite at 10 s with its plays; one filtered read for each other final.
+- **F:** E with every other live game read by id every 30 s at normal, its plays on change, through its final's drain at that pace; with none left to read together, no phase=in read.
 
 ## Headline
 
@@ -31,11 +32,12 @@ Demand is what the strategy asks with nothing held back. A plan carries a strate
 | C45 | 58 | 4,820 | 12,100 | 24,634 | 61,900 | no: sheds from Nov 1, exhausted Nov 8, 125 reads wait for the minute | fits (32% of requests, 24% of rows) |
 | D30 | 69 | 6,250 | 66,685 | 35,624 | 311,255 | no: sheds from Nov 1, exhausted Nov 8, 459 reads wait for the minute | no: sheds from Nov 22 |
 | E | 17 | 2,144 | 11,324 | 13,270 | 57,902 | no: sheds from Nov 8, exhausted Nov 15 | fits (17% of requests, 23% of rows) |
+| F | 48 | 9,579 | 18,484 | 49,169 | 94,802 | no: sheds from Nov 1, exhausted Nov 8, 6,308 reads wait for the minute | fits (65% of requests, 37% of rows); sheds from Nov 23 |
 
 ## Which plan carries which strategy
 
 - **Free** carries none of them.
-- **Builder** carries A, B45, C30, C45, E.
+- **Builder** carries A, B45, C30, C45, E, F.
 
 ## What each plan does to the rest of the month
 
@@ -48,6 +50,7 @@ Demand is what the strategy asks with nothing held back. A plan carries a strate
 - **C45** (5,000 requests and 11,497 rows read): from Nov 1, other games' score reads every 90 s (background slowed); from Nov 8, no other games' score reads (background shed); from Nov 8, the month is spent: nothing more is read, the favorite included; refused for the month: 944 favorite play reads, 3,710 favorite score reads, 715 final drain reads, 13,750 other games' score reads.
 - **D30** (5,000 requests and 23,403 rows read): from Nov 1, slate reads every 60 s (background slowed); from Nov 1, no slate reads (background shed); from Nov 2, no other games' play reads (normal shed); from Nov 8, the month is spent: nothing more is read, the favorite included; refused for the month: 1,051 favorite play reads, 4,122 favorite score reads, 715 final drain reads, 15,618 other games' play reads, 8,896 slate reads.
 - **E** (5,000 requests and 18,405 rows read): from Nov 8, no day's game list reads (backfill shed); from Nov 8, live-games reads every 90 s (background slowed); from Nov 9, no live-games reads (background shed); from Nov 15, the month is spent: nothing more is read, the favorite included; refused for the month: 10 day's game list reads, 720 favorite play reads, 2,828 favorite score reads, 43 final drain reads, 4,363 live-games reads.
+- **F** (5,000 requests and 8,638 rows read): from Nov 1, no other games' own score reads (normal shed); from Nov 1, no other games' play reads (normal shed); from Nov 2, no day's game list reads (backfill shed); from Nov 8, the month is spent: nothing more is read, the favorite included; refused for the month: 12 day's game list reads, 1,045 favorite play reads, 4,100 favorite score reads, 21,739 other games' own score reads, 16,591 other games' play reads.
 
 ### Builder
 
@@ -58,6 +61,7 @@ Demand is what the strategy asks with nothing held back. A plan carries a strate
 - **C45** (24,634 requests and 61,900 rows read): all of it.
 - **D30** (33,302 requests and 231,122 rows read): from Nov 22, slate reads every 60 s (background slowed); from Nov 29, no slate reads (background shed); refused for the month: 1,090 slate reads.
 - **E** (13,270 requests and 57,902 rows read): all of it.
+- **F** (49,166 requests and 94,786 rows read): from Nov 23, no day's game list reads (backfill shed); refused for the month: 3 day's game list reads.
 
 ## A board restart
 

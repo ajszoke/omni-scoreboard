@@ -591,12 +591,13 @@ def _caption(moment: _Moment) -> str | None:
 
 
 def test_an_nfl_play_captions_its_card_from_its_release_until_its_hard_end_and_halftime_counts_down(day: _Day) -> None:
-    """DAL@PHI's touchdown is written at 11:34:40 and read at 11:35:00, so it clears the delay 20 s early, and as a
-    major play it's gone 150 s after. SF@SEA's, after the wall clock's step, can't be dated: the full delay."""
+    """DAL@PHI's touchdown is written at 11:34:40 and read at 11:35:00, so it clears the delay 20 s early, and as the
+    live card's line it's gone 330 s after: the 5 minutes it may start in, and a turn of its card. SF@SEA's, after the
+    wall clock's step, can't be dated: the full delay."""
     live = _drawn(day, "nfl:nflmeta:401:live")
     scored = [moment.elapsed for moment in live if _caption(moment) == "TOUCHDOWN"]
     read = _first_ask(day.run, NFL_SHARED, PollSource.GAME_FEED, after=_at(SUN, 11, 34, 40))
-    assert scored and read + LAG.value - 20 <= scored[0] and scored[-1] < read + LAG.value - 20 + 150
+    assert scored and read + LAG.value - 20 <= scored[0] and scored[-1] < read + LAG.value - 20 + 330
     late = [moment.elapsed for moment in _drawn(day, "nfl:nflmeta:403:live") if _caption(moment) == "TOUCHDOWN"]
     read = _first_ask(day.run, SF_SEA, PollSource.GAME_FEED, after=_at(SUN, 15, 5, 45))
     assert late and read + LAG.value <= late[0]

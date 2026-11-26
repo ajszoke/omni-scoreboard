@@ -60,6 +60,7 @@ from omni.providers.base import ProviderError
 
 __all__ = [
     "AccountLocks",
+    "BALLDONTLIE_ALL_STAR",
     "BALLDONTLIE_FREE",
     "NFLMETA_BUILDER",
     "NFLMETA_FREE",
@@ -68,6 +69,7 @@ __all__ = [
     "UNLIMITED",
     "AccountLimits",
     "Admission",
+    "BalldontliePlan",
     "Billed",
     "BillingMonth",
     "ClassRule",
@@ -148,6 +150,7 @@ UNLIMITED = AccountLimits()  # counted, never held back
 NFLMETA_FREE = AccountLimits(per_minute=20, requests_a_month=5_000, rows_a_month=25_000)
 NFLMETA_BUILDER = AccountLimits(per_minute=120, requests_a_month=75_000, rows_a_month=250_000)
 BALLDONTLIE_FREE = AccountLimits(per_minute=5)
+BALLDONTLIE_ALL_STAR = AccountLimits(per_minute=60)
 POLYMARKET_US_PUBLIC = AccountLimits(per_minute=25 * 60)  # 25 a second per IP
 
 
@@ -164,6 +167,12 @@ class NflMetaPlan(StrEnumMixin, str, Enum):
     @property
     def limits(self) -> AccountLimits:
         return NFLMETA_BUILDER if self is NflMetaPlan.BUILDER else NFLMETA_FREE
+
+    @property
+    def every_game(self) -> bool:
+        """Whether the plan's month carries each live game read on its own, plays and all (strategy F of
+        `omni.replay.nfl_budget`): Builder's does, with room to spare; Free's carries a favorite's alone."""
+        return self is NflMetaPlan.BUILDER
 
     @property
     def label(self) -> str:
@@ -191,12 +200,51 @@ class NflMetaPlan(StrEnumMixin, str, Enum):
         )
 
 
-def account_limits(nflmeta: NflMetaPlan = NflMetaPlan.FREE) -> dict[ProviderAccount, AccountLimits]:
-    """Every account the board spends, with today's known limits: NFLMeta's by its plan, BALLDONTLIE's Free,
+class BalldontliePlan(StrEnumMixin, str, Enum):
+    """The BALLDONTLIE tier the board's key is on. The user chooses it; the board never assumes a paid one.
+
+    Free reads the day's games alone. ALL-STAR adds every player's line so far (``/v1/stats``), which Free's tier
+    can't read: the captions, the box scores and the players' lines come from it.
+
+    The ledger keeps a twelfth of a plan's minute in hand (`limits`), so a clock that disagrees with the provider's
+    about where a minute starts never spends the last of it: ALL-STAR's 60 a minute are asked at 55, the pace a
+    whole recorded night kept without a 429. Free's 5 have none to spare, and its reads are paced to fit them.
+    """
+
+    FREE = "free"
+    ALL_STAR = "all-star"  # $9.99 a month
+
+    @property
+    def published(self) -> AccountLimits:
+        """What the tier allows, as BALLDONTLIE publishes it."""
+        return BALLDONTLIE_ALL_STAR if self is BalldontliePlan.ALL_STAR else BALLDONTLIE_FREE
+
+    @property
+    def limits(self) -> AccountLimits:
+        """What the ledger holds the account to: the tier's minute less a twelfth of it."""
+        per_minute = self.published.per_minute
+        assert per_minute is not None  # each tier is limited by the minute
+        return AccountLimits(per_minute=per_minute - per_minute // 12)
+
+    @property
+    def lines(self) -> bool:
+        """Whether the tier reads the players' lines."""
+        return self is BalldontliePlan.ALL_STAR
+
+    @property
+    def label(self) -> str:
+        """The tier's name, as BALLDONTLIE writes it: "Free", "ALL-STAR"."""
+        return "ALL-STAR" if self is BalldontliePlan.ALL_STAR else "Free"
+
+
+def account_limits(
+    nflmeta: NflMetaPlan = NflMetaPlan.FREE, balldontlie: BalldontliePlan = BalldontliePlan.FREE
+) -> dict[ProviderAccount, AccountLimits]:
+    """Every account the board spends, with today's known limits: NFLMeta's and BALLDONTLIE's by their plans,
     Polymarket US's per-IP rate, and the rest unlimited."""
     limits = dict.fromkeys(ProviderAccount, UNLIMITED)
     limits[ProviderAccount.NFLMETA] = nflmeta.limits
-    limits[ProviderAccount.BALLDONTLIE] = BALLDONTLIE_FREE
+    limits[ProviderAccount.BALLDONTLIE] = balldontlie.limits
     limits[ProviderAccount.POLYMARKET_US] = POLYMARKET_US_PUBLIC
     return limits
 
@@ -216,6 +264,7 @@ class Refusal(StrEnumMixin, str, Enum):
     ROWS_RESERVE = "rows_reserve"  # the month's rows left are held for more important asks
     EXHAUSTED = "exhausted"  # nothing is left this month
     ELSEWHERE = "elsewhere"  # another process on this machine is polling the account
+    PROVIDER_WAIT = "provider_wait"  # the provider said to wait: its own minute is spent, or a 429 said how long
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -341,6 +390,8 @@ class Admission:
             return polled_elsewhere(self.account, self.holder or "another process")
         if self.refusal is Refusal.PER_MINUTE:
             return f"quota: {name} {self.used} of {self.per_minute} a minute used, {kind} waiting"
+        if self.refusal is Refusal.PROVIDER_WAIT:
+            return f"quota: {name} said to wait, {kind} waiting"
         if self.refusal is Refusal.EXHAUSTED:
             upgrade = self.plan.upgrade if self.plan is not None else None
             if self.plan is not None and upgrade is not None:
@@ -531,6 +582,7 @@ class QuotaLedger:
         self._store = store
         self._locks = locks
         self._claimed: set[ProviderAccount] = set()
+        self._paused: dict[ProviderAccount, MonotonicTime] = {}  # until when a provider said to wait
         self._save_every = save_every
         self._saved_at: MonotonicTime | None = None
         self._dirty = False
@@ -568,6 +620,15 @@ class QuotaLedger:
             if self._locks is not None:
                 self._locks.release()
             self._claimed.clear()
+
+    def pause(self, account: ProviderAccount, until: MonotonicTime) -> None:
+        """The provider said to wait until ``until`` (its own minute spent, or a 429's ``retry-after``): no ask or
+        request of ``account`` is admitted before then, whatever its class. A later pause extends it; an earlier one
+        changes nothing."""
+        with self._lock:
+            paused = self._paused.get(account)
+            if paused is None or until > paused:
+                self._paused[account] = until
 
     def admit(self, account: ProviderAccount, demand: Demand, at: ClockReading) -> Admission:
         """Whether an ask of ``demand``'s class may go out now. An admitted one holds its place in the minute for its
@@ -608,6 +669,9 @@ class QuotaLedger:
         refused = _exhausted(held, lefts)
         if refused is not None:
             return self._spent(account, held, demand.priority, refused)
+        paused = self._paused.get(account)
+        if paused is not None and at.monotonic < paused:
+            return Admission(account=account, priority=demand.priority, refusal=Refusal.PROVIDER_WAIT, retry_at=paused)
         tighter = min(lefts, key=lambda left: left.share, default=None)
         slowed_by = 1
         if tighter is not None and not _keeps(tighter, rule.above):
@@ -917,6 +981,11 @@ class Meter:
             raise QuotaExhausted(admission)
         if not admission.admitted:
             raise QuotaRefused(admission)
+
+    def pause(self, span: timedelta) -> None:
+        """The provider said to wait ``span`` from now: the account's asks and requests wait it out
+        (`QuotaLedger.pause`)."""
+        self._ledger.pause(self._account, self._clock.monotonic() + span)
 
     def charge(self, headers: Mapping[str, str] | None = None) -> None:
         """One request went out: charge it, with what its response's headers say it billed and left (nothing, for a

@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any
 
 from omni.app.quota import (
+    BalldontliePlan,
     BillingMonth,
     MonthUsage,
     NflMetaPlan,
@@ -216,16 +217,18 @@ def open_ledger(
     state_dir: Path,
     nflmeta: NflMetaPlan,
     *,
+    balldontlie: BalldontliePlan = BalldontliePlan.FREE,
     policy: QuotaPolicy = SHEDDING,
     log: Callable[[str], None] = print,
     who: str | None = None,
 ) -> QuotaLedger:
-    """The board's ledger: every account at today's limits (NFLMeta's at ``nflmeta``), counting on from the
+    """The board's ledger: every account at today's limits (NFLMeta's at ``nflmeta``, BALLDONTLIE's at
+    ``balldontlie``), counting on from the
     usage saved under ``state_dir``, and saving back there. NFLMeta is polled by one process at a time: the ledger
     holds it under ``state_dir`` (`FileLocks`, as ``who``, by default the program's name) from its first ask on."""
     usage = UsageFile(state_dir / USAGE_FILE, log=log)
     return QuotaLedger(
-        account_limits(nflmeta),
+        account_limits(nflmeta, balldontlie),
         policy=policy,
         usage=usage.load(),
         store=usage,

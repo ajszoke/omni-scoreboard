@@ -12,6 +12,7 @@ import pytest
 
 from omni.app.poll_plan import Demand, PollPriority
 from omni.app.quota import (
+    BalldontliePlan,
     BillingMonth,
     MonthUsage,
     NflMetaPlan,
@@ -48,6 +49,12 @@ def test_the_state_directory_follows_xdg_and_falls_back_to_the_home_directory() 
     assert default_state_dir({"XDG_STATE_HOME": "/var/state"}, home) == Path("/var/state/omni")
     assert default_state_dir({"XDG_STATE_HOME": ""}, home) == Path("/home/fan/.local/state/omni")
     assert default_state_dir({}, home) == Path("/home/fan/.local/state/omni")
+
+
+def test_the_ledger_holds_balldontlie_to_the_tier_it_s_opened_with(tmp_path: Path) -> None:
+    assert open_ledger(tmp_path, NflMetaPlan.FREE, log=_quiet).limits(ProviderAccount.BALLDONTLIE).per_minute == 5
+    all_star = open_ledger(tmp_path, NflMetaPlan.FREE, balldontlie=BalldontliePlan.ALL_STAR, log=_quiet)
+    assert all_star.limits(ProviderAccount.BALLDONTLIE).per_minute == 55
 
 
 def test_the_usage_survives_a_restart(tmp_path: Path) -> None:

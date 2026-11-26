@@ -9,7 +9,17 @@ from typing import Any
 
 from omni.app.football_feed import GameFeed
 from omni.app.poll_plan import Demand, PollPriority
-from omni.app.quota import AccountLimits, MeteredHttp, Meter, NflMetaPlan, QuotaLedger, account_limits, nflmeta_billed
+from omni.app.quota import (
+    UNLIMITED,
+    AccountLimits,
+    MeteredHttp,
+    Meter,
+    NflMetaPlan,
+    ProviderAccount,
+    QuotaLedger,
+    account_limits,
+    nflmeta_billed,
+)
 from omni.app.quota_store import open_ledger
 from omni.core.clock import FakeClock
 from omni.providers.nfl_teams import NflTeamRegistry
@@ -42,7 +52,8 @@ def test_eighteen_places_held_in_free_s_minute_leave_a_followed_poll_two_request
 
 
 def test_a_followed_poll_s_pages_are_each_charged_once_and_its_ask_s_place_is_its_first_request_s() -> None:
-    board = _board(EARLY - 60 * S, ledger=QuotaLedger({NFL: AccountLimits(per_minute=5)}))
+    ledger = QuotaLedger({NFL: AccountLimits(per_minute=5), ProviderAccount.POLYMARKET_US: UNLIMITED})  # the meter's
+    board = _board(EARLY - 60 * S, ledger=ledger)
     board.nflmeta.rows[101] = _row(*CAR_ATL, **LIVE)
     board.nflmeta.plays[101] = list(PAGES_150)
     board.step()

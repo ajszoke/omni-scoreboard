@@ -8,15 +8,20 @@ the game for its phase:
 - **upcoming** — no card yet. No renderer draws an upcoming NFL game as it is: the pregame card is baseball's (it
   counts down to a "first pitch"), and the football card's kickoff state is a game already under way.
 - **live** — a `LIVE_GAME` card drawn by the live football renderer, from the newest state to have cleared the TV
-  delay, with when a halftime ends (delayed to the viewer's clock) so the break counts down. No win meter yet.
-  - **The caption** (`last_play`) is the newest released play, staged with which entry it is and its bounds
-    (`StagedCaption`). It starts only when a frame that carried it is confirmed shown (`presented`): a routine entry
-    must start within 60 s of its release and is gone by 90 s; a major one (a score, a turnover, a ruling) by 120 s
-    and 150 s (`NflCardPolicy`; `CLOCK_AND_SCHEDULING.md`, the strip's hard ends). One no confirmed frame carried by
-    its latest start is dropped, and the pass says so (`CaptionMiss`): it's never shown late. Once a newer answer's
-    field has moved on from the one the play's own answer showed, the play no longer describes the field, and goes.
-    It airs only beside a field whose score agrees with its own answer's: until that field is released, the card
-    shows the field alone, as it does in a break or while the feed has gone quiet.
+  delay, with when a halftime ends (delayed to the viewer's clock) so the break counts down.
+  - **The win meter**, when the board reads one. The market moves on a play as it happens, while the feed reports it
+    20 to 30 seconds later, so a price as fresh as the feed's answer would give the play away early. The meter takes
+    the newest reading that arrived no later than `NflCardPolicy.meter_lag` before the answer whose state is on the
+    card, and drops it once it's `meter_max_age` older than that on the broadcast's clock: the delay, the lag and the
+    max age past its own arrival. A stale card shows no meter, and a final has none.
+  - **The caption** (`last_play`) is the game's line: the newest released play, staged with which entry it is and its
+    bounds (`StagedCaption`). It may first go up until it's `NflCardPolicy.recent_line` (5 minutes) past its release,
+    routine or major, and is gone one of the live card's longest turns after that, so a line up by then holds to its
+    turn's end; the board's policy picks the turns that show it (`omni.tower.director`). It needs no confirmed frame,
+    and none is said to have missed. Once a newer answer's field has moved on from the one the play's own answer
+    showed, the play no longer describes the field, and goes. It airs only beside a field whose score agrees with its
+    own answer's: until that field is released, the card shows the field alone, as it does in a break or while the
+    feed has gone quiet.
   - The plays in a game's first answer are from before the board tuned in, and what an outage's catch-up brings is
     history: none of them captions the card, nor is offered.
 - **final** — a result comes only from an answer that itself says the game is over. The first is held for the TV
@@ -32,7 +37,11 @@ the game for its phase:
   - **The drain.** The feed is read for a while after the final, for late plays and fixes. A play it brings that
     decided the game (`InterruptClass.DECISIVE_LATE_WINNER`, read against the last live state) updates the revealed
     final once, as its caption and the play that decided it; one that can't (the final's window is over, or it
-    already names one) is dropped, and the pass says why. Nothing the drain brings is offered for promotion.
+    already names one) is dropped, and the pass says why. Nothing the drain brings is offered for promotion. That
+    caption keeps the strip's bounds (`NflCardPolicy`; `CLOCK_AND_SCHEDULING.md`, the strip's hard ends): it starts
+    only when a frame that carried it is confirmed shown (`presented`), a routine entry within 60 s of its release
+    and a major one (a score, a turnover, a ruling) within 120 s, and is gone by 90 s and 150 s. One no confirmed
+    frame carried by its latest start is dropped, and the pass says so (`CaptionMiss`): it's never shown late.
 
 **Release.** Every hold (a state, a play, a result) is pinned when it is admitted, on the monotonic clock, by the
 board's `ReleaseGuard` for NFL's own delay: a play whose write time is credible at receipt + the delay less its age,
@@ -57,6 +66,11 @@ released state only (`omni.app.policy_facts`):
   play's revision: the field its answer showed, with the play as its caption (a `BIG_PLAY` card the live football
   renderer draws). Its moment is the play it's about: a review's ruling is that play's next revision, and a try
   merges into its touchdown. Once a ruling on a play is released, the play's older card and offer are withdrawn.
+  - **The swing.** When the board reads a market, a play's class also reads how far the market moved across it
+    (`omni.policy.interrupts.win_swing`): from its reading `meter_lag` before the answer before the play's, to its
+    reading `meter_lag` before the play's own answer, as the meter reads each. Ten points or more is a win swing at
+    any point in the game (`InterruptClass.WIN_SWING`). Those readings span every play one answer brought, so the
+    swing is put down to one of them: the answer's first score, turnover or ruling, else its last play.
 
 **Notes.** What the feed says about a poll reaches the warnings in our own words alone (`FeedNote.ours`): its kind,
 how many, and which entry by our own label. The feed's own words go only to a log stamped to expire.
@@ -78,9 +92,16 @@ from enum import Enum
 from types import MappingProxyType
 from typing import Any, Iterable
 
-from omni.app.football_board import MAJOR_HARD_END, MAJOR_START_WITHIN, ROUTINE_HARD_END, ROUTINE_START_WITHIN
+from omni.app.football_board import (
+    MAJOR_HARD_END,
+    MAJOR_START_WITHIN,
+    METER_LAG,
+    METER_MAX_AGE,
+    ROUTINE_HARD_END,
+    ROUTINE_START_WITHIN,
+)
 from omni.app.nfl_feeds import NflFeeds, NflReading
-from omni.app.pipeline import CONFIRM_WITHIN, STALE_FOR, PipelineResult
+from omni.app.pipeline import CONFIRM_WITHIN, STALE_FOR, GameMeter, PipelineResult
 from omni.app.policy_facts import (
     OFFER_LIFETIME,
     AwaitingSuccessor,
@@ -106,11 +127,12 @@ from omni.core.clock import ClockReading, MonotonicTime
 from omni.core.enum import DisplayPriority, GameStatus, PanelProfile, StrEnumMixin
 from omni.core.ids import LeagueScopedId
 from omni.core.time import DurationSeconds
+from omni.domain.baseball import WinProbability
 from omni.domain.contest import TeamGame
 from omni.domain.football import FootballGameState
 from omni.events.football import FootballEvent, FootballEventKind
 from omni.events.nfl_breaks import nfl_break_evidence, nfl_latest_action
-from omni.policy.interrupts import InterruptClass, classify_football_event
+from omni.policy.interrupts import SWING_KINDS, InterruptClass, classify_football_event, win_swing
 from omni.policy.leverage import football_proxy
 from omni.policy.promotion import CandidateOrigin, PromotionKey
 from omni.policy.view import GameFacts, PolicyView
@@ -141,8 +163,8 @@ class CaptionMiss(StrEnumMixin, str, Enum):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class NflCardPolicy:
-    """How NFL's cards are timed: their turns, the caption's lifetimes, a play's own card, and when a quiet feed's
-    card dims and goes."""
+    """How NFL's cards are timed: their turns, the live card's line and the other captions' lifetimes, a play's own
+    card, how old the meter's reading may be, and when a quiet feed's card dims and goes."""
 
     live_min_display: DurationSeconds = DurationSeconds(8)
     live_max_display: DurationSeconds = DurationSeconds(30)
@@ -152,6 +174,8 @@ class NflCardPolicy:
     play_max_display: DurationSeconds = DurationSeconds(12)
     play_window: timedelta = OFFER_LIFETIME  # and it's staged as long as its offer stands
     postgame_window: timedelta = timedelta(minutes=30)  # how long a final lingers after its reveal
+    recent_line: timedelta = timedelta(minutes=5)  # the live card's line may first go up until it's this old
+    # A play's own card and a final's deciding play keep the strip's bounds:
     routine_start_within: timedelta = ROUTINE_START_WITHIN  # a routine caption not up by then never goes up
     routine_hard_end: timedelta = ROUTINE_HARD_END  # and is gone by then, up or not
     major_start_within: timedelta = MAJOR_START_WITHIN  # a score, a turnover, a ruling
@@ -159,12 +183,19 @@ class NflCardPolicy:
     current_cadences: int = 2  # an answer that doesn't say how long it's current is current for this many cadences
     stale_for: timedelta = STALE_FOR  # a stale live card comes down this long after it went stale
     confirm_within: timedelta = CONFIRM_WITHIN  # how long the schedule may call a game final before its feed must
+    meter_lag: timedelta = METER_LAG  # the meter's reading arrived at least this long before the answer on the card
+    meter_max_age: timedelta = METER_MAX_AGE  # a reading this much older than its lag is no reading at all
 
     def caption_bounds(self, major: bool) -> tuple[timedelta, timedelta]:
-        """How long after its release a caption may first go up, and when it's gone."""
+        """How long after its release a play's own caption, or a final's, may first go up, and when it's gone."""
         if major:
             return self.major_start_within, self.major_hard_end
         return self.routine_start_within, self.routine_hard_end
+
+    def line_bounds(self) -> tuple[timedelta, timedelta]:
+        """How long after its release the live card's line may first go up, and when it's gone: one of the card's
+        longest turns later, so a line up by its latest start holds to its turn's end."""
+        return self.recent_line, self.recent_line + self.live_max_display.as_timedelta()
 
 
 @dataclass(frozen=True, slots=True)
@@ -209,8 +240,8 @@ class _ReleasedPlay:
 
 @dataclass(slots=True)
 class _Caption:
-    """An entry staged to caption a card, from its release until it's gone; started once a confirmed frame carried it
-    by its latest start."""
+    """An entry staged to caption a card, from its release until it's gone; a final's is started once a confirmed
+    frame carried it by its latest start."""
 
     play: _Play
     staged: StagedCaption
@@ -235,8 +266,10 @@ class _Live:
     states: DelayedFeed[_Field]
     plays: DelayedEventStream[_Play]
     breaks: ReleasedBreaks  # its break and action evidence, held with the states
+    meter: GameMeter  # the market's reading beside the field
     primed: bool = False  # its first answer's plays were set aside as from before the board tuned in
     last: FootballGameState | None = None  # the newest live answer's state: the one before the next answer's plays
+    last_arrived: ClockReading | None = None  # when that answer arrived
     rulings: dict[str, int] = field(default_factory=dict)  # each play's rulings so far, by the play it's about
     offered: int = 0  # plays offered so far: each one's place in the feed
     shown: Held[_Field] | None = None  # the newest state to have cleared the delay
@@ -342,8 +375,8 @@ class LiveFootballPipeline:
         )
 
     def presented(self, card: ScoreboardCard[Any], at: ClockReading) -> None:
-        """The display confirmed a frame of ``card`` shown at ``at``: a caption it carried first went up then, if that
-        was before its latest start. Safe from the frame thread; the next refresh takes it in."""
+        """The display confirmed a frame of ``card`` shown at ``at``: a final's caption it carried first went up then,
+        if that was before its latest start. Safe from the frame thread; the next refresh takes it in."""
         payload = card.payload
         if not isinstance(payload, LiveFootballCardPayload) or payload.last_play is None or payload.caption is None:
             return
@@ -352,11 +385,12 @@ class LiveFootballPipeline:
 
     def next_deadline(self, at: ClockReading) -> MonotonicTime | None:
         """When the pipeline would next surface or drop something by itself, as of ``at``: a state, a play or a
-        result clearing the delay, a caption's latest start or hard end, a live card going stale, or a stale card
-        coming down."""
+        result clearing the delay, a line's end, a final's caption's latest start or hard end, a live card going
+        stale, or a stale card coming down."""
         instants: list[MonotonicTime | None] = []
         for live in self._live.values():
-            instants += [live.states.next_eligible(at), live.plays.next_eligible(), *_bounds(live.caption)]
+            line = live.caption.staged.hard_end if live.caption is not None else None  # it has no start to miss
+            instants += [live.states.next_eligible(at), live.plays.next_eligible(), line]
         for final in self._finals.values():
             instants += [final.answers.next_eligible(at), *_bounds(final.caption)]
             if final.live is not None:
@@ -371,14 +405,14 @@ class LiveFootballPipeline:
         return min((instant for instant in instants if instant is not None and instant > at.monotonic), default=None)
 
     def _take_presented(self) -> None:
-        """Start each staged caption a confirmed frame carried by its latest start."""
+        """Start each final's staged caption a confirmed frame carried by its latest start."""
         with self._lock:
             presented, self._presented = self._presented, {}
         for (game_id, play), shown in presented.items():
-            for kept in (self._live.get(game_id), self._finals.get(game_id)):
-                caption = kept.caption if kept is not None else None
-                if caption is not None and caption.staged.play == play and shown < caption.staged.latest_start:
-                    caption.started = True
+            final = self._finals.get(game_id)
+            caption = final.caption if final is not None else None
+            if caption is not None and caption.staged.play == play and shown < caption.staged.latest_start:
+                caption.started = True
 
     # --- one game -----------------------------------------------------------------------------------------------
 
@@ -391,7 +425,13 @@ class LiveFootballPipeline:
             return
         live = self._live.get(game.id)
         if live is None:
-            live = _Live(game, DelayedFeed(self._guard), DelayedEventStream(self._guard), ReleasedBreaks(self._guard))
+            live = _Live(
+                game,
+                DelayedFeed(self._guard),
+                DelayedEventStream(self._guard),
+                ReleasedBreaks(self._guard),
+                self._meter(),
+            )
             self._live[game.id] = live
         live.game = game
         # Answers taken while its feed is out of date end an outage: what they bring is a catch-up.
@@ -425,7 +465,9 @@ class LiveFootballPipeline:
         out.warnings.extend(_noted(game.id, snapshot.notes))
         arrival = Arrival(received=reading.arrived, as_of=snapshot.observed_at)
         state = snapshot.state
-        context = PlayContext(live.last, state, self._guard.pin(arrival, at), origin)
+        context = PlayContext(
+            live.last, state, self._guard.pin(arrival, at), origin, live.last_arrived, reading.arrived
+        )
         self._offer_plays(
             game, live, snapshot.events, _field_of(state) if state is not None else None, arrival, at, context
         )
@@ -434,7 +476,8 @@ class LiveFootballPipeline:
         if snapshot.phase is NflPhase.POST:
             self._confirm_final(game, state, arrival, at)
         elif game.id not in self._finals:
-            live.last = state  # a final's plays are read against the last live state
+            # A final's plays are read against the last live state; the next answer's read the market from its arrival.
+            live.last, live.last_arrived = state, reading.arrived
             live.states.push(_Field(state, snapshot.break_ends_at), arrival, at)
             evidence = nfl_break_evidence(snapshot, reading.arrived)
             live.breaks.push(evidence, nfl_latest_action(snapshot, reading.arrived), arrival, at)
@@ -469,7 +512,7 @@ class LiveFootballPipeline:
                 live.rulings[about] = revision
 
     def _release_plays(self, game: TeamGame, live: _Live, at: ClockReading, out: _Pass) -> None:
-        """The newest play to clear the delay becomes the caption; an older one never takes a newer one's place. A
+        """The newest play to clear the delay becomes the line; an older one never takes a newer one's place. A
         ruling withdraws what stood for the play it rules on. Each live play waits for the state after it to clear
         too, to be offered for promotion; an outage's catch-up is history, and set aside."""
         caught_up = 0
@@ -479,7 +522,7 @@ class LiveFootballPipeline:
             current = play.context.origin is CandidateOrigin.LIVE
             if play.order > live.captioned:
                 live.captioned = play.order
-                live.caption = self._caption_of(play, held.release) if current else None
+                live.caption = self._line_of(play, held.release) if current else None
             if current:
                 live.awaiting.add(play.context.settled, _ReleasedPlay(game, play, held.release))
             else:
@@ -502,14 +545,20 @@ class LiveFootballPipeline:
 
     def _settle_plays(self, game: TeamGame, live: _Live, at: ClockReading, out: _Pass) -> None:
         """Each released play whose successor has cleared too: offered if its class scores, naming a card of its own
-        (the field its answer showed, with the play as its caption), unless a ruling on it is out already."""
-        for released in live.awaiting.ready(at.monotonic):
+        (the field its answer showed, with the play as its caption), unless a ruling on it is out already. The play
+        each answer's market swing is put down to (`_swung`) is classed with that swing."""
+        settled = live.awaiting.ready(at.monotonic)
+        # A play a ruling on it has overtaken no longer stands: it's neither offered nor put down for a swing.
+        standing = [each for each in settled if each.play.revision >= live.released[each.play.moment.play]]
+        swung = _swung(standing)
+        for released in standing:
             play = released.play
             moment = play.moment.play
-            if play.revision < live.released[moment]:
-                continue  # a ruling on it is out: it no longer stands
             context = play.context
-            classification = classify_football_event(play.event, before=context.before, after=context.after)
+            swing = self._swing(game, context) if play.event.key in swung else None
+            classification = classify_football_event(
+                play.event, before=context.before, after=context.after, swing=swing
+            )
             staged = live.cards.get(moment)
             key = staged.key if staged is not None else _play_key(game, play)
             offer = major_offer(
@@ -549,8 +598,12 @@ class LiveFootballPipeline:
         since = self._recover(game.id, shown)
         if since is not None and at.monotonic.since(since) >= self._policy.stale_for:
             return  # its card is down for staleness: nothing goes back up until a newer state clears the delay
-        caption = self._caption(game, live, shown, at, out, stale=since is not None)
-        card = self._live_card(game, shown.value, caption, at)
+        stale = since is not None
+        caption = self._caption(live, shown, at, stale=stale)
+        as_of = self._lagged(shown.arrival.received)  # the market, lag before the shown answer
+        live.meter.admit(self._feeds.win_probability(game, as_of), as_of)
+        meter = live.meter.current(at)
+        card = self._live_card(game, shown.value, caption, None if stale else meter, at)
         current = self._queue.card(card.dedupe_key.raw)
         recovered = current is not None and current.stale_since is not None and since is None and safe is not None
         if current is None or current.payload != card.payload or current.priority != card.priority or recovered:
@@ -568,26 +621,21 @@ class LiveFootballPipeline:
         self._answering.discard(game_id)
         return None
 
-    def _caption(
-        self, game: TeamGame, live: _Live, shown: Held[_Field], at: ClockReading, out: _Pass, *, stale: bool
-    ) -> _Caption | None:
-        """The play to caption the card beside ``shown``, or None for the field alone.
+    @staticmethod
+    def _caption(live: _Live, shown: Held[_Field], at: ClockReading, *, stale: bool) -> _Caption | None:
+        """The line to caption the card beside ``shown``, or None for the field alone.
 
-        A caption goes for good once it has run out its lifetime, a newer answer's field has moved on from its own
-        answer's, or no confirmed frame carried it by its latest start (said so). While the feed is quiet, in a
-        break, or before the field that agrees with its score is released, the card shows the field alone.
+        A line goes for good at its hard end, or once a newer answer's field has moved on from its own answer's. While
+        the feed is quiet, in a break, or before the field that agrees with its score is released, the card shows the
+        field alone.
         """
         caption = live.caption
         if caption is None:
             return None
-        now = at.monotonic
         state = shown.value.state
         moved = shown.arrival.received.monotonic > caption.play.answer and _field_of(state) != caption.play.field
-        late = not caption.started and now >= caption.staged.latest_start
-        if late or moved or now >= caption.staged.hard_end:
+        if moved or at.monotonic >= caption.staged.hard_end:
             live.caption = None
-            if late:
-                self._missed(game, caption.play, CaptionMiss.TOO_LATE, out)
             return None
         if stale or state.interval is not None or _score(state) != caption.play.score:
             return None
@@ -854,15 +902,28 @@ class LiveFootballPipeline:
 
     def _caption_of(self, play: _Play, release: MonotonicTime) -> _Caption:
         """``play`` staged as a caption from its ``release``, with its bounds."""
-        start_within, hard_end = self._policy.caption_bounds(play.event.major)
+        return self._staged(play, release, self._policy.caption_bounds(play.event.major))
+
+    def _line_of(self, play: _Play, release: MonotonicTime) -> _Caption:
+        """``play`` staged as the live card's line from its ``release``, with its bounds."""
+        return self._staged(play, release, self._policy.line_bounds())
+
+    @staticmethod
+    def _staged(play: _Play, release: MonotonicTime, bounds: tuple[timedelta, timedelta]) -> _Caption:
+        start_within, hard_end = bounds
         staged = StagedCaption(play=play.ref, latest_start=release + start_within, hard_end=release + hard_end)
         return _Caption(play, staged)
 
     def _live_card(
-        self, game: TeamGame, shown: _Field, caption: _Caption | None, at: ClockReading
+        self,
+        game: TeamGame,
+        shown: _Field,
+        caption: _Caption | None,
+        meter: WinProbability | None,
+        at: ClockReading,
     ) -> ScoreboardCard[LiveFootballCardPayload]:
-        """A live card for ``game`` showing ``shown`` and ``caption``, its halftime counting down on the viewer's
-        clock."""
+        """A live card for ``game`` showing ``shown``, ``caption`` and ``meter``, its halftime counting down on the
+        viewer's clock."""
         ends = shown.break_ends_at
         lag = self._guard.policy.broadcast_lag.as_timedelta()
         key = f"{game.id}:live"
@@ -883,6 +944,7 @@ class LiveFootballPipeline:
                 last_play=caption.play.event.summary if caption is not None else None,
                 break_ends_at=ends + lag if ends is not None else None,
                 caption=caption.staged if caption is not None else None,
+                win_probability=meter,
             ),
         )
 
@@ -913,6 +975,27 @@ class LiveFootballPipeline:
             ),
         )
 
+    def _lagged(self, arrived: ClockReading) -> ClockReading:
+        """`NflCardPolicy.meter_lag` before an answer that arrived at ``arrived``: the market's newest reading by then
+        can't know of a play the answer doesn't."""
+        lag = self._policy.meter_lag
+        return ClockReading(arrived.utc - lag, arrived.monotonic + -lag)
+
+    def _swing(self, game: TeamGame, context: PlayContext[FootballGameState]) -> float | None:
+        """How far the market moved across a play (`win_swing`): from its reading the lag before the answer before the
+        play's, to its reading the lag before the play's own answer, as the meter reads each. None without both."""
+        if context.before_arrived is None or context.after_arrived is None:
+            return None
+        before = self._feeds.win_probability(game, self._lagged(context.before_arrived))
+        after = self._feeds.win_probability(game, self._lagged(context.after_arrived))
+        return win_swing(before.value if before is not None else None, after.value if after is not None else None)
+
+    def _meter(self) -> GameMeter:
+        """A game's meter, its reading standing until it's `NflCardPolicy.meter_max_age` older than the lag on the
+        broadcast's clock."""
+        delay = self._guard.policy.broadcast_lag.as_timedelta()
+        return GameMeter(delay + self._policy.meter_lag + self._policy.meter_max_age)
+
     def _priority(self, game: TeamGame) -> CardPriority:
         """The favorite band for a game with one of NFL's favorites in it, naming the better-ranked; else normal."""
         rank = self._favorites.of(game)
@@ -933,15 +1016,16 @@ class LiveFootballPipeline:
         and the offers waiting; its next answer's plays are set aside, as a first answer's are, so a batch the gap
         held back can't caption or promote; and the field its card shows, released before the gap, is drawn stale
         from the gap's end (coming down `stale_for` later) until a state answered after it clears the delay. A final
-        stands. (An output loss is the display's: the loop tells the pipelines only of a host's gap.)"""
+        stands. Its meter's reading goes too. (An output loss is the display's: the loop tells the pipelines only of a
+        host's gap.)"""
         self._guard.distrust(interruption.after)  # what a wake admits waits its full delay until the clock settles
         self._woke = interruption.after.monotonic
         for game_id, live in self._live.items():
             self._forget_plays(live)  # a play's own card from before the gap is history, as its offer is
             live.states, live.plays = DelayedFeed(self._guard), DelayedEventStream(self._guard)
             live.breaks = ReleasedBreaks(self._guard)
-            live.primed, live.last, live.caption = False, None, None
-            live.awaiting = AwaitingSuccessor()
+            live.primed, live.last, live.last_arrived, live.caption = False, None, None, None
+            live.awaiting, live.meter = AwaitingSuccessor(), self._meter()
             self._woken[game_id] = live.shown
         self._offers = StandingOffers()
         with self._lock:
@@ -968,8 +1052,20 @@ def _play_key(game: TeamGame, play: _Play) -> str:
     return f"{game.id}:play:{play.moment.play}:r{play.revision}"
 
 
+def _swung(plays: Iterable[_ReleasedPlay]) -> set[str]:
+    """Of the plays settled together, the one each answer's market swing is put down to, by its key: the answer's
+    first score, turnover or ruling, else its last play (`SWING_KINDS`). The readings either side of an answer span
+    every play it brought, so the swing is one play's, and the big one is likeliest to have made it."""
+    answers: dict[MonotonicTime, list[FootballEvent]] = {}
+    for released in plays:
+        if released.play.event.kind in SWING_KINDS:
+            answers.setdefault(released.play.answer, []).append(released.play.event)
+    return {next((event for event in events if event.major), events[-1]).key for events in answers.values()}
+
+
 def _bounds(caption: _Caption | None) -> list[MonotonicTime]:
-    """When a staged caption next changes by itself: its latest start while it hasn't started, and its hard end."""
+    """When a final's staged caption next changes by itself: its latest start while it hasn't started, and its hard
+    end."""
     if caption is None:
         return []
     staged = caption.staged

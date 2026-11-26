@@ -158,27 +158,29 @@ def _braves_break(opens: float, ends: float) -> Run:
 
 
 def test_a_favorite_whose_break_opens_in_another_game_s_turn_is_credited_up_to_it_and_nothing_after() -> None:
-    """The Angels' turn at 12 is chosen with the Braves acting. The Braves' break opens at 17, and the board sees it at
-    20, when the turn's protection ends: the turn's first 8 s are credited to the games eligible when it was chosen,
-    the Braves among them, and its last 4 s to the games eligible now, without them. Nothing is credited for the
-    break, nor back once it ends, so at their next turn, at 44, the Braves are owed their own turn's pay (12 s at
-    their share, less the 12 s shown) and those 8 s."""
+    """The Braves take the first two turns at their 75% floor, and the Angels' turn at 24 is chosen with the Braves
+    acting. The Braves' break opens at 29, and the board sees it at 32, when the turn's protection ends: the turn's first
+    8 s are credited to the games eligible when it was chosen, the Braves among them, and its last 4 s to the games
+    eligible now, without them. Nothing is credited for the break, nor back once it ends, so at their next turn, at 56,
+    the Braves are owed their own two turns' pay (12 s at their share, less the 12 s shown, each) and those 8 s."""
     braves = games(1)[0]
-    run = _braves_break(opens=17, ends=40)
+    run = _braves_break(opens=29, ends=52)
     turns = {note.at.monotonic.seconds: note for note in run.of(BaseTurnNote)}
-    assert [(at, note.contest.raw) for at, note in sorted(turns.items())][:5] == [
+    assert [(at, note.contest.raw) for at, note in sorted(turns.items())][:6] == [
         (0.0, "g00"),
-        (12.0, "g01"),
-        (24.0, "g02"),
-        (36.0, "g01"),
-        (44.0, "g00"),
+        (12.0, "g00"),
+        (24.0, "g01"),
+        (36.0, "g02"),
+        (48.0, "g01"),
+        (56.0, "g00"),
     ]
-    first, chosen = turns[0.0].targets, turns[12.0].targets
-    assert first is not None and chosen is not None
-    own, latched = first.game(braves.id), chosen.game(braves.id)
-    assert own is not None and latched is not None
-    expected = -12 + 12 * own.within_league + 8 * latched.within_league
-    assert turns[44.0].debt == pytest.approx(expected, abs=1e-9)  # 1.53 s; crediting by the turn's end gave -3.88 s
+    first, second, chosen = turns[0.0].targets, turns[12.0].targets, turns[24.0].targets
+    assert first is not None and second is not None and chosen is not None
+    own, again, latched = first.game(braves.id), second.game(braves.id), chosen.game(braves.id)
+    assert own is not None and again is not None and latched is not None
+    assert latched.within_league == pytest.approx(0.75)
+    expected = -24 + 12 * own.within_league + 12 * again.within_league + 8 * latched.within_league
+    assert turns[56.0].debt == pytest.approx(expected, abs=1e-9)  # 0.00 s; crediting by the turn's end gave -6.00 s
 
 
 def test_a_favorite_s_own_turn_runs_its_12_s_when_its_break_opens_in_it() -> None:

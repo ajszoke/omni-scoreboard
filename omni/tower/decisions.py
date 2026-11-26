@@ -295,6 +295,7 @@ _EVENTS = MappingProxyType(
         InterruptClass.PERFECT_GAME: "perfect game",
         InterruptClass.NO_HITTER: "no-hitter",
         InterruptClass.DECISIVE_LATE_WINNER: "late winner",
+        InterruptClass.WIN_SWING: "win swing",
         InterruptClass.MAJOR: "big moment",
         InterruptClass.ROUTINE: "play",
     }

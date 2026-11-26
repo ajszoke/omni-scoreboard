@@ -16,8 +16,9 @@ from omni.app.contest_store import ContestStore, ProviderStatus
 from omni.app.display import RecordingDisplaySink
 from omni.app.loop import AppLoop
 from omni.app.planned_mlb import MLB_POLICIES, PlannedMlb, mlb_accounts
-from omni.app.planned_nfl import NFL_POLICIES, NflSchedulePolicy, PlannedNfl, nfl_accounts
-from omni.app.poll_plan import AccountMap, PollPlan, PollSource
+from omni.app.planned_nba import PUBLIC_MARKET_POLICY, MarketReader
+from omni.app.planned_nfl import NFL_POLICIES, PLAY_MARKET_POLICY, NflSchedulePolicy, PlannedNfl, nfl_accounts
+from omni.app.poll_plan import AccountMap, PollKey, PollPlan, PollSource
 from omni.app.poller import Poller
 from omni.app.quota import (
     BillingMonth,
@@ -32,8 +33,9 @@ from omni.app.quota import (
     nflmeta_billed,
 )
 from omni.app.runner import build_loop
-from omni.core.clock import FakeClock
+from omni.core.clock import ClockReading, FakeClock, MonotonicTime
 from omni.core.enum import GameStatus, League, PanelProfile
+from omni.domain.baseball import WinProbability
 from omni.domain.contest import TeamGame
 from omni.core.ids import LeagueScopedId
 from omni.events.baseball import LiveBaseballFeed
@@ -42,6 +44,7 @@ from omni.providers.base import LocalDate, PollScope, ProviderError, ScopeOutcom
 from omni.providers.nfl_teams import NflTeamRegistry
 from omni.providers.nflmeta import HALFTIME_HOLD, NFLMETA_SOURCE, NflMetaLiveProvider
 from omni.tower.board import SourceHealth
+from omni.tower.interruption import Interruption, InterruptionReason
 from tests.test_planned_mlb import AFTER_MIDNIGHT, TODAY, _FakeMlb
 from tests.test_app_loop import _game as _mlb_game
 
@@ -190,14 +193,17 @@ def _board(
     favorites: Favorites = CAR,
     ledger: QuotaLedger | None = None,
     policy: NflSchedulePolicy = NflSchedulePolicy(),
+    market: MarketReader | None = None,
+    tier: NflMetaPlan = NflMetaPlan.FREE,
 ) -> _Board:
+    """A board whose reads are paced for ``tier``, on a ledger with Builder's room unless ``ledger`` says."""
     clock = FakeClock(start)
     nflmeta = _NflMeta(clock)
     ledger = ledger if ledger is not None else QuotaLedger(account_limits(NflMetaPlan.BUILDER))
     plan = PollPlan(NFL_POLICIES, ledger=ledger, accounts=nfl_accounts())
     meter = Meter(ledger, NFL, clock, billed=nflmeta_billed)
     provider = NflMetaLiveProvider(NflTeamRegistry.default(source=NFLMETA_SOURCE), fetch=MeteredHttp(nflmeta, meter))
-    planned = PlannedNfl(plan, clock, provider, favorites=favorites, policy=policy)
+    planned = PlannedNfl(plan, clock, provider, favorites=favorites, policy=policy, market=market, tier=tier)
     return _Board(planned, plan, clock, nflmeta, ledger, Poller(plan, clock))
 
 
@@ -543,6 +549,80 @@ def _game(board: _Board, game_id: int) -> TeamGame:
     contest = next(each for each in board.store.contests if each.id.raw == str(game_id))
     assert isinstance(contest, TeamGame)
     return contest
+
+
+def test_a_game_s_meter_is_read_from_the_market_on_its_own_account_as_the_card_asks_and_a_gap_drops_it() -> None:
+    quotes: list[WinProbability | None] = [WinProbability(home=58.0, away=42.0), None]
+    asked: list[tuple[TeamGame, datetime]] = []
+
+    def market(game: TeamGame, now: datetime) -> WinProbability | None:
+        asked.append((game, now))
+        return quotes.pop(0)
+
+    board = _board(EARLY, market=market)
+    _sunday(board, CAR_ATL)
+    _start(board, 101)
+    board.step()
+    car = _game(board, 101)
+    assert board.planned.win_probability(car, board.clock.read()) is None and asked == []  # wanted, not yet asked
+    board.poller.run_due()
+    assert asked == [(car, EARLY)]
+    first = board.planned.win_probability(car, board.clock.read())
+    assert first is not None and first.value == WinProbability(home=58.0, away=42.0)
+    assert first.received == board.clock.read()
+    assert board.planned.win_probability(car, ClockReading(EARLY - S, MonotonicTime(-1.0))) is None  # not by then
+    accounts = board.plan.accounts
+    assert accounts is not None
+    assert accounts.account(PollSource.PLAY_MARKET, NFLMETA_SOURCE) is ProviderAccount.POLYMARKET_US
+    board.clock.advance(15 * S)
+    board.planned.win_probability(car, board.clock.read())
+    board.poller.run_due()
+    assert board.planned.win_probability(car, board.clock.read()) is None  # the market has nothing now
+    assert board.planned.win_probability(car, first.received) == first  # as it stood then
+    gap = Interruption(
+        serial=1, reason=InterruptionReason.PROCESS_STALL, before=board.clock.read(), after=board.clock.read()
+    )
+    board.planned.interrupted(gap, held=(), contests=(car.id, _mlb_game().id))
+    assert board.plan.latest_by(PollKey(PollSource.PLAY_MARKET, car.id), first.received.monotonic, gap.after) is None
+
+
+def test_without_a_market_no_meter_is_read() -> None:
+    board = _board(EARLY)
+    _sunday(board, CAR_ATL)
+    _start(board, 101)
+    board.step()
+    car = _game(board, 101)
+    assert board.planned.win_probability(car, board.clock.read()) is None
+    assert PollKey(PollSource.PLAY_MARKET, car.id) not in board.plan._entries
+
+
+def test_a_game_s_meter_is_asked_every_5_s_at_nfl_s_own_pace_and_a_reading_stands_5_minutes() -> None:
+    assert NFL_POLICIES[PollSource.PLAY_MARKET] is PLAY_MARKET_POLICY
+    assert (PLAY_MARKET_POLICY.every, PLAY_MARKET_POLICY.keep_for) == (5 * S, timedelta(minutes=5))
+    assert PUBLIC_MARKET_POLICY.every == 15 * S  # NBA's, its own
+    asked: list[datetime] = []
+
+    def market(game: TeamGame, now: datetime) -> WinProbability | None:
+        asked.append(now)
+        return WinProbability(home=60.0, away=40.0) if asked[1:] else WinProbability(home=50.0, away=50.0)
+
+    board = _board(EARLY, market=market)
+    _sunday(board, CAR_ATL)
+    _start(board, 101)
+    board.step()
+    car = _game(board, 101)
+    board.planned.win_probability(car, board.clock.read())  # the card asks for it
+    board.poller.run_due()
+    first = board.planned.win_probability(car, board.clock.read())
+    assert first is not None and first.value == WinProbability(home=50.0, away=50.0)
+    for _ in range(300):  # the card asks every second for five minutes
+        board.clock.advance(S)
+        board.planned.win_probability(car, board.clock.read())
+        board.poller.run_due()
+    assert asked == [EARLY + n * 5 * S for n in range(61)]
+    assert board.planned.win_probability(car, first.received) == first  # five minutes on, still as it stood then
+    board.clock.advance(S)
+    assert board.planned.win_probability(car, first.received) is None
 
 
 def test_take_hands_over_each_answer_once_in_arrival_order_and_latest_the_newest() -> None:

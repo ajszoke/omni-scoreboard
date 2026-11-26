@@ -112,11 +112,11 @@ def test_the_mixed_day_s_scorecard_is_its_recorded_one_on_every_profile(day: _Da
 
 def test_each_league_s_actual_base_share_lands_within_a_point_of_its_target(day: _Day) -> None:
     card = day.card
-    assert round(card.base, 1) == 16889.8
+    assert round(card.base, 1) == 16889.2
     shares = {each.league: (each.target / card.base, each.actual / card.base) for each in card.leagues}
     assert {league: (round(target, 4), round(actual, 4)) for league, (target, actual) in shares.items()} == {
-        League.MLB: (0.4146, 0.4186),
-        League.NFL: (0.5854, 0.5814),
+        League.MLB: (0.4335, 0.4365),
+        League.NFL: (0.5665, 0.5635),
     }
     for target, actual in shares.values():
         assert abs(actual - target) < 0.01
@@ -126,12 +126,12 @@ def test_the_favorites_get_their_share_and_no_game_waits_long_for_a_base_turn(da
     card = day.card
     panthers, braves, rockies = card.game(CAR), card.game(ATL), card.game(COL)
     assert (panthers.favorite, braves.favorite, rockies.favorite) == (1, 1, 2)
-    assert (round(panthers.target, 1), round(panthers.actual, 1)) == (4960.4, 4944.3)
-    assert (round(braves.target, 1), round(braves.actual, 1)) == (1971.7, 1978.4)
-    assert (round(rockies.target, 1), round(rockies.actual, 1)) == (2573.0, 2618.3)
-    assert max(game.longest_wait for game in card.games) == pytest.approx(192.2, abs=0.05)
-    assert sum(game.missed for game in card.games) == 6
-    assert (card.floor_turns, card.clamps, card.rescues) == (4, 3, 8)
+    assert (round(panthers.target, 1), round(panthers.actual, 1)) == (5186.8, 5160.0)
+    assert (round(braves.target, 1), round(braves.actual, 1)) == (2090.3, 2090.3)
+    assert (round(rockies.target, 1), round(rockies.actual, 1)) == (2853.0, 2891.9)
+    assert max(game.longest_wait for game in card.games) == pytest.approx(180.2, abs=0.05)
+    assert sum(game.missed for game in card.games) == 4
+    assert (card.floor_turns, card.clamps, card.rescues) == (554, 3, 8)
 
 
 def test_breaks_lend_guests_with_no_overrun_and_none_before_the_released_state_shows_the_break(day: _Day) -> None:
