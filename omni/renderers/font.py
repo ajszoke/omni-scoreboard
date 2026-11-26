@@ -15,8 +15,9 @@ from pathlib import Path
 from typing import Any
 
 import bdfparser
+from PIL import Image
 
-__all__ = ["FontSpec", "FONTS", "char_size", "advance", "rasterize"]
+__all__ = ["FontSpec", "FONTS", "char_size", "advance", "rasterize", "text_mask"]
 
 _FONT_DIR = Path(__file__).resolve().parents[2] / "assets" / "fonts" / "patched"
 
@@ -92,7 +93,22 @@ def advance(name: str, char: str) -> int:
     return _advances(name).get(ord(char), width)
 
 
-def rasterize(name: str, text: str) -> list[list[int]]:
+# A board draws the same few strings frame after frame (a code, a score, a clock), and bdfparser rasterizes in
+# pure Python, so a string is rasterized once per font and kept. The bound is far above what any slate shows.
+_RASTERS = 4096
+
+
+@lru_cache(maxsize=_RASTERS)
+def rasterize(name: str, text: str) -> tuple[tuple[int, ...], ...]:
     """Render `text` to a row-major grid of 0/1 pixels using font `name`."""
     grid: list[list[int]] = _load(name).draw(text).todata(2)
-    return grid
+    return tuple(tuple(row) for row in grid)
+
+
+@lru_cache(maxsize=_RASTERS)
+def text_mask(name: str, text: str) -> Image.Image:
+    """`text` in font `name` as a one-bit mask (lit pixels set), for a canvas to paste a color through."""
+    grid = rasterize(name, text)
+    mask = Image.new("1", (len(grid[0]), len(grid)))
+    mask.putdata([on for row in grid for on in row])
+    return mask

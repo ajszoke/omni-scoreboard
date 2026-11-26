@@ -25,6 +25,7 @@ second color switches to.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import TYPE_CHECKING
 
 from omni.core.colors import RGBColor
@@ -258,8 +259,22 @@ def resolve_matchup_treatment(
 
     The variant pair is clash-resolved once (so the two sides never disagree on who flipped), each
     side's tile-vs-bar is read from the store, and the meter geometry is derived from the actual
-    mark — so mark and gauge are guaranteed to agree.
+    mark — so mark and gauge are guaranteed to agree. A matchup's treatment never changes while it's
+    drawn, so it's worked out once and kept (`_treatment`): a board draws it every frame.
     """
+    return _treatment(away, home, profile, logos, policy, away_top, home_top)
+
+
+@lru_cache(maxsize=512)
+def _treatment(
+    away: Team,
+    home: Team,
+    profile: PanelProfile,
+    logos: LogoStore | None,
+    policy: VisualContrastPolicy,
+    away_top: int,
+    home_top: int,
+) -> MatchupVisualTreatment:
     variants = resolve_logo_variants(away, home, delta_e=policy.clash_delta_e, de2000=policy.clash_de2000)
     away_bars, home_bars = _resolve_bars(away, home, policy)
     return MatchupVisualTreatment(

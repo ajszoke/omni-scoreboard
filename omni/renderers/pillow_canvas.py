@@ -5,10 +5,23 @@ from __future__ import annotations
 from PIL import Image
 
 from omni.core.colors import RGBColor
-from omni.renderers.font import rasterize
+from omni.renderers.font import text_mask
 from omni.renderers.image import LogoImage
 
 __all__ = ["PillowCanvas"]
+
+# Each tile as a Pillow image, built once: a board pastes the same few tiles every frame. Keyed by identity and
+# holding the tile itself, so an id can't be reused while its entry stands; a slate's tiles number in the dozens.
+_TILES: dict[int, tuple[LogoImage, Image.Image]] = {}
+
+
+def _as_pillow(image: LogoImage) -> Image.Image:
+    held = _TILES.get(id(image))
+    if held is None:
+        tile = Image.new("RGB", (image.width, image.height))
+        tile.putdata([(c.r, c.g, c.b) for c in image.pixels])
+        held = _TILES[id(image)] = (image, tile)
+    return held[1]
 
 
 class PillowCanvas:
@@ -39,27 +52,16 @@ class PillowCanvas:
             self._px[x, y] = (color.r, color.g, color.b)
 
     def fill_rect(self, x: int, y: int, w: int, h: int, color: RGBColor) -> None:
-        rgb = (color.r, color.g, color.b)
-        for yy in range(max(0, y), min(self._h, y + h)):
-            for xx in range(max(0, x), min(self._w, x + w)):
-                self._px[xx, yy] = rgb
+        left, top, right, bottom = max(0, x), max(0, y), min(self._w, x + w), min(self._h, y + h)
+        if left < right and top < bottom:
+            self._img.paste((color.r, color.g, color.b), (left, top, right, bottom))
 
     def text(self, x: int, y: int, s: str, color: RGBColor, *, font: str = "4x6") -> None:
-        rgb = (color.r, color.g, color.b)
-        for ry, row in enumerate(rasterize(font, s)):
-            for rx, on in enumerate(row):
-                if on:
-                    px, py = x + rx, y + ry
-                    if 0 <= px < self._w and 0 <= py < self._h:
-                        self._px[px, py] = rgb
+        # Pillow clips a paste that runs off the canvas.
+        self._img.paste((color.r, color.g, color.b), (x, y), text_mask(font, s))
 
     def draw_image(self, x: int, y: int, image: LogoImage) -> None:
-        for ry in range(image.height):
-            for rx in range(image.width):
-                px, py = x + rx, y + ry
-                if 0 <= px < self._w and 0 <= py < self._h:
-                    c = image.pixel(rx, ry)
-                    self._px[px, py] = (c.r, c.g, c.b)
+        self._img.paste(_as_pillow(image), (x, y))
 
     def image(self) -> Image.Image:
         return self._img
