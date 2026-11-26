@@ -92,6 +92,22 @@ def test_pillow_canvas_clips_out_of_bounds_draws() -> None:
     assert image.getpixel((0, 0)) == (255, 0, 0)
 
 
+def test_pillow_canvas_draws_nothing_for_a_rect_wholly_off_it_or_with_no_width() -> None:
+    canvas = PillowCanvas(8, 4)
+    canvas.fill_rect(10, 0, 4, 4, RGBColor(255, 0, 0))  # starts past the right edge
+    canvas.fill_rect(0, 0, 0, 4, RGBColor(255, 0, 0))  # no width at all
+    assert canvas.image().getcolors() == [(32, (0, 0, 0))]
+
+
+def test_pillow_canvas_text_clipped_at_an_edge_keeps_the_part_on_it() -> None:
+    whole, clipped = PillowCanvas(16, 8), PillowCanvas(16, 8)
+    whole.text(0, 0, "8", RGBColor(0, 255, 0), font="4x6")
+    clipped.text(-2, 0, "8", RGBColor(0, 255, 0), font="4x6")  # two columns hang off the left edge
+    for y in range(6):
+        for x in range(2):
+            assert clipped.image().getpixel((x, y)) == whole.image().getpixel((x + 2, y))
+
+
 def test_a_dimmed_canvas_draws_every_color_at_a_fraction_of_its_brightness() -> None:
     import pytest
 
