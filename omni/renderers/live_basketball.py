@@ -68,7 +68,7 @@ from omni.domain.basketball import (
 from omni.domain.contest import TeamGame
 from omni.domain.football import PlayTone
 from omni.domain.teams import Team
-from omni.events.basketball import CaptionWords
+from omni.events.basketball import CaptionWords, TechnicalFoul
 from omni.renderers.canvas import Canvas
 from omni.renderers.context import RenderContext
 from omni.renderers.font import rasterize
@@ -510,6 +510,19 @@ def _caption(card: _Card) -> CaptionPanel | None:
     return bottom if isinstance(bottom, CaptionPanel) else None
 
 
+def _scorer(caption: CaptionPanel | None, words: CaptionWords | None) -> HomeAway | None:
+    """The side whose score the single board greens: a scoring play's, or, for a technical whose free throw went in,
+    the shooter's (the side the technical wasn't charged to)."""
+    if caption is None or words is None:
+        return None
+    event = caption.caption
+    if isinstance(event, TechnicalFoul):
+        if not event.made:
+            return None
+        return HomeAway.HOME if event.side is HomeAway.AWAY else HomeAway.AWAY
+    return event.side if words.tone is PlayTone.SCORE else None
+
+
 def _stack(canvas: Canvas, context: RenderContext, card: _Card) -> None:
     treatment = card.treatment(context, PanelProfile.STACK_64X64, _S_ROW)
     three = card.three_digits
@@ -711,9 +724,7 @@ def _single(canvas: Canvas, context: RenderContext, card: _Card) -> None:
     treatment = card.treatment(context, PanelProfile.SINGLE_64X32, _I_ROW)
     caption = _caption(card)
     words = _words(caption, card) if caption is not None else None
-    scorer = (
-        caption.caption.side if caption is not None and words is not None and words.tone is PlayTone.SCORE else None
-    )
+    scorer = _scorer(caption, words)
     code_font, code_row = _I_CODE[card.three_digits]
     record_font, record_row = _I_RECORD
     rows = ((HomeAway.AWAY, treatment.away, 0), (HomeAway.HOME, treatment.home, _I_ROW))
