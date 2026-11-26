@@ -31,7 +31,14 @@ from omni.core.colors import RGBColor
 from omni.core.enum import PanelProfile
 from omni.domain.logos import LogoVariant
 from omni.domain.teams import Team
-from omni.renderers.logo_clash import logo_background, pick_distinct_variants, resolve_logo_variants
+from omni.renderers.logo_clash import (
+    CLASH_DE2000,
+    CLASH_DELTA_E,
+    clash_metric,
+    logo_background,
+    pick_distinct_variants,
+    resolve_logo_variants,
+)
 
 if TYPE_CHECKING:
     from omni.renderers.image import LogoStore
@@ -60,12 +67,15 @@ class VisualContrastPolicy:
     One policy per `DisplaySink`/device (with optional per-profile overrides): a brighter
     diffuser, a dimmer brightness, or a particular matrix batch path can want a higher floor.
     `min_contrast` is the WCAG ratio a dim brand color is value-lifted to before it paints a
-    meter; `clash_delta_e` is the CIE76 distance below which two team tiles read as one color
-    and one side flips to its alt. Defaults reproduce the pre-policy hardcoded behavior.
+    meter. `clash_delta_e` (CIE76) and `clash_de2000` (CIEDE2000) are the distances below which
+    two team colors read as one, under either metric (see `logo_clash.clash_metric`): two tiles or
+    bars (one side flips to its alt), or a meter and the mark it sits beside (the meter goes white).
+    The clash defaults are the thresholds `resolve_logo_variants` applies on its own.
     """
 
     min_contrast: float = 3.0
-    clash_delta_e: float = 25.0
+    clash_delta_e: float = CLASH_DELTA_E
+    clash_de2000: float = CLASH_DE2000
 
     def lift(self, color: RGBColor) -> RGBColor:
         """Value-lift `color` to this policy's contrast floor against the black panel."""
@@ -164,7 +174,11 @@ def _meter_color(spare: RGBColor | None, mark: RGBColor | None, policy: VisualCo
     if spare is None or spare == _BLACK:
         return _WHITE
     lifted = policy.lift(spare)
-    return _WHITE if mark is not None and lifted.delta_e(mark) < policy.clash_delta_e else lifted
+    reads_as_mark = (
+        mark is not None
+        and clash_metric(lifted, mark, delta_e=policy.clash_delta_e, de2000=policy.clash_de2000) is not None
+    )
+    return _WHITE if reads_as_mark else lifted
 
 
 def _freed_base_meter(team: Team) -> RGBColor | None:
@@ -184,7 +198,9 @@ def _resolve_bars(away: Team, home: Team, policy: VisualContrastPolicy) -> tuple
     """Pick both sides' bar colors: home paints its first, away switches when the two would merge."""
     away_first, away_second = _bar_palette(away, policy)
     home_first, home_second = _bar_palette(home, policy)
-    picks = pick_distinct_variants(away_first, away_second, home_first, threshold=policy.clash_delta_e)
+    picks = pick_distinct_variants(
+        away_first, away_second, home_first, delta_e=policy.clash_delta_e, de2000=policy.clash_de2000
+    )
     away_bars = (
         _BarColors(bar=away_second, spare=_freed_base_meter(away) or away_first)
         if picks.away is LogoVariant.ALT
@@ -244,7 +260,7 @@ def resolve_matchup_treatment(
     side's tile-vs-bar is read from the store, and the meter geometry is derived from the actual
     mark — so mark and gauge are guaranteed to agree.
     """
-    variants = resolve_logo_variants(away, home, threshold=policy.clash_delta_e)
+    variants = resolve_logo_variants(away, home, delta_e=policy.clash_delta_e, de2000=policy.clash_de2000)
     away_bars, home_bars = _resolve_bars(away, home, policy)
     return MatchupVisualTreatment(
         away=_mark_treatment(

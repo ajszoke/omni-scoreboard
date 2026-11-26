@@ -13,7 +13,7 @@ from omni.domain.logos import LogoVariant
 from omni.providers.mlb_palette import LOGO_ALT_COLOR, LOGO_BASE_COLOR
 from omni.providers.mlb_teams import _TEAM_ID_INFO, MlbTeamRegistry
 from omni.renderers.image import LogoStore
-from omni.renderers.logo_clash import logo_background
+from omni.renderers.logo_clash import CLASH_DE2000, CLASH_DELTA_E, clash_metric, logo_background
 from omni.renderers.visual_treatment import (
     DEFAULT_CONTRAST_POLICY,
     VisualContrastPolicy,
@@ -42,8 +42,9 @@ def test_contrast_policy_lifts_to_its_floor_and_is_tunable() -> None:
     assert hotter.relative_luminance() > DEFAULT_CONTRAST_POLICY.lift(navy).relative_luminance()
 
 
-def test_default_policy_reproduces_the_pre_policy_thresholds() -> None:
-    assert (DEFAULT_CONTRAST_POLICY.min_contrast, DEFAULT_CONTRAST_POLICY.clash_delta_e) == (3.0, 25.0)
+def test_default_policy_uses_the_resolvers_own_clash_thresholds() -> None:
+    policy = DEFAULT_CONTRAST_POLICY
+    assert (policy.min_contrast, policy.clash_delta_e, policy.clash_de2000) == (3.0, CLASH_DELTA_E, CLASH_DE2000)
 
 
 @pytest.mark.parametrize(
@@ -128,11 +129,13 @@ def test_a_black_spare_color_meters_white_rather_than_a_lifted_grey() -> None:
 
 
 def test_two_bars_that_only_merge_once_lifted_still_separate() -> None:
-    # BOS navy and LAD blue are distinct tiles, but lifting the navy lands it almost on the blue.
-    bos = REG.resolve(111)
-    assert logo_background(bos, LogoVariant.BASE).delta_e(logo_background(LAD, LogoVariant.BASE)) >= 25.0  # type: ignore[union-attr, arg-type]
-    t = _treat(bos, LAD, PanelProfile.SINGLE_64X32, logos=LOGOS, away_top=0, home_top=16)
-    assert t.away.bar_color.delta_e(t.home.bar_color) >= 25.0
+    # CHC's blue and COL's black are distinct tiles, but a bar can't paint black, and lifted, CHC's blue
+    # lands near the purple COL paints instead: the visitor switches to its red.
+    chc = REG.resolve(112)
+    assert clash_metric(LOGO_BASE_COLOR[112], LOGO_BASE_COLOR[115]) is None
+    t = _treat(chc, COL, PanelProfile.SINGLE_64X32, logos=LOGOS, away_top=0, home_top=16)
+    assert t.away.bar_color == LOGO_ALT_COLOR[112].value_lifted()
+    assert clash_metric(t.away.bar_color, t.home.bar_color) is None
 
 
 def test_an_away_bar_with_no_second_color_switches_to_white_and_meters_its_first() -> None:
@@ -152,8 +155,8 @@ def test_boston_meters_white_rather_than_blue_when_it_shows_red() -> None:
 
 
 def test_boston_keeps_its_red_meter_beside_its_navy() -> None:
-    bos = REG.resolve(111)
-    tile = _treat(bos, LAD, PanelProfile.STACK_64X64, logos=LOGOS, away_top=0, home_top=22).away
+    bos, bal = REG.resolve(111), REG.resolve(110)
+    tile = _treat(bos, bal, PanelProfile.STACK_64X64, logos=LOGOS, away_top=0, home_top=22).away
     assert tile.variant is LogoVariant.BASE and tile.meter_color == LOGO_ALT_COLOR[111]
     home = _treat(LAD, bos, PanelProfile.SINGLE_64X32, logos=LOGOS, away_top=0, home_top=16).home
     assert home.meter_color == LOGO_ALT_COLOR[111]
@@ -174,9 +177,10 @@ SWEEP = [
     (PanelProfile.STACK_64X64, 22),
     (PanelProfile.SINGLE_64X32, 16),
 ]
-# Beside their silver these two meter in white, however close the two read: CWS's only spare is black,
-# and NYY's navy lifts to a blue the club doesn't wear.
-METER_LAST_RESORT = {"CWS", "NYY"}
+# These meter in white however close white reads to their mark. Beside their silver, CWS's only spare is
+# black and NYY's navy lifts to a blue the club doesn't wear. SF's one lit color is its cream: where it
+# gives way to a white bar (SF@PIT), the cream reads as that white by CIEDE2000, so the meter is white too.
+METER_LAST_RESORT = {"CWS", "NYY", "SF"}
 
 
 def _first_lit_color(team):

@@ -287,7 +287,8 @@ class DecisionTracer:
         if treatment is not None:
             line += (
                 f" | away {_mark(treatment.away)} | home {_mark(treatment.home)}"
-                f" | contrast {presentation.contrast.min_contrast:g}/{presentation.contrast.clash_delta_e:g}"
+                f" | contrast {presentation.contrast.min_contrast:g}"
+                f"/{presentation.contrast.clash_delta_e:g}|{presentation.contrast.clash_de2000:g}"
             )
         return line
 
