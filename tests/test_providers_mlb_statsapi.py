@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import ast
+import io
 import json
+import tokenize
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -112,19 +115,130 @@ def test_status_mapping_across_games() -> None:
         ("Pre-Game", GameStatus.PREGAME),
         ("Warmup", GameStatus.PREGAME),
         ("In Progress", GameStatus.LIVE),
-        ("Manager Challenge", GameStatus.LIVE),
+        # StatsAPI writes a manager's challenge and an umpire's review with a lowercase second word, an umpire's
+        # ball-strike challenge with a capital.
+        ("Manager challenge", GameStatus.LIVE),
+        ("Manager challenge: Tag play", GameStatus.LIVE),
+        ("Umpire review: Home run", GameStatus.LIVE),
+        ("Instant Replay", GameStatus.LIVE),
+        ("Umpire Challenge: Pitch Result", GameStatus.LIVE),
+        ("Player challenge: Pitch Result", GameStatus.LIVE),
         ("Final", GameStatus.FINAL),
+        ("Final: Tied", GameStatus.FINAL),
         ("Game Over", GameStatus.FINAL),
+        ("Forfeit: Rule", GameStatus.FINAL),
         ("Postponed", GameStatus.POSTPONED),
+        ("Postponed: Rain", GameStatus.POSTPONED),
         ("Cancelled", GameStatus.CANCELED),
         ("Canceled", GameStatus.CANCELED),
+        ("Cancelled: Wet Grounds", GameStatus.CANCELED),
         ("Delayed: Rain", GameStatus.DELAYED),
+        ("Delayed Start: Rain", GameStatus.DELAYED),
         ("Suspended: Inclement Weather", GameStatus.SUSPENDED),
         ("Frobnicated", GameStatus.UNKNOWN),
+        ("", GameStatus.UNKNOWN),
     ],
 )
 def test_map_game_status(raw: str, expected: GameStatus) -> None:
     assert map_game_status(raw) is expected
+    assert map_game_status(raw.upper()) is expected and map_game_status(raw.lower()) is expected  # in any case
+
+
+# Upstream's copy of StatsAPI's game statuses (`statsapi.meta("gameStatus")`), each constant with its coarse state.
+_UPSTREAM_STATUSES = Path(__file__).resolve().parents[1] / "data" / "status.py"
+# What upstream marks a status of its own, not StatsAPI's.
+_NOT_STATSAPIS = "Not in json"
+
+
+def _official_statuses() -> dict[str, str]:
+    """Each status upstream's `data/status.py` names, with the coarse state (`abstractGameState`) its trailing
+    comment gives: read from the module's source, so reading it imports nothing. Upstream's own statuses are left
+    out."""
+    source = _UPSTREAM_STATUSES.read_text()
+    comments = {
+        token.start[0]: token.string.removeprefix("#").strip()
+        for token in tokenize.generate_tokens(io.StringIO(source).readline)
+        if token.type == tokenize.COMMENT
+    }
+    statuses: dict[str, str] = {}
+    for node in ast.parse(source).body:
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+            statuses[node.value.value] = comments[node.lineno]
+    return {status: coarse for status, coarse in statuses.items() if coarse != _NOT_STATSAPIS}
+
+
+# The families of StatsAPI's statuses: what each status's text begins with, the coarse state StatsAPI gives every
+# status in it, and the typed status it maps to.
+_FAMILIES: tuple[tuple[str, str, GameStatus], ...] = (
+    ("Scheduled", "Preview", GameStatus.SCHEDULED),
+    ("Pre-Game", "Preview", GameStatus.PREGAME),
+    ("Warmup", "Live", GameStatus.PREGAME),
+    ("In Progress", "Live", GameStatus.LIVE),
+    ("Manager challenge", "Live", GameStatus.LIVE),
+    ("Umpire review", "Live", GameStatus.LIVE),
+    ("Instant Replay", "Live", GameStatus.LIVE),
+    ("Umpire Challenge", "Live", GameStatus.LIVE),
+    ("Player challenge", "Live", GameStatus.LIVE),
+    ("Delayed Start", "Preview", GameStatus.DELAYED),
+    ("Delayed", "Live", GameStatus.DELAYED),
+    ("Suspended", "Live", GameStatus.SUSPENDED),
+    ("Final", "Final", GameStatus.FINAL),
+    ("Game Over", "Final", GameStatus.FINAL),
+    ("Completed Early", "Final", GameStatus.FINAL),
+    ("Forfeit", "Final", GameStatus.FINAL),
+    ("Postponed", "Final", GameStatus.POSTPONED),
+    ("Cancelled", "Final", GameStatus.CANCELED),
+    ("Unknown", "Other", GameStatus.UNKNOWN),
+    ("Writing", "Other", GameStatus.UNKNOWN),
+)
+
+
+def _family(status: str) -> tuple[str, str, GameStatus]:
+    """The family ``status`` belongs to: the longest of their beginnings it starts with."""
+    return max((family for family in _FAMILIES if status.startswith(family[0])), key=lambda family: len(family[0]))
+
+
+def test_every_official_status_maps_by_its_family() -> None:
+    official = _official_statuses()
+    assert set(official.values()) == {"Preview", "Live", "Final", "Other"}
+    members: dict[str, list[str]] = {beginning: [] for beginning, _, _ in _FAMILIES}
+    for status, coarse in official.items():
+        beginning, family_coarse, expected = _family(status)
+        members[beginning].append(status)
+        assert coarse == family_coarse, status
+        assert map_game_status(status) is expected, status
+        assert map_game_status(status, coarse) is expected, status
+    assert all(members.values())  # no family is a beginning no status has
+
+
+def test_only_the_two_official_statuses_that_say_nothing_map_to_unknown() -> None:
+    official = _official_statuses()
+    unknown = {status for status in official if map_game_status(status) is GameStatus.UNKNOWN}
+    assert unknown == {status for status, coarse in official.items() if coarse == "Other"} == {"Unknown", "Writing"}
+
+
+@pytest.mark.parametrize(
+    ("abstract", "expected"),
+    [
+        ("Live", GameStatus.LIVE),
+        ("live", GameStatus.LIVE),
+        ("Final", GameStatus.FINAL),
+        ("Preview", GameStatus.SCHEDULED),
+        ("Other", GameStatus.UNKNOWN),
+        ("", GameStatus.UNKNOWN),
+        (None, GameStatus.UNKNOWN),
+    ],
+)
+def test_a_detailed_state_no_family_names_falls_back_to_its_coarse_state(
+    abstract: str | None, expected: GameStatus
+) -> None:
+    assert map_game_status("Crew chief review: Tag play", abstract) is expected
+
+
+def test_a_family_outranks_the_coarse_state() -> None:
+    assert map_game_status("Delayed: Rain", "Live") is GameStatus.DELAYED
+    assert map_game_status("Postponed: Rain", "Final") is GameStatus.POSTPONED
+    assert map_game_status("Warmup", "Live") is GameStatus.PREGAME
 
 
 def test_fetch_failure_becomes_provider_error() -> None:
@@ -237,13 +351,15 @@ def _scheduled_game(**changes: Any) -> TeamGame:
 
 
 def test_a_schedule_game_flattens_into_the_row_the_parse_reads() -> None:
-    assert _schedule_rows(_response(_scheduled(1, status={"detailedState": "Scheduled", "startTimeTBD": True}))) == [
+    status = {"abstractGameState": "Preview", "detailedState": "Scheduled", "startTimeTBD": True}
+    assert _schedule_rows(_response(_scheduled(1, status=status))) == [
         {
             "game_id": 1,
             "game_datetime": "2026-06-18T02:10:00Z",
             "game_date": "2026-06-17",
             "game_type": "R",
             "status": "Scheduled",
+            "abstract_game_state": "Preview",
             "away_id": 115,
             "away_name": "Colorado Rockies",
             "home_id": 119,
@@ -255,6 +371,22 @@ def test_a_schedule_game_flattens_into_the_row_the_parse_reads() -> None:
             "broadcasts": [_broadcast("TV"), _broadcast("TV", side="away"), _broadcast("AM")],
         }
     ]
+
+
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [
+        ({"abstractGameState": "Live", "detailedState": "Manager challenge: Tag play"}, GameStatus.LIVE),
+        ({"abstractGameState": "Live", "detailedState": "Crew chief review"}, GameStatus.LIVE),  # one added later
+        ({"abstractGameState": "Final", "detailedState": "Called"}, GameStatus.FINAL),
+        ({"abstractGameState": 7, "detailedState": "Crew chief review"}, GameStatus.UNKNOWN),  # not a state
+        ({"detailedState": "Crew chief review"}, GameStatus.UNKNOWN),
+    ],
+)
+def test_a_schedule_game_whose_status_no_family_names_takes_its_coarse_state(
+    status: dict[str, Any], expected: GameStatus
+) -> None:
+    assert _scheduled_game(status=status).status is expected
 
 
 def test_a_scheduled_game_is_typed_with_the_schedules_facts() -> None:

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import dataclasses
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+from typing import Any
 
 import pytest
 
@@ -29,14 +30,17 @@ from omni.domain.baseball import (
     WinLossRecord,
     WinProbability,
 )
+from omni.domain.breaks import BreakKind
 from omni.domain.contest import TeamGame
 from omni.events.base import EventImportance
 from omni.events.baseball import BaseballGameEvent, BaseballGameEventType, BaseballPlayPayload, LiveBaseballFeed
 from omni.providers.base import ProviderError
+from omni.providers.mlb_statsapi import MlbStatsApiProvider, _schedule_rows
 from omni.providers.mlb_teams import MlbTeamRegistry
 from omni.queue.delay_policy import DelayPolicy
 from omni.queue.priority import PriorityScorer
 from omni.queue.scheduler import InterleavedCardQueue
+from tests import mlb_break_feeds as mlb_feeds
 
 _REG = MlbTeamRegistry.from_color_file()
 SOURCE = SourceRef("mlb_statsapi", "https://statsapi.mlb.com")
@@ -855,6 +859,56 @@ def test_paused_game_resuming_swaps_back_to_the_live_card() -> None:
     res = pipe.refresh([_game("g1")], at=_at(T + timedelta(seconds=5)), fetch_feed=fetch)  # resumes live
     assert res.statuses == () and _id("g1") not in pipe._status_keys  # status card gone
     assert [c.raw for c in res.ingested] == ["mlb:mlb_statsapi:g1:live"] and len(queue) == 1  # live card back
+
+
+@pytest.mark.parametrize("abstract", [None, "Live"])
+def test_a_live_game_under_a_managers_challenge_keeps_its_card_and_shows_its_review(abstract: str | None) -> None:
+    """StatsAPI calls a game "Manager challenge: Tag play" while replay reviews the play. Read through the provider,
+    the game stays live, with or without the coarse state beside it: its card stays up, its feed is still read, and
+    the review the feed shows reaches the board's policy. Once play resumes, the same card carries on."""
+    states = ["In Progress", "Manager challenge: Tag play", "In Progress"]
+    reviews: list[Any] = [None, {"inProgress": True}, {"inProgress": False}]
+    status: dict[str, Any] = {}
+    raw: dict[str, Any] = {}
+
+    def schedule(day: date, sport_ids: str) -> list[dict[str, Any]]:
+        listed = {"gamePk": mlb_feeds.GAME_PK, "gameDate": "2026-06-17T23:10:00Z", "status": status}
+        listed["teams"] = {"away": {"team": {"id": 115}}, "home": {"team": {"id": 119}}}
+        return _schedule_rows({"dates": [{"date": "2026-06-17", "games": [listed]}]})
+
+    provider = MlbStatsApiProvider(_REG, schedule, fetch_game=lambda _pk: raw)
+    pipe, queue = _setup(lag=0)
+    game_id = LeagueScopedId(League.MLB, SOURCE, str(mlb_feeds.GAME_PK))
+    passes: list[PipelineResult] = []
+    for step, (state, review) in enumerate(zip(states, reviews)):
+        moment = mlb_feeds.T + timedelta(seconds=15 * step)
+        status.clear()
+        status.update({"detailedState": state} | ({"abstractGameState": abstract} if abstract is not None else {}))
+        raw.clear()
+        raw.update(
+            mlb_feeds.answer(
+                plays=(mlb_feeds.play(40, review=review), mlb_feeds.play(41, complete=False)),
+                status=state,
+                as_of=moment,
+            )
+        )
+        (game,) = provider.fetch_schedule(moment.date(), now=moment).contests
+        assert isinstance(game, TeamGame)
+        passes.append(
+            pipe.refresh([game], at=_at(moment), fetch_feed=lambda g, now: provider.fetch_live_feed(g, now=now))
+        )
+        assert queue.card(f"{game_id}:live") is not None and game_id in pipe._feeds
+        assert game.status is GameStatus.LIVE
+    before, during, after = passes
+    assert [card.raw for card in before.ingested] == [f"{game_id}:live"]
+    assert during.removed == () and during.skipped == () and during.statuses == ()
+    assert [(found.id.kind, found.ended) for found in during.policy.games[game_id].breaks] == [
+        (BreakKind.MLB_REVIEW, False)
+    ]
+    assert after.removed == () and [card.raw for card in after.ingested] == [f"{game_id}:live"]
+    assert [(found.id.kind, found.ended) for found in after.policy.games[game_id].breaks] == [
+        (BreakKind.MLB_REVIEW, True)
+    ]
 
 
 def test_status_card_dropped_when_the_game_ends() -> None:
