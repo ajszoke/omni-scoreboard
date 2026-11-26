@@ -27,8 +27,9 @@ round-N.zip           ← plans/ (trio snapshot) + sources/ + round-N-prompt.md 
 ```
 
 - **1-indexed, no timestamps** — the round number is the version. **Never overwrite a round.**
-- Build with `zip -r -q round-N.zip plans/ sources/ round-N-prompt.md`. **Verify** with `zipinfo -1`
-  before handing off: the trio snapshot must be current and no junk leaked in.
+- Build with `zip -r -q round-N.zip plans/ sources/ round-N-prompt.md`, after `tools/redact_run_log.py --check
+  sources/` exits 0 (§3). **Verify** with `zipinfo -1` before handing off: the trio snapshot must be current and
+  no junk leaked in.
 - Copy the final zip + prompt to a **user-reachable** location (e.g. `/mnt/c/Users/<user>/Downloads/
   omni_review_round-N/`) so the user can upload them to the flagship.
 
@@ -49,6 +50,13 @@ Bundle what lets the head reason from the actual repo, not training-data guesses
 - Round 2+ typically *adds* the specific files the head asked for, carried alongside round-1 sources.
 
 Exclude bulk/opaque junk and anything git-ignored (secrets, `config.json`, `.venv/`).
+
+**NFL run evidence** (NFLMeta's terms allow no standing copy, and a round's zip is kept for good) goes in only as
+a mined digest (`build/telemetry/runner-log/<run>/<date>.json` and its `.md`) or a redacted log
+(`<date>.redacted.log` beside it, or one written by `tools/redact_run_log.py IN --out OUT`): never a raw
+`runner.log`, a stdout capture of the runner, or a recording. Before zipping, run
+`.venv/bin/python tools/redact_run_log.py --check sources/`: it must exit 0. It checks every `*.log` file, zips
+included, so keep run evidence named `*.log`.
 
 ---
 

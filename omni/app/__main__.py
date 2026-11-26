@@ -53,6 +53,10 @@ Every request is counted against its provider account's quota (`omni.app.quota`)
 are kept under ``--state-dir`` so a restart doesn't forget them. ``--nflmeta-plan`` names the plan of the
 NFLMeta key, free unless you say otherwise. On Builder every live NFL game's plays are read, so each card has its
 timeouts, challenges and play line; on Free only a favorite's are.
+
+The app runs the expiry sweep (`omni.app.expiry.ExpirySweeper`) over ``build/recordings/`` and the NFL runner's log
+folder as it starts, every hour while it runs, and as it stops: each stamped folder past its delete-by is mined into
+our own telemetry, then deleted, with a line naming it. A sweep that fails is logged, and the board carries on.
 """
 
 from __future__ import annotations
@@ -71,6 +75,7 @@ from zoneinfo import ZoneInfo
 
 from omni.core.clock import SystemClock
 from omni.app.display import MatrixDevice, MatrixDisplaySink
+from omni.app.expiry import ExpirySweeper
 from omni.app.frame_stream import StreamDisplay, StreamDisplaySink, stream_display
 from omni.app.planned_mlb import MarketReader
 from omni.app.planned_nfl import PLAY_MARKET_POLICY
@@ -484,6 +489,8 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
         f"omni.app: {profile.value}, leagues {on}, delay {args.delay}s (nfl {args.nfl_delay}s, nba {args.nba_delay}s),"
         f"{nba_tier} favorites {args.favorites}, meter {meter}{quoted_meter} — {target}"
     )
+    sweeper = ExpirySweeper(clock, log=lambda line: print(line, flush=True))
+    sweeper.start()  # a sweep now, then every hour until the exit's
     if board is not None:
         board.start()
     try:
@@ -502,6 +509,7 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - drives
         if board is not None:
             board.stop()  # the receiver blanks the panel as its input ends
         ledger.save(clock.read(), force=True)  # the month's usage, for the next run
+        sweeper.stop()
     return 0
 
 
