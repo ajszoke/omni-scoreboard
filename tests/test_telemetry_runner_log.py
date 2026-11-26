@@ -1,21 +1,29 @@
 """Mining the NFL runner's log: each night's runs, strip, feed, display and clock, counted without their words.
 
 The logs here are synthetic, written line for line in the shapes the runner printed on each night: the first
-night's (`omni/app/football.py` and `football_board.py` at 176fd69) and the second's (the same files with
-`football_feed.py` and `frame_stream.py` at bfd123a). Every free-text part carries `PHRASE`.
+night's (`omni/app/football.py` and `football_board.py` at 176fd69), the second's (the same files with
+`football_feed.py` and `frame_stream.py` at bfd123a), and the 2026-11-19 runner's (d76a7eb, whose lines are
+today's: `NOV_19` builds them with the code's own formats). Every free-text part carries `PHRASE`, or in `NOV_19` a
+fake player and description, and NFLMeta's ids are numbers no other part of a line has.
 """
 
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from omni.app import football
+from omni.app.quota import ProviderAccount, QuotaLedger, account_limits, usage_line
+from omni.app.versions import SourceRevision
+from omni.core.clock import FakeClock
+from omni.events.football import EntryLabel, FootballEventKind
+from omni.providers.nflmeta import FeedNote, FeedNoteKind
 from omni.telemetry.digest import check_digest
-from omni.telemetry.runner_log_mine import MEASURES, allowed, mine_log, mine_runner_log, summary
+from omni.telemetry.runner_log_mine import MEASURES, allowed, mine_log, mine_runner_log, read_line, summary
 from tests.nflmeta_recording import PHRASE
 
 FIRST = date(2026, 11, 15)
@@ -111,6 +119,85 @@ NIGHT_THREE = [  # a run across midnight
     "23:59:00  CAR @ ATL: pre",
     "23:59:30  halftime: holding off the feed",
     "00:00:30  halftime hold over: polling again",
+]
+
+# The 2026-11-19 runner's lines, made with the code that writes them today.
+NOV_19_DATE = date(2026, 11, 19)
+GAME_ID = 987654
+PLAY_IDS = (55501, 55502, 55503)
+PLAYER = "Zebedee Quillfeather"
+DESCRIPTION = f"{PLAYER} up the middle to NE 31 for 7 yards (Ignatius Brambleworth)"
+FULL_LOG = "/srv/someone/build/logs/nflmeta/2026-11-19-NYJ-NE/runner.log"
+VERSIONS = football._versions(
+    football._parse_args(["--profile", "quad_128x64", "--teams", "NYJ,NE", "--emulated"]), SourceRevision("d76a7eb")
+)
+TIMEOUT_LABEL = EntryLabel(FootballEventKind.TIMEOUT, major=False, play=PLAY_IDS[0])
+SCORE_LABEL = EntryLabel(FootballEventKind.SCORE, major=True)
+LATE = FeedNote(
+    FeedNoteKind.LATE_PLAY,
+    entry=EntryLabel(FootballEventKind.PLAY, major=False, play=PLAY_IDS[2]),
+    quoting=f"7 YARD RUN | {DESCRIPTION}",
+)
+MISSING = FeedNote(
+    FeedNoteKind.PLAY_MISSING,
+    "not in the feed yet: reading again next poll",
+    entry=EntryLabel(FootballEventKind.PLAY, major=False, play=PLAY_IDS[1]),
+)
+
+
+def usage(requests: int, rows: int) -> str:
+    """The month's NFLMeta usage line, as the runner logs it at start and at exit."""
+    clock = FakeClock(datetime(2026, 11, 19, 23, 0, tzinfo=timezone.utc))
+    ledger = QuotaLedger(account_limits())
+    ledger.charge(ProviderAccount.NFLMETA, at=clock.read(), requests=requests, rows=rows)
+    return usage_line(ledger, ProviderAccount.NFLMETA, clock.read())
+
+
+def opening(*, stamp: str) -> list[str]:
+    """A run's opening lines: its game, where its full log is, and what it decides with."""
+    return [
+        f"omni.app.football: NYJ @ NE (game {GAME_ID}), quad_128x64, delay 0s",
+        f"omni.app.football: the full log is {FULL_LOG}, deleted by 2026-11-26",
+        f"{stamp}  {VERSIONS.line()}",
+        f"{stamp}  {VERSIONS.config.line()}",
+    ]
+
+
+NOV_19 = [
+    usage(2_875, 12_369),  # the month so far, just before the run's opening line
+    *opening(stamp="20:10:00"),
+    f"20:10:01  display: starting {DISPLAY}",
+    "20:10:02  NYJ @ NE: pre",
+    "20:15:00  NYJ @ NE 0-0 Q1 15:00 [in] | kickoff, 65 to go | TO 3-3 CH 2-2",
+    f"20:15:00    > KICKOFF | {PLAYER} kicks 65 yards from NYJ 35 to end zone, Touchback.",
+    f"20:15:01    = KICKOFF | {PLAYER} kicks 65 yards from NYJ 35 to end zone, Touchback. (unconfirmed)",
+    f"20:16:00    > {TIMEOUT_LABEL}",  # stdout names an entry by its label, where the full log quotes its words
+    f"20:16:01    = {TIMEOUT_LABEL}",
+    f"20:16:30    ! {LATE.quoted}",
+    f"20:16:31    ! {MISSING.quoted}",  # nothing quoted: the note in our own words
+    f"20:17:00    x {TIMEOUT_LABEL} (cleared: past its hard end)",
+    "20:17:01    - an entry (unseen: the field moved on)",
+    f"20:17:02    > {SCORE_LABEL}",
+    "20:18:00  clock: the wall clock jumped +12m against the monotonic clock (the host slept?)",
+    f"20:18:00    - {SCORE_LABEL} (unseen: its source went stale)",
+    "20:18:00  woke: dimming the card until an answer from after the sleep is up",
+    "20:18:05  woke: an answer from after the sleep is up",
+    f"20:19:00  feed: NFLMeta no longer lists game {GAME_ID}",
+    f"20:19:01  feed: NFLMeta fetch failed for /api/v1/games/{GAME_ID}/play-changes: HTTP Error 429: {DESCRIPTION}",
+    "20:19:02  feed stale: no answer (quota: NFLMeta 20 of 20 a minute used, focus waiting); dimming the card until"
+    " it answers",
+    "20:19:30  feed: the ask failed",
+    "20:19:31  market: the ask failed",
+    f"{PLAYER} was helped off the field.",  # the feed's words across a line break: unstamped, and unplaced
+    "22:40:00  NYJ @ NE 13-27 Q4 0:00 [post] | final",
+    "22:42:00  final: no more polling",
+    usage(3_100, 13_000),  # at exit
+    usage(3_100, 13_000),  # the restart's
+    *opening(stamp="22:50:00"),
+    f"22:50:01    ! {LATE.quoted}",
+    f"22:50:02    - {LATE.entry} (unseen: arrived late)",
+    "22:50:05  final: no more polling",
+    usage(3_104, 13_010),
 ]
 
 
@@ -309,3 +396,87 @@ def test_a_long_drain_after_the_final_is_measured_as_the_drain_not_a_silence() -
     (night,) = mine_log(log, FIRST)
     assert night["clock"]["silences"] == 0
     assert night["final"]["drain"] == _same(900.0)
+
+
+def test_the_2026_11_19_runner_s_own_lines_are_read_and_its_usage_is_the_run_s() -> None:
+    (night,) = mine_log(NOV_19, NOV_19_DATE)
+    assert night["formats"] == ["nfl runner 2026-11-19"]
+    assert night["lines"] == {"parsed": len(NOV_19) - 1, "unparsed": 1}  # the feed's words on a line of their own
+    assert [row["lines"] for row in night["run_rows"]] == [30, 9]  # each with the usage line before its opening
+    assert night["quota"] == {
+        "lines": 4,
+        "requests": 229,
+        "rows": 641,
+        "requests_limit": 5_000,
+        "rows_limit": 25_000,
+        "per_minute": 20,
+    }
+    assert "- Quota: 4 NFLMeta usage lines; the month rose 229 requests and 641 rows (limits 5000 requests," in (
+        summary(night)
+    )
+    assert night["strip"]["arrived"] == [
+        {"kind": "play", "count": 1},
+        {"kind": "score", "count": 1},
+        {"kind": "timeout", "count": 1},
+    ]
+    assert night["strip"]["cleared"] == [{"kind": "timeout", "reason": "past its hard end", "count": 1}]
+    assert night["strip"]["dropped"] == [
+        {"kind": "play", "reason": "arrived late", "count": 1},
+        {"kind": "play", "reason": "the field moved on", "count": 1},
+        {"kind": "score", "reason": "its source went stale", "count": 1},
+    ]
+    assert night["feed"]["errors"] == [
+        {"kind": "fetch failed", "endpoint": "play-changes", "status": 429, "count": 1},
+        {"kind": "game not listed", "endpoint": None, "status": None, "count": 1},
+        {"kind": "other", "endpoint": None, "status": None, "count": 1},
+    ]
+    assert night["feed"]["notes"] == [{"kind": "late play", "count": 2}, {"kind": "matched play missing", "count": 1}]
+    assert (night["feed"]["stale_spells"], night["feed"]["market_errors"]) == (1, 1)
+    check_digest(night, measures=MEASURES, values=allowed(night))
+
+
+def test_the_month_s_usage_lines_before_a_log_s_first_run_open_it_and_a_month_s_turn_rises_nothing() -> None:
+    log = [
+        "quota: NFLMeta in 2026-11: 4,990 of 5,000 requests, 24,000 of 25,000 rows, 20 a minute",
+        "omni.app.football: NYJ @ NE (game 1), quad_128x64, delay 0s",
+        "23:59:00  NYJ @ NE: pre",
+        "quota: NFLMeta in 2026-12: 3 requests (no limit), 9 rows (no limit)",
+    ]
+    (night,) = mine_log(log, NOV_19_DATE)
+    assert night["run_rows"][0]["lines"] == 4 and night["lines"] == {"parsed": 4, "unparsed": 0}
+    assert night["quota"] == {
+        "lines": 2,
+        "requests": None,
+        "rows": None,
+        "requests_limit": None,
+        "rows_limit": None,
+        "per_minute": None,
+    }
+    (alone,) = mine_log([log[0]], NOV_19_DATE)  # a usage line and no run: the log's first night, all the same
+    assert alone["runs"] == 0 and alone["quota"]["lines"] == 1 and alone["quota"]["requests"] is None
+
+
+def test_a_night_without_a_usage_line_has_no_quota_figures(nights: list[dict[str, Any]]) -> None:
+    assert nights[0]["quota"] == {
+        "lines": 0,
+        "requests": None,
+        "rows": None,
+        "requests_limit": None,
+        "rows_limit": None,
+        "per_minute": None,
+    }
+    assert "- Quota: 0 NFLMeta usage lines; the month rose - requests and - rows" in summary(nights[0])
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "versions: policy omni-nfl-solo/1 | config omni-config/1 | rules x | models none",  # short of its parts
+        "config: delay=0s",
+        "clock: the wall clock jumped a lot against the monotonic clock",
+        "quota: BALLDONTLIE in 2026-11: 1 requests (no limit), 2 rows (no limit)",  # not the runner's account
+        "omni.app.football: the full log is somewhere",
+    ],
+)
+def test_a_line_only_like_the_2026_11_19_runner_s_own_is_not_placed(line: str) -> None:
+    assert read_line(line).kind.value == "unparsed"

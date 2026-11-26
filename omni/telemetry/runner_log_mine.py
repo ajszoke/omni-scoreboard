@@ -6,7 +6,7 @@ score line, a note's detail. `mine_runner_log` reads the lines by their shape al
 say, and writes one digest per night (`build/telemetry/runner-log/<date>.json`, schema ``omni-mined/1``) with a
 short Markdown summary beside it. A line it can't place is counted, never kept.
 
-**The formats.** The runner's lines changed between the two nights it ran, and both are read:
+**The formats.** The runner's lines changed between the nights it ran, and each version is read:
 - **2026-11-15** (`omni/app/football.py` and `football_board.py` as committed in 176fd69): ``HH:MM:SS`` and two
   spaces before each board line; the display process's lines (``display: starting ...``, ``display: lost the
   display process; restarting shortly``) unstamped. The strip logs what arrives (``  > words``), what it puts up
@@ -21,19 +21,36 @@ short Markdown summary beside it. A line it can't place is counted, never kept.
   answering again``, ``paint failed``, ``strip: a caption failed to draw``, ``step failed`` and the display's
   start, write and acknowledgement failures. Frames sent and their acknowledgements aren't logged one by one, so
   only the strip's shown entries tell confirmed from unconfirmed.
+- **2026-11-19** (the same files at d76a7eb, with `omni/app/quota.py`, `versions.py` and `run_log.py`): each line
+  goes in full to the run's ``runner.log``, quoting the feed as before, while stdout gets our own telemetry, which
+  names a strip entry by its label (``routine play #57``: `omni.events.football.EntryLabel`) and a note by its
+  kind. New lines: the month's NFLMeta usage (``quota: NFLMeta in 2026-11: 2,875 of 5,000 requests, ...``,
+  unstamped, just before the opening line and again at exit), where the full log is (``omni.app.football: the
+  full log is <path>, deleted by <date>``, unstamped), what the run decides with (``versions: ...`` and ``config
+  <digest>: ...``), a jump of the wall clock (``clock: the wall clock jumped ...``) and the wake after a sleep
+  (``woke: ...``).
+
+**Reading a line.** `read_line` places a line by its shape, and keeps beside what the digest counts the same line
+in our own words (`RunnerLine.ours`): the shape's fixed words, our kinds, the clubs, the score, the period and the
+clock. Each run of a provider's words becomes ``[detail]`` (or a placeholder like it), each of NFLMeta's ids is
+left for whoever writes the line to number (`NflMetaId`), and a line of no known shape becomes ``[line not
+kept]``. A line in our own words reads the same when read again, so `omni.telemetry.runner_log_redact` writes a
+log of our own from it, and checks one.
 
 **Runs and nights.** Each run starts with the runner's own line (``omni.app.football: PIT @ CIN (game 1),
-quad_128x64, delay 0s``). Stamps carry no date: within a run, a stamp more than 12 hours behind the one before it
-crossed midnight, and a smaller step back is a wall-clock jump. A run starts a new night when its game differs
-from the run before, or its first stamp is earlier in the day than where the run before ended; nights are dated
-one day apart from ``first_date``.
+quad_128x64, delay 0s``); the month's usage line just before it is that run's. Stamps carry no date: within a run, a
+stamp more than 12 hours behind the one before it crossed midnight, and a smaller step back is a wall-clock jump. A
+run starts a new night when its game differs from the run before, or its first stamp is earlier in the day than
+where the run before ended; nights are dated one day apart from ``first_date`` (`read_nights`).
 
 A strip entry's kind is read from its headline, the board's own words for it ("TIMEOUT CIN", "TV TIMEOUT", "XP
-GOOD"): our `FootballEventKind`, the officials' timeout logged as "TV TIMEOUT" on both nights included.
+GOOD"): our `FootballEventKind`, the officials' timeout logged as "TV TIMEOUT" on both nights included. An entry
+named by its label ("major score #60") is read by the kind it names.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import re
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
@@ -60,13 +77,21 @@ from omni.telemetry.digest import (
 from omni.telemetry.nflmeta_mine import Endpoint
 
 __all__ = [
+    "DETAIL",
     "MEASURES",
+    "NOT_KEPT",
     "FeedErrorKind",
+    "IdKind",
     "LineKind",
     "LogFormat",
+    "NflMetaId",
+    "Night",
+    "RunnerLine",
     "StripReason",
     "mine_log",
     "mine_runner_log",
+    "read_line",
+    "read_nights",
     "summary",
 ]
 
@@ -74,12 +99,23 @@ _DAY = 86_400
 _MIDNIGHT = 12 * 3_600  # a stamp this far behind the one before it is the next day's
 SILENCE = timedelta(minutes=5)  # no line for this long, while the game should be talking, is a silence
 
+# The placeholders a line in our own words puts where the log had something that isn't ours to keep.
+DETAIL = "[detail]"  # a provider's words, or a failure's message, which may quote them
+NOT_KEPT = "[line not kept]"  # a line of no known shape
+_TEAM = "[team]"  # a club that isn't an NFL club
+_GAME = "[game]"  # a game named by no id we know the shape of
+_NOTE = "[note]"  # a note of a kind we don't know
+_PROFILE = "[profile]"  # a panel that isn't one of ours
+_COMMAND = "[command]"  # the display's command: this machine's, not the run's
+_PATH = "[path]"  # where the full log is on this machine
+
 
 class LogFormat(StrEnumMixin, str, Enum):
     """Which version of the runner wrote a run's lines."""
 
     NIGHT_ONE = "nfl runner 2026-11-15"
     NIGHT_TWO = "nfl runner 2026-11-16"
+    NIGHT_THREE = "nfl runner 2026-11-19"
 
 
 class LineKind(StrEnumMixin, str, Enum):
@@ -109,11 +145,17 @@ class LineKind(StrEnumMixin, str, Enum):
     CLEARED = "cleared"
     BLANKED = "blanked"
     ANSWER = "answer"
+    QUOTA = "quota"  # the month's NFLMeta usage
+    FULL_LOG = "full log"  # where the run's full log is, and when it's deleted
+    VERSIONS = "versions"
+    CONFIG = "config"
+    CLOCK_JUMP = "clock jump"
+    WOKE = "woke"
     UNPARSED = "unparsed"
 
 
 class StripReason(StrEnumMixin, str, Enum):
-    """Why the strip dropped or cleared an entry, as the runner worded it on either night."""
+    """Why the strip dropped or cleared an entry, as the runner worded it on any night."""
 
     BREAK_BEGAN = "the break began"
     DURING_BREAK = "during a break"
@@ -128,6 +170,14 @@ class StripReason(StrEnumMixin, str, Enum):
     MISSED_WINDOW = "missed its air window"
     SOURCE_STALE = "its source went stale"
     FIELD_MOVED_ON = "the field moved on without its play"
+    MOVED_ON = "the field moved on"  # an entry dropped unseen for it, since 2026-11-19
+    PAST_HARD_END = "past its hard end"
+    ARRIVED_LATE = "arrived late"
+    BACKLOG = "backlog"
+    LANDED_LATE = "accidental: landed after its latest start"
+    GRANT_LAPSED = "accidental: landed after its grant lapsed"
+    UNCONFIRMED = "its display can't confirm it"
+    INTERRUPTED = "interrupted"
     DROPPED = "dropped"
     OTHER = "other"
 
@@ -146,7 +196,23 @@ class FeedErrorKind(StrEnumMixin, str, Enum):
     OTHER = "other"
 
 
-# Lines only the second night's runner wrote.
+class IdKind(StrEnumMixin, str, Enum):
+    """Which of NFLMeta's ids a line names."""
+
+    GAME = "game"
+    PLAY = "play"  # a play-by-play row's number
+
+
+@dataclass(frozen=True, slots=True)
+class NflMetaId:
+    """One of NFLMeta's ids as a line names it: its kind, and the id as written (or the ordinal a redacted log
+    wrote in its place, ``G1`` or ``P001``)."""
+
+    kind: IdKind
+    raw: str
+
+
+# Lines only the second night's runner and the ones after it wrote.
 _NIGHT_TWO = frozenset(
     {
         LineKind.FEED_STALE,
@@ -162,37 +228,78 @@ _NIGHT_TWO = frozenset(
         LineKind.DISPLAY_WRITE_FAILED,
     }
 )
+# Lines only the 2026-11-19 runner wrote.
+_NIGHT_THREE = frozenset(
+    {LineKind.QUOTA, LineKind.FULL_LOG, LineKind.VERSIONS, LineKind.CONFIG, LineKind.CLOCK_JUMP, LineKind.WOKE}
+)
 _STAMP = re.compile(r"(?P<h>\d{2}):(?P<m>\d{2}):(?P<s>\d{2})  (?P<body>.*)")
+_CLUB = r"[A-Z]{2,3}|\[team\]"
+_GAME_ID = r"\d+|G\d+"  # NFLMeta's id for a game, or the ordinal a redacted log names it by
+_PLAY_ID = r"\d+|P\d+"  # and for a play-by-play row
 _START = re.compile(
-    r"omni\.app\.football: (?P<away>[A-Z]{2,3}) @ (?P<home>[A-Z]{2,3}) \(game \d+\), (?P<profile>\S+),"
-    r" delay (?P<delay>\d+)s"
+    rf"omni\.app\.football: (?P<away>{_CLUB}) @ (?P<home>{_CLUB}) \(game (?P<game>{_GAME_ID})\),"
+    r" (?P<profile>\S+), delay (?P<delay>\d+)s"
 )
 _ANSWER = re.compile(
-    r"[A-Z]{2,3} @ [A-Z]{2,3}(?:: (?P<early>pre|in|post)"
-    r"| \d+-\d+ Q(?P<period>\d+) \d+:\d{2} \[(?P<phase>pre|in|post)\](?P<rest>.*))"
+    rf"(?P<away>{_CLUB}) @ (?P<home>{_CLUB})(?:: (?P<early>pre|in|post)"
+    r"| (?P<score>\d+-\d+) Q(?P<period>\d+) (?P<clock>\d+:\d{2}) \[(?P<phase>pre|in|post)\](?P<rest>.*))"
 )
 _STRIP = re.compile(r"  (?P<mark>[>=\-x~]) (?P<words>.*)")
 _SUFFIX = re.compile(r"(?P<words>.*) \((?P<what>unseen|cleared|blanked): (?P<why>[^()]*)\)")
 _HTTP = re.compile(r"HTTP Error (?P<status>\d{3})")
+_KINDS = "|".join(sorted((re.escape(kind.value) for kind in FootballEventKind), key=len, reverse=True))
+# An entry by our own label ("routine play #57", `EntryLabel`), or by its kind alone (a redacted log's "play").
+_LABEL = re.compile(rf"(?:(?P<weight>routine|major) )?(?P<kind>{_KINDS})(?: #(?P<play>{_PLAY_ID}))?")
+# A note's entry by its label, then what happens next.
+_NOTE_LABEL = re.compile(rf"(?P<weight>routine|major) (?P<kind>{_KINDS})(?: #(?P<play>{_PLAY_ID}))?(?:: (?P<rest>.*))?")
+_GAME_THEN = re.compile(rf"(?P<game>{_GAME_ID})(?P<rest>.*)")
+_USAGE = re.compile(
+    r"quota: NFLMeta in (?P<month>\d{4}-\d{2}): (?P<requests>[\d,]+) (?:of (?P<requests_limit>[\d,]+) )?requests"
+    r"(?: \(no limit\))?, (?P<rows>[\d,]+) (?:of (?P<rows_limit>[\d,]+) )?rows(?: \(no limit\))?"
+    r"(?:, (?P<per_minute>[\d,]+) a minute)?"
+)
+_FULL_LOG = re.compile(r"omni\.app\.football: the full log is (?P<path>.+), deleted by (?P<date>\d{4}-\d{2}-\d{2})")
+_VERSIONS = re.compile(
+    r"versions: policy \S+ \| config \S+ [0-9a-f]+ \| rules \S+ \| models .+ \| source \S+ \| migrations .+"
+)
+_CONFIG = re.compile(r"config [0-9a-f]+: \S+")
+_CLOCK_JUMP = re.compile(
+    r"clock: the wall clock jumped [+-]\d+(?:s|m|h\d{2}m) against the monotonic clock(?: \(the host slept\?\))?"
+)
 _FIXED = {
     "feed answering again": LineKind.FEED_BACK,
     "halftime: holding off the feed": LineKind.HOLD_START,
     "halftime hold over: polling again": LineKind.HOLD_END,
     "final: no more polling": LineKind.PARKED,
     "paint recovered": LineKind.PAINT_RECOVERED,
+    "feed stale: no answer; dimming the card until it answers": LineKind.FEED_STALE,
+    "display: no frame acknowledgements; showing frames unconfirmed (update board_frame_sink.py on the board)": (
+        LineKind.DISPLAY_UNCONFIRMED
+    ),
+    "market: the ask failed": LineKind.MARKET_ERROR,
+    "woke: an answer from after the sleep is up": LineKind.WOKE,
+    "woke: dimming the card until an answer from after the sleep is up": LineKind.WOKE,
 }
+# Each line known by how it starts, and what follows the start in our own words.
 _PREFIXED = (
-    ("display: starting ", LineKind.DISPLAY_START),
-    ("display: couldn't start it ", LineKind.DISPLAY_START_FAILED),
-    ("display: a frame write failed: ", LineKind.DISPLAY_WRITE_FAILED),
-    ("display: no frame acknowledgements; ", LineKind.DISPLAY_UNCONFIRMED),
-    ("feed stale: ", LineKind.FEED_STALE),
-    ("feed: ", LineKind.FEED_ERROR),
-    ("market: ", LineKind.MARKET_ERROR),
-    ("paint failed: ", LineKind.PAINT_FAILED),
-    ("strip: a caption failed to draw: ", LineKind.CAPTION_FAILED),
-    ("step failed: ", LineKind.STEP_FAILED),
+    ("display: starting ", LineKind.DISPLAY_START, _COMMAND),
+    ("display: couldn't start it ", LineKind.DISPLAY_START_FAILED, f"({DETAIL}); trying again shortly"),
+    ("display: a frame write failed: ", LineKind.DISPLAY_WRITE_FAILED, DETAIL),
+    ("display: no frame acknowledgements; ", LineKind.DISPLAY_UNCONFIRMED, DETAIL),
+    ("feed stale: ", LineKind.FEED_STALE, DETAIL),
+    ("market: ", LineKind.MARKET_ERROR, DETAIL),
+    ("paint failed: ", LineKind.PAINT_FAILED, DETAIL),
+    ("strip: a caption failed to draw: ", LineKind.CAPTION_FAILED, DETAIL),
+    ("step failed: ", LineKind.STEP_FAILED, DETAIL),
 )
+_LOST = "lost the display process"
+_DISPLAY_LOSSES = frozenset({_LOST, "the display process ended"})
+_BLANKED_WHY = "the display went away"
+_AN_ENTRY = "an entry"  # an entry the runner had no label for
+_ASK_FAILED = "the ask failed"
+_FETCH = "NFLMeta fetch failed for "
+_NOT_LISTED = "NFLMeta no longer lists game"
+_UNREADABLE = "NFLMeta sent an unreadable game"
 _MARKS = {
     ">": LineKind.ARRIVED,
     "=": LineKind.SHOWN,
@@ -274,6 +381,12 @@ MEASURES = SPREAD_MEASURES | frozenset(
         "paint",
         "paint_recovered",
         "caption",
+        "quota",
+        "requests",
+        "rows",
+        "requests_limit",
+        "rows_limit",
+        "per_minute",
     }
 )
 _ENUMS: tuple[type[Enum], ...] = (
@@ -290,11 +403,26 @@ _ENUMS: tuple[type[Enum], ...] = (
 # --- reading a line ----------------------------------------------------------------------------------------------
 
 
+@dataclass(frozen=True, slots=True)
+class _Usage:
+    """The month's NFLMeta usage as a quota line gave it: requests and rows so far, against the plan's limits."""
+
+    month: str
+    requests: int
+    rows: int
+    requests_limit: int | None
+    rows_limit: int | None
+    per_minute: int | None
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
-class _Line:
-    """What one log line said, by its shape, without its words."""
+class RunnerLine:
+    """What one log line said, by its shape, without its words; and the line in our own words."""
 
     kind: LineKind
+    # The line's body in our own words: text, and NFLMeta's ids left for the writer to number.
+    ours: tuple[str | NflMetaId, ...]
+    prefix: str = ""  # the stamp as written, with the two spaces after it, when the line is stamped
     stamp: int | None = None  # seconds since local midnight, when the line is stamped
     event: FootballEventKind | None = None
     reason: StripReason | None = None
@@ -310,99 +438,205 @@ class _Line:
     home: str | None = None
     profile: PanelProfile | None = None
     delay: int | None = None
+    usage: _Usage | None = None
 
 
-def _read_line(line: str) -> _Line:
+def read_line(line: str) -> RunnerLine:
     """One line of the runner's log, by its shape; an unknown shape is `LineKind.UNPARSED`."""
     stamped = _STAMP.fullmatch(line)
-    stamp = None
-    body = line
-    if stamped is not None:
-        stamp = int(stamped["h"]) * 3_600 + int(stamped["m"]) * 60 + int(stamped["s"])
-        body = stamped["body"]
-    return _body(body, stamp)
+    if stamped is None:
+        return _body(line)
+    stamp = int(stamped["h"]) * 3_600 + int(stamped["m"]) * 60 + int(stamped["s"])
+    prefix = line[: stamped.start("body")]
+    return dataclasses.replace(_body(stamped["body"]), prefix=prefix, stamp=stamp)
 
 
-def _body(body: str, stamp: int | None) -> _Line:
+def _body(body: str) -> RunnerLine:
     if (kind := _FIXED.get(body)) is not None:
-        return _Line(kind=kind, stamp=stamp)
+        return RunnerLine(kind=kind, ours=(body,))
     if (start := _START.fullmatch(body)) is not None:
-        return _start(start, stamp)
+        return _start(start)
+    if (written := _FULL_LOG.fullmatch(body)) is not None:
+        return RunnerLine(
+            kind=LineKind.FULL_LOG, ours=(f"omni.app.football: the full log is {_PATH}, deleted by {written['date']}",)
+        )
+    for pattern, kind in (
+        (_VERSIONS, LineKind.VERSIONS),
+        (_CONFIG, LineKind.CONFIG),
+        (_CLOCK_JUMP, LineKind.CLOCK_JUMP),
+    ):
+        if pattern.fullmatch(body) is not None:
+            return RunnerLine(kind=kind, ours=(body,))
+    if (usage := _USAGE.fullmatch(body)) is not None:
+        return RunnerLine(kind=LineKind.QUOTA, ours=(body,), usage=_usage(usage))
     if body.startswith("display: ") and body.endswith("; restarting shortly"):
-        return _Line(kind=LineKind.DISPLAY_LOST, stamp=stamp)
-    for prefix, kind in _PREFIXED:
+        return _display_lost(body.removeprefix("display: ").removesuffix("; restarting shortly"))
+    if body.startswith("feed: "):
+        return _feed_error(body.removeprefix("feed: "))
+    for prefix, kind, rest in _PREFIXED:
         if body.startswith(prefix):
-            return (
-                _feed_error(body.removeprefix(prefix), stamp)
-                if kind is LineKind.FEED_ERROR
-                else _Line(kind=kind, stamp=stamp)
-            )
+            return RunnerLine(kind=kind, ours=(prefix + rest,))
     if body.startswith("  ! "):
-        named = body.removeprefix("  ! ").split(": ", 1)[0]
-        note = next((kind for kind in FeedNoteKind if kind.value == named), None)
-        return _Line(kind=LineKind.NOTE, stamp=stamp, note=note)
+        return _note(body.removeprefix("  ! "))
     if (strip := _STRIP.fullmatch(body)) is not None:
-        return _strip(_MARKS[strip["mark"]], strip["words"], stamp)
+        return _strip(strip["mark"], strip["words"])
     if (answer := _ANSWER.fullmatch(body)) is not None:
-        return _answer(answer, stamp)
-    return _Line(kind=LineKind.UNPARSED, stamp=stamp)
+        return _answer(answer)
+    return RunnerLine(kind=LineKind.UNPARSED, ours=(NOT_KEPT,))
 
 
-def _start(start: re.Match[str], stamp: int | None) -> _Line:
-    """The runner's opening line: the game's two clubs (when they're NFL clubs), the panel and the delay."""
-    away: str | None
-    home: str | None
+def _club(raw: str) -> str | None:
+    """A club's canonical abbreviation, or None when it isn't an NFL club."""
     try:
-        away, home = canonical_abbreviation(start["away"]), canonical_abbreviation(start["home"])
+        return canonical_abbreviation(raw)
     except KeyError:
+        return None
+
+
+def _clubs(away: str, home: str) -> str:
+    """The two clubs as a line in our own words names them."""
+    return f"{_club(away) or _TEAM} @ {_club(home) or _TEAM}"
+
+
+def _start(start: re.Match[str]) -> RunnerLine:
+    """The runner's opening line: the game's two clubs (when they're NFL clubs), the panel and the delay."""
+    away, home = _club(start["away"]), _club(start["home"])
+    if away is None or home is None:
         away = home = None
     profile = next((profile for profile in PanelProfile if profile.value == start["profile"]), None)
-    return _Line(kind=LineKind.START, stamp=stamp, away=away, home=home, profile=profile, delay=int(start["delay"]))
-
-
-def _feed_error(error: str, stamp: int | None) -> _Line:
-    """A ``feed:`` line by the shape of its error: the provider's and the quota's own phrasing."""
-    status = _HTTP.search(error)
-    endpoint = None
-    if error.startswith("quota: "):
-        kind = FeedErrorKind.REFUSED
-    elif error.startswith("NFLMeta fetch failed for "):
-        kind = FeedErrorKind.FETCH_FAILED
-        endpoint = Endpoint.PLAY_CHANGES if "/play-changes" in error else Endpoint.LIVE_SCORES
-    elif error.startswith("NFLMeta no longer lists game"):
-        kind = FeedErrorKind.NOT_LISTED
-    elif error.startswith("NFLMeta sent an unreadable game"):
-        kind = FeedErrorKind.UNREADABLE
-    else:
-        kind = FeedErrorKind.OTHER
-    return _Line(
-        kind=LineKind.FEED_ERROR,
-        stamp=stamp,
-        error=kind,
-        endpoint=endpoint,
-        status=int(status["status"]) if status is not None else None,
+    delay = int(start["delay"])
+    return RunnerLine(
+        kind=LineKind.START,
+        away=away,
+        home=home,
+        profile=profile,
+        delay=delay,
+        ours=(
+            f"omni.app.football: {_clubs(start['away'], start['home'])} (game ",
+            NflMetaId(IdKind.GAME, start["game"]),
+            f"), {profile.value if profile is not None else _PROFILE}, delay {delay}s",
+        ),
     )
 
 
-def _strip(kind: LineKind, words: str, stamp: int | None) -> _Line:
-    """A strip line: the entry's kind from its headline, and the reason or marks after its words."""
+def _usage(usage: re.Match[str]) -> _Usage:
+    def count(written: str) -> int:
+        return int(written.replace(",", ""))
+
+    def limit(written: str | None) -> int | None:
+        return count(written) if written is not None else None
+
+    return _Usage(
+        month=usage["month"],
+        requests=count(usage["requests"]),
+        rows=count(usage["rows"]),
+        requests_limit=limit(usage["requests_limit"]),
+        rows_limit=limit(usage["rows_limit"]),
+        per_minute=limit(usage["per_minute"]),
+    )
+
+
+def _display_lost(why: str) -> RunnerLine:
+    """The display process lost: why, when it's in the runner's own words."""
+    if why not in _DISPLAY_LOSSES:
+        why = f"{_LOST} ({DETAIL})" if why.startswith(f"{_LOST} (") else DETAIL
+    return RunnerLine(kind=LineKind.DISPLAY_LOST, ours=(f"display: {why}; restarting shortly",))
+
+
+def _feed_error(error: str) -> RunnerLine:
+    """A ``feed:`` line by the shape of its error: the provider's and the quota's own phrasing. Its kind, the
+    endpoint and the HTTP status are kept, and the game it names by its id; the rest is the provider's."""
+    status = _HTTP.search(error)
+    code = int(status["status"]) if status is not None else None
+    tail = f": HTTP Error {code}: {DETAIL}" if code is not None else f": {DETAIL}"
+    endpoint = None
+    said: tuple[str | NflMetaId, ...]
+    if error.startswith("quota: "):
+        kind, said = FeedErrorKind.REFUSED, ("quota" + tail,)
+    elif error.startswith(_FETCH):
+        kind = FeedErrorKind.FETCH_FAILED
+        endpoint = Endpoint.PLAY_CHANGES if "/play-changes" in error else Endpoint.LIVE_SCORES
+        said = (f"{_FETCH}/{endpoint.value}{tail}",)
+    elif error.startswith(_NOT_LISTED):
+        kind, said = FeedErrorKind.NOT_LISTED, (f"{_NOT_LISTED} ", *_game_named(error.removeprefix(_NOT_LISTED), tail))
+    elif error.startswith(_UNREADABLE):
+        kind, said = FeedErrorKind.UNREADABLE, (f"{_UNREADABLE} ", *_game_named(error.removeprefix(_UNREADABLE), tail))
+    else:
+        kind, said = FeedErrorKind.OTHER, (_ASK_FAILED if error == _ASK_FAILED else tail.removeprefix(": "),)
+    return RunnerLine(kind=LineKind.FEED_ERROR, error=kind, endpoint=endpoint, status=code, ours=("feed: ", *said))
+
+
+def _game_named(text: str, tail: str) -> tuple[str | NflMetaId, ...]:
+    """The game an error names by its id, then the error's tail when anything follows the id."""
+    named = _GAME_THEN.fullmatch(text.removeprefix(" "))
+    if named is None:
+        return (_GAME, tail)
+    return (NflMetaId(IdKind.GAME, named["game"]), tail if named["rest"] else "")
+
+
+def _note(text: str) -> RunnerLine:
+    """A feed note: its kind, the entry it's about by our own label, and a placeholder for anything else."""
+    named, colon, tail = text.partition(": ")
+    note = next((kind for kind in FeedNoteKind if kind.value == named), None)
+    said: list[str | NflMetaId] = ["  ! ", note.value if note is not None else _NOTE]
+    rest: str | None = tail
+    if colon and (label := _NOTE_LABEL.fullmatch(tail)) is not None:
+        said += [": ", *_label(label)]
+        rest = label["rest"]
+    if colon and rest:
+        said.append(f": {DETAIL}")
+    return RunnerLine(kind=LineKind.NOTE, note=note, ours=tuple(said))
+
+
+def _label(label: re.Match[str]) -> tuple[str | NflMetaId, ...]:
+    """An entry's label in our own words: its weight, its kind, and its play by the id."""
+    words = (f"{label['weight']} " if label["weight"] else "") + FootballEventKind(label["kind"]).value
+    if label["play"] is None:
+        return (words,)
+    return (f"{words} #", NflMetaId(IdKind.PLAY, label["play"]))
+
+
+def _strip(mark: str, words: str) -> RunnerLine:
+    """A strip line: the entry's kind from its headline or label, and the reason or marks after its words."""
+    kind = _MARKS[mark]
     reason = None
     unconfirmed = again = False
+    after = ""
     if kind is LineKind.SHOWN:
         unconfirmed = words.endswith(" (unconfirmed)")
         words = words.removesuffix(" (unconfirmed)")
         again = words.endswith(" (again, on the new display)")
         words = words.removesuffix(" (again, on the new display)")
+        after = (" (again, on the new display)" if again else "") + (" (unconfirmed)" if unconfirmed else "")
     elif kind is not LineKind.ARRIVED:
         suffix = _SUFFIX.fullmatch(words)
         if suffix is not None:
-            words = suffix["words"]
-            reason = StripReason(suffix["why"]) if kind is not LineKind.BLANKED else None
+            words, why = suffix["words"], suffix["why"]
+            reason = StripReason(why) if kind is not LineKind.BLANKED else None
+            own = StripReason(why) is not StripReason.OTHER or why == _BLANKED_WHY  # the runner's own words
+            after = f" ({suffix['what']}: {why if own else DETAIL})"
         elif kind is not LineKind.BLANKED:
             reason = StripReason.OTHER
-    return _Line(
-        kind=kind, stamp=stamp, event=_headline_kind(words), reason=reason, unconfirmed=unconfirmed, again=again
+    event, entry = _entry(words)
+    return RunnerLine(
+        kind=kind,
+        event=event,
+        reason=reason,
+        unconfirmed=unconfirmed,
+        again=again,
+        ours=(f"  {mark} ", *entry, after),
     )
+
+
+def _entry(words: str) -> tuple[FootballEventKind, tuple[str | NflMetaId, ...]]:
+    """A strip entry's kind and the entry in our own words: by its label when it has one, else by the kind its
+    headline reads as."""
+    if words == _AN_ENTRY:
+        return FootballEventKind.PLAY, (_AN_ENTRY,)
+    if (label := _LABEL.fullmatch(words)) is not None:
+        return FootballEventKind(label["kind"]), _label(label)
+    kind = _headline_kind(words)
+    return kind, (kind.value,)
 
 
 def _headline_kind(words: str) -> FootballEventKind:
@@ -413,14 +647,24 @@ def _headline_kind(words: str) -> FootballEventKind:
     return next((kind for pattern, kind in _HEADLINES if pattern.fullmatch(headline)), FootballEventKind.PLAY)
 
 
-def _answer(answer: re.Match[str], stamp: int | None) -> _Line:
-    """A changed answer's line: its phase, and its break, if it's in one. The score and the field go unread."""
+def _answer(answer: re.Match[str]) -> RunnerLine:
+    """A changed answer's line: its phase, and its break, if it's in one. In our own words it keeps the clubs, the
+    score, the period, the clock, the phase and the break; the field after them is the feed's."""
     phase = NflPhase(answer["early"] or answer["phase"])
-    rest = answer["rest"] or ""
+    clubs = _clubs(answer["away"], answer["home"])
+    if answer["early"] is not None:
+        return RunnerLine(kind=LineKind.ANSWER, phase=phase, ours=(f"{clubs}: {phase.value}",))
+    rest = answer["rest"]
     interval = next(
         (interval for interval in FootballInterval if re.match(rf" \| {interval.value}(?: |$)", rest)), None
     )
-    return _Line(kind=LineKind.ANSWER, stamp=stamp, phase=phase, interval=interval)
+    said = f"{clubs} {answer['score']} Q{answer['period']} {answer['clock']} [{phase.value}]"
+    if interval is not None:
+        said += f" | {interval.value}"
+        rest = rest.removeprefix(f" | {interval.value}")
+    if rest:
+        said += f" | {DETAIL}"
+    return RunnerLine(kind=LineKind.ANSWER, phase=phase, interval=interval, ours=(said,))
 
 
 # --- runs and nights ---------------------------------------------------------------------------------------------
@@ -431,8 +675,8 @@ class _Run:
     """One run of the runner: its opening line, and its lines, each stamp placed in seconds from the midnight
     before the run's first stamp, running on across a midnight it crosses."""
 
-    start: _Line
-    lines: list[tuple[_Line, int | None]] = field(default_factory=list)  # each line, and its time if stamped
+    start: RunnerLine
+    lines: list[tuple[RunnerLine, int | None]] = field(default_factory=list)  # each line, and its time if stamped
     jumps: list[int] = field(default_factory=list)  # each step back of the wall clock, in seconds
     days: int = 0  # midnights crossed so far
     last: int | None = None  # the latest stamped line's time
@@ -441,7 +685,7 @@ class _Run:
     def times(self) -> list[int]:
         return [at for _, at in self.lines if at is not None]
 
-    def add(self, line: _Line) -> None:
+    def add(self, line: RunnerLine) -> None:
         """Place ``line`` on the run's clock: a stamp far behind the last crossed midnight, a small step back is a
         jump of the wall clock."""
         at = None
@@ -457,6 +701,8 @@ class _Run:
 
     @property
     def format(self) -> LogFormat:
+        if any(line.kind in _NIGHT_THREE for line, _ in self.lines):
+            return LogFormat.NIGHT_THREE
         later = any(
             line.kind in _NIGHT_TWO
             or (line.kind is LineKind.DISPLAY_START and at is not None)
@@ -467,23 +713,38 @@ class _Run:
 
 
 @dataclass(slots=True)
-class _Night:
+class Night:
     """The runs of one night, and the lines before the log's first run (only the first night has any)."""
 
     day: int  # days after the first night
     runs: list[_Run] = field(default_factory=list)
-    orphans: list[_Line] = field(default_factory=list)
+    orphans: list[RunnerLine] = field(default_factory=list)
+
+    @property
+    def size(self) -> int:
+        """How many of the log's lines are this night's: a night's lines are one stretch of the log."""
+        return len(self.orphans) + sum(1 + len(run.lines) for run in self.runs)
+
+    @property
+    def formats(self) -> tuple[LogFormat, ...]:
+        """The formats its runs were written in, in order."""
+        return tuple(sorted({run.format for run in self.runs}, key=lambda written: written.value))
 
 
-def _runs(lines: Iterable[str]) -> tuple[list[_Run], list[_Line]]:
+def _runs(lines: Iterable[str]) -> tuple[list[_Run], list[RunnerLine]]:
     """The log's runs, each line's stamp placed on a clock that runs on across midnight; and the lines before the
-    first run."""
+    first run. The month's usage, logged just before a run's opening line, is that run's."""
     runs: list[_Run] = []
-    orphans: list[_Line] = []
+    orphans: list[RunnerLine] = []
     for raw in lines:
-        line = _read_line(raw)
+        line = read_line(raw)
         if line.kind is LineKind.START:
-            runs.append(_Run(line))
+            run = _Run(line)
+            if runs and runs[-1].lines and runs[-1].lines[-1][0].kind is LineKind.QUOTA:
+                run.add(runs[-1].lines.pop()[0])
+            elif not runs and orphans and orphans[-1].kind is LineKind.QUOTA:
+                run.add(orphans.pop())
+            runs.append(run)
         elif runs:
             runs[-1].add(line)
         else:
@@ -491,14 +752,15 @@ def _runs(lines: Iterable[str]) -> tuple[list[_Run], list[_Line]]:
     return runs, orphans
 
 
-def _nights(runs: Sequence[_Run], orphans: list[_Line]) -> list[_Night]:
-    """Runs grouped by night: a run starts a new night when its game differs from the run before's, or it starts
-    earlier in the day than the run before ended."""
-    nights = [_Night(0, orphans=orphans)]
+def read_nights(lines: Iterable[str]) -> list[Night]:
+    """The log's runs grouped by night: a run starts a new night when its game differs from the run before's, or it
+    starts earlier in the day than the run before ended."""
+    runs, orphans = _runs(lines)
+    nights = [Night(0, orphans=orphans)]
     previous: _Run | None = None
     for run in runs:
         if previous is not None and (_game(run) != _game(previous) or _earlier(run, previous)):
-            nights.append(_Night(nights[-1].day + 1))
+            nights.append(Night(nights[-1].day + 1))
         nights[-1].runs.append(run)
         previous = run
     return [night for night in nights if night.runs or night.orphans]
@@ -517,7 +779,7 @@ def _earlier(run: _Run, before: _Run) -> bool:
 # --- measures ----------------------------------------------------------------------------------------------------
 
 
-def _counted(lines: Iterable[_Line], *keys: str) -> list[dict[str, Any]]:
+def _counted(lines: Iterable[RunnerLine], *keys: str) -> list[dict[str, Any]]:
     """Lines counted by the given fields' values, one record each, in a stable order."""
     counts: Counter[tuple[Any, ...]] = Counter(tuple(getattr(line, key) for key in keys) for line in lines)
     rows = [
@@ -579,7 +841,33 @@ def _drain(run: _Run) -> float | None:
     return float(parked - post) if parked is not None else None
 
 
-def _night_digest(night: _Night, first_date: date) -> dict[str, Any]:
+def _quota(night: Night) -> dict[str, Any]:
+    """The month's NFLMeta usage over the night, from its quota lines: how far the month's requests and rows rose
+    from the first to the last (when both are in one month), and the plan's limits as the last gave them."""
+    usages = [line.usage for line in night.orphans if line.usage is not None]
+    usages += [line.usage for run in night.runs for line, _ in run.lines if line.usage is not None]
+    if not usages:
+        return {
+            "lines": 0,
+            "requests": None,
+            "rows": None,
+            "requests_limit": None,
+            "rows_limit": None,
+            "per_minute": None,
+        }
+    first, last = usages[0], usages[-1]
+    rose = len(usages) > 1 and first.month == last.month
+    return {
+        "lines": len(usages),
+        "requests": last.requests - first.requests if rose else None,
+        "rows": last.rows - first.rows if rose else None,
+        "requests_limit": last.requests_limit,
+        "rows_limit": last.rows_limit,
+        "per_minute": last.per_minute,
+    }
+
+
+def _night_digest(night: Night, first_date: date) -> dict[str, Any]:
     day = (first_date + timedelta(days=night.day)).isoformat()
     lines = [line for run in night.runs for line, _ in run.lines] + night.orphans
     games = {_game(run) for run in night.runs}
@@ -600,7 +888,7 @@ def _night_digest(night: _Night, first_date: date) -> dict[str, Any]:
         "date": day,
         "away": away,
         "home": home,
-        "formats": sorted({run.format.value for run in night.runs}),
+        "formats": [written.value for written in night.formats],
         "runs": len(night.runs),
         "run_rows": [
             {
@@ -671,13 +959,13 @@ def _night_digest(night: _Night, first_date: date) -> dict[str, Any]:
             "paint_recovered": of[LineKind.PAINT_RECOVERED],
             "caption": of[LineKind.CAPTION_FAILED],
         },
+        "quota": _quota(night),
     }
 
 
 def mine_log(lines: Iterable[str], first_date: date) -> list[dict[str, Any]]:
     """A digest for each night in the runner's log ``lines``, the first night dated ``first_date``."""
-    runs, orphans = _runs(lines)
-    return [_night_digest(night, first_date) for night in _nights(runs, orphans)]
+    return [_night_digest(night, first_date) for night in read_nights(lines)]
 
 
 def allowed(digest: Mapping[str, Any]) -> frozenset[str]:
@@ -720,7 +1008,7 @@ def _tally(rows: Sequence[Mapping[str, Any]]) -> str:
 
 def summary(digest: Mapping[str, Any]) -> str:
     """A short Markdown summary of a night's digest, for a person; it holds nothing the digest doesn't."""
-    strip, feed, frames, clock = digest["strip"], digest["feed"], digest["frames"], digest["clock"]
+    strip, feed, frames, clock, quota = (digest[part] for part in ("strip", "feed", "frames", "clock", "quota"))
     holds = digest["halftime"]["holds"]
     game = f"{figure(digest['away'])} @ {figure(digest['home'])}"
     lines = [
@@ -748,5 +1036,8 @@ def summary(digest: Mapping[str, Any]) -> str:
         f"- Halftime holds: {', '.join(figure(hold['length']) for hold in holds) or 'none'}.",
         f"- Final: parked {digest['final']['parked']} times; drain {_spread(digest['final']['drain'])}.",
         f"- Clock: {clock['backward_steps']} steps back, {clock['silences']} silences ({_spread(clock['silence'])}).",
+        f"- Quota: {quota['lines']} NFLMeta usage lines; the month rose {figure(quota['requests'])} requests and"
+        f" {figure(quota['rows'])} rows (limits {figure(quota['requests_limit'])} requests,"
+        f" {figure(quota['rows_limit'])} rows, {figure(quota['per_minute'])} a minute).",
     ]
     return "\n".join(lines) + "\n"
