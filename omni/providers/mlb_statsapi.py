@@ -63,8 +63,8 @@ __all__ = ["MlbStatsApiProvider", "ScheduleFetcher", "GameFetcher", "ContextMetr
 
 # (game_date, sport_ids) -> the list of flat schedule rows. A row has `statsapi.schedule`'s keys for what the two
 # share (`game_id`, `game_datetime`, `game_date`, `game_type`, `status`, `away_id`, `away_name`, `home_id`,
-# `home_name`, `venue_name`, `doubleheader`, `game_num`), and four of its own: `start_time_tbd`,
-# `resumed_from_date`, `broadcasts` and `inning_break_length` (`_schedule_rows`).
+# `home_name`, `venue_name`, `doubleheader`, `game_num`), and five of its own: `abstract_game_state` (the status's
+# coarse state), `start_time_tbd`, `resumed_from_date`, `broadcasts` and `inning_break_length` (`_schedule_rows`).
 ScheduleFetcher = Callable[[date, str], list[dict[str, Any]]]
 # game_pk -> the raw nested game feed (statsapi.get("game", ...)).
 GameFetcher = Callable[[Any], dict[str, Any]]
@@ -159,36 +159,56 @@ _SOURCE = SourceRef("mlb_statsapi", "https://statsapi.mlb.com")
 # MLB's league-office zone; a sensible default "baseball day" until a device sets its own.
 _DEFAULT_SCHEDULE_TZ = ZoneInfo("America/New_York")
 
-# StatsAPI `detailedState` strings -> our typed status. Variants that carry a
-# suffix ("Delayed: Rain", "Suspended: Rain") are matched by prefix below.
-_STATUS_MAP: dict[str, GameStatus] = {
-    "Scheduled": GameStatus.SCHEDULED,
-    "Pre-Game": GameStatus.PREGAME,
-    "Warmup": GameStatus.PREGAME,
-    "In Progress": GameStatus.LIVE,
-    "Manager Challenge": GameStatus.LIVE,
-    "Final": GameStatus.FINAL,
-    "Game Over": GameStatus.FINAL,
-    "Completed Early": GameStatus.FINAL,
-    "Postponed": GameStatus.POSTPONED,
-    "Cancelled": GameStatus.CANCELED,
-    "Canceled": GameStatus.CANCELED,
-}
+# StatsAPI `detailedState` -> our typed status, by the family the state's text begins with, compared without regard
+# to case: StatsAPI writes "Manager challenge" but "Umpire Challenge". Each family is checked against the coarse state
+# (`abstractGameState`) StatsAPI gives its members, noted beside it; where the typed status differs from that coarse
+# state, the note says why.
 _STATUS_PREFIXES: tuple[tuple[str, GameStatus], ...] = (
-    ("Delayed", GameStatus.DELAYED),
-    ("Suspended", GameStatus.SUSPENDED),
-    ("Completed Early", GameStatus.FINAL),
+    ("scheduled", GameStatus.SCHEDULED),  # Preview; "Scheduled: COVID-19" too
+    ("pre-game", GameStatus.PREGAME),  # Preview
+    ("warmup", GameStatus.PREGAME),  # Live, but no pitch has been thrown: the game is still carded as upcoming
+    ("in progress", GameStatus.LIVE),  # Live
+    # Live: a replay review or a challenge pauses a game still in play. The game's feed shows whether a review is
+    # under way (`reviewDetails`), so the game stays live for its card and its feed to be read through it.
+    ("manager challenge", GameStatus.LIVE),
+    ("umpire review", GameStatus.LIVE),
+    ("instant replay", GameStatus.LIVE),
+    ("umpire challenge", GameStatus.LIVE),  # a ball-strike challenge ("Umpire Challenge: Pitch Result")
+    ("player challenge", GameStatus.LIVE),  # a ball-strike challenge ("Player challenge: Pitch Result")
+    # Live for a game under way ("Delayed: Rain"), Preview for one not yet begun ("Delayed Start: Rain"): either way
+    # the game is held up, so a status card stands in for it.
+    ("delayed", GameStatus.DELAYED),
+    ("suspended", GameStatus.SUSPENDED),  # Live: stopped, to be finished another day
+    # Final: the game is over with a result, tied ("Final: Tied") or forfeited ("Forfeit: Rule") included.
+    ("final", GameStatus.FINAL),
+    ("game over", GameStatus.FINAL),
+    ("completed early", GameStatus.FINAL),
+    ("forfeit", GameStatus.FINAL),
+    # Final, though no result stands: a game put off to be played later, or called off.
+    ("postponed", GameStatus.POSTPONED),
+    ("cancelled", GameStatus.CANCELED),
+    ("canceled", GameStatus.CANCELED),
 )
+# StatsAPI's coarse `abstractGameState` -> the status a detailed state no family names falls back to. Its fourth
+# value, Other ("Unknown", "Writing"), says nothing of where the game stands, so it stays UNKNOWN.
+_ABSTRACT_STATUS: dict[str, GameStatus] = {
+    "preview": GameStatus.SCHEDULED,
+    "live": GameStatus.LIVE,
+    "final": GameStatus.FINAL,
+}
 
 
-def map_game_status(detailed_state: str) -> GameStatus:
-    """Map a StatsAPI `detailedState` to a typed `GameStatus` (UNKNOWN if unrecognized)."""
-    if detailed_state in _STATUS_MAP:
-        return _STATUS_MAP[detailed_state]
+def map_game_status(detailed_state: str, abstract_state: str | None = None) -> GameStatus:
+    """Map a StatsAPI `detailedState` to a typed `GameStatus`, by the family its text begins with, in any case.
+
+    A detailed state no family names falls back to ``abstract_state``, the payload's `abstractGameState`, when it
+    has one: a status StatsAPI adds later still keeps a live game live. UNKNOWN when neither says.
+    """
+    folded = detailed_state.casefold()
     for prefix, status in _STATUS_PREFIXES:
-        if detailed_state.startswith(prefix):
+        if folded.startswith(prefix):
             return status
-    return GameStatus.UNKNOWN
+    return _ABSTRACT_STATUS.get((abstract_state or "").casefold(), GameStatus.UNKNOWN)
 
 
 class _SkipGame(Exception):
@@ -339,7 +359,7 @@ class MlbStatsApiProvider:
         return TeamGame(
             id=LeagueScopedId(League.MLB, self.source, str(game_pk)),
             league=League.MLB,
-            status=map_game_status(str(row.get("status", ""))),
+            status=map_game_status(str(row.get("status", "")), _text(row.get("abstract_game_state"))),
             scheduled_start=_parse_start(row.get("game_datetime"), game_pk),
             away=away,
             home=home,
@@ -414,6 +434,7 @@ def _schedule_rows(response: Any) -> list[dict[str, Any]]:
                 "game_date": game.get("officialDate") or day.get("date"),
                 "game_type": game.get("gameType"),
                 "status": status.get("detailedState"),
+                "abstract_game_state": status.get("abstractGameState"),
                 "away_id": away.get("id"),
                 "away_name": away.get("name"),
                 "home_id": home.get("id"),
@@ -844,9 +865,16 @@ def _parse_game_state(raw: dict[str, Any], *, inning_break_length: timedelta | N
 
 
 def _feed_status(raw: dict[str, Any]) -> GameStatus | None:
-    """The game's status as the feed gives it (``gameData.status.detailedState``), or None when it says none."""
-    detailed = ((raw.get("gameData") or {}).get("status") or {}).get("detailedState")
-    return map_game_status(detailed) if isinstance(detailed, str) and detailed else None
+    """The game's status as the feed gives it (``gameData.status``: its ``detailedState``, else its
+    ``abstractGameState``), or None when it says neither."""
+    status = (raw.get("gameData") or {}).get("status") or {}
+    detailed, abstract = _text(status.get("detailedState")), _text(status.get("abstractGameState"))
+    return map_game_status(detailed or "", abstract) if detailed or abstract else None
+
+
+def _text(value: Any) -> str | None:
+    """``value`` if it is a string, else None."""
+    return value if isinstance(value, str) else None
 
 
 def _feed_as_of(raw: dict[str, Any]) -> datetime | None:
@@ -1324,7 +1352,7 @@ _GAME_FIELDS = (
     # Pauses in play -> the break signals: each event's place in its plate appearance (`index`; its type, times
     # and `isPitch` are kept above), and replay reviews on a play or an event.
     "index,reviewDetails,inProgress,"
-    "gameData,status,detailedState,metaData,timeStamp"  # the feed's own status and timestamp
+    "gameData,status,detailedState,abstractGameState,metaData,timeStamp"  # the feed's own status and timestamp
 )
 
 

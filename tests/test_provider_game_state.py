@@ -589,8 +589,31 @@ def test_a_live_feed_carries_its_own_status_and_timestamp() -> None:
 
 
 @pytest.mark.parametrize(
+    ("status", "expected"),
+    [
+        ({"abstractGameState": "Live", "detailedState": "Manager challenge: Tag play"}, GameStatus.LIVE),
+        ({"abstractGameState": "Live", "detailedState": "Crew chief review"}, GameStatus.LIVE),  # one added later
+        ({"abstractGameState": "Final"}, GameStatus.FINAL),  # the coarse state alone
+        ({"abstractGameState": "Other", "detailedState": "Writing"}, GameStatus.UNKNOWN),
+        ({"abstractGameState": None, "detailedState": "Final: Tied"}, GameStatus.FINAL),
+    ],
+)
+def test_a_live_feeds_status_falls_back_to_its_coarse_state(status: dict[str, Any], expected: GameStatus) -> None:
+    feed = _feed()
+    feed["gameData"]["status"] = status
+    live = MlbStatsApiProvider(MlbTeamRegistry({}), fetch_game=lambda _pk: feed).fetch_live_feed(_game(), now=NOW)
+    assert live.status is expected
+    assert "abstractGameState" in _GAME_FIELDS.split(",")  # the feed's fields keep it
+
+
+@pytest.mark.parametrize(
     ("game_data", "meta_data"),
-    [({}, {}), ({"status": {"detailedState": ""}}, {"timeStamp": "not a time"}), ({"status": None}, {"timeStamp": 7})],
+    [
+        ({}, {}),
+        ({"status": {"detailedState": ""}}, {"timeStamp": "not a time"}),
+        ({"status": None}, {"timeStamp": 7}),
+        ({"status": {"detailedState": 3, "abstractGameState": ""}}, {}),
+    ],
 )
 def test_a_feed_that_doesnt_say_its_status_or_time_says_neither(game_data: Any, meta_data: Any) -> None:
     feed = _feed()
