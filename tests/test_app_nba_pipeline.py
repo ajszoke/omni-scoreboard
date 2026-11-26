@@ -311,7 +311,7 @@ def test_a_basket_from_the_lines_clears_the_delay_and_holds_the_panel_for_a_turn
         (67, "CaptionPanel"),  # seen waiting at 66 s, in the players' second half: at the next
         (79, "LineScorePanel"),
     ]
-    assert isinstance(caption, CaptionPanel) and caption.place is None  # alone: no marker
+    assert isinstance(caption, CaptionPanel)
     assert caption.caption == FieldGoalMade(side=A, shooter="A.Shooter", value=ShotValue.TWO)
 
 

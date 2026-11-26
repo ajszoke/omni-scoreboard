@@ -4,10 +4,10 @@ A live card's turn is 12 s in two 6 s halves, counted from the card's first fram
 `turn_half` reads the same count). The panel changes only on those half boundaries, so its plays line up with the
 halves and the team rows keep alternating underneath. What it shows, in order:
 
-- **The play queue.** A caption released through the delay waits its turn. One alone holds a whole 12 s turn, with no
-  marker. While two or more wait, each shows for 6 s, numbered ``i/N``: ``i`` its place in the run, ``N`` the run's
-  plays shown so far and still waiting, so ``N`` grows as plays arrive. The run lasts until nothing eligible waits.
-  A timeout's caption and a ruling (a won challenge, a call taken back, a technical) hold a whole turn even in a run.
+- **The play queue.** A caption released through the delay waits its turn. One alone holds a whole 12 s turn. While
+  two or more wait, they run, each for 6 s, and the run lasts until nothing eligible waits; plays that arrive during
+  it join it. A timeout's caption and a ruling (a won challenge, a call taken back, a technical) hold a whole turn
+  even in a run.
 - **The rotation**, once no play waits: the line score, the two teams' box scores, then one player a team from each
   team's plus-minus order (the next rank each time, from the best down to `PanelPolicy.player_ranks`), a whole turn
   each, in that order, picking up where it left off whenever the card comes back. While a timeout lasts the line score
@@ -36,7 +36,6 @@ from omni.cards.basketball import (
     CaptionPanel,
     LineScorePanel,
     PlayerLinesPanel,
-    QueuePlace,
     TeamBoxPanel,
 )
 from omni.core.clock import MonotonicTime
@@ -297,14 +296,10 @@ class BottomPanelQueue:
         return _ORDER
 
     def _draw(self, slot: _Slot, view: PanelView) -> BottomPanel:
-        """The slot as the payload carries it: a caption with its place while others wait, or a stat panel."""
+        """The slot as the payload carries it: a caption or a stat panel."""
         caption = slot.caption
         if caption is not None:
-            place = None
-            if slot.place is not None:
-                count = slot.place + len([each for each in self._eligible(view) if each is not caption])
-                place = QueuePlace(slot.place, count) if count >= 2 else None
-            return CaptionPanel(caption=caption.caption, place=place)
+            return CaptionPanel(caption=caption.caption)
         if slot.stat is StatPanel.LINE_SCORE or view.lines is None:
             return LineScorePanel()
         away, home = view.lines.away, view.lines.home

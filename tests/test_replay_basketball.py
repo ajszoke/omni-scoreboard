@@ -5,6 +5,7 @@ card drawable on every profile, and the same night on Free, on the slate alone."
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from datetime import timedelta
 from functools import cache
@@ -116,13 +117,32 @@ def test_uta_at_lal_s_timeouts_lend_eight_long_breaks_and_two_short_and_its_peri
     assert all("provisional" not in line for line in opened if "timeout" in line)  # aged from the inferred onset
 
 
-def test_the_play_queue_runs_6_s_plays_numbered_and_lone_ones_a_whole_turn() -> None:
+def _caption_holds() -> Counter[tuple[float, str]]:
+    """How long each caption line held its game's panel, by what came next: another ``caption``, a ``stat`` panel, or
+    the card going ``down``."""
+    lines = _decisions()[1:]
+    holds: Counter[tuple[float, str]] = Counter()
+    for i, line in enumerate(lines):
+        game, words = line[18:].split("  ") if line[10:18].strip() == "panel" else ("", "")
+        if not words[:1].isupper():
+            continue  # not a panel line, or a stat panel's
+        for later in lines[i + 1 :]:
+            if later[10:18].strip() == "panel" and later[18:].startswith(f"{game}  "):
+                after = "caption" if later.split("  ")[-1][:1].isupper() else "stat"
+                break
+            if later[10:18].strip() == "down" and later[18:].startswith(f"{game}:live"):
+                after = "down"
+                break
+        holds[round(float(later[:8]) - float(line[:8]), 1), after] += 1
+    return holds
+
+
+def test_the_play_queue_runs_its_plays_6_s_each_and_a_lone_one_a_whole_turn_with_no_count() -> None:
     panels = _lines("panel")
-    numbered = [line for line in panels if line.split()[-1].count("/") == 1]
-    alone = [line for line in panels if line.endswith(" alone")]
-    assert numbered and alone
-    assert any(line.endswith(" 1/2") for line in numbered) and any(line.split()[-1].endswith("/3") for line in numbered)
-    stats = {line.split("  ")[-1] for line in panels if "/" not in line and not line.endswith(" alone")}
+    assert not [line for line in panels if re.search(r"\d+/\d+|alone", line)]
+    holds = _caption_holds()
+    assert holds[6.0, "caption"] and holds[12.0, "stat"]  # a run's plays, and one alone before the rotation
+    stats = {line.split("  ")[-1] for line in panels if not line.split("  ")[-1][:1].isupper()}
     assert {"line score", "team box", "players #1"} <= stats
     assert any("unseen (too late to start)" in line for line in _lines("skip"))  # never shown late
 

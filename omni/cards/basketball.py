@@ -55,23 +55,8 @@ __all__ = [
     "CaptionPanel",
     "LineScorePanel",
     "PlayerLinesPanel",
-    "QueuePlace",
     "TeamBoxPanel",
 ]
-
-
-@dataclass(frozen=True, slots=True)
-class QueuePlace:
-    """Where a caption stands among the plays waiting their turn: ``index`` of ``count``, from 1."""
-
-    index: int
-    count: int
-
-    def __post_init__(self) -> None:
-        if self.count < 2:
-            raise ValueError("a caption alone has no place in a queue")
-        if not 1 <= self.index <= self.count:
-            raise ValueError("a place is 1..count")
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,11 +66,9 @@ class LineScorePanel:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class CaptionPanel:
-    """One caption, a play, a timeout or a ruling, and its place among the plays waiting when there's more than
-    one; None when it's alone."""
+    """One caption: a play, a timeout or a ruling."""
 
     caption: BasketballCaption
-    place: QueuePlace | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -219,7 +202,7 @@ GAME_LAYOUT = LayoutSupport(
         _QUAD_RECORD,
         _STACK_RECORD,
         "stack_64x64: the box score keeps FG% and rebounds, and a player's line its points and field goals",
-        "stack_64x64: a play queue's count is a segmented divider, and a ruling's words split across the turn's halves",
+        "stack_64x64: a ruling's words split across the turn's halves",
         "stack_64x64: a run takes the bottom panel from the line score and the stat panels, though never a caption",
         "single_64x32: no bottom panel, so no line score, captions, rulings, stat panels or run",
         "single_64x32: a timeout shows TO over the team's code in place of the clock and pips",

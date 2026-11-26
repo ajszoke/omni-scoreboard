@@ -16,8 +16,8 @@ named all turn.
   the clock (8x13B) over four quarter pips (filled gold once begun, a dim ring before), or ``OT``/``2OT``; a run
   raises them and sits underneath (``MIN 7-0`` over ``LAST 1:28``); a break shows its words instead (``END Q1``,
   ``HALF 12:35``, ``FINAL 2OT``). Under the divider: the line score by default; a caption, NFL's way, a headline
-  in the event's tone over a white detail line, marked ``i/N`` while plays queue; the two teams' box-score lines;
-  or one player a team, away over home, from each team's plus-minus order, the stats scrolling when they overflow.
+  in the event's tone over a white detail line; the two teams' box-score lines; or one player a team, away over
+  home, from each team's plus-minus order, the stats scrolling when they overflow.
 - stack_64x64 : 20-row team rows; the clock pinned left on row 40 and the pips (or the overtime) pinned right; a
   divider at row 50 and two 4x6 lines under it. The code is 6x10 with two-digit scores and 5x7 from 100; the
   record is 4x6 at any score, under the code with two blank rows below the score's ink. Under the divider: the
@@ -25,8 +25,7 @@ named all turn.
   last two periods in overtime); a caption, its rulings split across the halves; a run; FG% and rebounds; one
   player a half, away first; and at a final, the winner's best player, then the loser's. COMPROMISE: with a 1xx
   score, the record passes under the score's first two columns; the box score keeps FG% and rebounds, and a
-  player's line its points and field goals; while plays queue, the divider splits into one segment per play,
-  the one up in gold, in place of ``i/N``.
+  player's line its points and field goals.
 - single_64x32: 16-row team rows with color bars. The code is 6x10 with two-digit scores and 5x7 from 100, over
   a 5x7 record that may run beneath a three-digit score; the second half shows ``5TO`` over a boxed ``BON``. The
   6x10 scores end at x42; right of them, the clock (4x6) over the pips, ``TO`` over the team's code while a
@@ -415,15 +414,10 @@ def _quad_line_score(canvas: Canvas, card: _Card) -> None:
 
 
 def _quad_caption(canvas: Canvas, context: RenderContext, card: _Card, panel: CaptionPanel) -> None:
-    """The event as it happens, NFL's way: a headline in its tone, a detail line a size down in white. While more
-    than one play waits, each shows 6 s, marked ``i/N`` at right; N grows as plays arrive."""
+    """The event as it happens, NFL's way: a headline in its tone, a detail line a size down in white."""
     words = _words(panel, card)
     marquee = context.marquee
-    width = 128
-    if panel.place is not None:
-        draw_right_aligned(canvas, 127, 42, f"{panel.place.index}/{panel.place.count}", _SECONDARY, "4x6")
-        width = 114
-    headline = TextLane(x=0, y=42, width=width, font="6x10", style=marquee.style)
+    headline = TextLane(x=0, y=42, width=128, font="6x10", style=marquee.style)
     draw_text_lane(canvas, headline, words.headline, _TONE_COLOR[words.tone], now=context.now, clock=marquee.clock)
     detail = TextLane(x=0, y=55, width=128, font="5x7", style=marquee.style)
     draw_text_lane(canvas, detail, words.detail, _WHITE, now=context.now, clock=marquee.clock)
@@ -542,7 +536,7 @@ def _stack(canvas: Canvas, context: RenderContext, card: _Card) -> None:
         draw_right_aligned(canvas, 64, top + 1, str(side.score), card.text_color(which), "8x13B")
     _draw_meter(canvas, treatment, card)
     _stack_clock_line(canvas, context, card)
-    _stack_divider(canvas, card)
+    canvas.fill_rect(0, _S_DIVIDER_Y, 64, 1, _DIVIDER)
     _stack_bottom(canvas, context, card)
 
 
@@ -568,22 +562,6 @@ def _stack_clock_line(canvas: Canvas, context: RenderContext, card: _Card) -> No
     else:
         label = f"FINAL/{period_label(state.period)}" if state.is_overtime else "FINAL"
     draw_centered(canvas, 0, 64, y, label, _GOLD, font)
-
-
-def _stack_divider(canvas: Canvas, card: _Card) -> None:
-    """The gray divider; while plays queue, cut into one segment per waiting play, the one showing gold.
-
-    There's no room beside a 4x6 headline for an ``i/N`` count, so the divider carries it.
-    """
-    caption = _caption(card)
-    place = caption.place if caption is not None else None
-    if place is None:
-        canvas.fill_rect(0, _S_DIVIDER_Y, 64, 1, _DIVIDER)
-        return
-    for i in range(place.count):
-        x0, x1 = i * 64 // place.count, (i + 1) * 64 // place.count
-        gap = 0 if i == place.count - 1 else 1
-        canvas.fill_rect(x0, _S_DIVIDER_Y, x1 - x0 - gap, 1, _GOLD if i == place.index - 1 else _DIVIDER)
 
 
 def _stack_bottom(canvas: Canvas, context: RenderContext, card: _Card) -> None:

@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from omni.cards.basketball import BasketballGameCardPayload, CaptionPanel, QueuePlace
+from omni.cards.basketball import BasketballGameCardPayload, CaptionPanel
 from omni.core.clock import MonotonicTime
 from omni.core.enum import HomeAway, PanelProfile
 from omni.domain.baseball import WinLossRecord
@@ -172,7 +172,7 @@ def test_the_widest_code_and_digit() -> None:
 _PANEL_TOP = {QUAD: 40, STACK: 50}  # the divider's row: the caption's lines sit under it
 
 
-def _panel_texts(caption: BasketballCaption, profile: PanelProfile, up: float, place: QueuePlace | None) -> list[str]:
+def _panel_texts(caption: BasketballCaption, profile: PanelProfile, up: float) -> list[str]:
     """The text a live card draws under its divider ``up`` seconds into the turn, with ``caption`` in the panel."""
     payload = live(
         side(58, 4, False, (26, 25, 7)),
@@ -180,7 +180,7 @@ def _panel_texts(caption: BasketballCaption, profile: PanelProfile, up: float, p
         3,
         3670,
         home_win=None,
-        bottom=CaptionPanel(caption=caption, place=place),
+        bottom=CaptionPanel(caption=caption),
     )
     width, height = geometry_for(profile).size
     canvas = RecordingCanvas(width, height)
@@ -200,14 +200,11 @@ _WIDEST = (
 
 
 @pytest.mark.parametrize("caption", _WIDEST, ids=lambda caption: type(caption).__name__)
-def test_the_quads_free_throw_and_technical_lines_fit_whole_even_beside_a_queue_count(
-    caption: BasketballCaption,
-) -> None:
+def test_the_quads_free_throw_and_technical_lines_fit_whole(caption: BasketballCaption) -> None:
     words = caption.words(BySide("ATL", "MIN"))
-    for place in (None, QueuePlace(2, 3)):
-        texts = _panel_texts(caption, QUAD, 1.0, place)
-        assert texts == [words.headline, words.detail]  # drawn whole: a line that overflowed would be clipped
-    assert text_width(words.headline, "6x10") <= 114  # the headline's lane beside ``i/N``
+    texts = _panel_texts(caption, QUAD, 1.0)
+    assert texts == [words.headline, words.detail]  # drawn whole: a line that overflowed would be clipped
+    assert text_width(words.headline, "6x10") <= 128  # the headline's lane, the board's whole width
 
 
 @pytest.mark.parametrize("caption", _WIDEST, ids=lambda caption: type(caption).__name__)
@@ -215,5 +212,5 @@ def test_the_stacks_narrow_words_fit_its_16_character_lanes_whole_at_both_halves
     words = caption.words(BySide("ATL", "MIN"))
     assert words.narrow is not None
     for up, lines in ((1.0, words.narrow[0]), (7.0, words.narrow[1])):
-        assert _panel_texts(caption, STACK, up, None) == [lines.headline, lines.detail]
+        assert _panel_texts(caption, STACK, up) == [lines.headline, lines.detail]
         assert all(text_width(line, "4x6") <= 64 for line in (lines.headline, lines.detail))

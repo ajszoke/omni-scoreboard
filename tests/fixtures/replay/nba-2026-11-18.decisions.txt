@@ -11,7 +11,7 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
     44.0  base    nba:balldontlie:21718132:live  (weighted) | G 0.238 proxy F 1.00 T 1.000 Q 0.500 | target 48.13% (league 100.00%, 48.13% within) | actual 0.00% | debt +5.78s (league +0.00s) | why: Rockets at Pacers: in rotation
     56.0  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
     56.0  up      nba:balldontlie:21718137:live  (rotation)
-    56.0  panel   nba:balldontlie:21718137  FieldGoalMade alone
+    56.0  panel   nba:balldontlie:21718137  FieldGoalMade
     56.0  base    nba:balldontlie:21718137:live  (weighted) | G 0.288 proxy F 1.00 T 1.000 Q 0.500 | target 51.37% (league 100.00%, 51.37% within) | actual 50.00% | debt +0.45s (league -0.00s) | why: Pistons at Pelicans: in rotation
     68.0  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
     68.0  up      nba:balldontlie:21718132:live  (rotation)
@@ -19,16 +19,16 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
     68.0  base    nba:balldontlie:21718132:live  (weighted) | G 0.238 proxy F 1.00 T 1.000 Q 0.500 | target 48.63% (league 100.00%, 48.63% within) | actual 33.33% | debt +5.39s (league -0.00s) | why: Rockets at Pacers: in rotation
     80.0  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
     80.0  up      nba:balldontlie:21718137:live  (rotation)
-    80.0  panel   nba:balldontlie:21718137  PersonalFoul alone
+    80.0  panel   nba:balldontlie:21718137  PersonalFoul
     80.0  base    nba:balldontlie:21718137:live  (weighted) | G 0.289 proxy F 1.00 T 1.000 Q 0.500 | target 51.39% (league 100.00%, 51.39% within) | actual 50.00% | debt +0.78s (league -0.00s) | why: Pistons at Pelicans: in rotation
     92.0  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
     92.0  up      nba:balldontlie:21718132:live  (rotation)
     92.0  panel   nba:balldontlie:21718132  players #1
     92.0  base    nba:balldontlie:21718132:live  (weighted) | G 0.238 proxy F 1.00 T 1.000 Q 0.500 | target 48.61% (league 100.00%, 48.61% within) | actual 40.00% | debt +5.06s (league -0.00s) | why: Rockets at Pacers: in rotation
-    98.0  panel   nba:balldontlie:21718132  PersonalFoul alone
+    98.0  panel   nba:balldontlie:21718132  PersonalFoul
    104.0  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
    104.0  up      nba:balldontlie:21718137:live  (rotation)
-   104.0  panel   nba:balldontlie:21718137  FreeThrow alone
+   104.0  panel   nba:balldontlie:21718137  FreeThrow
    104.0  base    nba:balldontlie:21718137:live  (weighted) | G 0.289 proxy F 1.00 T 1.000 Q 0.500 | target 51.39% (league 100.00%, 51.39% within) | actual 50.00% | debt +1.11s (league -0.00s) | why: Pistons at Pelicans: in rotation
    116.0  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
    116.0  up      nba:balldontlie:21718132:live  (rotation)
@@ -46,13 +46,13 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
    140.0  base    nba:balldontlie:21718132:live  (weighted) | G 0.238 proxy F 1.00 T 1.000 Q 0.500 | target 48.61% (league 100.00%, 48.61% within) | actual 44.44% | debt +4.39s (league -0.00s) | why: Rockets at Pacers: in rotation
    152.0  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
    152.0  up      nba:balldontlie:21718137:live  (rotation)
-   152.0  panel   nba:balldontlie:21718137  TimeoutTaken alone
+   152.0  panel   nba:balldontlie:21718137  TimeoutTaken
    152.0  base    nba:balldontlie:21718137:live  (weighted) | G 0.289 proxy F 1.00 T 1.000 Q 0.500 | target 51.39% (league 100.00%, 51.39% within) | actual 50.00% | debt +1.77s (league -0.00s) | why: Pistons at Pelicans: in rotation
    164.0  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
    164.0  up      nba:balldontlie:21718132:live  (rotation)
    164.0  panel   nba:balldontlie:21718132  players #2
    164.0  base    nba:balldontlie:21718132:live  (weighted) | G 0.238 proxy F 1.00 T 1.000 Q 0.500 | target 48.61% (league 100.00%, 48.61% within) | actual 45.45% | debt +4.06s (league -0.00s) | why: Rockets at Pacers: in rotation
-   170.0  panel   nba:balldontlie:21718132  FieldGoalMade alone
+   170.0  panel   nba:balldontlie:21718132  FieldGoalMade
    176.0  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
    176.0  up      nba:balldontlie:21718137:live  (rotation)
    176.0  panel   nba:balldontlie:21718137  players #1
@@ -69,7 +69,7 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
    212.0  up      nba:balldontlie:21718132:live  (rotation)
    212.0  panel   nba:balldontlie:21718132  team box
    212.0  base    nba:balldontlie:21718132:live  (weighted) | G 0.206 proxy F 1.00 T 1.000 Q 0.500 | target 47.71% (league 100.00%, 47.71% within) | actual 46.67% | debt +3.06s (league -0.00s) | why: Rockets at Pacers: in rotation
-   218.0  panel   nba:balldontlie:21718132  PersonalFoul alone
+   218.0  panel   nba:balldontlie:21718132  PersonalFoul
    224.0  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
    224.0  up      nba:balldontlie:21718137:live  (rotation)
    224.0  panel   nba:balldontlie:21718137  players #2
@@ -77,7 +77,7 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
    232.0  lease   lapsed nba:balldontlie:21718137 nba tv timeout @ timeout period 1 5:06 home
    236.0  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
    236.0  up      nba:balldontlie:21718132:live  (rotation)
-   236.0  panel   nba:balldontlie:21718132  FieldGoalMade alone
+   236.0  panel   nba:balldontlie:21718132  FieldGoalMade
    236.0  base    nba:balldontlie:21718132:live  (weighted) | G 0.165 proxy F 1.00 T 1.000 Q 0.500 | target 46.53% (league 100.00%, 46.53% within) | actual 47.06% | debt +2.52s (league -0.00s) | why: Rockets at Pacers: in rotation
    248.0  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
    248.0  up      nba:balldontlie:21718137:live  (rotation)
@@ -85,7 +85,7 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
    248.0  base    nba:balldontlie:21718137:live  (weighted) | G 0.289 proxy F 1.00 T 1.000 Q 0.500 | target 53.47% (league 100.00%, 53.47% within) | actual 50.00% | debt +3.90s (league -0.00s) | why: Pistons at Pelicans: in rotation
    260.0  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
    260.0  up      nba:balldontlie:21718132:live  (rotation)
-   260.0  panel   nba:balldontlie:21718132  FieldGoalMade alone
+   260.0  panel   nba:balldontlie:21718132  FieldGoalMade
    260.0  base    nba:balldontlie:21718132:live  (weighted) | G 0.207 proxy F 1.00 T 1.000 Q 0.500 | target 47.75% (league 100.00%, 47.75% within) | actual 47.37% | debt +1.68s (league -0.00s) | why: Rockets at Pacers: in rotation
    272.0  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
    272.0  up      nba:balldontlie:21718137:live  (rotation)
@@ -93,7 +93,7 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
    272.0  base    nba:balldontlie:21718137:live  (weighted) | G 0.289 proxy F 1.00 T 1.000 Q 0.500 | target 52.25% (league 100.00%, 52.25% within) | actual 50.00% | debt +4.59s (league -0.00s) | why: Pistons at Pelicans: in rotation
    284.0  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
    284.0  up      nba:balldontlie:21718132:live  (rotation)
-   284.0  panel   nba:balldontlie:21718132  PersonalFoul alone
+   284.0  panel   nba:balldontlie:21718132  PersonalFoul
    284.0  base    nba:balldontlie:21718132:live  (weighted) | G 0.207 proxy F 1.00 T 1.000 Q 0.500 | target 47.76% (league 100.00%, 47.76% within) | actual 47.62% | debt +1.14s (league -0.00s) | why: Rockets at Pacers: in rotation
    296.0  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
    296.0  up      nba:balldontlie:21718137:live  (rotation)
@@ -107,15 +107,14 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
    320.0  lease   refused nba:balldontlie:21718132 nba team timeout @ timeout period 3 8:17 away  (backfill) | age 45.0s local_read | 45.0s of its ceiling gone
    320.0  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
    320.0  up      nba:balldontlie:21718137:live  (rotation)
-   320.0  panel   nba:balldontlie:21718137  FreeThrow 1/2
+   320.0  panel   nba:balldontlie:21718137  FreeThrow
    320.0  base    nba:balldontlie:21718137:live  (weighted) | G 0.298 proxy F 1.00 T 1.000 Q 0.500 | target 52.46% (league 100.00%, 52.46% within) | actual 50.00% | debt +5.69s (league -0.00s) | why: Pistons at Pelicans: in rotation
-   326.0  panel   nba:balldontlie:21718137  FreeThrow 2/2
    332.0  panel   nba:balldontlie:21718137  players #4
    332.0  base    nba:balldontlie:21718137:live  (weighted, again) | G 0.305 proxy F 1.00 T 1.000 Q 0.500 | target 52.65% (league 100.00%, 52.65% within) | actual 52.00% | debt -0.01s (league -0.00s) | why: Pistons at Pelicans: in rotation
    340.0  break   nba:balldontlie:21718137 nba tv timeout @ timeout period 1 5:06 home  (ended)
    344.0  down    nba:balldontlie:21718137:live  (ran its time, 24.0s)
    344.0  up      nba:balldontlie:21718132:live  (rotation)
-   344.0  panel   nba:balldontlie:21718132  TimeoutTaken alone
+   344.0  panel   nba:balldontlie:21718132  TimeoutTaken
    344.0  base    nba:balldontlie:21718132:live  (weighted) | G 0.207 proxy F 1.00 T 1.000 Q 0.500 | target 47.32% (league 100.00%, 47.32% within) | actual 46.15% | debt +5.70s (league -0.00s) | why: Rockets at Pacers: in rotation
    356.0  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
    356.0  up      nba:balldontlie:21718137:live  (rotation)
@@ -130,9 +129,9 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
    380.0  card    nba:balldontlie:21718141:pregame  (pregame) | why: Lakers: starting soon
    388.0  down    nba:balldontlie:21718141:pregame  (ran its time, 8.0s)
    388.0  up      nba:balldontlie:21718137:live  (rotation)
-   388.0  panel   nba:balldontlie:21718137  PersonalFoul 1/2
+   388.0  panel   nba:balldontlie:21718137  PersonalFoul
    388.0  base    nba:balldontlie:21718137:live  (weighted) | G 0.317 proxy F 1.00 T 1.000 Q 0.500 | target 52.97% (league 100.00%, 52.97% within) | actual 51.72% | debt +1.27s (league -0.00s) | why: Pistons at Pelicans: in rotation
-   394.0  panel   nba:balldontlie:21718137  FieldGoalMade 2/2
+   394.0  panel   nba:balldontlie:21718137  FieldGoalMade
    400.0  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
    400.0  up      nba:balldontlie:21718132:live  (rotation)
    400.0  panel   nba:balldontlie:21718132  players #4
@@ -147,7 +146,7 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
    424.0  base    nba:balldontlie:21718132:live  (weighted) | G 0.207 proxy F 1.00 T 1.000 Q 0.500 | target 47.00% (league 100.00%, 47.00% within) | actual 46.88% | debt +3.66s (league -0.00s) | why: Rockets at Pacers: in rotation
    436.0  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
    436.0  up      nba:balldontlie:21718137:live  (rotation)
-   436.0  panel   nba:balldontlie:21718137  PersonalFoul alone
+   436.0  panel   nba:balldontlie:21718137  PersonalFoul
    436.0  base    nba:balldontlie:21718137:live  (weighted) | G 0.319 proxy F 1.00 T 1.000 Q 0.500 | target 53.00% (league 100.00%, 53.00% within) | actual 51.52% | debt +2.70s (league -0.00s) | why: Pistons at Pelicans: in rotation
    448.0  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
    448.0  up      nba:balldontlie:21718132:live  (rotation)
@@ -155,7 +154,7 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
    448.0  base    nba:balldontlie:21718132:live  (weighted) | G 0.207 proxy F 1.00 T 1.000 Q 0.500 | target 47.00% (league 100.00%, 47.00% within) | actual 47.06% | debt +2.94s (league -0.00s) | why: Rockets at Pacers: in rotation
    460.0  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
    460.0  up      nba:balldontlie:21718137:live  (rotation)
-   460.0  panel   nba:balldontlie:21718137  FieldGoalMade alone
+   460.0  panel   nba:balldontlie:21718137  FieldGoalMade
    460.0  base    nba:balldontlie:21718137:live  (weighted) | G 0.322 proxy F 1.00 T 1.000 Q 0.500 | target 53.09% (league 100.00%, 53.09% within) | actual 51.43% | debt +3.42s (league -0.00s) | why: Pistons at Pelicans: in rotation
    472.0  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
    472.0  up      nba:balldontlie:21718132:live  (rotation)
@@ -163,16 +162,16 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
    472.0  base    nba:balldontlie:21718132:live  (weighted) | G 0.207 proxy F 1.00 T 1.000 Q 0.500 | target 46.91% (league 100.00%, 46.91% within) | actual 47.22% | debt +2.21s (league -0.00s) | why: Rockets at Pacers: in rotation
    484.0  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
    484.0  up      nba:balldontlie:21718137:live  (rotation)
-   484.0  panel   nba:balldontlie:21718137  FieldGoalMade alone
+   484.0  panel   nba:balldontlie:21718137  FieldGoalMade
    484.0  base    nba:balldontlie:21718137:live  (weighted) | G 0.323 proxy F 1.00 T 1.000 Q 0.500 | target 53.10% (league 100.00%, 53.10% within) | actual 51.35% | debt +4.16s (league -0.00s) | why: Pistons at Pelicans: in rotation
    496.0  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
    496.0  up      nba:balldontlie:21718132:live  (rotation)
-   496.0  panel   nba:balldontlie:21718132  PersonalFoul 1/2
+   496.0  panel   nba:balldontlie:21718132  PersonalFoul
    496.0  base    nba:balldontlie:21718132:live  (weighted) | G 0.207 proxy F 1.00 T 1.000 Q 0.500 | target 46.90% (league 100.00%, 46.90% within) | actual 47.37% | debt +1.46s (league -0.00s) | why: Rockets at Pacers: in rotation
-   502.0  panel   nba:balldontlie:21718132  CallReversed 2/2
+   502.0  panel   nba:balldontlie:21718132  CallReversed
    508.0  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
    508.0  up      nba:balldontlie:21718137:live  (rotation)
-   508.0  panel   nba:balldontlie:21718137  FieldGoalMade alone
+   508.0  panel   nba:balldontlie:21718137  FieldGoalMade
    508.0  base    nba:balldontlie:21718137:live  (weighted) | G 0.320 proxy F 1.00 T 1.000 Q 0.500 | target 53.03% (league 100.00%, 53.03% within) | actual 51.28% | debt +4.91s (league -0.00s) | why: Pistons at Pelicans: in rotation
    515.0  break   nba:balldontlie:21718132 nba team timeout @ timeout period 3 8:17 away  (ended)
    520.0  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
@@ -181,18 +180,18 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
    520.0  base    nba:balldontlie:21718132:live  (weighted) | G 0.208 proxy F 1.00 T 1.000 Q 0.500 | target 46.82% (league 100.00%, 46.82% within) | actual 47.50% | debt +0.73s (league -0.00s) | why: Rockets at Pacers: in rotation
    532.0  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
    532.0  up      nba:balldontlie:21718137:live  (rotation)
-   532.0  panel   nba:balldontlie:21718137  FieldGoalMade 1/2
+   532.0  panel   nba:balldontlie:21718137  FieldGoalMade
    532.0  base    nba:balldontlie:21718137:live  (weighted) | G 0.326 proxy F 1.00 T 1.000 Q 0.500 | target 53.17% (league 100.00%, 53.17% within) | actual 51.22% | debt +5.65s (league -0.00s) | why: Pistons at Pelicans: in rotation
-   538.0  panel   nba:balldontlie:21718137  PersonalFoul 2/2
+   538.0  panel   nba:balldontlie:21718137  PersonalFoul
    544.0  panel   nba:balldontlie:21718137  players #5
    544.0  base    nba:balldontlie:21718137:live  (weighted, again) | G 0.326 proxy F 1.00 T 1.000 Q 0.500 | target 53.17% (league 100.00%, 53.17% within) | actual 52.38% | debt +0.03s (league -0.00s) | why: Pistons at Pelicans: in rotation
    556.0  down    nba:balldontlie:21718137:live  (ran its time, 24.0s)
    556.0  up      nba:balldontlie:21718132:live  (rotation)
-   556.0  panel   nba:balldontlie:21718132  PersonalFoul alone
+   556.0  panel   nba:balldontlie:21718132  PersonalFoul
    556.0  base    nba:balldontlie:21718132:live  (weighted) | G 0.208 proxy F 1.00 T 1.000 Q 0.500 | target 46.83% (league 100.00%, 46.83% within) | actual 46.51% | debt +5.59s (league -0.00s) | why: Rockets at Pacers: in rotation
    568.0  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
    568.0  up      nba:balldontlie:21718137:live  (rotation)
-   568.0  panel   nba:balldontlie:21718137  FreeThrow alone
+   568.0  panel   nba:balldontlie:21718137  FreeThrow
    568.0  base    nba:balldontlie:21718137:live  (weighted) | G 0.325 proxy F 1.00 T 1.000 Q 0.500 | target 53.14% (league 100.00%, 53.14% within) | actual 52.27% | debt +0.79s (league -0.00s) | why: Pistons at Pelicans: in rotation
    580.0  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
    580.0  up      nba:balldontlie:21718132:live  (rotation)
@@ -208,21 +207,20 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
    604.0  base    nba:balldontlie:21718132:live  (weighted) | G 0.208 proxy F 1.00 T 1.000 Q 0.500 | target 46.86% (league 100.00%, 46.86% within) | actual 46.81% | debt +4.08s (league -0.00s) | why: Rockets at Pacers: in rotation
    616.0  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
    616.0  up      nba:balldontlie:21718137:live  (rotation)
-   616.0  panel   nba:balldontlie:21718137  FieldGoalMade 1/2
+   616.0  panel   nba:balldontlie:21718137  FieldGoalMade
    616.0  base    nba:balldontlie:21718137:live  (weighted) | G 0.328 proxy F 1.00 T 1.000 Q 0.500 | target 53.21% (league 100.00%, 53.21% within) | actual 52.08% | debt +2.30s (league -0.00s) | why: Pistons at Pelicans: in rotation
-   620.0  panel   nba:balldontlie:21718137  FieldGoalMade 1/3
-   622.0  panel   nba:balldontlie:21718137  FreeThrow 2/3
+   622.0  panel   nba:balldontlie:21718137  FreeThrow
    628.0  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
    628.0  up      nba:balldontlie:21718132:live  (rotation)
    628.0  panel   nba:balldontlie:21718132  players #2
    628.0  base    nba:balldontlie:21718132:live  (weighted) | G 0.245 proxy F 1.00 T 1.000 Q 0.500 | target 47.88% (league 100.00%, 47.88% within) | actual 46.94% | debt +3.31s (league -0.00s) | why: Rockets at Pacers: in rotation
    640.0  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
    640.0  up      nba:balldontlie:21718137:live  (rotation)
-   640.0  panel   nba:balldontlie:21718137  FieldGoalMade alone
+   640.0  panel   nba:balldontlie:21718137  FieldGoalMade
    640.0  base    nba:balldontlie:21718137:live  (weighted) | G 0.326 proxy F 1.00 T 1.000 Q 0.500 | target 52.14% (league 100.00%, 52.14% within) | actual 52.00% | debt +2.94s (league -0.00s) | why: Pistons at Pelicans: in rotation
    652.1  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
    652.1  up      nba:balldontlie:21718132:live  (rotation)
-   652.1  panel   nba:balldontlie:21718132  FieldGoalMade alone
+   652.1  panel   nba:balldontlie:21718132  FieldGoalMade
    652.1  base    nba:balldontlie:21718132:live  (weighted) | G 0.245 proxy F 1.00 T 1.000 Q 0.500 | target 47.86% (league 100.00%, 47.86% within) | actual 47.06% | debt +2.80s (league -0.00s) | why: Rockets at Pacers: in rotation
    664.1  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
    664.1  up      nba:balldontlie:21718137:live  (rotation)
@@ -230,7 +228,7 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
    664.1  base    nba:balldontlie:21718137:live  (weighted) | G 0.326 proxy F 1.00 T 1.000 Q 0.500 | target 52.14% (league 100.00%, 52.14% within) | actual 51.92% | debt +3.45s (league -0.00s) | why: Pistons at Pelicans: in rotation
    676.1  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
    676.1  up      nba:balldontlie:21718132:live  (rotation)
-   676.1  panel   nba:balldontlie:21718132  FieldGoalMade alone
+   676.1  panel   nba:balldontlie:21718132  FieldGoalMade
    676.1  base    nba:balldontlie:21718132:live  (weighted) | G 0.314 proxy F 1.00 T 1.000 Q 0.500 | target 49.67% (league 100.00%, 49.67% within) | actual 47.17% | debt +2.29s (league -0.00s) | why: Rockets at Pacers: in rotation
    685.0  break   nba:balldontlie:21718132 nba team timeout @ timeout period 3 6:15 away
    685.0  lease   opened nba:balldontlie:21718132 nba team timeout @ timeout period 3 6:15 away | 60.0s left | any guests that fit
@@ -239,26 +237,26 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
    688.1  card    nba:balldontlie:21718141:pregame  (pregame) | why: Lakers: starting soon
    696.1  down    nba:balldontlie:21718141:pregame  (ran its time, 8.0s)
    696.1  up      nba:balldontlie:21718137:live  (rotation)
-   696.1  panel   nba:balldontlie:21718137  FieldGoalMade alone
+   696.1  panel   nba:balldontlie:21718137  FieldGoalMade
    696.1  base    nba:balldontlie:21718137:live  (weighted) | G 0.315 proxy F 1.00 T 1.000 Q 0.500 | target 48.64% (league 100.00%, 48.64% within) | actual 51.85% | debt +3.75s (league -0.00s) | why: Pistons at Pelicans: in rotation
    708.1  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
    708.1  up      nba:balldontlie:21718132:live  (rotation)
-   708.1  panel   nba:balldontlie:21718132  TimeoutTaken 1/2
+   708.1  panel   nba:balldontlie:21718132  TimeoutTaken
    708.1  base    nba:balldontlie:21718132:live  (weighted) | G 0.369 proxy F 1.00 T 1.000 Q 0.500 | target 51.36% (league 100.00%, 51.36% within) | actual 47.27% | debt +2.41s (league -0.00s) | why: Rockets at Pacers: in rotation
    720.1  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
    720.1  up      nba:balldontlie:21718137:live  (rotation)
-   720.1  panel   nba:balldontlie:21718137  PersonalFoul 1/2
+   720.1  panel   nba:balldontlie:21718137  PersonalFoul
    720.1  base    nba:balldontlie:21718137:live  (weighted) | G 0.323 proxy F 1.00 T 1.000 Q 0.500 | target 48.84% (league 100.00%, 48.84% within) | actual 51.79% | debt +3.43s (league -0.00s) | why: Pistons at Pelicans: in rotation
-   726.1  panel   nba:balldontlie:21718137  FreeThrow 2/2
+   726.1  panel   nba:balldontlie:21718137  FreeThrow
    732.1  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
    732.1  up      nba:balldontlie:21718132:live  (rotation)
-   732.1  panel   nba:balldontlie:21718132  FieldGoalMade alone
+   732.1  panel   nba:balldontlie:21718132  FieldGoalMade
    732.1  base    nba:balldontlie:21718132:live  (weighted) | G 0.369 proxy F 1.00 T 1.000 Q 0.500 | target 51.16% (league 100.00%, 51.16% within) | actual 47.37% | debt +2.71s (league -0.00s) | why: Rockets at Pacers: in rotation
    744.1  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
    744.1  up      nba:balldontlie:21718137:live  (rotation)
    744.1  panel   nba:balldontlie:21718137  players #1
    744.1  base    nba:balldontlie:21718137:live  (weighted) | G 0.323 proxy F 1.00 T 1.000 Q 0.500 | target 48.84% (league 100.00%, 48.84% within) | actual 51.72% | debt +3.15s (league -0.00s) | why: Pistons at Pelicans: in rotation
-   750.1  panel   nba:balldontlie:21718137  FreeThrow alone
+   750.1  panel   nba:balldontlie:21718137  FreeThrow
    752.1  lease   lapsed nba:balldontlie:21718132 nba team timeout @ timeout period 3 6:15 away
    756.1  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
    756.1  up      nba:balldontlie:21718132:live  (rotation)
@@ -266,9 +264,9 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
    756.1  base    nba:balldontlie:21718132:live  (weighted) | G 0.369 proxy F 1.00 T 1.000 Q 0.500 | target 51.00% (league 100.00%, 51.00% within) | actual 47.46% | debt +2.99s (league -0.00s) | why: Rockets at Pacers: in rotation
    768.1  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
    768.1  up      nba:balldontlie:21718137:live  (rotation)
-   768.1  panel   nba:balldontlie:21718137  PersonalFoul 1/2
+   768.1  panel   nba:balldontlie:21718137  PersonalFoul
    768.1  base    nba:balldontlie:21718137:live  (weighted) | G 0.317 proxy F 1.00 T 1.000 Q 0.500 | target 48.70% (league 100.00%, 48.70% within) | actual 51.67% | debt +2.89s (league -0.00s) | why: Pistons at Pelicans: in rotation
-   774.1  panel   nba:balldontlie:21718137  FieldGoalMade 2/2
+   774.1  panel   nba:balldontlie:21718137  FieldGoalMade
    780.1  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
    780.1  up      nba:balldontlie:21718132:live  (rotation)
    780.1  panel   nba:balldontlie:21718132  players #3
@@ -277,14 +275,14 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
    792.1  up      nba:balldontlie:21718137:live  (rotation)
    792.1  panel   nba:balldontlie:21718137  line score
    792.1  base    nba:balldontlie:21718137:live  (weighted) | G 0.317 proxy F 1.00 T 1.000 Q 0.500 | target 48.70% (league 100.00%, 48.70% within) | actual 51.61% | debt +2.58s (league -0.00s) | why: Pistons at Pelicans: in rotation
-   798.1  panel   nba:balldontlie:21718137  FreeThrow alone
+   798.1  panel   nba:balldontlie:21718137  FreeThrow
    804.1  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
    804.1  up      nba:balldontlie:21718132:live  (rotation)
    804.1  panel   nba:balldontlie:21718132  team box
    804.1  base    nba:balldontlie:21718132:live  (weighted) | G 0.369 proxy F 1.00 T 1.000 Q 0.500 | target 51.09% (league 100.00%, 51.09% within) | actual 47.62% | debt +3.58s (league -0.00s) | why: Rockets at Pacers: in rotation
    816.1  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
    816.1  up      nba:balldontlie:21718137:live  (rotation)
-   816.1  panel   nba:balldontlie:21718137  FreeThrow alone
+   816.1  panel   nba:balldontlie:21718137  FreeThrow
    816.1  base    nba:balldontlie:21718137:live  (weighted) | G 0.331 proxy F 1.00 T 1.000 Q 0.500 | target 49.06% (league 100.00%, 49.06% within) | actual 51.56% | debt +2.29s (league -0.00s) | why: Pistons at Pelicans: in rotation
    828.1  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
    828.1  up      nba:balldontlie:21718132:live  (rotation)
@@ -315,7 +313,7 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
    900.1  panel   nba:balldontlie:21718132  team box
    900.1  base    nba:balldontlie:21718132:live  (weighted) | G 0.369 proxy F 1.00 T 1.000 Q 0.500 | target 50.83% (league 100.00%, 50.83% within) | actual 47.89% | debt +4.45s (league -0.00s) | why: Rockets at Pacers: in rotation
    905.0  break   nba:balldontlie:21718132 nba team timeout @ timeout period 3 6:15 away  (ended)
-   906.1  panel   nba:balldontlie:21718132  PersonalFoul alone
+   906.1  panel   nba:balldontlie:21718132  PersonalFoul
    912.1  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
    912.1  up      nba:balldontlie:21718137:live  (rotation)
    912.1  panel   nba:balldontlie:21718137  team box
@@ -340,10 +338,10 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
    972.1  up      nba:balldontlie:21718132:live  (rotation)
    972.1  panel   nba:balldontlie:21718132  team box
    972.1  base    nba:balldontlie:21718132:live  (weighted) | G 0.438 proxy F 1.00 T 1.000 Q 0.500 | target 52.23% (league 100.00%, 52.23% within) | actual 48.05% | debt +5.07s (league -0.00s) | why: Rockets at Pacers: in rotation
-   978.1  panel   nba:balldontlie:21718132  FieldGoalMade alone
+   978.1  panel   nba:balldontlie:21718132  FieldGoalMade
    984.1  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
    984.1  up      nba:balldontlie:21718137:live  (rotation)
-   984.1  panel   nba:balldontlie:21718137  FieldGoalMade alone
+   984.1  panel   nba:balldontlie:21718137  FieldGoalMade
    984.1  base    nba:balldontlie:21718137:live  (weighted) | G 0.344 proxy F 1.00 T 1.000 Q 0.500 | target 47.77% (league 100.00%, 47.77% within) | actual 51.28% | debt +0.67s (league -0.00s) | why: Pistons at Pelicans: in rotation
    996.1  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
    996.1  up      nba:balldontlie:21718141:pregame  (rotation)
@@ -352,7 +350,7 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   1000.0  lease   opened nba:balldontlie:21718137 nba quarter break @ end of period 1 | 120.0s left | any guests that fit | provisional
   1004.1  down    nba:balldontlie:21718141:pregame  (ran its time, 8.0s)
   1004.1  up      nba:balldontlie:21718132:live  (rotation)
-  1004.1  panel   nba:balldontlie:21718132  FieldGoalMade alone
+  1004.1  panel   nba:balldontlie:21718132  FieldGoalMade
   1004.1  base    nba:balldontlie:21718132:live  (weighted) | G 0.380 proxy F 1.00 T 1.000 Q 0.500 | target 50.87% (league 100.00%, 50.87% within) | actual 48.10% | debt +5.60s (league -0.00s) | why: Rockets at Pacers: in rotation
   1016.1  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   1016.1  up      nba:balldontlie:21718137:live  (rotation)
@@ -360,7 +358,7 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   1016.1  base    nba:balldontlie:21718137:live  (weighted) | G 0.344 proxy F 1.00 T 1.000 Q 0.500 | target 50.53% (league 100.00%, 50.53% within) | actual 51.25% | debt +0.29s (league -0.00s) | why: Pistons at Pelicans: in rotation
   1028.1  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   1028.1  up      nba:balldontlie:21718132:live  (rotation)
-  1028.1  panel   nba:balldontlie:21718132  FieldGoalMade alone
+  1028.1  panel   nba:balldontlie:21718132  FieldGoalMade
   1028.1  base    nba:balldontlie:21718132:live  (weighted) | G 0.322 proxy F 1.00 T 1.000 Q 0.500 | target 49.47% (league 100.00%, 49.47% within) | actual 48.15% | debt +5.64s (league -0.00s) | why: Rockets at Pacers: in rotation
   1040.1  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   1040.1  up      nba:balldontlie:21718137:live  (rotation)
@@ -376,7 +374,7 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   1064.1  base    nba:balldontlie:21718137:live  (weighted) | G 0.344 proxy F 1.00 T 1.000 Q 0.500 | target 50.52% (league 100.00%, 50.52% within) | actual 51.19% | debt +0.55s (league -0.00s) | why: Pistons at Pelicans: in rotation
   1076.1  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   1076.1  up      nba:balldontlie:21718132:live  (rotation)
-  1076.1  panel   nba:balldontlie:21718132  PersonalFoul alone
+  1076.1  panel   nba:balldontlie:21718132  PersonalFoul
   1076.1  base    nba:balldontlie:21718132:live  (weighted) | G 0.323 proxy F 1.00 T 1.000 Q 0.500 | target 49.48% (league 100.00%, 49.48% within) | actual 48.24% | debt +5.39s (league -0.00s) | why: Rockets at Pacers: in rotation
   1088.1  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   1088.1  up      nba:balldontlie:21718137:live  (rotation)
@@ -396,61 +394,60 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   1124.1  up      nba:balldontlie:21718132:live  (rotation)
   1124.1  panel   nba:balldontlie:21718132  team box
   1124.1  base    nba:balldontlie:21718132:live  (weighted) | G 0.296 proxy F 1.00 T 1.000 Q 0.500 | target 48.80% (league 100.00%, 48.80% within) | actual 48.31% | debt +5.06s (league -0.00s) | why: Rockets at Pacers: in rotation
-  1130.1  panel   nba:balldontlie:21718132  FreeThrow alone
+  1130.1  panel   nba:balldontlie:21718132  FreeThrow
   1136.1  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   1136.1  up      nba:balldontlie:21718137:live  (rotation)
   1136.1  panel   nba:balldontlie:21718137  line score
   1136.1  base    nba:balldontlie:21718137:live  (weighted) | G 0.344 proxy F 1.00 T 1.000 Q 0.500 | target 51.21% (league 100.00%, 51.21% within) | actual 51.11% | debt +1.09s (league -0.00s) | why: Pistons at Pelicans: in rotation
   1148.1  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   1148.1  up      nba:balldontlie:21718132:live  (rotation)
-  1148.1  panel   nba:balldontlie:21718132  FreeThrow alone
+  1148.1  panel   nba:balldontlie:21718132  FreeThrow
   1148.1  base    nba:balldontlie:21718132:live  (weighted) | G 0.296 proxy F 1.00 T 1.000 Q 0.500 | target 48.75% (league 100.00%, 48.75% within) | actual 48.35% | debt +4.77s (league -0.00s) | why: Rockets at Pacers: in rotation
   1160.1  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   1160.1  up      nba:balldontlie:21718137:live  (rotation)
-  1160.1  panel   nba:balldontlie:21718137  FieldGoalMade alone
+  1160.1  panel   nba:balldontlie:21718137  FieldGoalMade
   1160.1  base    nba:balldontlie:21718137:live  (weighted) | G 0.342 proxy F 1.00 T 1.000 Q 0.500 | target 51.79% (league 100.00%, 51.79% within) | actual 51.09% | debt +1.38s (league -0.00s) | why: Pistons at Pelicans: in rotation
   1172.1  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   1172.1  up      nba:balldontlie:21718132:live  (rotation)
-  1172.1  panel   nba:balldontlie:21718132  FreeThrow alone
+  1172.1  panel   nba:balldontlie:21718132  FreeThrow
   1172.1  base    nba:balldontlie:21718132:live  (weighted) | G 0.272 proxy F 1.00 T 1.000 Q 0.500 | target 48.21% (league 100.00%, 48.21% within) | actual 48.39% | debt +4.40s (league -0.00s) | why: Rockets at Pacers: in rotation
   1184.1  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   1184.1  up      nba:balldontlie:21718137:live  (rotation)
-  1184.1  panel   nba:balldontlie:21718137  FieldGoalMade alone
+  1184.1  panel   nba:balldontlie:21718137  FieldGoalMade
   1184.1  base    nba:balldontlie:21718137:live  (weighted) | G 0.350 proxy F 1.00 T 1.000 Q 0.500 | target 51.99% (league 100.00%, 51.99% within) | actual 51.06% | debt +1.81s (league -0.00s) | why: Pistons at Pelicans: in rotation
   1196.1  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   1196.1  up      nba:balldontlie:21718132:live  (rotation)
-  1196.1  panel   nba:balldontlie:21718132  FieldGoalMade alone
+  1196.1  panel   nba:balldontlie:21718132  FieldGoalMade
   1196.1  base    nba:balldontlie:21718132:live  (weighted) | G 0.251 proxy F 1.00 T 1.000 Q 0.500 | target 47.67% (league 100.00%, 47.67% within) | actual 48.42% | debt +3.95s (league -0.00s) | why: Rockets at Pacers: in rotation
   1208.1  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   1208.1  up      nba:balldontlie:21718137:live  (rotation)
-  1208.1  panel   nba:balldontlie:21718137  FieldGoalMade alone
+  1208.1  panel   nba:balldontlie:21718137  FieldGoalMade
   1208.1  base    nba:balldontlie:21718137:live  (weighted) | G 0.341 proxy F 1.00 T 1.000 Q 0.500 | target 51.08% (league 100.00%, 51.08% within) | actual 51.04% | debt +2.33s (league -0.00s) | why: Pistons at Pelicans: in rotation
   1220.1  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   1220.1  up      nba:balldontlie:21718132:live  (rotation)
-  1220.1  panel   nba:balldontlie:21718132  FieldGoalMade 1/3
+  1220.1  panel   nba:balldontlie:21718132  FieldGoalMade
   1220.1  base    nba:balldontlie:21718132:live  (weighted) | G 0.388 proxy F 1.00 T 1.000 Q 0.500 | target 50.77% (league 100.00%, 50.77% within) | actual 48.45% | debt +3.54s (league -0.00s) | why: Rockets at Pacers: in rotation
-  1226.1  panel   nba:balldontlie:21718132  FieldGoalMade 2/3
   1232.1  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   1232.1  up      nba:balldontlie:21718137:live  (rotation)
-  1232.1  panel   nba:balldontlie:21718137  FieldGoalMade alone
+  1232.1  panel   nba:balldontlie:21718137  FieldGoalMade
   1232.1  base    nba:balldontlie:21718137:live  (weighted) | G 0.356 proxy F 1.00 T 1.000 Q 0.500 | target 49.23% (league 100.00%, 49.23% within) | actual 51.02% | debt +2.37s (league -0.00s) | why: Pistons at Pelicans: in rotation
   1244.1  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   1244.1  up      nba:balldontlie:21718132:live  (rotation)
-  1244.1  panel   nba:balldontlie:21718132  FieldGoalMade alone
+  1244.1  panel   nba:balldontlie:21718132  FieldGoalMade
   1244.1  base    nba:balldontlie:21718132:live  (weighted) | G 0.388 proxy F 1.00 T 1.000 Q 0.500 | target 50.87% (league 100.00%, 50.87% within) | actual 48.48% | debt +3.72s (league -0.00s) | why: Rockets at Pacers: in rotation
   1256.1  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   1256.1  up      nba:balldontlie:21718137:live  (rotation)
-  1256.1  panel   nba:balldontlie:21718137  FieldGoalMade alone
+  1256.1  panel   nba:balldontlie:21718137  FieldGoalMade
   1256.1  base    nba:balldontlie:21718137:live  (weighted) | G 0.354 proxy F 1.00 T 1.000 Q 0.500 | target 51.38% (league 100.00%, 51.38% within) | actual 51.00% | debt +2.17s (league -0.00s) | why: Pistons at Pelicans: in rotation
   1268.1  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   1268.1  up      nba:balldontlie:21718132:live  (rotation)
-  1268.1  panel   nba:balldontlie:21718132  FieldGoalMade alone
+  1268.1  panel   nba:balldontlie:21718132  FieldGoalMade
   1268.1  base    nba:balldontlie:21718132:live  (weighted) | G 0.299 proxy F 1.00 T 1.000 Q 0.500 | target 48.62% (league 100.00%, 48.62% within) | actual 48.51% | debt +3.66s (league -0.00s) | why: Rockets at Pacers: in rotation
   1280.1  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   1280.1  up      nba:balldontlie:21718137:live  (rotation)
   1280.1  panel   nba:balldontlie:21718137  team box
   1280.1  base    nba:balldontlie:21718137:live  (weighted) | G 0.357 proxy F 1.00 T 1.000 Q 0.500 | target 51.45% (league 100.00%, 51.45% within) | actual 50.98% | debt +2.50s (league -0.00s) | why: Pistons at Pelicans: in rotation
-  1286.1  panel   nba:balldontlie:21718137  FieldGoalMade alone
+  1286.1  panel   nba:balldontlie:21718137  FieldGoalMade
   1292.1  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   1292.1  up      nba:balldontlie:21718132:live  (rotation)
   1292.1  panel   nba:balldontlie:21718132  players #3
@@ -460,7 +457,7 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   1304.1  card    nba:balldontlie:21718141:pregame  (pregame) | why: Lakers: starting soon
   1312.1  down    nba:balldontlie:21718141:pregame  (ran its time, 8.0s)
   1312.1  up      nba:balldontlie:21718137:live  (rotation)
-  1312.1  panel   nba:balldontlie:21718137  PersonalFoul alone
+  1312.1  panel   nba:balldontlie:21718137  PersonalFoul
   1312.1  base    nba:balldontlie:21718137:live  (weighted) | G 0.365 proxy F 1.00 T 1.000 Q 0.500 | target 51.64% (league 100.00%, 51.64% within) | actual 50.96% | debt +2.87s (league -0.00s) | why: Pistons at Pelicans: in rotation
   1324.1  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   1324.1  up      nba:balldontlie:21718132:live  (rotation)
@@ -472,7 +469,7 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   1336.1  base    nba:balldontlie:21718137:live  (weighted) | G 0.365 proxy F 1.00 T 1.000 Q 0.500 | target 51.64% (league 100.00%, 51.64% within) | actual 50.94% | debt +3.26s (league -0.00s) | why: Pistons at Pelicans: in rotation
   1348.1  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   1348.1  up      nba:balldontlie:21718132:live  (rotation)
-  1348.1  panel   nba:balldontlie:21718132  PersonalFoul alone
+  1348.1  panel   nba:balldontlie:21718132  PersonalFoul
   1348.1  base    nba:balldontlie:21718132:live  (weighted) | G 0.300 proxy F 1.00 T 1.000 Q 0.500 | target 48.31% (league 100.00%, 48.31% within) | actual 48.60% | debt +2.54s (league -0.00s) | why: Rockets at Pacers: in rotation
   1360.1  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   1360.1  up      nba:balldontlie:21718137:live  (rotation)
@@ -484,7 +481,7 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   1372.1  base    nba:balldontlie:21718132:live  (weighted) | G 0.300 proxy F 1.00 T 1.000 Q 0.500 | target 48.24% (league 100.00%, 48.24% within) | actual 48.62% | debt +2.13s (league -0.00s) | why: Rockets at Pacers: in rotation
   1375.0  break   nba:balldontlie:21718132 nba team timeout @ timeout period 3 2:31 home
   1375.0  lease   refused nba:balldontlie:21718132 nba team timeout @ timeout period 3 2:31 home  (backfill) | age 45.0s local_read | 45.0s of its ceiling gone
-  1378.1  panel   nba:balldontlie:21718132  TimeoutTaken alone
+  1378.1  panel   nba:balldontlie:21718132  TimeoutTaken
   1384.1  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   1384.1  up      nba:balldontlie:21718137:live  (rotation)
   1384.1  panel   nba:balldontlie:21718137  team box
@@ -503,16 +500,15 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   1420.1  base    nba:balldontlie:21718132:live  (weighted) | G 0.300 proxy F 1.00 T 1.000 Q 0.500 | target 48.16% (league 100.00%, 48.16% within) | actual 48.67% | debt +1.27s (league -0.00s) | why: Rockets at Pacers: in rotation
   1432.1  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   1432.1  up      nba:balldontlie:21718137:live  (rotation)
-  1432.1  panel   nba:balldontlie:21718137  FieldGoalMade 1/2
+  1432.1  panel   nba:balldontlie:21718137  FieldGoalMade
   1432.1  base    nba:balldontlie:21718137:live  (weighted) | G 0.375 proxy F 1.00 T 1.000 Q 0.500 | target 51.88% (league 100.00%, 51.88% within) | actual 50.88% | debt +4.95s (league -0.00s) | why: Pistons at Pelicans: in rotation
-  1438.1  panel   nba:balldontlie:21718137  FieldGoalMade 2/2
   1444.1  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   1444.1  up      nba:balldontlie:21718132:live  (rotation)
   1444.1  panel   nba:balldontlie:21718132  players #5
   1444.1  base    nba:balldontlie:21718132:live  (weighted) | G 0.300 proxy F 1.00 T 1.000 Q 0.500 | target 48.12% (league 100.00%, 48.12% within) | actual 48.70% | debt +0.82s (league -0.00s) | why: Rockets at Pacers: in rotation
   1456.1  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   1456.1  up      nba:balldontlie:21718137:live  (rotation)
-  1456.1  panel   nba:balldontlie:21718137  PersonalFoul alone
+  1456.1  panel   nba:balldontlie:21718137  PersonalFoul
   1456.1  base    nba:balldontlie:21718137:live  (weighted) | G 0.375 proxy F 1.00 T 1.000 Q 0.500 | target 51.88% (league 100.00%, 51.88% within) | actual 50.86% | debt +5.40s (league -0.00s) | why: Pistons at Pelicans: in rotation
   1468.1  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   1468.1  up      nba:balldontlie:21718132:live  (rotation)
@@ -520,7 +516,7 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   1468.1  base    nba:balldontlie:21718132:live  (weighted) | G 0.300 proxy F 1.00 T 1.000 Q 0.500 | target 48.12% (league 100.00%, 48.12% within) | actual 48.72% | debt +0.37s (league -0.00s) | why: Rockets at Pacers: in rotation
   1480.1  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   1480.1  up      nba:balldontlie:21718137:live  (rotation)
-  1480.1  panel   nba:balldontlie:21718137  FreeThrow alone
+  1480.1  panel   nba:balldontlie:21718137  FreeThrow
   1480.1  base    nba:balldontlie:21718137:live  (weighted) | G 0.375 proxy F 1.00 T 1.000 Q 0.500 | target 51.88% (league 100.00%, 51.88% within) | actual 50.85% | debt +5.85s (league -0.00s) | why: Pistons at Pelicans: in rotation
   1492.1  base    nba:balldontlie:21718137:live  (weighted, again) | G 0.370 proxy F 1.00 T 1.000 Q 0.500 | target 51.77% (league 100.00%, 51.77% within) | actual 51.26% | debt +0.08s (league -0.00s) | why: Pistons at Pelicans: in rotation
   1504.1  down    nba:balldontlie:21718137:live  (ran its time, 24.0s)
@@ -533,27 +529,26 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   1516.1  base    nba:balldontlie:21718137:live  (weighted) | G 0.371 proxy F 1.00 T 1.000 Q 0.500 | target 51.78% (league 100.00%, 51.78% within) | actual 51.24% | debt +0.50s (league -0.00s) | why: Pistons at Pelicans: in rotation
   1528.1  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   1528.1  up      nba:balldontlie:21718132:live  (rotation)
-  1528.1  panel   nba:balldontlie:21718132  FreeThrow alone
+  1528.1  panel   nba:balldontlie:21718132  FreeThrow
   1528.1  base    nba:balldontlie:21718132:live  (weighted) | G 0.274 proxy F 1.00 T 1.000 Q 0.500 | target 47.27% (league 100.00%, 47.27% within) | actual 48.36% | debt +5.28s (league -0.00s) | why: Rockets at Pacers: in rotation
   1535.0  break   nba:balldontlie:21718132 nba team timeout @ timeout period 3 2:31 home  (ended)
   1540.0  break   nba:balldontlie:21718137 nba tv timeout @ timeout period 2 7:27 home
   1540.0  lease   opened nba:balldontlie:21718137 nba tv timeout @ timeout period 2 7:27 home | 160.0s left | any guests that fit
   1540.1  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   1540.1  up      nba:balldontlie:21718137:live  (rotation)
-  1540.1  panel   nba:balldontlie:21718137  FieldGoalMade 1/3
+  1540.1  panel   nba:balldontlie:21718137  FieldGoalMade
   1540.1  base    nba:balldontlie:21718137:live  (weighted) | G 0.377 proxy F 1.00 T 1.000 Q 0.500 | target 53.19% (league 100.00%, 53.19% within) | actual 51.22% | debt +1.05s (league -0.00s) | why: Pistons at Pelicans: in rotation
-  1546.1  panel   nba:balldontlie:21718137  FieldGoalMade 2/3
   1552.1  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   1552.1  up      nba:balldontlie:21718132:live  (rotation)
-  1552.1  panel   nba:balldontlie:21718132  FreeThrow alone
+  1552.1  panel   nba:balldontlie:21718132  FreeThrow
   1552.1  base    nba:balldontlie:21718132:live  (weighted) | G 0.300 proxy F 1.00 T 1.000 Q 0.500 | target 48.10% (league 100.00%, 48.10% within) | actual 48.39% | debt +4.57s (league -0.00s) | why: Rockets at Pacers: in rotation
   1564.1  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   1564.1  up      nba:balldontlie:21718137:live  (rotation)
-  1564.1  panel   nba:balldontlie:21718137  TimeoutTaken alone
+  1564.1  panel   nba:balldontlie:21718137  TimeoutTaken
   1564.1  base    nba:balldontlie:21718137:live  (weighted) | G 0.377 proxy F 1.00 T 1.000 Q 0.500 | target 51.90% (league 100.00%, 51.90% within) | actual 51.20% | debt +1.66s (league -0.00s) | why: Pistons at Pelicans: in rotation
   1576.1  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   1576.1  up      nba:balldontlie:21718132:live  (rotation)
-  1576.1  panel   nba:balldontlie:21718132  FieldGoalMade alone
+  1576.1  panel   nba:balldontlie:21718132  FieldGoalMade
   1576.1  base    nba:balldontlie:21718132:live  (weighted) | G 0.300 proxy F 1.00 T 1.000 Q 0.500 | target 48.10% (league 100.00%, 48.10% within) | actual 48.41% | debt +4.11s (league -0.00s) | why: Rockets at Pacers: in rotation
   1588.1  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   1588.1  up      nba:balldontlie:21718137:live  (rotation)
@@ -561,7 +556,7 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   1588.1  base    nba:balldontlie:21718137:live  (weighted) | G 0.377 proxy F 1.00 T 1.000 Q 0.500 | target 50.39% (league 100.00%, 50.39% within) | actual 51.18% | debt +2.11s (league -0.00s) | why: Pistons at Pelicans: in rotation
   1600.1  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   1600.1  up      nba:balldontlie:21718132:live  (rotation)
-  1600.1  panel   nba:balldontlie:21718132  FieldGoalMade alone
+  1600.1  panel   nba:balldontlie:21718132  FieldGoalMade
   1600.1  base    nba:balldontlie:21718132:live  (weighted) | G 0.361 proxy F 1.00 T 1.000 Q 0.500 | target 49.62% (league 100.00%, 49.62% within) | actual 48.44% | debt +3.84s (league -0.00s) | why: Rockets at Pacers: in rotation
   1612.1  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   1612.1  up      nba:balldontlie:21718141:pregame  (rotation)
@@ -572,7 +567,7 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   1620.1  base    nba:balldontlie:21718137:live  (weighted) | G 0.377 proxy F 1.00 T 1.000 Q 0.500 | target 50.38% (league 100.00%, 50.38% within) | actual 51.16% | debt +2.21s (league -0.00s) | why: Pistons at Pelicans: in rotation
   1632.1  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   1632.1  up      nba:balldontlie:21718132:live  (rotation)
-  1632.1  panel   nba:balldontlie:21718132  PersonalFoul alone
+  1632.1  panel   nba:balldontlie:21718132  PersonalFoul
   1632.1  base    nba:balldontlie:21718132:live  (weighted) | G 0.361 proxy F 1.00 T 1.000 Q 0.500 | target 49.62% (league 100.00%, 49.62% within) | actual 48.46% | debt +3.75s (league -0.00s) | why: Rockets at Pacers: in rotation
   1644.1  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   1644.1  up      nba:balldontlie:21718137:live  (rotation)
@@ -580,16 +575,15 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   1644.1  base    nba:balldontlie:21718137:live  (weighted) | G 0.377 proxy F 1.00 T 1.000 Q 0.500 | target 50.38% (league 100.00%, 50.38% within) | actual 51.15% | debt +2.30s (league -0.00s) | why: Pistons at Pelicans: in rotation
   1656.1  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   1656.1  up      nba:balldontlie:21718132:live  (rotation)
-  1656.1  panel   nba:balldontlie:21718132  FreeThrow 1/2
+  1656.1  panel   nba:balldontlie:21718132  FreeThrow
   1656.1  base    nba:balldontlie:21718132:live  (weighted) | G 0.330 proxy F 1.00 T 1.000 Q 0.500 | target 48.84% (league 100.00%, 48.84% within) | actual 48.48% | debt +3.66s (league -0.00s) | why: Rockets at Pacers: in rotation
-  1662.1  panel   nba:balldontlie:21718132  FreeThrow 2/2
   1668.1  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   1668.1  up      nba:balldontlie:21718137:live  (rotation)
   1668.1  panel   nba:balldontlie:21718137  players #4
   1668.1  base    nba:balldontlie:21718137:live  (weighted) | G 0.377 proxy F 1.00 T 1.000 Q 0.500 | target 51.14% (league 100.00%, 51.14% within) | actual 51.13% | debt +2.48s (league -0.00s) | why: Pistons at Pelicans: in rotation
   1680.1  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   1680.1  up      nba:balldontlie:21718132:live  (rotation)
-  1680.1  panel   nba:balldontlie:21718132  PersonalFoul alone
+  1680.1  panel   nba:balldontlie:21718132  PersonalFoul
   1680.1  base    nba:balldontlie:21718132:live  (weighted) | G 0.330 proxy F 1.00 T 1.000 Q 0.500 | target 48.86% (league 100.00%, 48.86% within) | actual 48.51% | debt +3.38s (league -0.00s) | why: Rockets at Pacers: in rotation
   1692.1  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   1692.1  up      nba:balldontlie:21718137:live  (rotation)
@@ -606,7 +600,7 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   1716.1  base    nba:balldontlie:21718137:live  (weighted) | G 0.377 proxy F 1.00 T 1.000 Q 0.500 | target 51.88% (league 100.00%, 51.88% within) | actual 51.09% | debt +3.03s (league -0.00s) | why: Pistons at Pelicans: in rotation
   1728.1  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   1728.1  up      nba:balldontlie:21718132:live  (rotation)
-  1728.1  panel   nba:balldontlie:21718132  FreeThrow alone
+  1728.1  panel   nba:balldontlie:21718132  FreeThrow
   1728.1  base    nba:balldontlie:21718132:live  (weighted) | G 0.275 proxy F 1.00 T 1.000 Q 0.500 | target 47.43% (league 100.00%, 47.43% within) | actual 48.55% | debt +2.74s (league -0.00s) | why: Rockets at Pacers: in rotation
   1740.1  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   1740.1  up      nba:balldontlie:21718137:live  (rotation)
@@ -616,15 +610,15 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   1752.1  up      nba:balldontlie:21718132:live  (rotation)
   1752.1  panel   nba:balldontlie:21718132  players #2
   1752.1  base    nba:balldontlie:21718132:live  (weighted) | G 0.251 proxy F 1.00 T 1.000 Q 0.500 | target 46.80% (league 100.00%, 46.80% within) | actual 48.57% | debt +2.13s (league -0.00s) | why: Rockets at Pacers: in rotation
-  1758.1  panel   nba:balldontlie:21718132  TechnicalFoul 1/2
+  1758.1  panel   nba:balldontlie:21718132  TechnicalFoul
   1764.1  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   1764.1  up      nba:balldontlie:21718137:live  (rotation)
-  1764.1  panel   nba:balldontlie:21718137  PersonalFoul 1/2
+  1764.1  panel   nba:balldontlie:21718137  PersonalFoul
   1764.1  base    nba:balldontlie:21718137:live  (weighted) | G 0.388 proxy F 1.00 T 1.000 Q 0.500 | target 53.48% (league 100.00%, 53.48% within) | actual 51.06% | debt +4.26s (league -0.00s) | why: Pistons at Pelicans: in rotation
-  1770.1  panel   nba:balldontlie:21718137  FieldGoalMade 2/2
+  1770.1  panel   nba:balldontlie:21718137  FieldGoalMade
   1776.1  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   1776.1  up      nba:balldontlie:21718132:live  (rotation)
-  1776.1  panel   nba:balldontlie:21718132  FreeThrow alone
+  1776.1  panel   nba:balldontlie:21718132  FreeThrow
   1776.1  base    nba:balldontlie:21718132:live  (weighted) | G 0.251 proxy F 1.00 T 1.000 Q 0.500 | target 46.51% (league 100.00%, 46.51% within) | actual 48.59% | debt +1.33s (league -0.00s) | why: Rockets at Pacers: in rotation
   1788.1  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   1788.1  up      nba:balldontlie:21718137:live  (rotation)
@@ -634,7 +628,7 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   1800.1  base    nba:balldontlie:21718137:live  (weighted, again) | G 0.389 proxy F 1.00 T 1.000 Q 0.500 | target 55.14% (league 100.00%, 55.14% within) | actual 51.39% | debt -0.29s (league -0.00s) | why: Pistons at Pelicans: in rotation
   1812.1  down    nba:balldontlie:21718137:live  (ran its time, 24.0s)
   1812.1  up      nba:balldontlie:21718132:live  (rotation)
-  1812.1  panel   nba:balldontlie:21718132  FieldGoalMade alone
+  1812.1  panel   nba:balldontlie:21718132  FieldGoalMade
   1812.1  base    nba:balldontlie:21718132:live  (weighted) | G 0.192 proxy F 1.00 T 1.000 Q 0.500 | target 44.84% (league 100.00%, 44.84% within) | actual 48.28% | debt +5.67s (league -0.00s) | why: Rockets at Pacers: in rotation
   1820.0  break   nba:balldontlie:21718132 nba quarter break @ end of period 3
   1820.0  panel   nba:balldontlie:21718132  line score
@@ -649,16 +643,16 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   1836.1  base    nba:balldontlie:21718132:live  (weighted) | G 0.192 proxy F 1.00 T 1.000 Q 0.500 | target 44.89% (league 100.00%, 44.89% within) | actual 48.30% | debt +4.43s (league -0.00s) | why: Rockets at Pacers: in rotation
   1848.2  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   1848.2  up      nba:balldontlie:21718137:live  (rotation)
-  1848.2  panel   nba:balldontlie:21718137  PersonalFoul 1/2
+  1848.2  panel   nba:balldontlie:21718137  PersonalFoul
   1848.2  base    nba:balldontlie:21718137:live  (weighted) | G 0.387 proxy F 1.00 T 1.000 Q 0.500 | target 55.11% (league 100.00%, 55.11% within) | actual 51.35% | debt +2.19s (league -0.00s) | why: Pistons at Pelicans: in rotation
-  1854.2  panel   nba:balldontlie:21718137  FieldGoalMade 2/2
+  1854.2  panel   nba:balldontlie:21718137  FieldGoalMade
   1860.2  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   1860.2  up      nba:balldontlie:21718132:live  (rotation)
   1860.2  panel   nba:balldontlie:21718132  players #3
   1860.2  base    nba:balldontlie:21718132:live  (weighted) | G 0.192 proxy F 1.00 T 1.000 Q 0.500 | target 44.89% (league 100.00%, 44.89% within) | actual 48.32% | debt +3.20s (league -0.00s) | why: Rockets at Pacers: in rotation
   1872.2  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   1872.2  up      nba:balldontlie:21718137:live  (rotation)
-  1872.2  panel   nba:balldontlie:21718137  FreeThrow alone
+  1872.2  panel   nba:balldontlie:21718137  FreeThrow
   1872.2  base    nba:balldontlie:21718137:live  (weighted) | G 0.392 proxy F 1.00 T 1.000 Q 0.500 | target 55.23% (league 100.00%, 55.23% within) | actual 51.33% | debt +3.41s (league -0.00s) | why: Pistons at Pelicans: in rotation
   1884.2  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   1884.2  up      nba:balldontlie:21718132:live  (rotation)
@@ -666,7 +660,7 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   1884.2  base    nba:balldontlie:21718132:live  (weighted) | G 0.192 proxy F 1.00 T 1.000 Q 0.500 | target 44.77% (league 100.00%, 44.77% within) | actual 48.34% | debt +1.96s (league -0.00s) | why: Rockets at Pacers: in rotation
   1896.2  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   1896.2  up      nba:balldontlie:21718137:live  (rotation)
-  1896.2  panel   nba:balldontlie:21718137  FreeThrow alone
+  1896.2  panel   nba:balldontlie:21718137  FreeThrow
   1896.2  base    nba:balldontlie:21718137:live  (weighted) | G 0.392 proxy F 1.00 T 1.000 Q 0.500 | target 55.23% (league 100.00%, 55.23% within) | actual 51.32% | debt +4.67s (league -0.00s) | why: Pistons at Pelicans: in rotation
   1908.2  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   1908.2  up      nba:balldontlie:21718132:live  (rotation)
@@ -677,12 +671,10 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   1920.2  card    nba:balldontlie:21718141:pregame  (pregame) | why: Lakers: starting soon
   1928.2  down    nba:balldontlie:21718141:pregame  (ran its time, 8.0s)
   1928.2  up      nba:balldontlie:21718137:live  (rotation)
-  1928.2  panel   nba:balldontlie:21718137  FieldGoalMade alone
+  1928.2  panel   nba:balldontlie:21718137  FieldGoalMade
   1928.2  base    nba:balldontlie:21718137:live  (weighted) | G 0.381 proxy F 1.00 T 1.000 Q 0.500 | target 54.97% (league 100.00%, 54.97% within) | actual 51.30% | debt +5.93s (league -0.00s) | why: Pistons at Pelicans: in rotation
   1940.0  lease   lapsed nba:balldontlie:21718132 nba quarter break @ end of period 3
-  1940.2  panel   nba:balldontlie:21718137  FieldGoalMade 1/2
   1940.2  base    nba:balldontlie:21718137:live  (weighted, again) | G 0.373 proxy F 1.00 T 1.000 Q 0.500 | target 54.79% (league 100.00%, 54.79% within) | actual 51.61% | debt +0.52s (league -0.00s) | why: Pistons at Pelicans: in rotation
-  1946.2  panel   nba:balldontlie:21718137  FieldGoalMade 2/2
   1952.2  down    nba:balldontlie:21718137:live  (ran its time, 24.0s)
   1952.2  up      nba:balldontlie:21718132:live  (rotation)
   1952.2  panel   nba:balldontlie:21718132  players #4
@@ -712,7 +704,7 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   2024.2  up      nba:balldontlie:21718132:live  (rotation)
   2024.2  panel   nba:balldontlie:21718132  players #5
   2024.2  base    nba:balldontlie:21718132:live  (weighted) | G 0.191 proxy F 1.00 T 1.000 Q 0.500 | target 44.94% (league 100.00%, 44.94% within) | actual 48.15% | debt +1.36s (league -0.00s) | why: Rockets at Pacers: in rotation
-  2030.2  panel   nba:balldontlie:21718132  FieldGoalMade alone
+  2030.2  panel   nba:balldontlie:21718132  FieldGoalMade
   2036.2  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   2036.2  up      nba:balldontlie:21718137:live  (rotation)
   2036.2  panel   nba:balldontlie:21718137  players #3
@@ -721,17 +713,16 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   2048.2  base    nba:balldontlie:21718137:live  (weighted, again) | G 0.387 proxy F 1.00 T 1.000 Q 0.500 | target 54.10% (league 100.00%, 54.10% within) | actual 51.83% | debt -0.27s (league -0.00s) | why: Pistons at Pelicans: in rotation
   2060.2  down    nba:balldontlie:21718137:live  (ran its time, 24.0s)
   2060.2  up      nba:balldontlie:21718132:live  (rotation)
-  2060.2  panel   nba:balldontlie:21718132  FieldGoalMade 1/2
+  2060.2  panel   nba:balldontlie:21718132  FieldGoalMade
   2060.2  base    nba:balldontlie:21718132:live  (weighted) | G 0.207 proxy F 1.00 T 1.000 Q 0.500 | target 45.32% (league 100.00%, 45.32% within) | actual 47.88% | debt +5.77s (league -0.00s) | why: Rockets at Pacers: in rotation
-  2066.2  panel   nba:balldontlie:21718132  FieldGoalMade 2/2
   2072.2  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   2072.2  up      nba:balldontlie:21718137:live  (rotation)
   2072.2  panel   nba:balldontlie:21718137  team box
   2072.2  base    nba:balldontlie:21718137:live  (weighted) | G 0.387 proxy F 1.00 T 1.000 Q 0.500 | target 54.68% (league 100.00%, 54.68% within) | actual 51.81% | debt +0.79s (league -0.00s) | why: Pistons at Pelicans: in rotation
-  2078.2  panel   nba:balldontlie:21718137  PersonalFoul alone
+  2078.2  panel   nba:balldontlie:21718137  PersonalFoul
   2084.2  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   2084.2  up      nba:balldontlie:21718132:live  (rotation)
-  2084.2  panel   nba:balldontlie:21718132  FieldGoalMade alone
+  2084.2  panel   nba:balldontlie:21718132  FieldGoalMade
   2084.2  base    nba:balldontlie:21718132:live  (weighted) | G 0.160 proxy F 1.00 T 1.000 Q 0.500 | target 43.95% (league 100.00%, 43.95% within) | actual 47.90% | debt +4.65s (league -0.00s) | why: Rockets at Pacers: in rotation
   2096.2  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   2096.2  up      nba:balldontlie:21718137:live  (rotation)
@@ -739,13 +730,13 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   2096.2  base    nba:balldontlie:21718137:live  (weighted) | G 0.389 proxy F 1.00 T 1.000 Q 0.500 | target 56.12% (league 100.00%, 56.12% within) | actual 51.79% | debt +2.08s (league -0.00s) | why: Pistons at Pelicans: in rotation
   2108.2  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   2108.2  up      nba:balldontlie:21718132:live  (rotation)
-  2108.2  panel   nba:balldontlie:21718132  PersonalFoul alone
+  2108.2  panel   nba:balldontlie:21718132  PersonalFoul
   2108.2  base    nba:balldontlie:21718132:live  (weighted) | G 0.159 proxy F 1.00 T 1.000 Q 0.500 | target 43.85% (league 100.00%, 43.85% within) | actual 47.93% | debt +3.19s (league -0.00s) | why: Rockets at Pacers: in rotation
   2120.2  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   2120.2  up      nba:balldontlie:21718137:live  (rotation)
   2120.2  panel   nba:balldontlie:21718137  line score
   2120.2  base    nba:balldontlie:21718137:live  (weighted) | G 0.344 proxy F 1.00 T 1.000 Q 0.500 | target 55.04% (league 100.00%, 55.04% within) | actual 51.76% | debt +3.55s (league -0.00s) | why: Pistons at Pelicans: in rotation
-  2126.2  panel   nba:balldontlie:21718137  FieldGoalMade alone
+  2126.2  panel   nba:balldontlie:21718137  FieldGoalMade
   2132.2  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   2132.2  up      nba:balldontlie:21718132:live  (rotation)
   2132.2  panel   nba:balldontlie:21718132  line score
@@ -756,16 +747,15 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   2144.2  base    nba:balldontlie:21718137:live  (weighted) | G 0.344 proxy F 1.00 T 1.000 Q 0.500 | target 54.63% (league 100.00%, 54.63% within) | actual 51.74% | debt +4.76s (league -0.00s) | why: Pistons at Pelicans: in rotation
   2156.2  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   2156.2  up      nba:balldontlie:21718132:live  (rotation)
-  2156.2  panel   nba:balldontlie:21718132  FreeThrow 1/2
+  2156.2  panel   nba:balldontlie:21718132  FreeThrow
   2156.2  base    nba:balldontlie:21718132:live  (weighted) | G 0.173 proxy F 1.00 T 1.000 Q 0.500 | target 45.33% (league 100.00%, 45.33% within) | actual 47.98% | debt +0.69s (league -0.00s) | why: Rockets at Pacers: in rotation
-  2162.2  panel   nba:balldontlie:21718132  FreeThrow 2/2
   2168.2  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   2168.2  up      nba:balldontlie:21718137:live  (rotation)
-  2168.2  panel   nba:balldontlie:21718137  PersonalFoul alone
+  2168.2  panel   nba:balldontlie:21718137  PersonalFoul
   2168.2  base    nba:balldontlie:21718137:live  (weighted) | G 0.346 proxy F 1.00 T 1.000 Q 0.500 | target 54.68% (league 100.00%, 54.68% within) | actual 51.72% | debt +5.87s (league -0.00s) | why: Pistons at Pelicans: in rotation
   2180.0  break   nba:balldontlie:21718137 nba tv timeout @ timeout period 2 3:21 home
   2180.0  lease   opened nba:balldontlie:21718137 nba tv timeout @ timeout period 2 3:21 home | 165.0s left | any guests that fit
-  2180.2  panel   nba:balldontlie:21718137  TimeoutTaken 1/2
+  2180.2  panel   nba:balldontlie:21718137  TimeoutTaken
   2180.2  base    nba:balldontlie:21718137:live  (weighted, again) | G 0.308 proxy F 1.00 T 1.000 Q 0.500 | target 53.79% (league 100.00%, 53.79% within) | actual 52.00% | debt +0.43s (league -0.00s) | why: Pistons at Pelicans: in rotation
   2192.2  down    nba:balldontlie:21718137:live  (ran its time, 24.0s)
   2192.2  up      nba:balldontlie:21718132:live  (rotation)
@@ -773,11 +763,11 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   2192.2  base    nba:balldontlie:21718132:live  (weighted) | G 0.171 proxy F 1.00 T 1.000 Q 0.500 | target 46.21% (league 100.00%, 46.21% within) | actual 47.73% | debt +5.11s (league -0.00s) | why: Rockets at Pacers: in rotation
   2204.2  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   2204.2  up      nba:balldontlie:21718137:live  (rotation)
-  2204.2  panel   nba:balldontlie:21718137  FieldGoalMade alone
+  2204.2  panel   nba:balldontlie:21718137  FieldGoalMade
   2204.2  base    nba:balldontlie:21718137:live  (weighted) | G 0.308 proxy F 1.00 T 1.000 Q 0.500 | target 53.79% (league 100.00%, 53.79% within) | actual 51.98% | debt +1.34s (league -0.00s) | why: Pistons at Pelicans: in rotation
   2216.2  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   2216.2  up      nba:balldontlie:21718132:live  (rotation)
-  2216.2  panel   nba:balldontlie:21718132  FieldGoalMade alone
+  2216.2  panel   nba:balldontlie:21718132  FieldGoalMade
   2216.2  base    nba:balldontlie:21718132:live  (weighted) | G 0.143 proxy F 1.00 T 1.000 Q 0.500 | target 45.38% (league 100.00%, 45.38% within) | actual 47.75% | debt +4.20s (league -0.00s) | why: Rockets at Pacers: lopsided game
   2228.2  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   2228.2  up      nba:balldontlie:21718141:pregame  (rotation)
@@ -788,7 +778,7 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   2236.2  base    nba:balldontlie:21718137:live  (weighted) | G 0.308 proxy F 1.00 T 1.000 Q 0.500 | target 54.64% (league 100.00%, 54.64% within) | actual 51.96% | debt +2.35s (league -0.00s) | why: Pistons at Pelicans: in rotation
   2248.2  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   2248.2  up      nba:balldontlie:21718132:live  (rotation)
-  2248.2  panel   nba:balldontlie:21718132  PersonalFoul alone
+  2248.2  panel   nba:balldontlie:21718132  PersonalFoul
   2248.2  base    nba:balldontlie:21718132:live  (weighted) | G 0.142 proxy F 1.00 T 1.000 Q 0.500 | target 45.35% (league 100.00%, 45.35% within) | actual 47.78% | debt +3.09s (league -0.00s) | why: Rockets at Pacers: lopsided game
   2260.2  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   2260.2  up      nba:balldontlie:21718137:live  (rotation)
@@ -823,7 +813,7 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   2352.2  lease   lapsed nba:balldontlie:21718137 nba tv timeout @ timeout period 2 3:21 home
   2356.2  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   2356.2  up      nba:balldontlie:21718132:live  (rotation)
-  2356.2  panel   nba:balldontlie:21718132  PersonalFoul alone
+  2356.2  panel   nba:balldontlie:21718132  PersonalFoul
   2356.2  base    nba:balldontlie:21718132:live  (weighted) | G 0.139 proxy F 1.00 T 1.000 Q 0.500 | target 45.26% (league 100.00%, 45.26% within) | actual 47.62% | debt +4.03s (league -0.00s) | why: Rockets at Pacers: lopsided game
   2368.2  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   2368.2  up      nba:balldontlie:21718137:live  (rotation)
@@ -840,31 +830,30 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   2400.0  break   nba:balldontlie:21718137 nba tv timeout @ timeout period 2 3:21 home  (ended)
   2404.2  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   2404.2  up      nba:balldontlie:21718132:live  (rotation)
-  2404.2  panel   nba:balldontlie:21718132  FieldGoalMade alone
+  2404.2  panel   nba:balldontlie:21718132  FieldGoalMade
   2404.2  base    nba:balldontlie:21718132:live  (weighted) | G 0.160 proxy F 1.00 T 1.000 Q 0.500 | target 44.39% (league 100.00%, 44.39% within) | actual 47.67% | debt +1.92s (league -0.00s) | why: Rockets at Pacers: in rotation
   2416.2  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   2416.2  up      nba:balldontlie:21718137:live  (rotation)
-  2416.2  panel   nba:balldontlie:21718137  FieldGoalMade alone
+  2416.2  panel   nba:balldontlie:21718137  FieldGoalMade
   2416.2  base    nba:balldontlie:21718137:live  (weighted) | G 0.370 proxy F 1.00 T 1.000 Q 0.500 | target 55.61% (league 100.00%, 55.61% within) | actual 52.06% | debt +4.75s (league -0.00s) | why: Pistons at Pelicans: in rotation
   2428.2  panel   nba:balldontlie:21718137  players #4
   2428.2  base    nba:balldontlie:21718137:live  (weighted, again) | G 0.372 proxy F 1.00 T 1.000 Q 0.500 | target 56.79% (league 100.00%, 56.79% within) | actual 52.31% | debt -0.58s (league -0.00s) | why: Pistons at Pelicans: in rotation
   2440.2  down    nba:balldontlie:21718137:live  (ran its time, 24.0s)
   2440.2  up      nba:balldontlie:21718132:live  (rotation)
-  2440.2  panel   nba:balldontlie:21718132  FieldGoalMade 1/2
+  2440.2  panel   nba:balldontlie:21718132  FieldGoalMade
   2440.2  base    nba:balldontlie:21718132:live  (weighted) | G 0.145 proxy F 1.00 T 1.000 Q 0.500 | target 43.86% (league 100.00%, 43.86% within) | actual 47.45% | debt +5.76s (league -0.00s) | why: Rockets at Pacers: lopsided game
-  2446.2  panel   nba:balldontlie:21718132  FieldGoalMade 2/2
   2452.2  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   2452.2  up      nba:balldontlie:21718137:live  (rotation)
-  2452.2  panel   nba:balldontlie:21718137  PersonalFoul alone
+  2452.2  panel   nba:balldontlie:21718137  PersonalFoul
   2452.2  base    nba:balldontlie:21718137:live  (weighted) | G 0.372 proxy F 1.00 T 1.000 Q 0.500 | target 56.20% (league 100.00%, 56.20% within) | actual 52.28% | debt +0.98s (league -0.00s) | why: Pistons at Pelicans: in rotation
   2464.2  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   2464.2  up      nba:balldontlie:21718132:live  (rotation)
   2464.2  panel   nba:balldontlie:21718132  line score
   2464.2  base    nba:balldontlie:21718132:live  (weighted) | G 0.143 proxy F 1.00 T 1.000 Q 0.500 | target 43.80% (league 100.00%, 43.80% within) | actual 47.47% | debt +4.28s (league -0.00s) | why: Rockets at Pacers: lopsided game
-  2470.2  panel   nba:balldontlie:21718132  PersonalFoul alone
+  2470.2  panel   nba:balldontlie:21718132  PersonalFoul
   2476.2  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   2476.2  up      nba:balldontlie:21718137:live  (rotation)
-  2476.2  panel   nba:balldontlie:21718137  FreeThrow alone
+  2476.2  panel   nba:balldontlie:21718137  FreeThrow
   2476.2  base    nba:balldontlie:21718137:live  (weighted) | G 0.372 proxy F 1.00 T 1.000 Q 0.500 | target 56.22% (league 100.00%, 56.22% within) | actual 52.26% | debt +2.46s (league -0.00s) | why: Pistons at Pelicans: in rotation
   2488.2  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   2488.2  up      nba:balldontlie:21718132:live  (rotation)
@@ -872,12 +861,12 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   2488.2  base    nba:balldontlie:21718132:live  (weighted) | G 0.142 proxy F 1.00 T 1.000 Q 0.500 | target 43.78% (league 100.00%, 43.78% within) | actual 47.50% | debt +2.79s (league -0.00s) | why: Rockets at Pacers: lopsided game
   2500.2  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   2500.2  up      nba:balldontlie:21718137:live  (rotation)
-  2500.2  panel   nba:balldontlie:21718137  FreeThrow 1/2
+  2500.2  panel   nba:balldontlie:21718137  FreeThrow
   2500.2  base    nba:balldontlie:21718137:live  (weighted) | G 0.395 proxy F 1.00 T 1.000 Q 0.500 | target 55.95% (league 100.00%, 55.95% within) | actual 52.24% | debt +3.96s (league -0.00s) | why: Pistons at Pelicans: in rotation
-  2506.2  panel   nba:balldontlie:21718137  FieldGoalMade 2/2
+  2506.2  panel   nba:balldontlie:21718137  FieldGoalMade
   2512.2  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   2512.2  up      nba:balldontlie:21718132:live  (rotation)
-  2512.2  panel   nba:balldontlie:21718132  FieldGoalMade alone
+  2512.2  panel   nba:balldontlie:21718132  FieldGoalMade
   2512.2  base    nba:balldontlie:21718132:live  (weighted) | G 0.169 proxy F 1.00 T 1.000 Q 0.500 | target 44.05% (league 100.00%, 44.05% within) | actual 47.52% | debt +1.33s (league -0.00s) | why: Rockets at Pacers: in rotation
   2524.2  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   2524.2  up      nba:balldontlie:21718137:live  (rotation)
@@ -894,18 +883,18 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   2550.0  lease   opened nba:balldontlie:21718132 nba tv timeout @ timeout period 4 6:35 home | 165.0s left | any guests that fit
   2556.2  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   2556.2  up      nba:balldontlie:21718132:live  (rotation)
-  2556.2  panel   nba:balldontlie:21718132  FieldGoalMade 1/3
+  2556.2  panel   nba:balldontlie:21718132  FieldGoalMade
   2556.2  base    nba:balldontlie:21718132:live  (weighted) | G 0.138 proxy F 1.00 T 1.000 Q 0.500 | target 39.63% (league 100.00%, 39.63% within) | actual 47.32% | debt +4.66s (league -0.00s) | why: Rockets at Pacers: lopsided game
   2560.0  break   nba:balldontlie:21718137 nba team timeout @ timeout period 2 1:58 home
   2560.0  lease   opened nba:balldontlie:21718137 nba team timeout @ timeout period 2 1:58 home | 30.0s left | any guests that fit
-  2562.2  panel   nba:balldontlie:21718132  TimeoutTaken 2/3
+  2562.2  panel   nba:balldontlie:21718132  TimeoutTaken
   2568.2  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   2568.2  up      nba:balldontlie:21718137:live  (rotation)
-  2568.2  panel   nba:balldontlie:21718137  TimeoutTaken alone
+  2568.2  panel   nba:balldontlie:21718137  TimeoutTaken
   2568.2  base    nba:balldontlie:21718137:live  (weighted) | G 0.560 proxy F 1.00 T 1.000 Q 0.500 | target 60.37% (league 100.00%, 60.37% within) | actual 52.43% | debt +2.59s (league -0.00s) | why: Pistons at Pelicans: in rotation
   2580.2  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   2580.2  up      nba:balldontlie:21718132:live  (rotation)
-  2580.2  panel   nba:balldontlie:21718132  PersonalFoul alone
+  2580.2  panel   nba:balldontlie:21718132  PersonalFoul
   2580.2  base    nba:balldontlie:21718132:live  (weighted) | G 0.138 proxy F 1.00 T 1.000 Q 0.500 | target 39.63% (league 100.00%, 39.63% within) | actual 47.34% | debt +2.17s (league -0.00s) | why: Rockets at Pacers: lopsided game
   2590.0  lease   lapsed nba:balldontlie:21718137 nba team timeout @ timeout period 2 1:58 home
   2592.2  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
@@ -938,7 +927,7 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   2676.2  base    nba:balldontlie:21718132:live  (weighted) | G 0.138 proxy F 1.00 T 1.000 Q 0.500 | target 39.63% (league 100.00%, 39.63% within) | actual 46.98% | debt +4.21s (league -0.00s) | why: Rockets at Pacers: lopsided game
   2688.2  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   2688.2  up      nba:balldontlie:21718137:live  (rotation)
-  2688.2  panel   nba:balldontlie:21718137  ChallengeWon alone
+  2688.2  panel   nba:balldontlie:21718137  ChallengeWon
   2688.2  base    nba:balldontlie:21718137:live  (weighted) | G 0.560 proxy F 1.00 T 1.000 Q 0.500 | target 60.37% (league 100.00%, 60.37% within) | actual 52.78% | debt +3.03s (league -0.00s) | why: Pistons at Pelicans: in rotation
   2695.0  break   nba:balldontlie:21718137 nba team timeout @ timeout period 2 1:58 home  (ended)
   2700.2  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
@@ -954,80 +943,77 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   2724.2  base    nba:balldontlie:21718137:live  (weighted, again) | G 0.534 proxy F 1.00 T 1.000 Q 0.500 | target 59.86% (league 100.00%, 59.86% within) | actual 52.97% | debt +0.76s (league -0.00s) | why: Pistons at Pelicans: in rotation
   2736.2  down    nba:balldontlie:21718137:live  (ran its time, 24.0s)
   2736.2  up      nba:balldontlie:21718132:live  (rotation)
-  2736.2  panel   nba:balldontlie:21718132  CallReversed 1/2
+  2736.2  panel   nba:balldontlie:21718132  CallReversed
   2736.2  base    nba:balldontlie:21718132:live  (weighted) | G 0.138 proxy F 1.00 T 1.000 Q 0.500 | target 36.37% (league 100.00%, 36.37% within) | actual 46.82% | debt +4.06s (league -0.00s) | why: Rockets at Pacers: lopsided game
   2748.2  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   2748.2  up      nba:balldontlie:21718137:live  (rotation)
-  2748.2  panel   nba:balldontlie:21718137  FieldGoalMade alone
+  2748.2  panel   nba:balldontlie:21718137  FieldGoalMade
   2748.2  base    nba:balldontlie:21718137:live  (weighted) | G 0.742 proxy F 1.00 T 1.000 Q 0.500 | target 63.63% (league 100.00%, 63.63% within) | actual 52.94% | debt +3.57s (league -0.00s) | why: Pistons at Pelicans: close late game
   2760.2  base    nba:balldontlie:21718137:live  (weighted, again) | G 0.512 proxy F 1.00 T 1.000 Q 0.500 | target 59.42% (league 100.00%, 59.42% within) | actual 53.15% | debt -0.79s (league -0.00s) | why: Pistons at Pelicans: in rotation
   2772.2  down    nba:balldontlie:21718137:live  (ran its time, 24.0s)
   2772.2  up      nba:balldontlie:21718132:live  (rotation)
-  2772.2  panel   nba:balldontlie:21718132  PersonalFoul alone
+  2772.2  panel   nba:balldontlie:21718132  PersonalFoul
   2772.2  base    nba:balldontlie:21718132:live  (weighted) | G 0.138 proxy F 1.00 T 1.000 Q 0.500 | target 40.58% (league 100.00%, 40.58% within) | actual 46.64% | debt +5.66s (league -0.00s) | why: Rockets at Pacers: lopsided game
   2784.2  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   2784.2  up      nba:balldontlie:21718137:live  (rotation)
   2784.2  panel   nba:balldontlie:21718137  players #3
   2784.2  base    nba:balldontlie:21718137:live  (weighted) | G 0.512 proxy F 1.00 T 1.000 Q 0.500 | target 59.42% (league 100.00%, 59.42% within) | actual 53.12% | debt +1.47s (league -0.00s) | why: Pistons at Pelicans: in rotation
-  2790.2  panel   nba:balldontlie:21718137  PersonalFoul 1/2
+  2790.2  panel   nba:balldontlie:21718137  PersonalFoul
   2796.2  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   2796.2  up      nba:balldontlie:21718132:live  (rotation)
   2796.2  panel   nba:balldontlie:21718132  players #5
   2796.2  base    nba:balldontlie:21718132:live  (weighted) | G 0.117 proxy F 1.00 T 1.000 Q 0.500 | target 38.16% (league 100.00%, 38.16% within) | actual 46.67% | debt +3.40s (league -0.00s) | why: Rockets at Pacers: lopsided game
   2808.2  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   2808.2  up      nba:balldontlie:21718137:live  (rotation)
-  2808.2  panel   nba:balldontlie:21718137  FreeThrow 1/2
+  2808.2  panel   nba:balldontlie:21718137  FreeThrow
   2808.2  base    nba:balldontlie:21718137:live  (weighted) | G 0.603 proxy F 1.00 T 1.000 Q 0.500 | target 61.84% (league 100.00%, 61.84% within) | actual 53.10% | debt +4.02s (league -0.00s) | why: Pistons at Pelicans: close late game
-  2810.0  panel   nba:balldontlie:21718137  FreeThrow 1/3
-  2814.2  panel   nba:balldontlie:21718137  PersonalFoul 2/3
-  2820.2  panel   nba:balldontlie:21718137  FieldGoalMade 3/3
+  2814.2  panel   nba:balldontlie:21718137  PersonalFoul
+  2820.2  panel   nba:balldontlie:21718137  FieldGoalMade
   2820.2  base    nba:balldontlie:21718137:live  (weighted, again) | G 0.603 proxy F 1.00 T 1.000 Q 0.500 | target 61.84% (league 100.00%, 61.84% within) | actual 53.30% | debt -0.56s (league -0.00s) | why: Pistons at Pelicans: close late game
   2826.2  panel   nba:balldontlie:21718137  line score
   2830.0  break   nba:balldontlie:21718132 nba tv timeout @ timeout period 4 6:35 home  (ended)
   2832.2  down    nba:balldontlie:21718137:live  (ran its time, 24.0s)
   2832.2  up      nba:balldontlie:21718132:live  (rotation)
-  2832.2  panel   nba:balldontlie:21718132  FreeThrow 1/2
+  2832.2  panel   nba:balldontlie:21718132  FreeThrow
   2832.2  base    nba:balldontlie:21718132:live  (weighted) | G 0.135 proxy F 1.00 T 1.000 Q 0.500 | target 36.71% (league 100.00%, 36.71% within) | actual 46.49% | debt +5.14s (league -0.00s) | why: Rockets at Pacers: lopsided game
-  2838.2  panel   nba:balldontlie:21718132  FreeThrow 2/2
   2844.2  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   2844.2  up      nba:balldontlie:21718141:pregame  (rotation)
   2844.2  card    nba:balldontlie:21718141:pregame  (pregame) | why: Lakers: starting soon
   2852.2  down    nba:balldontlie:21718141:pregame  (ran its time, 8.0s)
   2852.2  up      nba:balldontlie:21718137:live  (rotation)
-  2852.2  panel   nba:balldontlie:21718137  FreeThrow alone
+  2852.2  panel   nba:balldontlie:21718137  FreeThrow
   2852.2  base    nba:balldontlie:21718137:live  (weighted) | G 0.716 proxy F 1.00 T 1.000 Q 0.500 | target 63.29% (league 100.00%, 63.29% within) | actual 53.28% | debt +2.46s (league -0.00s) | why: Pistons at Pelicans: close late game
   2864.2  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   2864.2  up      nba:balldontlie:21718132:live  (rotation)
-  2864.2  panel   nba:balldontlie:21718132  FieldGoalMade 1/2
+  2864.2  panel   nba:balldontlie:21718132  FieldGoalMade
   2864.2  base    nba:balldontlie:21718132:live  (weighted) | G 0.176 proxy F 1.00 T 1.000 Q 0.500 | target 45.35% (league 100.00%, 45.35% within) | actual 46.52% | debt +1.95s (league -0.00s) | why: Rockets at Pacers: in rotation
-  2870.2  panel   nba:balldontlie:21718132  FieldGoalMade 2/2
   2876.2  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   2876.2  up      nba:balldontlie:21718137:live  (rotation)
-  2876.2  panel   nba:balldontlie:21718137  FieldGoalMade 1/3
+  2876.2  panel   nba:balldontlie:21718137  FieldGoalMade
   2876.2  base    nba:balldontlie:21718137:live  (weighted) | G 0.349 proxy F 1.00 T 1.000 Q 0.500 | target 54.80% (league 100.00%, 54.80% within) | actual 53.25% | debt +4.61s (league -0.00s) | why: Pistons at Pelicans: in rotation
-  2882.2  panel   nba:balldontlie:21718137  PersonalFoul 2/3
+  2882.2  panel   nba:balldontlie:21718137  PersonalFoul
   2888.2  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   2888.2  up      nba:balldontlie:21718132:live  (rotation)
   2888.2  panel   nba:balldontlie:21718132  line score
   2888.2  base    nba:balldontlie:21718132:live  (weighted) | G 0.171 proxy F 1.00 T 1.000 Q 0.500 | target 45.20% (league 100.00%, 45.20% within) | actual 46.55% | debt +0.81s (league -0.00s) | why: Rockets at Pacers: in rotation
-  2894.2  panel   nba:balldontlie:21718132  PersonalFoul 1/2
+  2894.2  panel   nba:balldontlie:21718132  PersonalFoul
   2900.2  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   2900.2  up      nba:balldontlie:21718137:live  (rotation)
-  2900.2  panel   nba:balldontlie:21718137  FieldGoalMade alone
+  2900.2  panel   nba:balldontlie:21718137  FieldGoalMade
   2900.2  base    nba:balldontlie:21718137:live  (weighted) | G 0.349 proxy F 1.00 T 1.000 Q 0.500 | target 53.76% (league 100.00%, 53.76% within) | actual 53.22% | debt +5.76s (league -0.00s) | why: Pistons at Pelicans: in rotation
   2912.2  panel   nba:balldontlie:21718137  team box
   2912.2  base    nba:balldontlie:21718137:live  (weighted, again) | G 0.349 proxy F 1.00 T 1.000 Q 0.500 | target 53.76% (league 100.00%, 53.76% within) | actual 53.42% | debt +0.22s (league -0.00s) | why: Pistons at Pelicans: in rotation
   2915.0  break   nba:balldontlie:21718132 nba tv timeout @ timeout period 4 5:06 home
   2915.0  lease   opened nba:balldontlie:21718132 nba tv timeout @ timeout period 4 5:06 home | 140.0s left | any guests that fit
-  2918.2  panel   nba:balldontlie:21718137  FreeThrow alone
+  2918.2  panel   nba:balldontlie:21718137  FreeThrow
   2924.2  down    nba:balldontlie:21718137:live  (ran its time, 24.0s)
   2924.2  up      nba:balldontlie:21718132:live  (rotation)
-  2924.2  panel   nba:balldontlie:21718132  FieldGoalMade 1/2
+  2924.2  panel   nba:balldontlie:21718132  FieldGoalMade
   2924.2  base    nba:balldontlie:21718132:live  (weighted) | G 0.207 proxy F 1.00 T 1.000 Q 0.500 | target 46.78% (league 100.00%, 46.78% within) | actual 46.38% | debt +5.33s (league -0.00s) | why: Rockets at Pacers: in rotation
-  2930.2  panel   nba:balldontlie:21718132  TimeoutTaken 2/2
+  2930.2  panel   nba:balldontlie:21718132  TimeoutTaken
   2936.2  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   2936.2  up      nba:balldontlie:21718137:live  (rotation)
-  2936.2  panel   nba:balldontlie:21718137  FieldGoalMade alone
+  2936.2  panel   nba:balldontlie:21718137  FieldGoalMade
   2936.2  base    nba:balldontlie:21718137:live  (weighted) | G 0.374 proxy F 1.00 T 1.000 Q 0.500 | target 54.37% (league 100.00%, 54.37% within) | actual 53.39% | debt +1.05s (league -0.00s) | why: Pistons at Pelicans: in rotation
   2948.2  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   2948.2  up      nba:balldontlie:21718132:live  (rotation)
@@ -1104,7 +1090,7 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   3152.2  card    nba:balldontlie:21718141:pregame  (pregame) | why: Lakers: starting soon
   3160.2  down    nba:balldontlie:21718141:pregame  (ran its time, 8.0s)
   3160.2  up      nba:balldontlie:21718132:live  (rotation)
-  3160.2  panel   nba:balldontlie:21718132  FieldGoalMade alone
+  3160.2  panel   nba:balldontlie:21718132  FieldGoalMade
   3160.2  base    nba:balldontlie:21718132:live  (weighted) | G 0.125 proxy F 1.00 T 1.000 Q 0.500 | target 43.18% (league 100.00%, 43.18% within) | actual 46.46% | debt +1.26s (league -0.00s) | why: Rockets at Pacers: lopsided game
   3172.2  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   3172.2  up      nba:balldontlie:21718137:live  (rotation)
@@ -1114,16 +1100,15 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   3184.3  base    nba:balldontlie:21718137:live  (weighted, again) | G 0.376 proxy F 1.00 T 1.000 Q 0.500 | target 56.02% (league 100.00%, 56.02% within) | actual 53.52% | debt +0.38s (league -0.00s) | why: Pistons at Pelicans: in rotation
   3196.3  down    nba:balldontlie:21718137:live  (ran its time, 24.0s)
   3196.3  up      nba:balldontlie:21718132:live  (rotation)
-  3196.3  panel   nba:balldontlie:21718132  FieldGoalMade 1/3
+  3196.3  panel   nba:balldontlie:21718132  FieldGoalMade
   3196.3  base    nba:balldontlie:21718132:live  (weighted) | G 0.152 proxy F 1.00 T 1.000 Q 0.500 | target 43.98% (league 100.00%, 43.98% within) | actual 46.30% | debt +4.90s (league -0.00s) | why: Rockets at Pacers: in rotation
-  3202.3  panel   nba:balldontlie:21718132  FieldGoalMade 2/3
   3208.3  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   3208.3  up      nba:balldontlie:21718137:live  (rotation)
   3208.3  panel   nba:balldontlie:21718137  team box
   3208.3  base    nba:balldontlie:21718137:live  (weighted) | G 0.376 proxy F 1.00 T 1.000 Q 0.500 | target 56.02% (league 100.00%, 56.02% within) | actual 53.49% | debt +1.83s (league -0.00s) | why: Pistons at Pelicans: in rotation
   3220.3  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   3220.3  up      nba:balldontlie:21718132:live  (rotation)
-  3220.3  panel   nba:balldontlie:21718132  PersonalFoul alone
+  3220.3  panel   nba:balldontlie:21718132  PersonalFoul
   3220.3  base    nba:balldontlie:21718132:live  (weighted) | G 0.152 proxy F 1.00 T 1.000 Q 0.500 | target 43.98% (league 100.00%, 43.98% within) | actual 46.33% | debt +3.45s (league -0.00s) | why: Rockets at Pacers: in rotation
   3232.3  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   3232.3  up      nba:balldontlie:21718137:live  (rotation)
@@ -1131,7 +1116,7 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   3232.3  base    nba:balldontlie:21718137:live  (weighted) | G 0.376 proxy F 1.00 T 1.000 Q 0.500 | target 55.51% (league 100.00%, 55.51% within) | actual 53.46% | debt +3.27s (league -0.00s) | why: Pistons at Pelicans: in rotation
   3244.3  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   3244.3  up      nba:balldontlie:21718132:live  (rotation)
-  3244.3  panel   nba:balldontlie:21718132  FreeThrow alone
+  3244.3  panel   nba:balldontlie:21718132  FreeThrow
   3244.3  base    nba:balldontlie:21718132:live  (weighted) | G 0.165 proxy F 1.00 T 1.000 Q 0.500 | target 44.37% (league 100.00%, 44.37% within) | actual 46.36% | debt +2.07s (league -0.00s) | why: Rockets at Pacers: in rotation
   3256.3  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   3256.3  up      nba:balldontlie:21718137:live  (rotation)
@@ -1151,16 +1136,15 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   3304.3  up      nba:balldontlie:21718132:live  (rotation)
   3304.3  panel   nba:balldontlie:21718132  line score
   3304.3  base    nba:balldontlie:21718132:live  (weighted) | G 0.162 proxy F 1.00 T 1.000 Q 0.500 | target 44.30% (league 100.00%, 44.30% within) | actual 46.24% | debt +4.66s (league -0.00s) | why: Rockets at Pacers: in rotation
-  3310.3  panel   nba:balldontlie:21718132  FieldGoalMade 1/2
+  3310.3  panel   nba:balldontlie:21718132  FieldGoalMade
   3316.3  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   3316.3  up      nba:balldontlie:21718137:live  (rotation)
   3316.3  panel   nba:balldontlie:21718137  line score
   3316.3  base    nba:balldontlie:21718137:live  (weighted) | G 0.376 proxy F 1.00 T 1.000 Q 0.500 | target 55.97% (league 100.00%, 55.97% within) | actual 53.56% | debt +2.03s (league -0.00s) | why: Pistons at Pelicans: in rotation
   3328.3  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   3328.3  up      nba:balldontlie:21718132:live  (rotation)
-  3328.3  panel   nba:balldontlie:21718132  FieldGoalMade 1/2
+  3328.3  panel   nba:balldontlie:21718132  FieldGoalMade
   3328.3  base    nba:balldontlie:21718132:live  (weighted) | G 0.120 proxy F 1.00 T 1.000 Q 0.500 | target 43.00% (league 100.00%, 43.00% within) | actual 46.27% | debt +3.26s (league -0.00s) | why: Rockets at Pacers: lopsided game
-  3334.3  panel   nba:balldontlie:21718132  FieldGoalMade 2/2
   3340.3  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   3340.3  up      nba:balldontlie:21718137:live  (rotation)
   3340.3  panel   nba:balldontlie:21718137  team box
@@ -1169,7 +1153,7 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   3350.0  lease   opened nba:balldontlie:21718132 nba team timeout @ timeout period 4 2:23 away | 45.0s left | any guests that fit
   3352.3  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   3352.3  up      nba:balldontlie:21718132:live  (rotation)
-  3352.3  panel   nba:balldontlie:21718132  TimeoutTaken alone
+  3352.3  panel   nba:balldontlie:21718132  TimeoutTaken
   3352.3  base    nba:balldontlie:21718132:live  (weighted) | G 0.114 proxy F 1.00 T 1.000 Q 0.500 | target 42.82% (league 100.00%, 42.82% within) | actual 46.30% | debt +1.56s (league -0.00s) | why: Rockets at Pacers: lopsided game
   3364.3  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   3364.3  up      nba:balldontlie:21718137:live  (rotation)
@@ -1214,14 +1198,14 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   3480.3  up      nba:balldontlie:21718132:live  (rotation)
   3480.3  panel   nba:balldontlie:21718132  players #1
   3480.3  base    nba:balldontlie:21718132:live  (weighted) | G 0.132 proxy F 1.00 T 1.000 Q 0.500 | target 43.38% (league 100.00%, 43.38% within) | actual 46.07% | debt +4.94s (league -0.00s) | why: Rockets at Pacers: lopsided game
-  3486.3  panel   nba:balldontlie:21718132  FieldGoalMade alone
+  3486.3  panel   nba:balldontlie:21718132  FieldGoalMade
   3492.3  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   3492.3  up      nba:balldontlie:21718137:live  (rotation)
   3492.3  panel   nba:balldontlie:21718137  players #2
   3492.3  base    nba:balldontlie:21718137:live  (weighted) | G 0.376 proxy F 1.00 T 1.000 Q 0.500 | target 56.62% (league 100.00%, 56.62% within) | actual 53.74% | debt +1.85s (league -0.00s) | why: Pistons at Pelicans: in rotation
   3504.3  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   3504.3  up      nba:balldontlie:21718132:live  (rotation)
-  3504.3  panel   nba:balldontlie:21718132  PersonalFoul alone
+  3504.3  panel   nba:balldontlie:21718132  PersonalFoul
   3504.3  base    nba:balldontlie:21718132:live  (weighted) | G 0.132 proxy F 1.00 T 1.000 Q 0.500 | target 43.38% (league 100.00%, 43.38% within) | actual 46.10% | debt +3.35s (league -0.00s) | why: Rockets at Pacers: lopsided game
   3516.3  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   3516.3  up      nba:balldontlie:21718137:live  (rotation)
@@ -1229,7 +1213,7 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   3516.3  base    nba:balldontlie:21718137:live  (weighted) | G 0.376 proxy F 1.00 T 1.000 Q 0.500 | target 56.14% (league 100.00%, 56.14% within) | actual 53.71% | debt +3.44s (league -0.00s) | why: Pistons at Pelicans: in rotation
   3528.3  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   3528.3  up      nba:balldontlie:21718132:live  (rotation)
-  3528.3  panel   nba:balldontlie:21718132  FreeThrow alone
+  3528.3  panel   nba:balldontlie:21718132  FreeThrow
   3528.3  base    nba:balldontlie:21718132:live  (weighted) | G 0.146 proxy F 1.00 T 1.000 Q 0.500 | target 43.80% (league 100.00%, 43.80% within) | actual 46.13% | debt +1.82s (league -0.00s) | why: Rockets at Pacers: lopsided game
   3540.3  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   3540.3  up      nba:balldontlie:21718137:live  (rotation)
@@ -1257,7 +1241,7 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   3600.3  base    nba:balldontlie:21718137:live  (weighted) | G 0.376 proxy F 1.00 T 1.000 Q 0.500 | target 56.96% (league 100.00%, 56.96% within) | actual 53.79% | debt +2.97s (league -0.00s) | why: Pistons at Pelicans: in rotation
   3612.3  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   3612.3  up      nba:balldontlie:21718132:live  (rotation)
-  3612.3  panel   nba:balldontlie:21718132  TimeoutTaken alone
+  3612.3  panel   nba:balldontlie:21718132  TimeoutTaken
   3612.3  base    nba:balldontlie:21718132:live  (weighted) | G 0.121 proxy F 1.00 T 1.000 Q 0.500 | target 43.04% (league 100.00%, 43.04% within) | actual 46.05% | debt +2.19s (league -0.00s) | why: Rockets at Pacers: lopsided game
   3624.3  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   3624.3  up      nba:balldontlie:21718137:live  (rotation)
@@ -1325,16 +1309,16 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   3812.3  base    nba:balldontlie:21718137:live  (weighted, again) | G 0.376 proxy F 1.00 T 1.000 Q 0.500 | target 57.23% (league 100.00%, 57.23% within) | actual 54.07% | debt -0.83s (league -0.00s) | why: Pistons at Pelicans: in rotation
   3824.3  down    nba:balldontlie:21718137:live  (ran its time, 24.0s)
   3824.3  up      nba:balldontlie:21718132:live  (rotation)
-  3824.3  panel   nba:balldontlie:21718132  PersonalFoul 1/2
+  3824.3  panel   nba:balldontlie:21718132  PersonalFoul
   3824.3  base    nba:balldontlie:21718132:live  (weighted) | G 0.112 proxy F 1.00 T 1.000 Q 0.500 | target 42.77% (league 100.00%, 42.77% within) | actual 45.78% | debt +5.96s (league -0.00s) | why: Rockets at Pacers: lopsided game
-  3830.3  panel   nba:balldontlie:21718132  FieldGoalMade 2/2
+  3830.3  panel   nba:balldontlie:21718132  FieldGoalMade
   3836.3  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   3836.3  up      nba:balldontlie:21718137:live  (rotation)
   3836.3  panel   nba:balldontlie:21718137  line score
   3836.3  base    nba:balldontlie:21718137:live  (weighted) | G 0.376 proxy F 1.00 T 1.000 Q 0.500 | target 57.99% (league 100.00%, 57.99% within) | actual 54.05% | debt +0.90s (league -0.00s) | why: Pistons at Pelicans: in rotation
   3848.3  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   3848.3  up      nba:balldontlie:21718132:live  (rotation)
-  3848.3  panel   nba:balldontlie:21718132  FreeThrow alone
+  3848.3  panel   nba:balldontlie:21718132  FreeThrow
   3848.3  base    nba:balldontlie:21718132:live  (weighted) | G 0.078 proxy F 1.00 T 1.000 Q 0.500 | target 41.68% (league 100.00%, 41.68% within) | actual 45.81% | debt +4.14s (league -0.00s) | why: Rockets at Pacers: lopsided game
   3860.3  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   3860.3  up      nba:balldontlie:21718137:live  (rotation)
@@ -1342,7 +1326,7 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   3860.3  base    nba:balldontlie:21718137:live  (weighted) | G 0.376 proxy F 1.00 T 1.000 Q 0.500 | target 58.66% (league 100.00%, 58.66% within) | actual 54.02% | debt +2.86s (league -0.00s) | why: Pistons at Pelicans: in rotation
   3872.3  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   3872.3  up      nba:balldontlie:21718132:live  (rotation)
-  3872.3  panel   nba:balldontlie:21718132  FieldGoalMade alone
+  3872.3  panel   nba:balldontlie:21718132  FieldGoalMade
   3872.3  base    nba:balldontlie:21718132:live  (weighted) | G 0.082 proxy F 1.00 T 1.000 Q 0.500 | target 41.79% (league 100.00%, 41.79% within) | actual 45.83% | debt +2.10s (league -0.00s) | why: Rockets at Pacers: lopsided game
   3884.3  down    nba:balldontlie:21718132:live  (ran its time, 12.0s)
   3884.3  up      nba:balldontlie:21718137:live  (rotation)
@@ -1394,7 +1378,7 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   4148.0  panel   nba:balldontlie:21718137  line score
   4160.0  panel   nba:balldontlie:21718137  team box
   4172.0  panel   nba:balldontlie:21718137  players #5
-  4184.0  panel   nba:balldontlie:21718137  PersonalFoul alone
+  4184.0  panel   nba:balldontlie:21718137  PersonalFoul
   4196.0  panel   nba:balldontlie:21718137  line score
   4208.0  panel   nba:balldontlie:21718137  team box
   4220.0  down    nba:balldontlie:21718137:live  (ran its time, 108.0s)
@@ -1407,13 +1391,12 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   4236.0  up      nba:balldontlie:21718137:live  (rotation)
   4236.0  panel   nba:balldontlie:21718137  players #1
   4236.0  base    nba:balldontlie:21718137:live  (only candidate) | G 0.383 proxy F 1.00 T 1.000 Q 0.500 | target 100.00% (league 100.00%, 100.00% within) | actual 57.23% | debt +1.77s (league -0.00s) | why: Pistons at Pelicans: the only game on
-  4248.0  panel   nba:balldontlie:21718137  FieldGoalMade alone
+  4248.0  panel   nba:balldontlie:21718137  FieldGoalMade
   4260.0  panel   nba:balldontlie:21718137  line score
   4272.0  panel   nba:balldontlie:21718137  team box
-  4284.0  panel   nba:balldontlie:21718137  FieldGoalMade 1/2
-  4290.0  panel   nba:balldontlie:21718137  FieldGoalMade 2/2
+  4284.0  panel   nba:balldontlie:21718137  FieldGoalMade
   4296.0  panel   nba:balldontlie:21718137  players #2
-  4302.0  panel   nba:balldontlie:21718137  FieldGoalMade alone
+  4302.0  panel   nba:balldontlie:21718137  FieldGoalMade
   4314.0  panel   nba:balldontlie:21718137  line score
   4326.0  panel   nba:balldontlie:21718137  team box
   4338.0  panel   nba:balldontlie:21718137  players #3
@@ -1426,14 +1409,13 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   4364.0  panel   nba:balldontlie:21718137  team box
   4364.0  base    nba:balldontlie:21718137:live  (only candidate) | G 0.421 proxy F 1.00 T 1.000 Q 0.500 | target 100.00% (league 100.00%, 100.00% within) | actual 58.46% | debt +1.77s (league -0.00s) | why: Pistons at Pelicans: the only game on
   4376.0  panel   nba:balldontlie:21718137  players #4
-  4382.0  panel   nba:balldontlie:21718137  FieldGoalMade 1/2
-  4385.0  panel   nba:balldontlie:21718137  FieldGoalMade 1/3
-  4388.0  panel   nba:balldontlie:21718137  PersonalFoul 2/3
-  4394.0  panel   nba:balldontlie:21718137  FieldGoalMade 3/3
+  4382.0  panel   nba:balldontlie:21718137  FieldGoalMade
+  4388.0  panel   nba:balldontlie:21718137  PersonalFoul
+  4394.0  panel   nba:balldontlie:21718137  FieldGoalMade
   4400.0  panel   nba:balldontlie:21718137  line score
   4412.0  panel   nba:balldontlie:21718137  team box
   4424.0  panel   nba:balldontlie:21718137  players #5
-  4430.0  panel   nba:balldontlie:21718137  PersonalFoul alone
+  4430.0  panel   nba:balldontlie:21718137  PersonalFoul
   4442.0  panel   nba:balldontlie:21718137  line score
   4454.0  panel   nba:balldontlie:21718137  team box
   4466.0  panel   nba:balldontlie:21718137  players #1
@@ -1445,16 +1427,16 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   4492.0  up      nba:balldontlie:21718137:live  (rotation)
   4492.0  panel   nba:balldontlie:21718137  team box
   4492.0  base    nba:balldontlie:21718137:live  (only candidate) | G 0.443 proxy F 1.00 T 1.000 Q 0.500 | target 100.00% (league 100.00%, 100.00% within) | actual 59.61% | debt +1.77s (league -0.00s) | why: Pistons at Pelicans: the only game on
-  4498.0  panel   nba:balldontlie:21718137  FieldGoalMade alone
+  4498.0  panel   nba:balldontlie:21718137  FieldGoalMade
   4510.0  panel   nba:balldontlie:21718137  players #2
-  4522.0  panel   nba:balldontlie:21718137  FieldGoalMade alone
+  4522.0  panel   nba:balldontlie:21718137  FieldGoalMade
   4534.0  panel   nba:balldontlie:21718137  line score
-  4546.0  panel   nba:balldontlie:21718137  FieldGoalMade alone
+  4546.0  panel   nba:balldontlie:21718137  FieldGoalMade
   4558.0  panel   nba:balldontlie:21718137  team box
   4570.0  panel   nba:balldontlie:21718137  players #3
   4580.0  break   nba:balldontlie:21718137 nba tv timeout @ timeout period 3 6:14 home
   4580.0  lease   opened nba:balldontlie:21718137 nba tv timeout @ timeout period 3 6:14 home | 145.0s left | any guests that fit
-  4582.0  panel   nba:balldontlie:21718137  TimeoutTaken alone
+  4582.0  panel   nba:balldontlie:21718137  TimeoutTaken
   4594.0  panel   nba:balldontlie:21718137  team box
   4606.0  panel   nba:balldontlie:21718137  players #4
   4612.0  down    nba:balldontlie:21718137:live  (ran its time, 120.0s)
@@ -1492,9 +1474,8 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   4820.0  card    nba:balldontlie:21718132:final  (repeat) | why: Rockets at Pacers: final, again
   4828.0  down    nba:balldontlie:21718132:final  (ran its time, 8.0s)
   4828.0  up      nba:balldontlie:21718137:live  (rotation)
-  4828.0  panel   nba:balldontlie:21718137  FieldGoalMade 1/2
+  4828.0  panel   nba:balldontlie:21718137  FieldGoalMade
   4828.0  base    nba:balldontlie:21718137:live  (only candidate) | G 0.376 proxy F 1.00 T 1.000 Q 0.500 | target 100.00% (league 100.00%, 100.00% within) | actual 62.34% | debt +1.77s (league -0.00s) | why: Pistons at Pelicans: the only game on
-  4834.0  panel   nba:balldontlie:21718137  FieldGoalMade 2/2
   4840.0  panel   nba:balldontlie:21718137  players #2
   4852.0  panel   nba:balldontlie:21718137  line score
   4864.0  down    nba:balldontlie:21718137:live  (ran its time, 36.0s)
@@ -1504,22 +1485,22 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   4872.0  up      nba:balldontlie:21718137:live  (rotation)
   4872.0  panel   nba:balldontlie:21718137  team box
   4872.0  base    nba:balldontlie:21718137:live  (only candidate) | G 0.379 proxy F 1.00 T 1.000 Q 0.500 | target 100.00% (league 100.00%, 100.00% within) | actual 62.63% | debt +1.77s (league -0.00s) | why: Pistons at Pelicans: the only game on
-  4884.0  panel   nba:balldontlie:21718137  PersonalFoul alone
+  4884.0  panel   nba:balldontlie:21718137  PersonalFoul
   4896.0  panel   nba:balldontlie:21718137  players #3
   4908.0  panel   nba:balldontlie:21718137  line score
   4920.0  panel   nba:balldontlie:21718137  team box
-  4926.0  panel   nba:balldontlie:21718137  PersonalFoul alone
+  4926.0  panel   nba:balldontlie:21718137  PersonalFoul
   4938.0  panel   nba:balldontlie:21718137  players #4
-  4944.0  panel   nba:balldontlie:21718137  FreeThrow alone
+  4944.0  panel   nba:balldontlie:21718137  FreeThrow
   4956.0  panel   nba:balldontlie:21718137  line score
   4968.0  panel   nba:balldontlie:21718137  team box
-  4980.0  panel   nba:balldontlie:21718137  FreeThrow alone
+  4980.0  panel   nba:balldontlie:21718137  FreeThrow
   4992.0  down    nba:balldontlie:21718137:live  (ran its time, 120.0s)
   4992.0  up      nba:balldontlie:21718141:pregame  (rotation)
   4992.0  card    nba:balldontlie:21718141:pregame  (pregame) | why: Lakers: starting soon
   5000.0  down    nba:balldontlie:21718141:pregame  (ran its time, 8.0s)
   5000.0  up      nba:balldontlie:21718137:live  (rotation)
-  5000.0  panel   nba:balldontlie:21718137  PersonalFoul alone
+  5000.0  panel   nba:balldontlie:21718137  PersonalFoul
   5000.0  base    nba:balldontlie:21718137:live  (only candidate) | G 0.352 proxy F 1.00 T 1.000 Q 0.500 | target 100.00% (league 100.00%, 100.00% within) | actual 63.57% | debt +1.77s (league -0.00s) | why: Pistons at Pelicans: the only game on
   5012.0  panel   nba:balldontlie:21718137  players #5
   5024.0  panel   nba:balldontlie:21718137  line score
@@ -1528,10 +1509,9 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   5060.0  panel   nba:balldontlie:21718137  line score
   5072.0  panel   nba:balldontlie:21718137  team box
   5084.0  panel   nba:balldontlie:21718137  players #2
-  5090.0  panel   nba:balldontlie:21718137  FieldGoalMade 1/2
-  5096.0  panel   nba:balldontlie:21718137  PersonalFoul 2/2
-  5100.0  panel   nba:balldontlie:21718137  PersonalFoul 2/3
-  5102.0  panel   nba:balldontlie:21718137  FreeThrow 3/3
+  5090.0  panel   nba:balldontlie:21718137  FieldGoalMade
+  5096.0  panel   nba:balldontlie:21718137  PersonalFoul
+  5102.0  panel   nba:balldontlie:21718137  FreeThrow
   5108.0  panel   nba:balldontlie:21718137  line score
   5120.0  down    nba:balldontlie:21718137:live  (ran its time, 120.0s)
   5120.0  up      nba:balldontlie:21718141:pregame  (rotation)
@@ -1541,20 +1521,20 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   5128.0  panel   nba:balldontlie:21718137  team box
   5128.0  base    nba:balldontlie:21718137:live  (only candidate) | G 0.454 proxy F 1.00 T 1.000 Q 0.500 | target 100.00% (league 100.00%, 100.00% within) | actual 64.46% | debt +1.77s (league -0.00s) | why: Pistons at Pelicans: the only game on
   5140.0  panel   nba:balldontlie:21718137  players #3
-  5152.0  panel   nba:balldontlie:21718137  FieldGoalMade alone
+  5152.0  panel   nba:balldontlie:21718137  FieldGoalMade
   5164.0  panel   nba:balldontlie:21718137  line score
-  5170.0  panel   nba:balldontlie:21718137  PersonalFoul alone
+  5170.0  panel   nba:balldontlie:21718137  PersonalFoul
   5182.0  panel   nba:balldontlie:21718137  team box
   5188.0  down    nba:balldontlie:21718137:live  (ran its time, 60.0s)
   5188.0  up      nba:balldontlie:21718141:pregame  (rotation)
   5188.0  card    nba:balldontlie:21718141:pregame  (pregame) | why: Lakers: starting soon
   5196.0  down    nba:balldontlie:21718141:pregame  (ran its time, 8.0s)
   5196.0  up      nba:balldontlie:21718137:live  (rotation)
-  5196.0  panel   nba:balldontlie:21718137  FieldGoalMade alone
+  5196.0  panel   nba:balldontlie:21718137  FieldGoalMade
   5196.0  base    nba:balldontlie:21718137:live  (only candidate) | G 0.424 proxy F 1.00 T 1.000 Q 0.500 | target 100.00% (league 100.00%, 100.00% within) | actual 64.90% | debt +1.77s (league -0.00s) | why: Pistons at Pelicans: the only game on
   5208.0  panel   nba:balldontlie:21718137  players #4
   5220.0  panel   nba:balldontlie:21718137  line score
-  5226.0  panel   nba:balldontlie:21718137  PersonalFoul alone
+  5226.0  panel   nba:balldontlie:21718137  PersonalFoul
   5238.0  panel   nba:balldontlie:21718137  team box
   5250.0  panel   nba:balldontlie:21718137  players #5
   5256.0  down    nba:balldontlie:21718137:live  (ran its time, 60.0s)
@@ -1569,7 +1549,7 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   5300.0  panel   nba:balldontlie:21718137  line score
   5305.0  break   nba:balldontlie:21718137 nba tv timeout @ timeout period 3 2:44 away
   5305.0  lease   refused nba:balldontlie:21718137 nba tv timeout @ timeout period 3 2:44 away  (backfill) | age 115.0s local_read | 115.0s of its ceiling gone
-  5306.0  panel   nba:balldontlie:21718137  TimeoutTaken alone
+  5306.0  panel   nba:balldontlie:21718137  TimeoutTaken
   5318.0  panel   nba:balldontlie:21718137  team box
   5324.0  down    nba:balldontlie:21718137:live  (ran its time, 60.0s)
   5324.0  up      nba:balldontlie:21718141:pregame  (rotation)
@@ -1590,11 +1570,11 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   5400.0  panel   nba:balldontlie:21718137  team box
   5400.0  base    nba:balldontlie:21718137:live  (only candidate) | G 0.424 proxy F 1.00 T 1.000 Q 0.500 | target 100.00% (league 100.00%, 100.00% within) | actual 66.13% | debt +1.77s (league -0.00s) | why: Pistons at Pelicans: the only game on
   5412.0  panel   nba:balldontlie:21718137  players #5
-  5418.0  panel   nba:balldontlie:21718137  FreeThrow alone
+  5418.0  panel   nba:balldontlie:21718137  FreeThrow
   5430.0  panel   nba:balldontlie:21718137  team box
   5442.0  panel   nba:balldontlie:21718137  players #1
   5445.0  break   nba:balldontlie:21718137 nba tv timeout @ timeout period 3 2:44 away  (ended)
-  5448.0  panel   nba:balldontlie:21718137  FreeThrow alone
+  5448.0  panel   nba:balldontlie:21718137  FreeThrow
   5460.0  down    nba:balldontlie:21718137:live  (ran its time, 60.0s)
   5460.0  up      nba:balldontlie:21718141:pregame  (rotation)
   5460.0  card    nba:balldontlie:21718141:pregame  (pregame) | why: Lakers: starting soon
@@ -1603,10 +1583,10 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   5468.0  panel   nba:balldontlie:21718137  line score
   5468.0  base    nba:balldontlie:21718137:live  (only candidate) | G 0.463 proxy F 1.00 T 1.000 Q 0.500 | target 100.00% (league 100.00%, 100.00% within) | actual 66.52% | debt +1.77s (league -0.00s) | why: Pistons at Pelicans: the only game on
   5480.0  panel   nba:balldontlie:21718137  team box
-  5492.0  panel   nba:balldontlie:21718137  FieldGoalMade alone
-  5504.0  panel   nba:balldontlie:21718137  PersonalFoul alone
+  5492.0  panel   nba:balldontlie:21718137  FieldGoalMade
+  5504.0  panel   nba:balldontlie:21718137  PersonalFoul
   5516.0  panel   nba:balldontlie:21718137  players #2
-  5522.0  panel   nba:balldontlie:21718137  FreeThrow alone
+  5522.0  panel   nba:balldontlie:21718137  FreeThrow
   5528.0  down    nba:balldontlie:21718137:live  (ran its time, 60.0s)
   5528.0  up      nba:balldontlie:21718141:pregame  (rotation)
   5528.0  card    nba:balldontlie:21718141:pregame  (pregame) | why: Lakers: starting soon
@@ -1615,8 +1595,8 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   5536.0  panel   nba:balldontlie:21718137  line score
   5536.0  base    nba:balldontlie:21718137:live  (only candidate) | G 0.428 proxy F 1.00 T 1.000 Q 0.500 | target 100.00% (league 100.00%, 100.00% within) | actual 66.90% | debt +1.77s (league -0.00s) | why: Pistons at Pelicans: the only game on
   5548.0  panel   nba:balldontlie:21718137  team box
-  5560.0  panel   nba:balldontlie:21718137  FreeThrow alone
-  5572.0  panel   nba:balldontlie:21718137  PersonalFoul alone
+  5560.0  panel   nba:balldontlie:21718137  FreeThrow
+  5572.0  panel   nba:balldontlie:21718137  PersonalFoul
   5584.0  panel   nba:balldontlie:21718137  players #3
   5596.0  down    nba:balldontlie:21718137:live  (ran its time, 60.0s)
   5596.0  up      nba:balldontlie:21718141:pregame  (rotation)
@@ -1626,21 +1606,21 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   5604.0  panel   nba:balldontlie:21718137  line score
   5604.0  base    nba:balldontlie:21718137:live  (only candidate) | G 0.466 proxy F 1.00 T 1.000 Q 0.500 | target 100.00% (league 100.00%, 100.00% within) | actual 67.27% | debt +1.77s (league -0.00s) | why: Pistons at Pelicans: the only game on
   5616.0  panel   nba:balldontlie:21718137  team box
-  5622.0  panel   nba:balldontlie:21718137  FieldGoalMade alone
+  5622.0  panel   nba:balldontlie:21718137  FieldGoalMade
   5634.0  panel   nba:balldontlie:21718137  players #4
-  5640.0  panel   nba:balldontlie:21718137  FieldGoalMade alone
+  5640.0  panel   nba:balldontlie:21718137  FieldGoalMade
   5652.0  panel   nba:balldontlie:21718137  line score
-  5658.0  panel   nba:balldontlie:21718137  FieldGoalMade alone
+  5658.0  panel   nba:balldontlie:21718137  FieldGoalMade
   5664.0  down    nba:balldontlie:21718137:live  (ran its time, 60.0s)
   5664.0  up      nba:balldontlie:21718141:pregame  (rotation)
   5664.0  card    nba:balldontlie:21718141:pregame  (pregame) | why: Lakers: starting soon
   5672.0  down    nba:balldontlie:21718141:pregame  (ran its time, 8.0s)
   5672.0  up      nba:balldontlie:21718137:live  (rotation)
-  5672.0  panel   nba:balldontlie:21718137  FieldGoalMade alone
+  5672.0  panel   nba:balldontlie:21718137  FieldGoalMade
   5672.0  base    nba:balldontlie:21718137:live  (only candidate) | G 0.474 proxy F 1.00 T 1.000 Q 0.500 | target 100.00% (league 100.00%, 100.00% within) | actual 67.64% | debt +1.77s (league -0.00s) | why: Pistons at Pelicans: the only game on
   5684.0  panel   nba:balldontlie:21718137  team box
-  5690.0  panel   nba:balldontlie:21718137  PersonalFoul 1/2
-  5696.0  panel   nba:balldontlie:21718137  FreeThrow 2/2
+  5690.0  panel   nba:balldontlie:21718137  PersonalFoul
+  5696.0  panel   nba:balldontlie:21718137  FreeThrow
   5702.0  panel   nba:balldontlie:21718137  players #5
   5714.0  panel   nba:balldontlie:21718137  line score
   5720.0  down    nba:balldontlie:21718137:live  (ran its time, 48.0s)
@@ -1680,35 +1660,35 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   6016.0  panel   nba:balldontlie:21718137  team box
   6028.0  panel   nba:balldontlie:21718137  players #4
   6040.0  panel   nba:balldontlie:21718137  line score
-  6046.0  panel   nba:balldontlie:21718137  FieldGoalMade alone
+  6046.0  panel   nba:balldontlie:21718137  FieldGoalMade
   6058.0  panel   nba:balldontlie:21718137  team box
   6070.0  panel   nba:balldontlie:21718137  players #5
   6082.0  panel   nba:balldontlie:21718137  line score
-  6094.0  panel   nba:balldontlie:21718137  PersonalFoul alone
+  6094.0  panel   nba:balldontlie:21718137  PersonalFoul
   6106.0  panel   nba:balldontlie:21718137  team box
   6118.0  panel   nba:balldontlie:21718137  players #1
-  6130.0  panel   nba:balldontlie:21718137  FreeThrow alone
+  6130.0  panel   nba:balldontlie:21718137  FreeThrow
   6142.0  panel   nba:balldontlie:21718137  line score
   6154.0  panel   nba:balldontlie:21718137  team box
-  6160.0  panel   nba:balldontlie:21718137  FreeThrow alone
+  6160.0  panel   nba:balldontlie:21718137  FreeThrow
   6172.0  panel   nba:balldontlie:21718137  players #2
-  6178.0  panel   nba:balldontlie:21718137  PersonalFoul alone
+  6178.0  panel   nba:balldontlie:21718137  PersonalFoul
   6190.0  panel   nba:balldontlie:21718137  line score
-  6202.0  panel   nba:balldontlie:21718137  FreeThrow alone
+  6202.0  panel   nba:balldontlie:21718137  FreeThrow
   6214.0  panel   nba:balldontlie:21718137  team box
   6226.0  panel   nba:balldontlie:21718137  players #3
-  6238.0  panel   nba:balldontlie:21718137  FreeThrow alone
+  6238.0  panel   nba:balldontlie:21718137  FreeThrow
   6250.0  panel   nba:balldontlie:21718137  line score
   6262.0  panel   nba:balldontlie:21718137  team box
-  6274.0  panel   nba:balldontlie:21718137  FieldGoalMade alone
+  6274.0  panel   nba:balldontlie:21718137  FieldGoalMade
   6286.0  panel   nba:balldontlie:21718137  players #4
   6298.0  panel   nba:balldontlie:21718137  line score
   6310.0  panel   nba:balldontlie:21718137  team box
-  6316.0  panel   nba:balldontlie:21718137  FieldGoalMade alone
+  6316.0  panel   nba:balldontlie:21718137  FieldGoalMade
   6328.0  panel   nba:balldontlie:21718137  players #5
   6335.0  break   nba:balldontlie:21718137 nba tv timeout @ timeout period 4 9:10 home
   6335.0  lease   opened nba:balldontlie:21718137 nba tv timeout @ timeout period 4 9:10 home | 140.0s left | any guests that fit
-  6340.0  panel   nba:balldontlie:21718137  TimeoutTaken alone
+  6340.0  panel   nba:balldontlie:21718137  TimeoutTaken
   6352.0  panel   nba:balldontlie:21718137  team box
   6364.0  panel   nba:balldontlie:21718137  players #1
   6376.0  panel   nba:balldontlie:21718137  team box
@@ -1728,36 +1708,36 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   6520.0  panel   nba:balldontlie:21718137  line score
   6532.0  panel   nba:balldontlie:21718137  team box
   6544.0  panel   nba:balldontlie:21718137  players #3
-  6550.0  panel   nba:balldontlie:21718137  PersonalFoul alone
+  6550.0  panel   nba:balldontlie:21718137  PersonalFoul
   6562.0  panel   nba:balldontlie:21718137  line score
   6574.0  panel   nba:balldontlie:21718137  team box
-  6586.0  panel   nba:balldontlie:21718137  PersonalFoul alone
+  6586.0  panel   nba:balldontlie:21718137  PersonalFoul
   6598.0  panel   nba:balldontlie:21718137  players #4
   6610.0  panel   nba:balldontlie:21718137  line score
-  6616.0  panel   nba:balldontlie:21718137  FieldGoalMade alone
+  6616.0  panel   nba:balldontlie:21718137  FieldGoalMade
   6628.0  panel   nba:balldontlie:21718137  team box
-  6634.0  panel   nba:balldontlie:21718137  FieldGoalMade alone
+  6634.0  panel   nba:balldontlie:21718137  FieldGoalMade
   6646.0  panel   nba:balldontlie:21718137  players #5
   6658.0  panel   nba:balldontlie:21718137  line score
-  6664.0  panel   nba:balldontlie:21718137  PersonalFoul alone
+  6664.0  panel   nba:balldontlie:21718137  PersonalFoul
   6676.0  panel   nba:balldontlie:21718137  team box
   6688.0  panel   nba:balldontlie:21718137  players #1
-  6700.0  panel   nba:balldontlie:21718137  FreeThrow alone
+  6700.0  panel   nba:balldontlie:21718137  FreeThrow
   6724.0  panel   nba:balldontlie:21718137  line score
   6736.0  panel   nba:balldontlie:21718137  team box
-  6748.0  panel   nba:balldontlie:21718137  FieldGoalMade alone
-  6760.0  panel   nba:balldontlie:21718137  PersonalFoul alone
+  6748.0  panel   nba:balldontlie:21718137  FieldGoalMade
+  6760.0  panel   nba:balldontlie:21718137  PersonalFoul
   6772.0  panel   nba:balldontlie:21718137  players #2
   6784.0  panel   nba:balldontlie:21718137  line score
-  6790.0  panel   nba:balldontlie:21718137  FreeThrow alone
+  6790.0  panel   nba:balldontlie:21718137  FreeThrow
   6802.0  panel   nba:balldontlie:21718137  team box
   6814.0  panel   nba:balldontlie:21718137  players #3
-  6820.0  panel   nba:balldontlie:21718137  FreeThrow alone
+  6820.0  panel   nba:balldontlie:21718137  FreeThrow
   6832.0  panel   nba:balldontlie:21718137  line score
   6844.0  panel   nba:balldontlie:21718137  team box
-  6850.0  panel   nba:balldontlie:21718137  PersonalFoul alone
+  6850.0  panel   nba:balldontlie:21718137  PersonalFoul
   6862.0  panel   nba:balldontlie:21718137  players #4
-  6868.0  panel   nba:balldontlie:21718137  FreeThrow alone
+  6868.0  panel   nba:balldontlie:21718137  FreeThrow
   6880.0  down    nba:balldontlie:21718137:live  (ran its time, 1152.0s)
   6880.0  up      nba:balldontlie:21718141:live  (rotation)
   6880.0  panel   nba:balldontlie:21718141  line score
@@ -1766,11 +1746,11 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   6892.0  base    nba:balldontlie:21718141:live  (weighted, again) | G 0.299 proxy F 4.00 T 1.000 Q 0.500 | target 81.63% (league 100.00%, 81.63% within) | actual 100.00% | debt -2.20s (league -0.00s) | why: Lakers: favorite
   6904.0  down    nba:balldontlie:21718141:live  (ran its time, 24.0s)
   6904.0  up      nba:balldontlie:21718137:live  (rotation)
-  6904.0  panel   nba:balldontlie:21718137  FreeThrow alone
+  6904.0  panel   nba:balldontlie:21718137  FreeThrow
   6904.0  base    nba:balldontlie:21718137:live  (weighted) | G 0.224 proxy F 1.00 T 1.000 Q 0.500 | target 18.74% (league 100.00%, 18.74% within) | actual 73.28% | debt +6.18s (league -0.00s) | why: Pistons at Pelicans: in rotation
   6916.0  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   6916.0  up      nba:balldontlie:21718141:live  (rotation)
-  6916.0  panel   nba:balldontlie:21718141  PersonalFoul alone
+  6916.0  panel   nba:balldontlie:21718141  PersonalFoul
   6916.0  base    nba:balldontlie:21718141:live  (weighted) | G 0.299 proxy F 4.00 T 1.000 Q 0.500 | target 81.31% (league 100.00%, 81.31% within) | actual 66.67% | debt +5.34s (league -0.00s) | why: Lakers: favorite
   6928.0  panel   nba:balldontlie:21718141  players #1
   6928.0  base    nba:balldontlie:21718141:live  (weighted, again) | G 0.299 proxy F 4.00 T 1.000 Q 0.500 | target 81.32% (league 100.00%, 81.32% within) | actual 75.00% | debt +3.10s (league -0.00s) | why: Lakers: favorite
@@ -1780,51 +1760,50 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   6952.0  base    nba:balldontlie:21718141:live  (weighted, again) | G 0.299 proxy F 4.00 T 1.000 Q 0.500 | target 81.32% (league 100.00%, 81.32% within) | actual 83.33% | debt -1.38s (league -0.00s) | why: Lakers: favorite
   6964.0  down    nba:balldontlie:21718141:live  (ran its time, 48.0s)
   6964.0  up      nba:balldontlie:21718137:live  (rotation)
-  6964.0  panel   nba:balldontlie:21718137  PersonalFoul 1/2
+  6964.0  panel   nba:balldontlie:21718137  PersonalFoul
   6964.0  base    nba:balldontlie:21718137:live  (weighted) | G 0.199 proxy F 1.00 T 1.000 Q 0.500 | target 18.31% (league 100.00%, 18.31% within) | actual 72.80% | debt +5.40s (league -0.00s) | why: Pistons at Pelicans: in rotation
-  6970.0  panel   nba:balldontlie:21718137  FreeThrow 2/2
-  6975.0  panel   nba:balldontlie:21718137  FreeThrow 2/3
+  6970.0  panel   nba:balldontlie:21718137  FreeThrow
   6976.0  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   6976.0  up      nba:balldontlie:21718141:live  (rotation)
-  6976.0  panel   nba:balldontlie:21718141  FreeThrows alone
+  6976.0  panel   nba:balldontlie:21718141  FreeThrows
   6976.0  base    nba:balldontlie:21718141:live  (weighted) | G 0.300 proxy F 4.00 T 1.000 Q 0.500 | target 82.02% (league 100.00%, 82.02% within) | actual 75.00% | debt +6.18s (league -0.00s) | why: Lakers: favorite
-  6988.0  panel   nba:balldontlie:21718141  FieldGoalMade alone
+  6988.0  panel   nba:balldontlie:21718141  FieldGoalMade
   6988.0  base    nba:balldontlie:21718141:live  (weighted, again) | G 0.300 proxy F 4.00 T 1.000 Q 0.500 | target 82.02% (league 100.00%, 82.02% within) | actual 77.78% | debt +4.02s (league -0.00s) | why: Lakers: favorite
-  7000.0  panel   nba:balldontlie:21718141  PersonalFoul 1/2
+  7000.0  panel   nba:balldontlie:21718141  PersonalFoul
   7000.0  base    nba:balldontlie:21718141:live  (weighted, again) | G 0.297 proxy F 4.00 T 1.000 Q 0.500 | target 82.30% (league 100.00%, 82.30% within) | actual 80.00% | debt +1.86s (league -0.00s) | why: Lakers: favorite
-  7006.0  panel   nba:balldontlie:21718141  FreeThrow 2/2
+  7006.0  panel   nba:balldontlie:21718141  FreeThrow
   7012.0  panel   nba:balldontlie:21718141  players #2
   7012.0  base    nba:balldontlie:21718141:live  (weighted, again) | G 0.297 proxy F 4.00 T 1.000 Q 0.500 | target 81.72% (league 100.00%, 81.72% within) | actual 81.82% | debt -0.26s (league -0.00s) | why: Lakers: favorite
   7024.0  panel   nba:balldontlie:21718141  line score
   7024.0  base    nba:balldontlie:21718141:live  (weighted, again) | G 0.297 proxy F 4.00 T 1.000 Q 0.500 | target 81.72% (league 100.00%, 81.72% within) | actual 83.33% | debt -2.46s (league -0.00s) | why: Lakers: favorite
-  7030.0  panel   nba:balldontlie:21718141  FieldGoalMade alone
+  7030.0  panel   nba:balldontlie:21718141  FieldGoalMade
   7035.0  skip    nba:balldontlie:21718137: caption 143 (FreeThrow) unseen (too late to start)
   7036.0  down    nba:balldontlie:21718141:live  (ran its time, 60.0s)
   7036.0  up      nba:balldontlie:21718137:live  (rotation)
-  7036.0  panel   nba:balldontlie:21718137  FreeThrow 1/3
+  7036.0  panel   nba:balldontlie:21718137  FreeThrow
   7036.0  base    nba:balldontlie:21718137:live  (weighted) | G 0.195 proxy F 1.00 T 1.000 Q 0.500 | target 18.56% (league 100.00%, 18.56% within) | actual 72.20% | debt +6.42s (league -0.00s) | why: Pistons at Pelicans: in rotation
-  7042.0  panel   nba:balldontlie:21718137  FieldGoalMade 2/3
+  7042.0  panel   nba:balldontlie:21718137  FieldGoalMade
   7048.0  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   7048.0  up      nba:balldontlie:21718141:live  (rotation)
-  7048.0  panel   nba:balldontlie:21718141  FieldGoalMade alone
+  7048.0  panel   nba:balldontlie:21718141  FieldGoalMade
   7048.0  base    nba:balldontlie:21718141:live  (weighted) | G 0.293 proxy F 4.00 T 1.000 Q 0.500 | target 81.66% (league 100.00%, 81.66% within) | actual 78.57% | debt +5.12s (league -0.00s) | why: Lakers: favorite
-  7060.1  panel   nba:balldontlie:21718141  PersonalFoul alone
+  7060.1  panel   nba:balldontlie:21718141  PersonalFoul
   7060.1  base    nba:balldontlie:21718141:live  (weighted, again) | G 0.293 proxy F 4.00 T 1.000 Q 0.500 | target 81.66% (league 100.00%, 81.66% within) | actual 80.00% | debt +2.92s (league -0.00s) | why: Lakers: favorite
   7072.1  panel   nba:balldontlie:21718141  team box
   7072.1  base    nba:balldontlie:21718141:live  (weighted, again) | G 0.293 proxy F 4.00 T 1.000 Q 0.500 | target 81.98% (league 100.00%, 81.98% within) | actual 81.25% | debt +0.72s (league -0.00s) | why: Lakers: favorite
   7084.1  panel   nba:balldontlie:21718141  players #3
   7084.1  base    nba:balldontlie:21718141:live  (weighted, again) | G 0.293 proxy F 4.00 T 1.000 Q 0.500 | target 81.98% (league 100.00%, 81.98% within) | actual 82.35% | debt -1.44s (league -0.00s) | why: Lakers: favorite
   7085.0  skip    nba:balldontlie:21718137: caption 146 (PersonalFoul) unseen (too late to start)
-  7090.1  panel   nba:balldontlie:21718141  FreeThrow alone
+  7090.1  panel   nba:balldontlie:21718141  FreeThrow
   7096.1  down    nba:balldontlie:21718141:live  (ran its time, 48.0s)
   7096.1  up      nba:balldontlie:21718137:live  (rotation)
-  7096.1  panel   nba:balldontlie:21718137  FreeThrow alone
+  7096.1  panel   nba:balldontlie:21718137  FreeThrow
   7096.1  base    nba:balldontlie:21718137:live  (weighted) | G 0.177 proxy F 1.00 T 1.000 Q 0.500 | target 18.11% (league 100.00%, 18.11% within) | actual 71.73% | debt +5.37s (league -0.00s) | why: Pistons at Pelicans: in rotation
   7108.1  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   7108.1  up      nba:balldontlie:21718141:live  (rotation)
   7108.1  panel   nba:balldontlie:21718141  line score
   7108.1  base    nba:balldontlie:21718141:live  (weighted) | G 0.287 proxy F 4.00 T 1.000 Q 0.500 | target 81.89% (league 100.00%, 81.89% within) | actual 78.95% | debt +6.22s (league -0.00s) | why: Lakers: favorite
-  7120.1  panel   nba:balldontlie:21718141  FreeThrow alone
+  7120.1  panel   nba:balldontlie:21718141  FreeThrow
   7120.1  base    nba:balldontlie:21718141:live  (weighted, again) | G 0.279 proxy F 4.00 T 1.000 Q 0.500 | target 82.06% (league 100.00%, 82.06% within) | actual 80.00% | debt +4.05s (league -0.00s) | why: Lakers: favorite
   7132.1  panel   nba:balldontlie:21718141  team box
   7132.1  base    nba:balldontlie:21718141:live  (weighted, again) | G 0.279 proxy F 4.00 T 1.000 Q 0.500 | target 82.07% (league 100.00%, 82.07% within) | actual 80.95% | debt +1.90s (league -0.00s) | why: Lakers: favorite
@@ -1834,30 +1813,28 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   7156.1  base    nba:balldontlie:21718141:live  (weighted, again) | G 0.280 proxy F 4.00 T 1.000 Q 0.500 | target 82.33% (league 100.00%, 82.33% within) | actual 82.61% | debt -2.38s (league -0.00s) | why: Lakers: favorite
   7168.1  down    nba:balldontlie:21718141:live  (ran its time, 60.0s)
   7168.1  up      nba:balldontlie:21718137:live  (rotation)
-  7168.1  panel   nba:balldontlie:21718137  TechnicalFoul 1/3
+  7168.1  panel   nba:balldontlie:21718137  TechnicalFoul
   7168.1  base    nba:balldontlie:21718137:live  (weighted) | G 0.144 proxy F 1.00 T 1.000 Q 0.500 | target 17.63% (league 100.00%, 17.63% within) | actual 71.16% | debt +6.27s (league -0.00s) | why: Pistons at Pelicans: lopsided game
   7180.1  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   7180.1  up      nba:balldontlie:21718141:live  (rotation)
   7180.1  panel   nba:balldontlie:21718141  team box
   7180.1  base    nba:balldontlie:21718141:live  (weighted) | G 0.280 proxy F 4.00 T 1.000 Q 0.500 | target 81.90% (league 100.00%, 81.90% within) | actual 80.00% | debt +5.39s (league -0.00s) | why: Lakers: favorite
-  7186.1  panel   nba:balldontlie:21718141  PersonalFoul alone
+  7186.1  panel   nba:balldontlie:21718141  PersonalFoul
   7192.1  base    nba:balldontlie:21718141:live  (weighted, again) | G 0.280 proxy F 4.00 T 1.000 Q 0.500 | target 81.90% (league 100.00%, 81.90% within) | actual 80.77% | debt +3.21s (league -0.00s) | why: Lakers: favorite
   7195.0  skip    nba:balldontlie:21718137: caption 149 (FreeThrow) unseen (too late to start)
   7195.0  skip    nba:balldontlie:21718137: caption 150 (FreeThrow) unseen (too late to start)
   7198.1  panel   nba:balldontlie:21718141  players #5
   7204.1  base    nba:balldontlie:21718141:live  (weighted, again) | G 0.280 proxy F 4.00 T 1.000 Q 0.500 | target 82.67% (league 100.00%, 82.67% within) | actual 81.48% | debt +1.04s (league -0.00s) | why: Lakers: favorite
-  7210.1  panel   nba:balldontlie:21718141  FreeThrow alone
+  7210.1  panel   nba:balldontlie:21718141  FreeThrow
   7216.1  base    nba:balldontlie:21718141:live  (weighted, again) | G 0.288 proxy F 4.00 T 1.000 Q 0.500 | target 82.10% (league 100.00%, 82.10% within) | actual 82.14% | debt -1.04s (league -0.00s) | why: Lakers: favorite
   7222.1  panel   nba:balldontlie:21718141  line score
   7228.1  down    nba:balldontlie:21718141:live  (ran its time, 48.0s)
   7228.1  up      nba:balldontlie:21718137:live  (rotation)
-  7228.1  panel   nba:balldontlie:21718137  FieldGoalMade 1/3
+  7228.1  panel   nba:balldontlie:21718137  FieldGoalMade
   7228.1  base    nba:balldontlie:21718137:live  (weighted) | G 0.166 proxy F 1.00 T 1.000 Q 0.500 | target 17.80% (league 100.00%, 17.80% within) | actual 70.71% | debt +4.96s (league -0.00s) | why: Pistons at Pelicans: in rotation
-  7234.1  panel   nba:balldontlie:21718137  FieldGoalMade 2/3
-  7240.0  panel   nba:balldontlie:21718137  FieldGoalMade 2/4
   7240.1  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   7240.1  up      nba:balldontlie:21718141:live  (rotation)
-  7240.1  panel   nba:balldontlie:21718141  FreeThrow alone
+  7240.1  panel   nba:balldontlie:21718141  FreeThrow
   7240.1  base    nba:balldontlie:21718141:live  (weighted) | G 0.294 proxy F 4.00 T 1.000 Q 0.500 | target 82.25% (league 100.00%, 82.25% within) | actual 80.00% | debt +6.68s (league -0.00s) | why: Lakers: favorite
   7252.1  panel   nba:balldontlie:21718141  team box
   7252.1  base    nba:balldontlie:21718141:live  (weighted, again) | G 0.294 proxy F 4.00 T 1.000 Q 0.500 | target 82.25% (league 100.00%, 82.25% within) | actual 80.65% | debt +4.55s (league -0.00s) | why: Lakers: favorite
@@ -1871,11 +1848,11 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   7300.0  skip    nba:balldontlie:21718137: caption 154 (PersonalFoul) unseen (too late to start)
   7300.1  down    nba:balldontlie:21718141:live  (ran its time, 60.0s)
   7300.1  up      nba:balldontlie:21718137:live  (rotation)
-  7300.1  panel   nba:balldontlie:21718137  PersonalFoul alone
+  7300.1  panel   nba:balldontlie:21718137  PersonalFoul
   7300.1  base    nba:balldontlie:21718137:live  (weighted) | G 0.160 proxy F 1.00 T 1.000 Q 0.500 | target 17.67% (league 100.00%, 17.67% within) | actual 70.16% | debt +5.72s (league -0.00s) | why: Pistons at Pelicans: in rotation
   7312.1  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   7312.1  up      nba:balldontlie:21718141:live  (rotation)
-  7312.1  panel   nba:balldontlie:21718141  PersonalFoul alone
+  7312.1  panel   nba:balldontlie:21718141  PersonalFoul
   7312.1  base    nba:balldontlie:21718141:live  (weighted) | G 0.296 proxy F 4.00 T 1.000 Q 0.500 | target 82.33% (league 100.00%, 82.33% within) | actual 80.56% | debt +5.93s (league -0.00s) | why: Lakers: favorite
   7324.1  panel   nba:balldontlie:21718141  players #2
   7324.1  base    nba:balldontlie:21718141:live  (weighted, again) | G 0.296 proxy F 4.00 T 1.000 Q 0.500 | target 82.33% (league 100.00%, 82.33% within) | actual 81.08% | debt +3.81s (league -0.00s) | why: Lakers: favorite
@@ -1885,56 +1862,53 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   7348.1  base    nba:balldontlie:21718141:live  (weighted, again) | G 0.296 proxy F 4.00 T 1.000 Q 0.500 | target 82.03% (league 100.00%, 82.03% within) | actual 82.05% | debt -0.47s (league -0.00s) | why: Lakers: favorite
   7360.1  panel   nba:balldontlie:21718141  players #3
   7360.1  base    nba:balldontlie:21718141:live  (weighted, again) | G 0.296 proxy F 4.00 T 1.000 Q 0.500 | target 82.03% (league 100.00%, 82.03% within) | actual 82.50% | debt -2.62s (league -0.00s) | why: Lakers: favorite
-  7366.1  panel   nba:balldontlie:21718141  FieldGoalMade alone
+  7366.1  panel   nba:balldontlie:21718141  FieldGoalMade
   7372.1  down    nba:balldontlie:21718141:live  (ran its time, 60.0s)
   7372.1  up      nba:balldontlie:21718137:live  (rotation)
-  7372.1  panel   nba:balldontlie:21718137  FreeThrow alone
+  7372.1  panel   nba:balldontlie:21718137  FreeThrow
   7372.1  base    nba:balldontlie:21718137:live  (weighted) | G 0.177 proxy F 1.00 T 1.000 Q 0.500 | target 18.19% (league 100.00%, 18.19% within) | actual 69.61% | debt +6.55s (league -0.00s) | why: Pistons at Pelicans: in rotation
   7384.1  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   7384.1  up      nba:balldontlie:21718141:live  (rotation)
   7384.1  panel   nba:balldontlie:21718141  line score
   7384.1  base    nba:balldontlie:21718141:live  (weighted) | G 0.282 proxy F 4.00 T 1.000 Q 0.500 | target 81.81% (league 100.00%, 81.81% within) | actual 80.95% | debt +5.04s (league -0.00s) | why: Lakers: favorite
-  7390.1  panel   nba:balldontlie:21718141  PersonalFoul alone
+  7390.1  panel   nba:balldontlie:21718141  PersonalFoul
   7396.1  base    nba:balldontlie:21718141:live  (weighted, again) | G 0.282 proxy F 4.00 T 1.000 Q 0.500 | target 81.51% (league 100.00%, 81.51% within) | actual 81.40% | debt +2.86s (league -0.00s) | why: Lakers: favorite
   7402.1  panel   nba:balldontlie:21718141  team box
   7408.1  base    nba:balldontlie:21718141:live  (weighted, again) | G 0.282 proxy F 4.00 T 1.000 Q 0.500 | target 81.51% (league 100.00%, 81.51% within) | actual 81.82% | debt +0.64s (league -0.00s) | why: Lakers: favorite
   7414.1  panel   nba:balldontlie:21718141  players #4
-  7420.1  panel   nba:balldontlie:21718141  FieldGoalMade alone
+  7420.1  panel   nba:balldontlie:21718141  FieldGoalMade
   7420.1  base    nba:balldontlie:21718141:live  (weighted, again) | G 0.302 proxy F 4.00 T 1.000 Q 0.500 | target 82.17% (league 100.00%, 82.17% within) | actual 82.22% | debt -1.58s (league -0.00s) | why: Lakers: favorite
   7430.0  break   nba:balldontlie:21718141 nba tv timeout @ timeout period 1 7:24 away
   7430.0  lease   opened nba:balldontlie:21718141 nba tv timeout @ timeout period 1 7:24 away | 150.0s left | any guests that fit
   7432.1  down    nba:balldontlie:21718141:live  (ran its time, 48.0s)
   7432.1  up      nba:balldontlie:21718137:live  (rotation)
-  7432.1  panel   nba:balldontlie:21718137  TechnicalFoul 1/5
+  7432.1  panel   nba:balldontlie:21718137  TechnicalFoul
   7432.1  guest   admitted nba:balldontlie:21718137:live in nba:balldontlie:21718141
   7432.1  base    nba:balldontlie:21718137:live  (only candidate) | G 0.174 proxy F 1.00 T 1.000 Q 0.500 | target 100.00% (league 100.00%, 100.00% within) | actual 69.19% | debt +5.49s (league -0.00s) | guest of nba:balldontlie:21718141 | why: Pistons at Pelicans: the only game on; Lakers in TV timeout
-  7444.1  panel   nba:balldontlie:21718137  FreeThrow 2/5
+  7444.1  panel   nba:balldontlie:21718137  FreeThrow
   7444.1  guest   admitted nba:balldontlie:21718137:live in nba:balldontlie:21718141
   7445.0  skip    nba:balldontlie:21718137: caption 159 (FreeThrow) unseen (too late to start)
-  7445.0  panel   nba:balldontlie:21718137  FreeThrow 2/4
-  7450.0  panel   nba:balldontlie:21718137  FreeThrow 2/5
-  7450.1  panel   nba:balldontlie:21718137  PersonalFoul 3/5
-  7456.1  panel   nba:balldontlie:21718137  FreeThrow 4/5
+  7450.1  panel   nba:balldontlie:21718137  PersonalFoul
+  7456.1  panel   nba:balldontlie:21718137  FreeThrow
   7456.1  guest   admitted nba:balldontlie:21718137:live in nba:balldontlie:21718141
-  7462.1  panel   nba:balldontlie:21718137  FreeThrow 5/5
   7468.1  panel   nba:balldontlie:21718137  line score
   7468.1  guest   admitted nba:balldontlie:21718137:live in nba:balldontlie:21718141
   7480.1  panel   nba:balldontlie:21718137  team box
   7480.1  guest   admitted nba:balldontlie:21718137:live in nba:balldontlie:21718141
   7492.1  panel   nba:balldontlie:21718137  players #5
   7492.1  guest   admitted nba:balldontlie:21718137:live in nba:balldontlie:21718141
-  7504.1  panel   nba:balldontlie:21718137  PersonalFoul alone
+  7504.1  panel   nba:balldontlie:21718137  PersonalFoul
   7504.1  guest   admitted nba:balldontlie:21718137:live in nba:balldontlie:21718141
-  7516.1  panel   nba:balldontlie:21718137  FreeThrow alone
+  7516.1  panel   nba:balldontlie:21718137  FreeThrow
   7516.1  guest   admitted nba:balldontlie:21718137:live in nba:balldontlie:21718141
   7528.1  panel   nba:balldontlie:21718137  line score
   7528.1  guest   admitted nba:balldontlie:21718137:live in nba:balldontlie:21718141
-  7540.1  panel   nba:balldontlie:21718137  FreeThrow alone
+  7540.1  panel   nba:balldontlie:21718137  FreeThrow
   7540.1  guest   admitted nba:balldontlie:21718137:live in nba:balldontlie:21718141
   7550.0  skip    nba:balldontlie:21718141: caption 18 (TimeoutTaken) unseen (too late to start)
   7552.1  panel   nba:balldontlie:21718137  team box
   7552.1  guest   admitted nba:balldontlie:21718137:live in nba:balldontlie:21718141
-  7558.1  panel   nba:balldontlie:21718137  PersonalFoul alone
+  7558.1  panel   nba:balldontlie:21718137  PersonalFoul
   7564.1  down    nba:balldontlie:21718137:live  (ran its time, 132.0s)
   7564.1  up      nba:balldontlie:21718141:live  (rotation)
   7564.1  panel   nba:balldontlie:21718141  team box
@@ -1947,7 +1921,7 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   7588.1  up      nba:balldontlie:21718137:live  (rotation)
   7588.1  panel   nba:balldontlie:21718137  players #1
   7588.1  base    nba:balldontlie:21718137:live  (weighted) | G 0.160 proxy F 1.00 T 1.000 Q 0.500 | target 17.58% (league 100.00%, 17.58% within) | actual 69.53% | debt +9.75s (league -0.00s) | why: Pistons at Pelicans: in rotation
-  7600.1  panel   nba:balldontlie:21718137  FreeThrow alone
+  7600.1  panel   nba:balldontlie:21718137  FreeThrow
   7600.1  base    nba:balldontlie:21718137:live  (weighted, again) | G 0.160 proxy F 1.00 T 1.000 Q 0.500 | target 17.58% (league 100.00%, 17.58% within) | actual 69.58% | debt -0.14s (league -0.00s) | why: Pistons at Pelicans: in rotation
   7612.1  down    nba:balldontlie:21718137:live  (ran its time, 24.0s)
   7612.1  up      nba:balldontlie:21718141:live  (rotation)
@@ -1958,21 +1932,21 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   7635.0  break   nba:balldontlie:21718141 nba tv timeout @ timeout period 1 7:24 away  (ended)
   7636.1  panel   nba:balldontlie:21718141  line score
   7636.1  base    nba:balldontlie:21718141:live  (weighted, again) | G 0.292 proxy F 4.00 T 1.000 Q 0.500 | target 82.07% (league 100.00%, 82.07% within) | actual 80.77% | debt -7.20s (league -0.00s) | why: Lakers: favorite
-  7642.1  panel   nba:balldontlie:21718141  FieldGoalMade alone
+  7642.1  panel   nba:balldontlie:21718141  FieldGoalMade
   7648.1  base    nba:balldontlie:21718141:live  (weighted, again) | G 0.292 proxy F 4.00 T 1.000 Q 0.500 | target 82.07% (league 100.00%, 82.07% within) | actual 81.13% | debt -9.35s (league -0.00s) | why: Lakers: favorite
   7654.1  panel   nba:balldontlie:21718141  team box
   7660.1  down    nba:balldontlie:21718141:live  (ran its time, 48.0s)
   7660.1  up      nba:balldontlie:21718137:live  (rotation)
-  7660.1  panel   nba:balldontlie:21718137  FreeThrow 1/2
+  7660.1  panel   nba:balldontlie:21718137  FreeThrow
   7660.1  base    nba:balldontlie:21718137:live  (weighted) | G 0.163 proxy F 1.00 T 1.000 Q 0.500 | target 17.80% (league 100.00%, 17.80% within) | actual 69.17% | debt -1.52s (league -0.00s) | why: Pistons at Pelicans: in rotation
-  7666.1  panel   nba:balldontlie:21718137  FieldGoalMade 2/2
+  7666.1  panel   nba:balldontlie:21718137  FieldGoalMade
   7672.1  down    nba:balldontlie:21718137:live  (ran its time, 12.0s)
   7672.1  up      nba:balldontlie:21718141:live  (rotation)
   7672.1  panel   nba:balldontlie:21718141  players #2
   7672.1  base    nba:balldontlie:21718141:live  (weighted) | G 0.292 proxy F 4.00 T 1.000 Q 0.500 | target 82.20% (league 100.00%, 82.20% within) | actual 80.00% | debt -1.64s (league -0.00s) | why: Lakers: favorite
   7684.1  panel   nba:balldontlie:21718141  line score
   7684.1  base    nba:balldontlie:21718141:live  (weighted, again) | G 0.305 proxy F 4.00 T 1.000 Q 0.500 | target 82.40% (league 100.00%, 82.40% within) | actual 80.36% | debt -3.77s (league -0.00s) | why: Lakers: favorite
-  7690.1  panel   nba:balldontlie:21718141  FieldGoalMade alone
+  7690.1  panel   nba:balldontlie:21718141  FieldGoalMade
   7696.1  base    nba:balldontlie:21718141:live  (weighted, again) | G 0.305 proxy F 4.00 T 1.000 Q 0.500 | target 82.40% (league 100.00%, 82.40% within) | actual 80.70% | debt -5.88s (league -0.00s) | why: Lakers: favorite
   7702.1  panel   nba:balldontlie:21718141  team box
   7705.0  final   nba:balldontlie:21718137:final  (ended 7675.0, first seen final)
@@ -1984,17 +1958,12 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   7708.1  card    nba:balldontlie:21718137:final  (result) | guest of nba:balldontlie:21718141 | why: Pistons at Pelicans: final; Lakers in TV timeout
   7716.1  down    nba:balldontlie:21718137:final  (ran its time, 8.0s)
   7716.1  up      nba:balldontlie:21718141:live  (rotation)
-  7716.1  panel   nba:balldontlie:21718141  TimeoutTaken 1/9
+  7716.1  panel   nba:balldontlie:21718141  TimeoutTaken
   7716.1  base    nba:balldontlie:21718141:live  (only candidate) | G 0.312 proxy F 1.00 T 1.000 Q 0.500 | target 100.00% (league 100.00%, 100.00% within) | actual 81.03% | debt -7.46s (league -0.00s) | why: Lakers: favorite, the only game on
-  7728.1  panel   nba:balldontlie:21718141  FieldGoalMade 2/9
-  7734.1  panel   nba:balldontlie:21718141  PersonalFoul 3/9
-  7740.1  panel   nba:balldontlie:21718141  FieldGoalMade 4/9
-  7746.1  panel   nba:balldontlie:21718141  FieldGoalMade 5/9
-  7752.1  panel   nba:balldontlie:21718141  FieldGoalMade 6/9
-  7758.1  panel   nba:balldontlie:21718141  FieldGoalMade 7/9
-  7764.1  panel   nba:balldontlie:21718141  FieldGoalMade 8/9
+  7728.1  panel   nba:balldontlie:21718141  FieldGoalMade
+  7734.1  panel   nba:balldontlie:21718141  PersonalFoul
+  7740.1  panel   nba:balldontlie:21718141  FieldGoalMade
   7765.0  skip    nba:balldontlie:21718141: caption 29 (FieldGoalMade) unseen (too late to start)
-  7765.0  panel   nba:balldontlie:21718141  FieldGoalMade 8/8
   7770.1  panel   nba:balldontlie:21718141  players #3
   7782.1  panel   nba:balldontlie:21718141  team box
   7794.1  panel   nba:balldontlie:21718141  players #4
@@ -2004,38 +1973,38 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   7818.1  panel   nba:balldontlie:21718141  players #5
   7830.1  panel   nba:balldontlie:21718141  line score
   7842.1  panel   nba:balldontlie:21718141  team box
-  7848.1  panel   nba:balldontlie:21718141  FieldGoalMade alone
+  7848.1  panel   nba:balldontlie:21718141  FieldGoalMade
   7860.1  panel   nba:balldontlie:21718141  players #1
   7872.1  panel   nba:balldontlie:21718141  line score
-  7878.1  panel   nba:balldontlie:21718141  FieldGoalMade alone
+  7878.1  panel   nba:balldontlie:21718141  FieldGoalMade
   7902.1  panel   nba:balldontlie:21718141  team box
-  7908.1  panel   nba:balldontlie:21718141  PersonalFoul alone
+  7908.1  panel   nba:balldontlie:21718141  PersonalFoul
   7920.1  panel   nba:balldontlie:21718141  players #2
   7932.1  panel   nba:balldontlie:21718141  line score
-  7938.1  panel   nba:balldontlie:21718141  FreeThrow alone
+  7938.1  panel   nba:balldontlie:21718141  FreeThrow
   7950.1  panel   nba:balldontlie:21718141  team box
-  7962.1  panel   nba:balldontlie:21718141  FieldGoalMade alone
-  7974.1  panel   nba:balldontlie:21718141  PersonalFoul alone
-  7986.1  panel   nba:balldontlie:21718141  FreeThrow alone
+  7962.1  panel   nba:balldontlie:21718141  FieldGoalMade
+  7974.1  panel   nba:balldontlie:21718141  PersonalFoul
+  7986.1  panel   nba:balldontlie:21718141  FreeThrow
   7998.1  panel   nba:balldontlie:21718141  players #3
   8010.1  panel   nba:balldontlie:21718141  line score
-  8016.1  panel   nba:balldontlie:21718141  PersonalFoul alone
+  8016.1  panel   nba:balldontlie:21718141  PersonalFoul
   8028.1  panel   nba:balldontlie:21718141  team box
-  8034.1  panel   nba:balldontlie:21718141  FreeThrow alone
+  8034.1  panel   nba:balldontlie:21718141  FreeThrow
   8058.1  panel   nba:balldontlie:21718141  players #4
-  8064.1  panel   nba:balldontlie:21718141  PersonalFoul alone
-  8076.1  panel   nba:balldontlie:21718141  FreeThrow alone
+  8064.1  panel   nba:balldontlie:21718141  PersonalFoul
+  8076.1  panel   nba:balldontlie:21718141  FreeThrow
   8088.1  panel   nba:balldontlie:21718141  line score
-  8094.1  panel   nba:balldontlie:21718141  FreeThrow alone
+  8094.1  panel   nba:balldontlie:21718141  FreeThrow
   8106.1  panel   nba:balldontlie:21718141  team box
   8118.1  panel   nba:balldontlie:21718141  players #5
   8130.1  panel   nba:balldontlie:21718141  line score
   8142.1  panel   nba:balldontlie:21718141  team box
   8154.1  panel   nba:balldontlie:21718141  players #1
-  8160.1  panel   nba:balldontlie:21718141  FieldGoalMade alone
+  8160.1  panel   nba:balldontlie:21718141  FieldGoalMade
   8172.1  panel   nba:balldontlie:21718141  line score
   8184.1  panel   nba:balldontlie:21718141  team box
-  8190.1  panel   nba:balldontlie:21718141  FieldGoalMade alone
+  8190.1  panel   nba:balldontlie:21718141  FieldGoalMade
   8202.1  panel   nba:balldontlie:21718141  players #2
   8214.1  panel   nba:balldontlie:21718141  line score
   8215.0  break   nba:balldontlie:21718141 nba quarter break @ end of period 1
@@ -2064,41 +2033,41 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   8372.1  panel   nba:balldontlie:21718141  team box
   8384.1  panel   nba:balldontlie:21718141  players #2
   8396.1  panel   nba:balldontlie:21718141  line score
-  8408.1  panel   nba:balldontlie:21718141  PersonalFoul alone
+  8408.1  panel   nba:balldontlie:21718141  PersonalFoul
   8420.1  panel   nba:balldontlie:21718141  team box
   8432.1  panel   nba:balldontlie:21718141  players #3
-  8438.1  panel   nba:balldontlie:21718141  FreeThrow alone
+  8438.1  panel   nba:balldontlie:21718141  FreeThrow
   8462.1  panel   nba:balldontlie:21718141  line score
   8474.1  panel   nba:balldontlie:21718141  team box
-  8480.1  panel   nba:balldontlie:21718141  FieldGoalMade alone
+  8480.1  panel   nba:balldontlie:21718141  FieldGoalMade
   8492.1  panel   nba:balldontlie:21718141  players #4
   8504.1  panel   nba:balldontlie:21718141  line score
   8516.1  panel   nba:balldontlie:21718141  team box
   8528.1  panel   nba:balldontlie:21718141  players #5
-  8534.1  panel   nba:balldontlie:21718141  PersonalFoul alone
-  8546.1  panel   nba:balldontlie:21718141  FreeThrow alone
+  8534.1  panel   nba:balldontlie:21718141  PersonalFoul
+  8546.1  panel   nba:balldontlie:21718141  FreeThrow
   8558.1  panel   nba:balldontlie:21718141  line score
   8570.1  panel   nba:balldontlie:21718141  team box
-  8576.1  panel   nba:balldontlie:21718141  FreeThrow alone
+  8576.1  panel   nba:balldontlie:21718141  FreeThrow
   8588.1  panel   nba:balldontlie:21718141  players #1
   8600.1  panel   nba:balldontlie:21718141  line score
   8612.1  panel   nba:balldontlie:21718141  team box
-  8624.1  panel   nba:balldontlie:21718141  PersonalFoul alone
+  8624.1  panel   nba:balldontlie:21718141  PersonalFoul
   8636.1  panel   nba:balldontlie:21718141  players #2
   8648.1  panel   nba:balldontlie:21718141  line score
   8660.1  panel   nba:balldontlie:21718141  team box
-  8666.1  panel   nba:balldontlie:21718141  FreeThrow alone
+  8666.1  panel   nba:balldontlie:21718141  FreeThrow
   8678.1  panel   nba:balldontlie:21718141  players #3
-  8690.1  panel   nba:balldontlie:21718141  FreeThrow alone
+  8690.1  panel   nba:balldontlie:21718141  FreeThrow
   8702.1  panel   nba:balldontlie:21718141  line score
   8714.1  panel   nba:balldontlie:21718141  team box
   8726.1  panel   nba:balldontlie:21718141  players #4
-  8732.1  panel   nba:balldontlie:21718141  FieldGoalMade alone
+  8732.1  panel   nba:balldontlie:21718141  FieldGoalMade
   8744.1  panel   nba:balldontlie:21718141  line score
   8756.1  panel   nba:balldontlie:21718141  team box
   8760.0  break   nba:balldontlie:21718141 nba tv timeout @ timeout period 2 9:02 away
   8760.0  lease   opened nba:balldontlie:21718141 nba tv timeout @ timeout period 2 9:02 away | 150.0s left | any guests that fit
-  8762.1  panel   nba:balldontlie:21718141  TimeoutTaken alone
+  8762.1  panel   nba:balldontlie:21718141  TimeoutTaken
   8768.1  down    nba:balldontlie:21718141:live  (ran its time, 540.0s)
   8768.1  up      nba:balldontlie:21718137:final  (rotation)
   8768.1  guest   admitted nba:balldontlie:21718137:final in nba:balldontlie:21718141
@@ -2131,28 +2100,28 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   9016.1  panel   nba:balldontlie:21718141  team box
   9028.1  panel   nba:balldontlie:21718141  players #5
   9040.1  panel   nba:balldontlie:21718141  line score
-  9046.1  panel   nba:balldontlie:21718141  FieldGoalMade alone
+  9046.1  panel   nba:balldontlie:21718141  FieldGoalMade
   9058.1  panel   nba:balldontlie:21718141  team box
   9070.1  panel   nba:balldontlie:21718141  players #1
-  9076.1  panel   nba:balldontlie:21718141  FieldGoalMade alone
+  9076.1  panel   nba:balldontlie:21718141  FieldGoalMade
   9088.1  panel   nba:balldontlie:21718141  line score
-  9100.1  panel   nba:balldontlie:21718141  FieldGoalMade alone
+  9100.1  panel   nba:balldontlie:21718141  FieldGoalMade
   9112.1  panel   nba:balldontlie:21718141  team box
   9124.1  panel   nba:balldontlie:21718141  players #2
   9136.1  panel   nba:balldontlie:21718141  line score
   9148.1  panel   nba:balldontlie:21718141  team box
-  9160.1  panel   nba:balldontlie:21718141  FieldGoalMade 1/3
-  9166.1  panel   nba:balldontlie:21718141  PersonalFoul 2/3
-  9172.1  panel   nba:balldontlie:21718141  FieldGoalMade 3/3
+  9160.1  panel   nba:balldontlie:21718141  FieldGoalMade
+  9166.1  panel   nba:balldontlie:21718141  PersonalFoul
+  9172.1  panel   nba:balldontlie:21718141  FieldGoalMade
   9178.1  panel   nba:balldontlie:21718141  players #3
   9190.1  panel   nba:balldontlie:21718141  line score
-  9202.1  panel   nba:balldontlie:21718141  FreeThrow alone
+  9202.1  panel   nba:balldontlie:21718141  FreeThrow
   9214.1  panel   nba:balldontlie:21718141  team box
-  9220.1  panel   nba:balldontlie:21718141  PersonalFoul alone
+  9220.1  panel   nba:balldontlie:21718141  PersonalFoul
   9230.0  break   nba:balldontlie:21718141 nba tv timeout @ timeout period 2 6:15 home
   9230.0  lease   opened nba:balldontlie:21718141 nba tv timeout @ timeout period 2 6:15 home | 165.0s left | any guests that fit
-  9232.1  panel   nba:balldontlie:21718141  TimeoutTaken 1/2
-  9244.1  panel   nba:balldontlie:21718141  FieldGoalMade 2/2
+  9232.1  panel   nba:balldontlie:21718141  TimeoutTaken
+  9244.1  panel   nba:balldontlie:21718141  FieldGoalMade
   9250.1  panel   nba:balldontlie:21718141  players #4
   9262.1  panel   nba:balldontlie:21718141  team box
   9274.1  panel   nba:balldontlie:21718141  players #5
@@ -2175,12 +2144,12 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   9454.1  panel   nba:balldontlie:21718141  players #2
   9466.1  panel   nba:balldontlie:21718141  line score
   9478.1  panel   nba:balldontlie:21718141  team box
-  9490.1  panel   nba:balldontlie:21718141  FieldGoalMade alone
+  9490.1  panel   nba:balldontlie:21718141  FieldGoalMade
   9514.1  panel   nba:balldontlie:21718141  players #3
   9526.1  panel   nba:balldontlie:21718141  line score
   9538.1  panel   nba:balldontlie:21718141  team box
-  9550.1  panel   nba:balldontlie:21718141  PersonalFoul 1/2
-  9556.1  panel   nba:balldontlie:21718141  FieldGoalMade 2/2
+  9550.1  panel   nba:balldontlie:21718141  PersonalFoul
+  9556.1  panel   nba:balldontlie:21718141  FieldGoalMade
   9562.1  panel   nba:balldontlie:21718141  players #4
   9574.1  panel   nba:balldontlie:21718141  line score
   9586.1  panel   nba:balldontlie:21718141  team box
@@ -2192,62 +2161,61 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
   9658.1  panel   nba:balldontlie:21718141  team box
   9670.1  panel   nba:balldontlie:21718141  players #2
   9682.1  panel   nba:balldontlie:21718141  line score
-  9688.1  panel   nba:balldontlie:21718141  TechnicalFoul alone
-  9700.1  panel   nba:balldontlie:21718141  FieldGoalMade alone
+  9688.1  panel   nba:balldontlie:21718141  TechnicalFoul
+  9700.1  panel   nba:balldontlie:21718141  FieldGoalMade
   9712.1  panel   nba:balldontlie:21718141  team box
   9724.1  panel   nba:balldontlie:21718141  players #3
-  9730.1  panel   nba:balldontlie:21718141  PersonalFoul alone
-  9742.1  panel   nba:balldontlie:21718141  FieldGoalMade alone
+  9730.1  panel   nba:balldontlie:21718141  PersonalFoul
+  9742.1  panel   nba:balldontlie:21718141  FieldGoalMade
   9754.1  panel   nba:balldontlie:21718141  line score
-  9766.1  panel   nba:balldontlie:21718141  FreeThrow alone
+  9766.1  panel   nba:balldontlie:21718141  FreeThrow
   9778.1  panel   nba:balldontlie:21718141  team box
-  9784.1  panel   nba:balldontlie:21718141  PersonalFoul alone
+  9784.1  panel   nba:balldontlie:21718141  PersonalFoul
   9796.1  panel   nba:balldontlie:21718141  players #4
   9808.1  panel   nba:balldontlie:21718141  line score
-  9814.1  panel   nba:balldontlie:21718141  FreeThrow alone
+  9814.1  panel   nba:balldontlie:21718141  FreeThrow
   9826.1  panel   nba:balldontlie:21718141  team box
   9838.1  panel   nba:balldontlie:21718141  players #5
-  9844.1  panel   nba:balldontlie:21718141  FreeThrow alone
+  9844.1  panel   nba:balldontlie:21718141  FreeThrow
   9856.1  panel   nba:balldontlie:21718141  line score
   9868.1  panel   nba:balldontlie:21718141  team box
   9880.1  panel   nba:balldontlie:21718141  players #1
   9892.1  panel   nba:balldontlie:21718141  line score
   9904.1  panel   nba:balldontlie:21718141  team box
   9916.1  panel   nba:balldontlie:21718141  players #2
-  9922.1  panel   nba:balldontlie:21718141  PersonalFoul 1/2
-  9928.1  panel   nba:balldontlie:21718141  FieldGoalMade 2/2
+  9922.1  panel   nba:balldontlie:21718141  PersonalFoul
+  9928.1  panel   nba:balldontlie:21718141  FieldGoalMade
   9934.1  panel   nba:balldontlie:21718141  line score
   9946.1  panel   nba:balldontlie:21718141  team box
   9958.1  panel   nba:balldontlie:21718141  players #3
   9970.1  panel   nba:balldontlie:21718141  line score
   9982.1  panel   nba:balldontlie:21718141  team box
-  9988.1  panel   nba:balldontlie:21718141  FreeThrow alone
+  9988.1  panel   nba:balldontlie:21718141  FreeThrow
  10000.1  panel   nba:balldontlie:21718141  players #4
  10012.1  panel   nba:balldontlie:21718141  line score
  10024.1  panel   nba:balldontlie:21718141  team box
  10036.1  panel   nba:balldontlie:21718141  players #5
  10048.1  panel   nba:balldontlie:21718141  line score
- 10054.1  panel   nba:balldontlie:21718141  FieldGoalMade alone
+ 10054.1  panel   nba:balldontlie:21718141  FieldGoalMade
  10066.1  panel   nba:balldontlie:21718141  team box
  10078.1  panel   nba:balldontlie:21718141  players #1
  10090.1  panel   nba:balldontlie:21718141  line score
- 10102.1  panel   nba:balldontlie:21718141  PersonalFoul alone
+ 10102.1  panel   nba:balldontlie:21718141  PersonalFoul
  10114.1  panel   nba:balldontlie:21718141  team box
  10126.1  panel   nba:balldontlie:21718141  players #2
- 10132.1  panel   nba:balldontlie:21718141  FreeThrow alone
+ 10132.1  panel   nba:balldontlie:21718141  FreeThrow
  10144.1  panel   nba:balldontlie:21718141  line score
  10156.1  panel   nba:balldontlie:21718141  team box
- 10168.1  panel   nba:balldontlie:21718141  FreeThrow alone
+ 10168.1  panel   nba:balldontlie:21718141  FreeThrow
  10180.1  panel   nba:balldontlie:21718141  players #3
  10192.1  panel   nba:balldontlie:21718141  line score
  10204.1  panel   nba:balldontlie:21718141  team box
  10216.1  panel   nba:balldontlie:21718141  players #4
- 10228.1  panel   nba:balldontlie:21718141  PersonalFoul alone
+ 10228.1  panel   nba:balldontlie:21718141  PersonalFoul
  10240.1  panel   nba:balldontlie:21718141  line score
  10252.1  panel   nba:balldontlie:21718141  team box
  10264.1  panel   nba:balldontlie:21718141  players #5
- 10270.1  panel   nba:balldontlie:21718141  FreeThrow 1/2
- 10276.1  panel   nba:balldontlie:21718141  FreeThrow 2/2
+ 10270.1  panel   nba:balldontlie:21718141  FreeThrow
  10282.1  panel   nba:balldontlie:21718141  line score
  10290.0  break   nba:balldontlie:21718141 nba halftime @ halftime
  10290.0  lease   opened nba:balldontlie:21718141 nba halftime @ halftime | 825.0s left | any guests that fit | provisional
@@ -2341,13 +2309,13 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
  11314.1  panel   nba:balldontlie:21718141  players #4
  11326.1  panel   nba:balldontlie:21718141  line score
  11338.1  panel   nba:balldontlie:21718141  team box
- 11350.1  panel   nba:balldontlie:21718141  PersonalFoul alone
- 11362.1  panel   nba:balldontlie:21718141  FreeThrow alone
+ 11350.1  panel   nba:balldontlie:21718141  PersonalFoul
+ 11362.1  panel   nba:balldontlie:21718141  FreeThrow
  11374.1  panel   nba:balldontlie:21718141  players #5
- 11386.1  panel   nba:balldontlie:21718141  FreeThrow alone
+ 11386.1  panel   nba:balldontlie:21718141  FreeThrow
  11398.1  panel   nba:balldontlie:21718141  line score
- 11410.1  panel   nba:balldontlie:21718141  FieldGoalMade alone
- 11422.1  panel   nba:balldontlie:21718141  PersonalFoul alone
+ 11410.1  panel   nba:balldontlie:21718141  FieldGoalMade
+ 11422.1  panel   nba:balldontlie:21718141  PersonalFoul
  11434.1  panel   nba:balldontlie:21718141  team box
  11446.1  panel   nba:balldontlie:21718141  players #1
  11458.1  panel   nba:balldontlie:21718141  line score
@@ -2358,16 +2326,16 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
  11518.1  panel   nba:balldontlie:21718141  players #3
  11530.1  panel   nba:balldontlie:21718141  line score
  11542.1  panel   nba:balldontlie:21718141  team box
- 11548.1  panel   nba:balldontlie:21718141  FreeThrow alone
+ 11548.1  panel   nba:balldontlie:21718141  FreeThrow
  11560.1  panel   nba:balldontlie:21718141  players #4
  11572.1  panel   nba:balldontlie:21718141  line score
  11584.1  panel   nba:balldontlie:21718141  team box
- 11590.1  panel   nba:balldontlie:21718141  PersonalFoul alone
+ 11590.1  panel   nba:balldontlie:21718141  PersonalFoul
  11602.1  panel   nba:balldontlie:21718141  players #5
  11614.1  panel   nba:balldontlie:21718141  line score
- 11620.1  panel   nba:balldontlie:21718141  FreeThrow alone
+ 11620.1  panel   nba:balldontlie:21718141  FreeThrow
  11632.1  panel   nba:balldontlie:21718141  team box
- 11638.1  panel   nba:balldontlie:21718141  FreeThrow alone
+ 11638.1  panel   nba:balldontlie:21718141  FreeThrow
  11650.1  panel   nba:balldontlie:21718141  players #1
  11662.1  panel   nba:balldontlie:21718141  line score
  11674.1  panel   nba:balldontlie:21718141  team box
@@ -2376,22 +2344,22 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
  11710.1  panel   nba:balldontlie:21718141  team box
  11722.1  panel   nba:balldontlie:21718141  players #3
  11734.1  panel   nba:balldontlie:21718141  line score
- 11740.1  panel   nba:balldontlie:21718141  FieldGoalMade alone
+ 11740.1  panel   nba:balldontlie:21718141  FieldGoalMade
  11752.1  panel   nba:balldontlie:21718141  team box
  11764.1  panel   nba:balldontlie:21718141  players #4
- 11770.1  panel   nba:balldontlie:21718141  TechnicalFoul alone
+ 11770.1  panel   nba:balldontlie:21718141  TechnicalFoul
  11782.1  panel   nba:balldontlie:21718141  line score
  11794.1  panel   nba:balldontlie:21718141  team box
  11806.1  panel   nba:balldontlie:21718141  players #5
  11818.1  panel   nba:balldontlie:21718141  line score
- 11830.1  panel   nba:balldontlie:21718141  FieldGoalMade alone
+ 11830.1  panel   nba:balldontlie:21718141  FieldGoalMade
  11842.1  panel   nba:balldontlie:21718141  team box
  11854.1  panel   nba:balldontlie:21718141  players #1
  11866.1  panel   nba:balldontlie:21718141  line score
  11875.0  break   nba:balldontlie:21718141 nba tv timeout @ timeout period 3 8:33 away
  11875.0  lease   opened nba:balldontlie:21718141 nba tv timeout @ timeout period 3 8:33 away | 165.0s left | any guests that fit
- 11878.1  panel   nba:balldontlie:21718141  TimeoutTaken 1/2
- 11890.1  panel   nba:balldontlie:21718141  FieldGoalMade 2/2
+ 11878.1  panel   nba:balldontlie:21718141  TimeoutTaken
+ 11890.1  panel   nba:balldontlie:21718141  FieldGoalMade
  11896.1  panel   nba:balldontlie:21718141  team box
  11908.1  panel   nba:balldontlie:21718141  players #2
  11920.1  panel   nba:balldontlie:21718141  team box
@@ -2408,23 +2376,23 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
  12040.1  panel   nba:balldontlie:21718141  team box
  12052.1  panel   nba:balldontlie:21718141  players #3
  12055.0  break   nba:balldontlie:21718141 nba tv timeout @ timeout period 3 8:33 away  (ended)
- 12058.1  panel   nba:balldontlie:21718141  FieldGoalMade alone
+ 12058.1  panel   nba:balldontlie:21718141  FieldGoalMade
  12070.1  panel   nba:balldontlie:21718141  line score
  12082.1  panel   nba:balldontlie:21718141  team box
  12094.1  panel   nba:balldontlie:21718141  players #4
- 12100.1  panel   nba:balldontlie:21718141  PersonalFoul alone
- 12112.1  panel   nba:balldontlie:21718141  FreeThrow alone
+ 12100.1  panel   nba:balldontlie:21718141  PersonalFoul
+ 12112.1  panel   nba:balldontlie:21718141  FreeThrow
  12124.1  panel   nba:balldontlie:21718141  line score
- 12130.1  panel   nba:balldontlie:21718141  FreeThrow alone
+ 12130.1  panel   nba:balldontlie:21718141  FreeThrow
  12142.1  panel   nba:balldontlie:21718141  team box
  12154.1  panel   nba:balldontlie:21718141  players #5
- 12160.1  panel   nba:balldontlie:21718141  FieldGoalMade alone
+ 12160.1  panel   nba:balldontlie:21718141  FieldGoalMade
  12172.1  panel   nba:balldontlie:21718141  line score
- 12178.1  panel   nba:balldontlie:21718141  FieldGoalMade alone
+ 12178.1  panel   nba:balldontlie:21718141  FieldGoalMade
  12202.1  panel   nba:balldontlie:21718141  team box
  12214.1  panel   nba:balldontlie:21718141  players #1
  12226.1  panel   nba:balldontlie:21718141  line score
- 12238.1  panel   nba:balldontlie:21718141  FieldGoalMade alone
+ 12238.1  panel   nba:balldontlie:21718141  FieldGoalMade
  12262.1  panel   nba:balldontlie:21718141  team box
  12274.1  panel   nba:balldontlie:21718141  players #2
  12286.1  panel   nba:balldontlie:21718141  line score
@@ -2445,7 +2413,7 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
  12466.1  panel   nba:balldontlie:21718141  line score
  12470.0  break   nba:balldontlie:21718141 nba tv timeout @ timeout period 3 4:25 home
  12470.0  lease   opened nba:balldontlie:21718141 nba tv timeout @ timeout period 3 4:25 home | 150.0s left | any guests that fit
- 12472.1  panel   nba:balldontlie:21718141  TimeoutTaken alone
+ 12472.1  panel   nba:balldontlie:21718141  TimeoutTaken
  12484.1  panel   nba:balldontlie:21718141  team box
  12496.1  panel   nba:balldontlie:21718141  players #3
  12508.1  panel   nba:balldontlie:21718141  team box
@@ -2466,39 +2434,39 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
  12665.0  break   nba:balldontlie:21718141 nba tv timeout @ timeout period 3 4:25 home  (ended)
  12676.1  panel   nba:balldontlie:21718141  line score
  12688.1  panel   nba:balldontlie:21718141  team box
- 12700.1  panel   nba:balldontlie:21718141  FieldGoalMade alone
+ 12700.1  panel   nba:balldontlie:21718141  FieldGoalMade
  12712.1  panel   nba:balldontlie:21718141  players #1
  12724.1  panel   nba:balldontlie:21718141  line score
  12736.1  panel   nba:balldontlie:21718141  team box
- 12748.1  panel   nba:balldontlie:21718141  FieldGoalMade alone
+ 12748.1  panel   nba:balldontlie:21718141  FieldGoalMade
  12760.1  panel   nba:balldontlie:21718141  players #2
  12772.1  panel   nba:balldontlie:21718141  line score
- 12784.1  panel   nba:balldontlie:21718141  PersonalFoul alone
+ 12784.1  panel   nba:balldontlie:21718141  PersonalFoul
  12796.1  panel   nba:balldontlie:21718141  team box
  12808.1  panel   nba:balldontlie:21718141  players #3
- 12820.1  panel   nba:balldontlie:21718141  PersonalFoul alone
+ 12820.1  panel   nba:balldontlie:21718141  PersonalFoul
  12832.1  panel   nba:balldontlie:21718141  line score
  12844.1  panel   nba:balldontlie:21718141  team box
- 12850.1  panel   nba:balldontlie:21718141  FreeThrow alone
+ 12850.1  panel   nba:balldontlie:21718141  FreeThrow
  12862.1  panel   nba:balldontlie:21718141  players #4
- 12874.1  panel   nba:balldontlie:21718141  FreeThrow alone
+ 12874.1  panel   nba:balldontlie:21718141  FreeThrow
  12886.1  panel   nba:balldontlie:21718141  line score
- 12892.1  panel   nba:balldontlie:21718141  FieldGoalMade alone
+ 12892.1  panel   nba:balldontlie:21718141  FieldGoalMade
  12904.1  panel   nba:balldontlie:21718141  team box
- 12910.1  panel   nba:balldontlie:21718141  PersonalFoul alone
+ 12910.1  panel   nba:balldontlie:21718141  PersonalFoul
  12922.1  panel   nba:balldontlie:21718141  players #5
  12934.1  panel   nba:balldontlie:21718141  line score
- 12946.1  panel   nba:balldontlie:21718141  FieldGoalMade alone
+ 12946.1  panel   nba:balldontlie:21718141  FieldGoalMade
  12958.1  panel   nba:balldontlie:21718141  team box
- 12964.1  panel   nba:balldontlie:21718141  PersonalFoul alone
+ 12964.1  panel   nba:balldontlie:21718141  PersonalFoul
  12976.1  panel   nba:balldontlie:21718141  players #1
  12988.1  panel   nba:balldontlie:21718141  line score
- 13000.1  panel   nba:balldontlie:21718141  FreeThrow alone
+ 13000.1  panel   nba:balldontlie:21718141  FreeThrow
  13012.1  panel   nba:balldontlie:21718141  team box
- 13018.1  panel   nba:balldontlie:21718141  FreeThrow alone
+ 13018.1  panel   nba:balldontlie:21718141  FreeThrow
  13030.1  panel   nba:balldontlie:21718141  players #2
  13042.1  panel   nba:balldontlie:21718141  line score
- 13054.1  panel   nba:balldontlie:21718141  FieldGoalMade alone
+ 13054.1  panel   nba:balldontlie:21718141  FieldGoalMade
  13066.1  panel   nba:balldontlie:21718141  team box
  13078.1  panel   nba:balldontlie:21718141  players #3
  13090.1  panel   nba:balldontlie:21718141  line score
@@ -2529,48 +2497,48 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
  13342.1  panel   nba:balldontlie:21718141  line score
  13354.1  panel   nba:balldontlie:21718141  team box
  13366.1  panel   nba:balldontlie:21718141  players #1
- 13372.1  panel   nba:balldontlie:21718141  PersonalFoul alone
+ 13372.1  panel   nba:balldontlie:21718141  PersonalFoul
  13384.1  panel   nba:balldontlie:21718141  line score
  13396.1  panel   nba:balldontlie:21718141  team box
  13408.1  panel   nba:balldontlie:21718141  players #2
- 13420.1  panel   nba:balldontlie:21718141  PersonalFoul alone
+ 13420.1  panel   nba:balldontlie:21718141  PersonalFoul
  13432.1  panel   nba:balldontlie:21718141  line score
  13444.1  panel   nba:balldontlie:21718141  team box
- 13450.1  panel   nba:balldontlie:21718141  FreeThrows 1/2
- 13456.1  panel   nba:balldontlie:21718141  FreeThrow 2/2
+ 13450.1  panel   nba:balldontlie:21718141  FreeThrows
+ 13456.1  panel   nba:balldontlie:21718141  FreeThrow
  13462.1  panel   nba:balldontlie:21718141  players #3
- 13474.1  panel   nba:balldontlie:21718141  FreeThrow alone
+ 13474.1  panel   nba:balldontlie:21718141  FreeThrow
  13486.1  panel   nba:balldontlie:21718141  line score
  13498.1  panel   nba:balldontlie:21718141  team box
  13510.1  panel   nba:balldontlie:21718141  players #4
  13522.1  panel   nba:balldontlie:21718141  line score
  13534.1  panel   nba:balldontlie:21718141  team box
- 13546.1  panel   nba:balldontlie:21718141  PersonalFoul alone
+ 13546.1  panel   nba:balldontlie:21718141  PersonalFoul
  13558.1  panel   nba:balldontlie:21718141  players #5
- 13564.1  panel   nba:balldontlie:21718141  FreeThrow alone
+ 13564.1  panel   nba:balldontlie:21718141  FreeThrow
  13576.1  panel   nba:balldontlie:21718141  line score
  13588.1  panel   nba:balldontlie:21718141  team box
- 13600.1  panel   nba:balldontlie:21718141  FreeThrow alone
+ 13600.1  panel   nba:balldontlie:21718141  FreeThrow
  13612.1  panel   nba:balldontlie:21718141  players #1
  13624.1  panel   nba:balldontlie:21718141  line score
  13636.1  panel   nba:balldontlie:21718141  team box
  13648.1  panel   nba:balldontlie:21718141  players #2
- 13660.1  panel   nba:balldontlie:21718141  FieldGoalMade alone
+ 13660.1  panel   nba:balldontlie:21718141  FieldGoalMade
  13672.1  panel   nba:balldontlie:21718141  line score
- 13684.1  panel   nba:balldontlie:21718141  PersonalFoul 1/2
- 13690.1  panel   nba:balldontlie:21718141  FreeThrow 2/2
+ 13684.1  panel   nba:balldontlie:21718141  PersonalFoul
+ 13690.1  panel   nba:balldontlie:21718141  FreeThrow
  13696.1  panel   nba:balldontlie:21718141  team box
- 13702.1  panel   nba:balldontlie:21718141  FreeThrow alone
+ 13702.1  panel   nba:balldontlie:21718141  FreeThrow
  13714.1  panel   nba:balldontlie:21718141  players #3
  13726.1  panel   nba:balldontlie:21718141  line score
- 13738.1  panel   nba:balldontlie:21718141  FieldGoalMade alone
+ 13738.1  panel   nba:balldontlie:21718141  FieldGoalMade
  13762.1  panel   nba:balldontlie:21718141  team box
- 13774.1  panel   nba:balldontlie:21718141  FieldGoalMade alone
- 13798.1  panel   nba:balldontlie:21718141  PersonalFoul alone
+ 13774.1  panel   nba:balldontlie:21718141  FieldGoalMade
+ 13798.1  panel   nba:balldontlie:21718141  PersonalFoul
  13810.1  panel   nba:balldontlie:21718141  players #4
  13815.3  break   nba:balldontlie:21718141 nba tv timeout @ timeout period 4 7:50 home
  13815.3  lease   opened nba:balldontlie:21718141 nba tv timeout @ timeout period 4 7:50 home | 144.2s left | any guests that fit
- 13816.1  panel   nba:balldontlie:21718141  TimeoutTaken alone
+ 13816.1  panel   nba:balldontlie:21718141  TimeoutTaken
  13828.1  panel   nba:balldontlie:21718141  team box
  13840.1  panel   nba:balldontlie:21718141  players #5
  13852.1  panel   nba:balldontlie:21718141  team box
@@ -2588,10 +2556,10 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
  13984.1  panel   nba:balldontlie:21718141  players #1
  13996.1  panel   nba:balldontlie:21718141  team box
  14008.1  panel   nba:balldontlie:21718141  players #2
- 14020.1  panel   nba:balldontlie:21718141  FreeThrow alone
+ 14020.1  panel   nba:balldontlie:21718141  FreeThrow
  14032.1  panel   nba:balldontlie:21718141  team box
  14044.1  panel   nba:balldontlie:21718141  players #3
- 14056.1  panel   nba:balldontlie:21718141  FreeThrow alone
+ 14056.1  panel   nba:balldontlie:21718141  FreeThrow
  14064.8  break   nba:balldontlie:21718141 nba tv timeout @ timeout period 4 7:50 home  (ended)
  14068.1  panel   nba:balldontlie:21718141  line score
  14080.1  panel   nba:balldontlie:21718141  team box
@@ -2599,13 +2567,13 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
  14104.1  panel   nba:balldontlie:21718141  line score
  14116.1  panel   nba:balldontlie:21718141  team box
  14128.1  panel   nba:balldontlie:21718141  players #5
- 14134.1  panel   nba:balldontlie:21718141  FieldGoalMade alone
+ 14134.1  panel   nba:balldontlie:21718141  FieldGoalMade
  14146.1  panel   nba:balldontlie:21718141  line score
- 14152.1  panel   nba:balldontlie:21718141  PersonalFoul alone
+ 14152.1  panel   nba:balldontlie:21718141  PersonalFoul
  14164.1  panel   nba:balldontlie:21718141  team box
  14173.8  break   nba:balldontlie:21718141 nba tv timeout @ timeout period 4 6:35 home
  14173.8  lease   opened nba:balldontlie:21718141 nba tv timeout @ timeout period 4 6:35 home | 165.0s left | any guests that fit
- 14176.1  panel   nba:balldontlie:21718141  TimeoutTaken alone
+ 14176.1  panel   nba:balldontlie:21718141  TimeoutTaken
  14188.1  panel   nba:balldontlie:21718141  players #1
  14200.1  panel   nba:balldontlie:21718141  team box
  14212.1  panel   nba:balldontlie:21718141  players #2
@@ -2626,22 +2594,22 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
  14380.1  panel   nba:balldontlie:21718141  players #4
  14392.1  panel   nba:balldontlie:21718141  team box
  14398.3  break   nba:balldontlie:21718141 nba tv timeout @ timeout period 4 6:35 home  (ended)
- 14404.1  panel   nba:balldontlie:21718141  FieldGoalMade alone
+ 14404.1  panel   nba:balldontlie:21718141  FieldGoalMade
  14416.1  panel   nba:balldontlie:21718141  players #5
  14428.1  panel   nba:balldontlie:21718141  line score
  14440.1  panel   nba:balldontlie:21718141  team box
  14452.1  panel   nba:balldontlie:21718141  players #1
- 14464.1  panel   nba:balldontlie:21718141  FieldGoalMade alone
+ 14464.1  panel   nba:balldontlie:21718141  FieldGoalMade
  14476.1  panel   nba:balldontlie:21718141  line score
  14488.1  panel   nba:balldontlie:21718141  team box
  14500.1  panel   nba:balldontlie:21718141  players #2
- 14512.1  panel   nba:balldontlie:21718141  FieldGoalMade alone
+ 14512.1  panel   nba:balldontlie:21718141  FieldGoalMade
  14536.1  panel   nba:balldontlie:21718141  line score
- 14548.1  panel   nba:balldontlie:21718141  FieldGoalMade alone
+ 14548.1  panel   nba:balldontlie:21718141  FieldGoalMade
  14572.1  panel   nba:balldontlie:21718141  team box
  14574.3  break   nba:balldontlie:21718141 nba team timeout @ timeout period 4 4:13 away
  14574.3  lease   opened nba:balldontlie:21718141 nba team timeout @ timeout period 4 4:13 away | 40.0s left | any guests that fit
- 14578.1  panel   nba:balldontlie:21718141  TimeoutTaken alone
+ 14578.1  panel   nba:balldontlie:21718141  TimeoutTaken
  14590.1  panel   nba:balldontlie:21718141  players #3
  14602.1  panel   nba:balldontlie:21718141  team box
  14614.1  panel   nba:balldontlie:21718141  players #4
@@ -2652,31 +2620,31 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
  14662.1  panel   nba:balldontlie:21718141  players #1
  14674.1  panel   nba:balldontlie:21718141  team box
  14679.3  break   nba:balldontlie:21718141 nba team timeout @ timeout period 4 4:13 away  (ended)
- 14680.1  panel   nba:balldontlie:21718141  PersonalFoul alone
+ 14680.1  panel   nba:balldontlie:21718141  PersonalFoul
  14692.1  panel   nba:balldontlie:21718141  players #2
  14704.1  panel   nba:balldontlie:21718141  line score
- 14710.1  panel   nba:balldontlie:21718141  FieldGoalMade alone
+ 14710.1  panel   nba:balldontlie:21718141  FieldGoalMade
  14722.1  panel   nba:balldontlie:21718141  team box
  14734.1  panel   nba:balldontlie:21718141  players #3
  14746.1  panel   nba:balldontlie:21718141  line score
  14758.1  panel   nba:balldontlie:21718141  team box
  14770.1  panel   nba:balldontlie:21718141  players #4
- 14776.1  panel   nba:balldontlie:21718141  PersonalFoul alone
+ 14776.1  panel   nba:balldontlie:21718141  PersonalFoul
  14788.1  panel   nba:balldontlie:21718141  line score
  14800.1  panel   nba:balldontlie:21718141  team box
  14812.1  panel   nba:balldontlie:21718141  players #5
  14824.1  panel   nba:balldontlie:21718141  line score
- 14830.1  panel   nba:balldontlie:21718141  FreeThrow alone
+ 14830.1  panel   nba:balldontlie:21718141  FreeThrow
  14854.1  panel   nba:balldontlie:21718141  team box
- 14866.1  panel   nba:balldontlie:21718141  FieldGoalMade alone
+ 14866.1  panel   nba:balldontlie:21718141  FieldGoalMade
  14878.1  panel   nba:balldontlie:21718141  players #1
- 14890.1  panel   nba:balldontlie:21718141  FieldGoalMade alone
+ 14890.1  panel   nba:balldontlie:21718141  FieldGoalMade
  14902.1  panel   nba:balldontlie:21718141  line score
  14914.1  panel   nba:balldontlie:21718141  team box
- 14920.1  panel   nba:balldontlie:21718141  FieldGoalMade alone
+ 14920.1  panel   nba:balldontlie:21718141  FieldGoalMade
  14929.3  break   nba:balldontlie:21718141 nba team timeout @ timeout period 4 1:51 home
  14929.3  lease   opened nba:balldontlie:21718141 nba team timeout @ timeout period 4 1:51 home | 45.0s left | any guests that fit
- 14932.1  panel   nba:balldontlie:21718141  TimeoutTaken alone
+ 14932.1  panel   nba:balldontlie:21718141  TimeoutTaken
  14944.1  panel   nba:balldontlie:21718141  players #2
  14956.1  panel   nba:balldontlie:21718141  team box
  14968.1  panel   nba:balldontlie:21718141  players #3
@@ -2687,19 +2655,19 @@ versions: policy omni-board-policy/2 | config omni-config/1 c64466b01010 | rules
  15016.1  panel   nba:balldontlie:21718141  players #5
  15024.3  break   nba:balldontlie:21718141 nba team timeout @ timeout period 4 1:51 home  (ended)
  15028.1  panel   nba:balldontlie:21718141  line score
- 15040.1  panel   nba:balldontlie:21718141  FieldGoalMade alone
+ 15040.1  panel   nba:balldontlie:21718141  FieldGoalMade
  15052.1  panel   nba:balldontlie:21718141  team box
  15064.1  panel   nba:balldontlie:21718141  players #1
  15076.1  panel   nba:balldontlie:21718141  line score
  15088.1  panel   nba:balldontlie:21718141  team box
- 15094.1  panel   nba:balldontlie:21718141  FieldGoalMade alone
+ 15094.1  panel   nba:balldontlie:21718141  FieldGoalMade
  15106.1  panel   nba:balldontlie:21718141  players #2
  15118.1  panel   nba:balldontlie:21718141  line score
- 15130.1  panel   nba:balldontlie:21718141  PersonalFoul 1/2
- 15136.1  panel   nba:balldontlie:21718141  FieldGoalMade 2/2
+ 15130.1  panel   nba:balldontlie:21718141  PersonalFoul
+ 15136.1  panel   nba:balldontlie:21718141  FieldGoalMade
  15142.1  panel   nba:balldontlie:21718141  team box
  15154.1  panel   nba:balldontlie:21718141  players #3
- 15160.1  panel   nba:balldontlie:21718141  FreeThrow alone
+ 15160.1  panel   nba:balldontlie:21718141  FreeThrow
  15184.1  panel   nba:balldontlie:21718141  line score
  15196.1  panel   nba:balldontlie:21718141  team box
  15208.1  panel   nba:balldontlie:21718141  players #4

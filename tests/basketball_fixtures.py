@@ -26,7 +26,6 @@ from omni.cards.basketball import (
     CaptionPanel,
     LineScorePanel,
     PlayerLinesPanel,
-    QueuePlace,
     TeamBoxPanel,
 )
 from omni.core.enum import DisplayPriority, GameStatus, HomeAway, League, PanelProfile
@@ -204,8 +203,8 @@ def live(
     )
 
 
-def caption(event: BasketballCaption, place: tuple[int, int] | None = None) -> CaptionPanel:
-    return CaptionPanel(caption=event, place=QueuePlace(*place) if place is not None else None)
+def caption(event: BasketballCaption) -> CaptionPanel:
+    return CaptionPanel(caption=event)
 
 
 # --- the specimens ------------------------------------------------------------------------------------------
@@ -330,10 +329,10 @@ _QUEUE_READS = (
 
 
 def _queue_card(i: int) -> ScoreboardCard[BasketballGameCardPayload]:
-    """Play ``i``: 1/2 as the first read leaves it, then 2/4, 3/4 and 4/4 once the second lands."""
+    """Play ``i``: the first beside the first read's score, the rest beside the second's."""
     first = i == 1
     away, home, clock = _QUEUE_READS[0 if first else 1]
-    bottom = caption(_QUEUE_PLAYS[i - 1], (i, 2 if first else 4))
+    bottom = caption(_QUEUE_PLAYS[i - 1])
     return game_card(live(away, home, 3, clock, home_win=88.0 if first else 89.0, records=_POR_MIN, bottom=bottom))
 
 
@@ -512,8 +511,8 @@ SPECIMENS: tuple[Specimen, ...] = (
         _utc("2026-11-17T02:05:40Z"),
         profiles=_NO_SINGLE,
     ),
-    # A free throw as it lands: its made tone turns the single's home score green. Queued, the quad's headline
-    # keeps its whole width beside ``i/N``.
+    # A free throw as it lands: its made tone turns the single's home score green. The next, missed, is the widest
+    # free-throw headline the quad draws.
     Specimen(
         "live-free-throw",
         game_card(
@@ -542,8 +541,7 @@ SPECIMENS: tuple[Specimen, ...] = (
                 home_win=85.0,
                 records=_POR_MIN,
                 bottom=caption(
-                    FreeThrow(side=H, shooter="A.Edwards", place=2, made=False, game_made=6, game_attempted=8),
-                    (2, 3),
+                    FreeThrow(side=H, shooter="A.Edwards", place=2, made=False, game_made=6, game_attempted=8)
                 ),
             )
         ),

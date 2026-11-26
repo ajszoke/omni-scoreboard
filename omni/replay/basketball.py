@@ -14,8 +14,9 @@ frame as it's drawn, and the renderers are chosen and checked but not drawn.
 **The decisions** (`nba_decisions`), one line per change, timed in seconds since the start on the running clock:
 - the board's lines, as `omni.replay.harness.replay_decisions` writes them: ``up``, ``down``, ``drop``, ``frame``,
   ``unseen``, ``note``, ``stale`` and ``final``;
-- ``panel``: the bottom panel of the NBA live card on the board changing, while it's up: a caption by its kind, with
-  its place in the queue (``2/4``) or ``alone``, or a stat panel (``line score``, ``team box``, ``players #2``);
+- ``panel``: the bottom panel of the NBA live card on the board changing, while it's up: a caption by its kind, or a
+  stat panel (``line score``, ``team box``, ``players #2``); the words are what's compared, so a caption that follows
+  one of its own kind writes no line;
 - ``break``: a break the policy's view gains (its kind and where in the game), and ``ended`` when its end clears the
   delay;
 - ``skip``: what a pass set aside: a caption dropped unseen, an outage's catch-up;
@@ -203,8 +204,7 @@ def _panel(card: ScoreboardCard[Any] | None) -> tuple[str, str] | None:
 
 def _panel_words(bottom: BottomPanel) -> str:
     if isinstance(bottom, CaptionPanel):
-        place = f"{bottom.place.index}/{bottom.place.count}" if bottom.place is not None else "alone"
-        return f"{type(bottom.caption).__name__} {place}"
+        return type(bottom.caption).__name__
     if isinstance(bottom, PlayerLinesPanel):
         return f"players #{bottom.rank + 1}"
     return {"LineScorePanel": "line score", "TeamBoxPanel": "team box"}[type(bottom).__name__]

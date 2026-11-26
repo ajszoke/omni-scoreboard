@@ -14,7 +14,6 @@ from omni.cards.basketball import (
     CaptionPanel,
     LineScorePanel,
     PlayerLinesPanel,
-    QueuePlace,
     TeamBoxPanel,
 )
 from omni.core.enum import HomeAway
@@ -78,12 +77,6 @@ def test_a_game_payload_refuses_what_doesnt_go_with_its_moment(phase: Basketball
 def test_a_game_payload_takes_what_goes_with_its_moment(phase: BasketballPhase, changes: dict[str, Any]) -> None:
     payload = BasketballGameCardPayload(state=_state(phase), **changes)
     assert payload.records == BySide(None, None)
-
-
-@pytest.mark.parametrize("place", [(1, 1), (0, 2), (3, 2)])
-def test_a_place_in_a_queue_is_one_of_two_or_more(place: tuple[int, int]) -> None:
-    with pytest.raises(ValueError):
-        QueuePlace(*place)
 
 
 def test_player_lines_walk_each_teams_plus_minus_order() -> None:

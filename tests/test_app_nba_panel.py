@@ -1,10 +1,11 @@
-"""The NBA live card's bottom panel: a play alone holds its turn, two or more run 6 s each numbered i/N with N growing,
-a timeout or a ruling holds a whole turn, the stat rotation in its order (the stat panels alone through a timeout, the
-line score alone without the players' lines), every change on the card's own half boundaries, and a caption that no
-confirmed frame carried by its latest start is dropped, never shown late."""
+"""The NBA live card's bottom panel: a play alone holds its turn, two or more run 6 s each with no count drawn on any
+board, a timeout or a ruling holds a whole turn, the stat rotation in its order (the stat panels alone through a
+timeout, the line score alone without the players' lines), every change on the card's own half boundaries, and a
+caption that no confirmed frame carried by its latest start is dropped, never shown late."""
 
 from __future__ import annotations
 
+import re
 from datetime import timedelta
 
 from omni.app.nba_panel import BottomPanelQueue, PanelPolicy, PanelView, QueuedCaption, StatPanel, whole_turn
@@ -13,11 +14,10 @@ from omni.cards.basketball import (
     CaptionPanel,
     LineScorePanel,
     PlayerLinesPanel,
-    QueuePlace,
     TeamBoxPanel,
 )
 from omni.core.clock import MonotonicTime
-from omni.core.enum import HomeAway
+from omni.core.enum import HomeAway, PanelProfile
 from omni.domain.basketball import BySide, PlayerLine
 from omni.events.basketball import (
     BasketballCaption,
@@ -27,7 +27,12 @@ from omni.events.basketball import (
     ShotValue,
     TimeoutTaken,
 )
-from tests.basketball_fixtures import player
+from omni.panels.geometry import geometry_for
+from omni.renderers.canvas import DrawOp, RecordingCanvas
+from omni.renderers.context import RenderContext
+from omni.renderers.live_basketball import _DIVIDER as DIVIDER
+from omni.renderers.live_basketball import LiveBasketballRenderer
+from tests.basketball_fixtures import T, game_card, live, player, side
 
 A, H = HomeAway.AWAY, HomeAway.HOME
 S = timedelta(seconds=1)
@@ -87,10 +92,23 @@ class _Card:
         return changes
 
 
+_DIVIDER_Y = {PanelProfile.QUAD_128X64: 40, PanelProfile.STACK_64X64: 50}  # the single has no bottom panel
+
+
+def _drawn(bottom: BottomPanel, profile: PanelProfile, at: float) -> list[DrawOp]:
+    """A live card carrying ``bottom``, drawn on ``profile`` ``at`` seconds into its turn."""
+    payload = live(
+        side(58, 4, False, (26, 25, 7)), side(68, 5, True, (26, 33, 9)), 3, 3670, home_win=None, bottom=bottom
+    )
+    width, height = geometry_for(profile).size
+    canvas = RecordingCanvas(width, height)
+    LiveBasketballRenderer().render(game_card(payload), RenderContext(profile=profile, now=T + at * S), canvas)
+    return canvas.ops
+
+
 def _word(bottom: BottomPanel) -> str:
     if isinstance(bottom, CaptionPanel):
-        place = f" {bottom.place.index}/{bottom.place.count}" if bottom.place is not None else ""
-        return f"{getattr(bottom.caption, 'shooter', type(bottom.caption).__name__)}{place}"
+        return getattr(bottom.caption, "shooter", type(bottom.caption).__name__)
     if isinstance(bottom, PlayerLinesPanel):
         return f"players {bottom.rank}"
     return "line score" if isinstance(bottom, LineScorePanel) else "team box"
@@ -165,30 +183,39 @@ def test_the_rotation_picks_up_where_it_left_off_on_the_card_s_next_turn() -> No
 # --- the play queue --------------------------------------------------------------------------------------------
 
 
-def test_one_play_holds_a_whole_turn_with_no_marker() -> None:
+def test_one_play_holds_a_whole_turn() -> None:
     card = _Card()
     card.panel.offer(_queued(_basket(1), T0))
     card.up()
     assert card.run(0, 24) == [(0, "A.Shooter1"), (12, "line score")]
 
 
-def test_two_or_more_waiting_run_6_s_each_numbered_and_n_grows_as_plays_arrive() -> None:
+def test_a_run_of_plays_shows_6_s_each_and_no_caption_on_any_profile_draws_a_count() -> None:
     card = _Card()
     for n in (1, 2):
         card.panel.offer(_queued(_basket(n), T0, order=n))
     card.up()
-    changes = card.run(0, 3)
-    for n in (3, 4):  # two more arrive during the first
+    assert card.run(0, 3) == [(0, "A.Shooter1")]
+    for n in (3, 4):  # two more arrive during the first, and join the run
         card.panel.offer(_queued(_basket(n), T0 + 3 * S, order=n))
-    changes += card.run(3, 36)
-    assert changes == [
-        (0, "A.Shooter1 1/2"),
-        (3, "A.Shooter1 1/4"),
-        (6, "A.Shooter2 2/4"),
-        (12, "A.Shooter3 3/4"),
-        (18, "A.Shooter4 4/4"),
+    assert card.run(3, 36) == [
+        (3, "A.Shooter1"),  # the frame after they arrive: the first is still up
+        (6, "A.Shooter2"),
+        (12, "A.Shooter3"),
+        (18, "A.Shooter4"),
         (24, "line score"),
     ]
+    captions = [(at, bottom) for at, bottom in card.shown if isinstance(bottom, CaptionPanel)]
+    assert len(captions) == 24
+    for profile in PanelProfile:
+        for at, bottom in captions:
+            ops = _drawn(bottom, profile, at)
+            assert not [op.text for op in ops if op.op == "text" and re.fullmatch(r"\d+/\d+", op.text)]
+            divider = [op for op in ops if op.op == "fill_rect" and op.y == _DIVIDER_Y.get(profile)]
+            width = geometry_for(profile).width
+            assert [(op.x, op.w, op.color) for op in divider] == (
+                [(0, width, DIVIDER)] if profile in _DIVIDER_Y else []
+            )
 
 
 def test_a_timeout_and_a_ruling_hold_a_whole_turn_even_in_a_run() -> None:
@@ -198,20 +225,20 @@ def test_a_timeout_and_a_ruling_hold_a_whole_turn_even_in_a_run() -> None:
     card.panel.offer(_queued(ChallengeWon(side=H), T0, order=3))
     card.up()
     assert card.run(0, 36) == [
-        (0, "A.Shooter1 1/3"),
-        (6, "TimeoutTaken 2/3"),
-        (18, "ChallengeWon 3/3"),
+        (0, "A.Shooter1"),
+        (6, "TimeoutTaken"),
+        (18, "ChallengeWon"),
         (30, "line score"),
     ]
     assert whole_turn(TimeoutTaken(side=H, left=5)) and not whole_turn(_basket(1))
 
 
-def test_a_lone_play_whose_run_partner_has_gone_shows_with_no_marker() -> None:
+def test_a_lone_play_whose_run_partner_cant_go_up_holds_a_whole_turn() -> None:
     card = _Card()
     card.panel.offer(_queued(_basket(1), T0, order=1))
     card.panel.offer(_queued(_basket(2), T0, order=2, after=T0 + 99999 * S))  # its slate never catches up
     card.up()
-    assert card.run(0, 6) == [(0, "A.Shooter1")]  # the second can't go up beside this score
+    assert card.run(0, 24) == [(0, "A.Shooter1"), (12, "line score")]  # the second can't go up beside this score
 
 
 def test_a_stat_panel_gives_way_to_a_play_at_the_first_half_boundary_after_it_has_had_a_half() -> None:
@@ -330,7 +357,6 @@ def test_each_slot_knows_its_own_frames() -> None:
     panel.bottom(T0, PLAY)
     panel.shown(1, T0, PlayerLinesPanel.ranked(0, _AWAY, _HOME))  # not the line score proposed
     assert panel.next_change(T0, PLAY) == T0 + 12 * S  # still proposed: as if it started now
-    assert CaptionPanel(caption=_basket(1), place=QueuePlace(1, 2)).place == QueuePlace(1, 2)
 
 
 def test_the_policy_s_bounds_and_the_rotation_s_order() -> None:
