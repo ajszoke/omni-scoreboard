@@ -57,6 +57,7 @@ from omni.renderers.live_baseball import (
 )
 from omni.renderers.pillow_canvas import PillowCanvas
 from omni.renderers.text import text_width
+from omni.renderers.visual_treatment import DEFAULT_CONTRAST_POLICY
 
 GOLDEN_DIR = Path(__file__).resolve().parent / "golden"
 LOGOS = LogoStore()  # resolves the committed COL/LAD tiles for the logo + golden renders
@@ -64,8 +65,9 @@ T = datetime(2026, 6, 17, 19, 5, tzinfo=timezone.utc)
 SOURCE = SourceRef("mlb_statsapi")
 ALL_PROFILES = (PanelProfile.QUAD_128X64, PanelProfile.STACK_64X64, PanelProfile.SINGLE_64X32)
 REGISTRY = MlbTeamRegistry.from_color_file()  # the real palette, so a render shows what the board would draw
-AWAY_COLOR = LOGO_ALT_COLOR[115].value_lifted()  # COL's bar: its base is black, so its purple names the club
-HOME_COLOR = LOGO_BASE_COLOR[119].value_lifted()  # LAD's bar: Dodger blue
+# COL's bar: its base is black, so its purple names the club.
+AWAY_COLOR = DEFAULT_CONTRAST_POLICY.lift(LOGO_ALT_COLOR[115])
+HOME_COLOR = DEFAULT_CONTRAST_POLICY.lift(LOGO_BASE_COLOR[119])  # LAD's bar: Dodger blue
 WHITE = RGBColor(255, 255, 255)
 YELLOW = RGBColor(255, 215, 0)  # game-state color: count, outs, bases, stat lines
 DIM = RGBColor(60, 60, 60)  # spent / empty markers

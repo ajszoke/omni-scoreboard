@@ -8,6 +8,7 @@ from omni.core.colors import RGBColor
 from omni.providers.mlb_palette import LOGO_ALT_COLOR, LOGO_BASE_COLOR
 from omni.providers.mlb_teams import _TEAM_ID_INFO
 from omni.renderers.image import LogoImage
+from omni.renderers.visual_treatment import DEFAULT_CONTRAST_POLICY
 
 _FLOOR = 25.0  # delta_e below which two backgrounds blur together on a small panel
 _FLOOR_DE2000 = 20.0  # delta_e_2000 below which two backgrounds blur together, whatever CIE76 says
@@ -49,11 +50,12 @@ def test_every_meter_color_value_lifts_to_legibility_on_black() -> None:
     # The win-probability meter paints a team's freed color (its base or its alt,
     # whichever isn't the logo background) onto the black panel. However dim the brand
     # color — the Angels' navy, a deep red — value-lift must clear the legibility floor.
+    floor = DEFAULT_CONTRAST_POLICY.min_contrast
     black = RGBColor(0, 0, 0)
     for palette in (LOGO_BASE_COLOR, LOGO_ALT_COLOR):
         for team_id, color in palette.items():
-            lifted = color.value_lifted()
-            assert lifted.contrast_ratio(black) >= 3.0, f"{_TEAM_ID_INFO[team_id][0]} {color} did not lift"
+            lifted = DEFAULT_CONTRAST_POLICY.lift(color)
+            assert lifted.contrast_ratio(black) >= floor, f"{_TEAM_ID_INFO[team_id][0]} {color} did not lift"
 
 
 def test_detrademark_kept_the_twins_c_and_the_athletics_apostrophe() -> None:

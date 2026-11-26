@@ -17,8 +17,13 @@ from omni.domain.teams import Team
 from omni.providers.nba_palette import FREED_BASE_METER_COLOR, LOGO_ALT_COLOR, LOGO_BASE_COLOR
 from omni.providers.nba_teams import NBA_TEAMS, NbaTeamRegistry
 from omni.renderers.image import LogoImage, LogoStore
-from omni.renderers.logo_clash import MatchupLogoVariants, logo_background, resolve_logo_variants
-from omni.renderers.visual_treatment import DEFAULT_CONTRAST_POLICY, MarkTreatment, resolve_matchup_treatment
+from omni.renderers.logo_clash import MatchupLogoVariants, clash_metric, logo_background, resolve_logo_variants
+from omni.renderers.visual_treatment import (
+    DEFAULT_CONTRAST_POLICY,
+    MarkTreatment,
+    resolve_bar_colors,
+    resolve_matchup_treatment,
+)
 
 _FLOOR = 25.0  # delta_e below which two backgrounds blur together on a small panel
 _FLOOR_DE2000 = 20.0  # delta_e_2000 below which two backgrounds blur together, whatever CIE76 says
@@ -63,12 +68,13 @@ def test_every_club_has_20x20_base_and_alt_tiles(abbreviation: str) -> None:
 
 
 def test_every_meter_color_value_lifts_to_legibility_on_black() -> None:
+    floor = DEFAULT_CONTRAST_POLICY.min_contrast
     for palette in (LOGO_BASE_COLOR, LOGO_ALT_COLOR, FREED_BASE_METER_COLOR):
         for abbreviation, color in palette.items():
             if color == _BLACK:
                 continue  # a black background is never spent on a meter; the meter goes white instead
-            lifted = color.value_lifted()
-            assert lifted.contrast_ratio(_BLACK) >= 3.0, f"{abbreviation} {color} did not lift"
+            lifted = DEFAULT_CONTRAST_POLICY.lift(color)
+            assert lifted.contrast_ratio(_BLACK) >= floor, f"{abbreviation} {color} did not lift"
 
 
 def _count(tile: LogoImage, wanted: Callable[[RGBColor], bool]) -> int:
@@ -125,6 +131,15 @@ def test_the_magic_ball_shows_on_its_blue_base() -> None:
 def test_the_heat_ball_shows_on_its_alt() -> None:
     # The red ball would melt into the table's red; the alt is the club's yellow instead.
     assert _count(_tile("MIA", "-alt"), lambda p: p.r > 100 and p.g < 60) >= 40
+
+
+def test_the_hornet_shows_teal_on_its_purple_base_and_purple_on_its_teal_alt() -> None:
+    # On the base the mark's purple and teal trade places, so the hornet reads teal on the purple tile
+    # (drawn as is, about a dozen of its pixels are teal); on the teal alt it keeps the purple it is drawn in.
+    purple, teal = LOGO_BASE_COLOR["CHA"], LOGO_ALT_COLOR["CHA"]
+    assert (purple, teal) == (RGBColor(29, 17, 96), RGBColor(0, 120, 140))
+    assert _count(_tile("CHA"), lambda p: p.r < 60 and p.g > 80 and p.b > 100) >= 40
+    assert _count(_tile("CHA", "-alt"), lambda p: max(p.r, p.g, p.b) < 110 and p.delta_e(teal) >= _FLOOR) >= 30
 
 
 _HAND_PICKED = {"CHA"}
@@ -211,4 +226,56 @@ def test_a_navy_club_meters_white_when_it_switches_to_its_alt() -> None:
     )
     assert treatment.away.variant is LogoVariant.ALT and treatment.away.meter_color == _WHITE
     assert treatment.home.variant is LogoVariant.BASE
-    assert treatment.home.meter_color == LOGO_ALT_COLOR["NOP"].value_lifted()
+    assert treatment.home.meter_color == DEFAULT_CONTRAST_POLICY.lift(LOGO_ALT_COLOR["NOP"])
+
+
+def _quad(away: str, home: str) -> tuple[MarkTreatment, MarkTreatment]:
+    treatment = resolve_matchup_treatment(
+        _REGISTRY.resolve(away),
+        _REGISTRY.resolve(home),
+        profile=PanelProfile.QUAD_128X64,
+        logos=_LOGOS,
+        policy=DEFAULT_CONTRAST_POLICY,
+        away_top=0,
+        home_top=20,
+    )
+    return treatment.away, treatment.home
+
+
+def test_charlotte_meters_teal_beside_its_purple_base() -> None:
+    for away, home in (("CHA", "BOS"), ("BOS", "CHA")):
+        cha = dict(zip((away, home), _quad(away, home)))["CHA"]
+        assert cha.is_tile and cha.variant is LogoVariant.BASE
+        assert cha.meter_color == DEFAULT_CONTRAST_POLICY.lift(LOGO_ALT_COLOR["CHA"])
+        meter = cha.meter_color
+        assert meter.g > meter.r + 80 and meter.b > meter.r + 80, meter  # teal: green and blue, next to no red
+
+
+def test_charlotte_and_phoenix_share_a_purple_so_the_visitor_shows_its_alt() -> None:
+    cha, phx = _REGISTRY.resolve("CHA"), _REGISTRY.resolve("PHX")
+    assert LOGO_BASE_COLOR["CHA"] == LOGO_BASE_COLOR["PHX"]
+    assert resolve_logo_variants(cha, phx) == MatchupLogoVariants(LogoVariant.ALT, LogoVariant.BASE)
+    assert resolve_logo_variants(phx, cha) == MatchupLogoVariants(LogoVariant.ALT, LogoVariant.BASE)
+    # The visiting Hornets show the hornet on teal and meter in their purple; the Suns keep theirs, metering white.
+    away, home = _quad("CHA", "PHX")
+    assert (away.variant, away.meter_color) == (LogoVariant.ALT, DEFAULT_CONTRAST_POLICY.lift(LOGO_BASE_COLOR["CHA"]))
+    assert (home.variant, home.meter_color) == (LogoVariant.BASE, _WHITE)
+    # As bars, which paint the lifted purple both clubs share, the visitor switches the same way.
+    assert resolve_bar_colors(cha, phx, policy=DEFAULT_CONTRAST_POLICY) == (
+        DEFAULT_CONTRAST_POLICY.lift(LOGO_ALT_COLOR["CHA"]),
+        DEFAULT_CONTRAST_POLICY.lift(LOGO_BASE_COLOR["PHX"]),
+    )
+
+
+@pytest.mark.parametrize("rival", ["LAL", "UTA"])
+def test_charlotte_and_a_club_in_a_near_purple_send_the_visitor_to_its_alt(rival: str) -> None:
+    cha, other = _REGISTRY.resolve("CHA"), _REGISTRY.resolve(rival)
+    assert resolve_logo_variants(cha, other) == MatchupLogoVariants(LogoVariant.ALT, LogoVariant.BASE)
+    assert resolve_logo_variants(other, cha) == MatchupLogoVariants(LogoVariant.ALT, LogoVariant.BASE)
+
+
+def test_charlottes_teal_alt_reads_apart_from_every_purple_near_its_base() -> None:
+    purples = (LOGO_BASE_COLOR["PHX"], LOGO_BASE_COLOR["LAL"], LOGO_BASE_COLOR["UTA"], LOGO_ALT_COLOR["SAC"])
+    for purple in purples:
+        assert clash_metric(LOGO_BASE_COLOR["CHA"], purple) is not None, purple
+        assert clash_metric(LOGO_ALT_COLOR["CHA"], purple) is None, purple

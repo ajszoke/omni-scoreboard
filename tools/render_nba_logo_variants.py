@@ -79,6 +79,15 @@ def _on(abbreviation: str, slot: str, **changes: object) -> Treatment:
 # Per-club overrides (else: the mark for the tile's surface, as drawn, on its palette background). Each
 # fixes a mark drawn in its own background color, which would vanish into the tile.
 _BASE_TREAT: dict[str, Treatment] = {
+    # Hornets: the mark's purple and teal trade places, so a teal hornet shows on the purple tile.
+    "CHA": _on(
+        "CHA",
+        "base",
+        recolors=(
+            (RGBColor(31, 22, 72), LOGO_ALT_COLOR["CHA"], 40),
+            (RGBColor(0, 119, 140), LOGO_BASE_COLOR["CHA"], 40),
+        ),
+    ),
     "CHI": _on("CHI", "base", outline=_BLACK),  # the bull stroked black: its red melts into the red tile
     # Pistons: the ball and its white ring alone, without the logo's own blue rim and silver edge, so the ball fills
     # the blue tile. The white ring starts about 8.5% in from the logo's edge.

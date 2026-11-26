@@ -19,8 +19,8 @@ back to a plain color bar — so adding it broke no existing call site.
 renderer showing a time of day converts through this; None falls back to the render clock's own zone.
 
 `contrast` is the hardware-tunable legibility policy (the WCAG floor a dim brand color
-is value-lifted to, and the clash distance two tiles must keep). It defaults to the
-pre-policy behavior, so it too is a transparent addition; a device tunes it per sink.
+is value-lifted to, and the clash distance two tiles must keep). It defaults to
+`DEFAULT_CONTRAST_POLICY`; a device tunes it per sink.
 """
 
 from __future__ import annotations

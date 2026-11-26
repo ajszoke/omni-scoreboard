@@ -28,7 +28,7 @@ LOGO_BASE_COLOR: dict[str, RGBColor] = {
     "ATL": RGBColor(200, 16, 46),
     "BOS": RGBColor(0, 131, 72),
     "BKN": _BLACK,
-    "CHA": RGBColor(0, 120, 140),
+    "CHA": RGBColor(29, 17, 96),  # the user's pick, the table's second: a teal hornet on purple, beside a teal meter
     "CHI": RGBColor(206, 17, 65),
     "CLE": RGBColor(134, 0, 56),
     "DAL": RGBColor(0, 100, 177),
@@ -62,7 +62,7 @@ LOGO_ALT_COLOR: dict[str, RGBColor] = {
     "ATL": RGBColor(253, 185, 39),
     "BOS": _WHITE,
     "BKN": RGBColor(111, 114, 113),  # gray, the third color: on white, its meter (white too) would vanish
-    "CHA": RGBColor(29, 17, 96),
+    "CHA": RGBColor(0, 120, 140),  # the table's first, traded with the base
     "CHI": _BLACK,
     "CLE": _WHITE,  # the user's pick: the base's maroon C with its gold bevel, on white
     "DAL": RGBColor(187, 196, 202),
