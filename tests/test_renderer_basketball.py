@@ -24,7 +24,7 @@ from omni.core.ids import LeagueScopedId, SourceRef
 from omni.domain.baseball import WinLossRecord
 from omni.domain.basketball import BasketballPhase, BySide, CallChange, PlayerCallChange, ScoringRun
 from omni.domain.contest import GolfTournament
-from omni.events.basketball import CallReversed, FieldGoalMade, PersonalFoul, ShotValue, TimeoutTaken
+from omni.events.basketball import CallReversed, FieldGoalMade, PersonalFoul, ShotValue, TechnicalFoul, TimeoutTaken
 from omni.panels.geometry import geometry_for
 from omni.renderers.basketball_pregame import BasketballPregameRenderer
 from omni.renderers.canvas import Canvas, RecordingCanvas
@@ -312,6 +312,16 @@ def test_the_singles_scoring_play_turns_its_teams_score_green_and_nothing_else_d
 
     assert scores(basket) == {"58": WHITE, "68": GREEN}
     assert scores(foul) == scores(reversal) == {"58": WHITE, "68": WHITE}
+
+
+def test_on_the_single_a_made_technical_greens_the_shooters_score_and_a_missed_one_nothing() -> None:
+    def scores(made: bool) -> dict[str, RGBColor | None]:
+        technical = TechnicalFoul(side=HomeAway.AWAY, shooter="A.Edwards", made=made, game_made=7, game_attempted=8)
+        bottom = CaptionPanel(caption=technical)  # charged to the away side, so the home side shot it
+        return {op.text: op.color for op in _ops(_live(bottom=bottom), SINGLE).texts() if op.text in ("58", "68")}
+
+    assert scores(True) == {"58": WHITE, "68": GREEN}
+    assert scores(False) == {"58": WHITE, "68": WHITE}
 
 
 def test_the_single_shows_whose_timeout_play_is_stopped_for_in_place_of_the_clock() -> None:

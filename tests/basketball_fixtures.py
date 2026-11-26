@@ -52,9 +52,11 @@ from omni.events.basketball import (
     CallReversed,
     ChallengeWon,
     FieldGoalMade,
+    FreeThrow,
     FreeThrows,
     PersonalFoul,
     ShotValue,
+    TechnicalFoul,
     TimeoutTaken,
 )
 from omni.providers.nba_teams import NbaTeamRegistry
@@ -509,6 +511,61 @@ SPECIMENS: tuple[Specimen, ...] = (
         ),
         _utc("2026-11-17T02:05:40Z"),
         profiles=_NO_SINGLE,
+    ),
+    # A free throw as it lands: its made tone turns the single's home score green. Queued, the quad's headline
+    # keeps its whole width beside ``i/N``.
+    Specimen(
+        "live-free-throw",
+        game_card(
+            live(
+                side(58, 4, False, (26, 25, 7)),
+                side(69, 5, True, (26, 33, 10)),
+                3,
+                3610,
+                home_win=85.0,
+                records=_POR_MIN,
+                bottom=caption(
+                    FreeThrow(side=H, shooter="A.Edwards", place=1, made=True, game_made=6, game_attempted=7)
+                ),
+            )
+        ),
+        _utc("2026-11-17T02:41:10Z"),
+    ),
+    Specimen(
+        "live-free-throw-queued",
+        game_card(
+            live(
+                side(58, 4, False, (26, 25, 7)),
+                side(69, 5, True, (26, 33, 10)),
+                3,
+                3610,
+                home_win=85.0,
+                records=_POR_MIN,
+                bottom=caption(
+                    FreeThrow(side=H, shooter="A.Edwards", place=2, made=False, game_made=6, game_attempted=8),
+                    (2, 3),
+                ),
+            )
+        ),
+        _utc("2026-11-17T02:41:31Z"),
+        profiles=_NO_SINGLE,
+    ),
+    # A technical, seen through its free throw: the side charged in the headline, the shooter under it. Its alert
+    # tone leaves the single's scores as they are.
+    Specimen(
+        "live-technical",
+        game_card(
+            live(
+                side(58, 4, False, (26, 25, 7)),
+                side(70, 5, True, (26, 33, 11)),
+                3,
+                3610,
+                home_win=86.0,
+                records=_POR_MIN,
+                bottom=caption(TechnicalFoul(side=A, shooter="A.Edwards", made=True, game_made=7, game_attempted=8)),
+            )
+        ),
+        _utc("2026-11-17T02:42:02Z"),
     ),
     Specimen(
         "live-run",
