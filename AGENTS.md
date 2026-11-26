@@ -90,7 +90,7 @@ Free/low-cost by default:
 - Do not use Kalshi's API (its Developer Agreement limits use to a member's own trading) or polymarket.com's APIs from the US (its terms limit US residents to content features). Details: `docs/agent_context/SOURCES.md`.
 - Commercial fallback only after free sources fail product needs.
 - Each source's terms are typed in `omni/providers/rights.py`, with the user's ruling beside them: showing data on the family's own boards from a short-lived copy that expires is display, not redistribution (revisit before any commercial use).
-- A recording or run log quoting a provider whose terms allow no standing copy (NFLMeta) is stamped with a delete-by (`RETENTION.json`), and the expiry sweep mines it into our own telemetry, then deletes it (`tools/recordings_due.py --expire`; the NFL runner sweeps at start and exit). Provider wording never lands anywhere else. Every account's requests and rows are counted against its limits (`omni/app/quota.py`).
+- A recording or run log quoting a provider whose terms allow no standing copy (NFLMeta) is stamped with a delete-by (`RETENTION.json`), and the expiry sweep mines it into our own telemetry (a run log also into a redacted log, `tools/redact_run_log.py`), then deletes it (`tools/recordings_due.py --expire`; the NFL runner and the shared app sweep at start and exit, the shared app hourly too). Provider wording never lands anywhere else. Every account's requests and rows are counted against its limits (`omni/app/quota.py`).
 
 ## Device policy
 
