@@ -107,6 +107,11 @@ quad's state module in three columns) rather than tucked into the gaps between w
 
 ## Phase plan
 
+_Where it stands (2026-11-25):_
+- Phases 0–4 are done.
+- MLB (Phase 3), NFL (6) and NBA (7) run together on the shared board; their remaining gaps are in `STATUS.md`.
+- Phase 5, the family device, is next. Its hardware is in `HARDWARE.md`.
+
 ### Phase 0 — Project reset and local foundation
 
 Goal: revive the repo cleanly without carrying old divergence as technical debt.
@@ -310,6 +315,11 @@ Definition of done:
 
 - Favorite NFL team can be followed across all three display profiles with TV delay and priority queue integration.
 
+**Status (2026-11-25): met, except the pregame card.**
+- The live, kickoff, halftime and final cards run on all three profiles, on the shared board, under policy v2.
+- On Builder, every live game is read with its plays.
+- The meter and win swings are in.
+
 ### Phase 7 — NBA
 
 Goal: frequent-game league with simpler event model than baseball.
@@ -325,6 +335,12 @@ Cards:
 Definition of done:
 
 - Favorite NBA team support works and interleaves sanely with MLB/NFL.
+
+**Status (2026-11-25): met.**
+- The pregame, live and final cards (v6) run on all three profiles.
+- Captions come from the players' lines on ALL-STAR.
+- NBA interleaves with NFL on the shared board under policy v2.
+- Still to do: win swings and play promotions, as NFL has.
 
 ### Phase 8 — NHL
 

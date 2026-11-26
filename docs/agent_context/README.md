@@ -13,8 +13,12 @@ Primary product scope:
 - MLB remains the quality baseline.
 - Expansion order: MLB first, then NFL, NBA, NHL, PGA, then NCAA only after the above are stable.
 
-Files in this pack:
+Files in this pack (the original pack is frozen in `kernel/`; these are the living copies):
 
+- `STATUS.md` — what runs today, what's open, and what's next. Read it first after `AGENTS.md`.
+- `BOARD_POLICY.md` — which card the shared board shows, and when (policy v2).
+- `CLOCK_AND_SCHEDULING.md` — the clock and the scheduler (the "tower").
+- `HARDWARE.md` — panels, Pi and adapter for the family boards.
 - `ROADMAP.md` — comprehensive product and implementation roadmap.
 - `ARCHITECTURE_TYPED_DOMAIN.md` — typed/OOP architecture proposal and model sketches.
 - `BACKLOG.yaml` — issue-like structured backlog for agents.

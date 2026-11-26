@@ -15,10 +15,10 @@ wrappers that defer here: `CLAUDE.md` (Claude Code) and `.cursor/rules/` (Cursor
 config (permissions/skills) lives in `.claude/` but carries no project knowledge.
 
 - **Current status:** `docs/agent_context/STATUS.md` (living — update when state changes).
-- **Deep context:** `docs/agent_context/` — `ROADMAP.md`, `ARCHITECTURE_TYPED_DOMAIN.md`, `CLOCK_AND_SCHEDULING.md` (planned central clock/scheduler), `BOARD_POLICY.md` (which card the shared board shows, and when), `BACKLOG.yaml`, `SOURCES.md`.
+- **Deep context:** `docs/agent_context/` — `ROADMAP.md`, `ARCHITECTURE_TYPED_DOMAIN.md`, `CLOCK_AND_SCHEDULING.md` (planned central clock/scheduler), `BOARD_POLICY.md` (which card the shared board shows, and when), `HARDWARE.md` (panels, Pi and adapter for family boards), `BACKLOG.yaml`, `SOURCES.md`.
 - **Dev environment:** uv + project-local `.venv`; software emulator, no Pi needed — `docs/dev_setup.md`.
 - **Code:** `main.py` (entry), `renderers/`, `data/`, local packages `bullpen/ standings/ news/`; `starter_code/` holds typed-domain sketches to grow into `omni/`; `cloud/` is the AWS market service (see its `README.md`).
-- **Reference hardware:** a physical `quad_128x64` (2×2) board runs headless on the LAN (`screen` + `run.sh`); its SSH target is machine-local (`CLAUDE.local.md`, git-ignored). Use the `run-on-board` skill. It currently runs the pre-revival code.
+- **Reference hardware:** a physical `quad_128x64` (2×2) board on the LAN; its SSH target is machine-local (`CLAUDE.local.md`, git-ignored). The shared app renders on the dev machine and pipes frames to the Pi's display process (`tools/board_frame_sink.py`). Use the `run-on-board` skill.
 
 ## Operating notes
 
@@ -44,17 +44,18 @@ The old fork should be preserved as `omni-scoreboard-legacy`. The new repo shoul
 
 Do not blindly merge the legacy fork into upstream. Use legacy code as reference/prototype material.
 
-## Immediate priorities
+## Priorities
 
-1. Stand up clean repo/local clone.
-2. Run upstream in emulator.
-3. Add typed enum/domain foundation.
-4. Add display profile model for 64x32, 64x64, 128x64.
-5. Add fixture replay and snapshot tests.
-6. Fix MLB P0/P1 bugs before broad league expansion.
-7. Implement generic delay/event/card queue.
-8. Add setup portal, safe updater, sleep schedule, and physical button support.
-9. Add NFL, NBA, NHL, PGA, then NCAA later.
+The bootstrap's first seven are done: a clean repo, the upstream emulator, the typed domain, display profiles,
+fixture replay and goldens, MLB's P0/P1 fixes, and the delay/event/card queue. MLB, NFL and NBA run on the
+shared board. What's next is in `docs/agent_context/STATUS.md`, under "Next". In broad order:
+
+1. The friends-and-family path:
+   - each board's data without the user's keys;
+   - the app on the Pi itself;
+   - a setup portal, a safe updater, a sleep schedule and physical button support;
+   - an enclosure.
+2. Then NHL and PGA, and NCAA later.
 
 ## Type policy
 
@@ -81,8 +82,8 @@ Every spacing/animation bug fixed should get a fixture or golden-image snapshot 
 Free/low-cost by default:
 
 - MLB: upstream MLB StatsAPI integration.
-- NFL: NFLMeta (chosen 2026-11-15; ESPN's terms bar automated access), behind a provider. Free until its month is spent, then Builder (the user's plan, 2026-11-17).
-- NBA: BALLDONTLIE's Free tier (chosen 2026-11-16), behind a provider. Its terms bar sharing a key, so the key never goes onto a friend's board.
+- NFL: NFLMeta (chosen 2026-11-15; ESPN's terms bar automated access), behind a provider. The app defaults to Free; the user's board runs Builder (`--nflmeta-plan builder`, since 2026-11-22), which reads every live game's plays.
+- NBA: BALLDONTLIE (chosen 2026-11-16), behind a provider. The app defaults to Free; the user's board runs ALL-STAR (`--balldontlie-plan all-star`, since 2026-11-18) for players' lines. Its terms bar sharing a key, so the key never goes onto a friend's board.
 - NHL/PGA: not yet chosen; candidates in `docs/agent_context/SOURCES.md`.
 - PGA probability/cut-line optional: DataGolf if worth the key/cost.
 - MLB pregame odds: Bovada's public coupon, behind a provider; it sits behind a 10-minute CDN cache, so never use it for a live value. Its terms limit content to private personal use and bar storing it elsewhere without consent, so the cloud poller leaves it off by default.

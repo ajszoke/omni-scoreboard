@@ -95,7 +95,11 @@ deliberate; the renderer axis and sequencing are flagged for external review, no
   `assert_never` dispatch — instead of the proposed `profile_single_64x32.py` / `_stack_64x64` /
   `_quad_128x64` modules. Rationale: a card's layout is cohesive across profiles, and the `Canvas`
   seam lets one renderer drive a golden image, a recording double, or a real panel. **Axis inversion —
-  for the head to bless.**
+  for the head to bless.** _(Since #131, 2026-11-25: each string's raster and mask is cached
+  (`font.rasterize`/`text_mask`), `PillowCanvas` draws with Pillow's C paste, and each matchup's visual treatment
+  is cached. A quad frame on the Pi 3A+ fell from 104 ms to 11.7 ms. `MatrixCanvas` still sets pixels one at a
+  time from Python; an on-device board should render into `PillowCanvas` and push one `SetImage`, as
+  `tools/board_frame_sink.py` does.)_
 - **`core/serialization.py` — absent.** Serialization is inline on enums (`to_json_value()`); no
   central module was needed yet.
 - **`panels/` — `geometry.py` only.** `PanelProfile` lives in `core/enum.py` (subsumes `profiles.py`);
@@ -554,12 +558,22 @@ Provider modules own raw API shape. The rest of the system never sees raw JSON. 
 - **Schedule facts** on `Contest`: `stage` (`SeasonStage`), `game_number`, `start_tbd`, `provider_date`,
   `neutral_site`, `national_broadcast` and `resumed_from`, each unknown by default.
 
-- **Each league reaches its own card pipeline.** Baseball goes to `LiveBaseballPipeline`, NFL to
-  `LiveFootballPipeline` (`omni/app/nfl_pipeline.py`), both into one queue; any other league's games are
-  members and count toward its health, but have no cards (`AppLoop.refresh`). NFL's slate and feeds come from
-  `PlannedNfl` (`omni/app/planned_nfl.py`) on the same `PollPlan` and quota ledger as MLB: the day's list once,
-  each favorite's game at 10 s with its plays, the others in one `phase=in` read every 45 s, and one read per
-  other final. `--leagues mlb,nfl` (opt-in; the default is `mlb`) and `NFLMETA_API_KEY` put NFL on the board.
+- **Each league reaches its own card pipeline.** Each pipeline feeds one queue (`AppLoop.refresh`):
+  - **Baseball** goes to `LiveBaseballPipeline`.
+  - **NFL** goes to `LiveFootballPipeline` (`omni/app/nfl_pipeline.py`). Its slate and feeds come from `PlannedNfl` (`omni/app/planned_nfl.py`), on the same `PollPlan` and quota ledger as MLB:
+    - the day's list, once;
+    - each favorite's game every 10 s, with its plays;
+    - one read per other final;
+    - on Free, the other games in one `phase=in` read every 45 s;
+    - on Builder (`--nflmeta-plan builder`, `NflMetaPlan.every_game`), every other live game read on its own every 30 s, with its plays, so each card has its pips and its play line.
+  - **NBA** goes to `LiveBasketballPipeline` (`omni/app/nba_pipeline.py`). Its slate and feeds come from `PlannedNba` (`omni/app/planned_nba.py`):
+    - BALLDONTLIE's slate every 5 s on ALL-STAR (12 s on Free);
+    - on ALL-STAR, the players' lines every 5 s;
+    - the season's finals once a day, for records.
+
+    `BasketballFeedDeriver` (`omni/events/basketball_feed.py`) turns the reads into captions, timeouts and challenges.
+  - **Any other league's games** are members and count toward its health, but have no cards.
+  - **Turning leagues on:** `--leagues mlb,nfl,nba` (the default is `mlb`) with `NFLMETA_API_KEY` or `BALLDONTLIE_API_KEY` puts NFL or NBA on the board.
 - **Quota, per provider account** (`omni/app/quota.py`, `quota_store.py`):
   - **Accounts and limits:** each account the board spends (`ProviderAccount`: StatsAPI, NFLMeta,
     BALLDONTLIE, Polymarket US, Bovada, Omni's market service) has declared limits: a minute, a month's
@@ -598,9 +612,16 @@ Provider modules own raw API shape. The rest of the system never sees raw JSON. 
 - **Rights** (`omni/providers/rights.py`): a typed manifest of each source's terms. It covers display,
   cache, archive (none, a diagnosis with a retention period, or kept), training, redistribution,
   attribution, termination and key sharing; an unstated term counts as refused. Every recording folder
-  gets a `RETENTION.json` with its delete-by date, and the expiry sweep (`omni/app/expiry.py`;
-  `tools/recordings_due.py --expire`, and the NFL runner at start and exit) mines an overdue NFLMeta folder
-  into `build/telemetry/` (`omni/telemetry/`), then deletes it. Our decision telemetry (ids, kinds, reasons,
+  gets a `RETENTION.json` with its delete-by date, and the expiry sweep (`omni/app/expiry.py`) mines an
+  overdue NFLMeta folder into `build/telemetry/` (`omni/telemetry/`), then deletes it.
+  - **Who sweeps:** `tools/recordings_due.py --expire`, the NFL runner at start and at exit, and the shared app
+    (`ExpirySweeper`) at start, every hour and at exit. The roots are the checkout's own `build/` folders.
+  - **What mining keeps:** a run log's night is kept as a digest and as a redacted log
+    (`omni/telemetry/runner_log_redact.py`). The redacted log is the timeline line for line, in our own words, with
+    NFLMeta's ids as ordinals.
+  - **The gate before bundling or sharing:** `tools/redact_run_log.py --check` fails on any log it can't vouch for.
+
+  Our decision telemetry (ids, kinds, reasons,
   timings) is ours to keep; a provider's wording follows its source's archive rule, and lands only in a
   stamped folder. Beside the terms sits the user's ruling: showing data on the family's boards from a
   short-lived copy that expires is display, not redistribution (`ProjectUse.FAMILY_BOARD_DISPLAY`).

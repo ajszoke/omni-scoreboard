@@ -161,6 +161,8 @@ milestones:
       - id: M3-011
         title: "Challenge and ABS state tightening"
         labels: [mlb, data, rendering, p2]
+        notes:
+          - "2026-11-25 (#134): every StatsAPI status maps to a typed status, ignoring case, with a fallback to abstractGameState. A game under a manager challenge, an umpire review or an ABS challenge stays live, and its review reaches the policy as MLB_REVIEW. Before, 47 of the 49 live statuses were UNKNOWN, and the game dropped off the board. Remaining: the ABS display itself."
       - id: M3-012
         title: "End-of-game winner/loser logic and W/L/S tightening"
         labels: [mlb, rendering, p2]
@@ -227,6 +229,8 @@ milestones:
       - id: M5-005
         title: "1x1/2x1/2x2 case-design notes and BOM"
         labels: [hardware, case, p2]
+        notes:
+          - "2026-11-25: the hardware scouting is in HARDWARE.md: Waveshare P4 64x32 panels, a Pi Zero 2 W, and Adafruit's Triple Bonnet. The user plans a 3D-printed frame. A quad is 512x256 mm, so it prints in sections; measure the panels when they arrive."
       - id: M5-006
         title: "Shared odds and market service for multiple boards (AWS)"
         labels: [cloud, odds, secrets, p3]
@@ -256,6 +260,7 @@ milestones:
           - "Remaining: poll once in the cloud (map NFLMeta game ids into the market slate); move the runner onto the Pi, where a full redraw costs ~93 ms (redraw only on change, or drop to ~5 fps); size the Free tier vs Builder (a game is ~1,500 requests at the recommended pace; Free allows 5,000 a month); poll off the render thread (a slow request stalls frames); try BALLDONTLIE GOAT's free trial (plays with wall-clock order) as the next provider to compare."
           - "Round 4 (2026-11-15): H1 (reads keep their pages; retries; refused cursors restart quietly) and H2 (a bounded drain after the final) fixed. `--play-feed every-poll` reads the feed each tick (about 2x the requests): a quarter of play rows sat 15 s+ in the feed before the on-change gating read them, worst 274 s."
           - "Round 4 plan: keep NFLMeta primary. Builder ($12: 75,000 requests and 250,000 rows a month) is an opt-in for regular Sundays and the user's call; Free is personal, non-commercial evaluation. Cloud polling is deferred: design the typed ingest boundary in A1a, and revisit when several devices are active and quota data justify it. Then keep the key server-side, give each game an atomic cursor commit, and settle the permitted remote display and retention before any family rollout."
+          - "2026-11-25: the user's board runs Builder (since 2026-11-22), where the shared app reads every live game with its plays (#129). Polling once in the cloud waits on the friends'-boards data design (STATUS, Next 1)."
           - "Round 4: one BALLDONTLIE GOAT shadow trial on a nationally visible game, side by side with NFLMeta, comparing eight things: scoreboard delay, clock, scoring/try/reversal coverage, missing or late plays, possession after transfers, ordering and revision semantics, requests per game, and archive permission. A benchmark, not a commitment."
       - id: M6-002
         title: "NFL domain/events/cards"
@@ -268,9 +273,12 @@ milestones:
       - id: M6-003
         title: "NFL red-zone/scoring/turnover priority"
         labels: [nfl, priority, p2]
+        notes:
+          - "2026-11-25: policy v2's interrupt classes cover majors and promotions. A play that swings the win probability 10 points is a win swing at any time (#129), and the first half's last two minutes get the late boost."
       - id: M6-004
         title: "Multi-league plumbing before NFL runs in the app"
         labels: [nfl, app, p1]
+        status: done # H5 (#114, #115) and NFL on the shared board (#116, #118, #119)
         notes:
           - "ContestStore replaces all contests per update; the loop has one supervisor and one baseball pipeline; card keys use only the raw game id; favorites match bare abbreviations, which collide across leagues (DET, MIN, KC)."
           - "Round 4 H5 (gates mixed-league operation): partition snapshots by provider, league and coverage scope, and handle partial or failed reads without removals. Use full typed ids in storage, scheduling and market joins (14 abbreviations collide between the MLB and NFL registries). Make the contest-to-market mapping an explicit join, not a slug guess. Settle ProviderUpdate.events (L5): never filled or read today. Test simultaneous favorites, a repeated burst in one league, a final against a decisive play, and an outage in one league."
@@ -282,6 +290,7 @@ milestones:
       - id: M7-001
         title: "NBA provider evaluation (licensed or explicitly documented endpoints; ESPN's terms bar automated access)"
         labels: [nba, provider, p2]
+        status: done # BALLDONTLIE; the provider is #122, and the user's board runs ALL-STAR (since 2026-11-18)
         notes:
           - "2026-11-15: the user put NBA next once A1a lands and leagues can mix. Research thread briefed for the head: ~/omni-review/research/nba-providers-prompt.md (fields, terms, slate-night cost, NFLMeta's lessons). File the answer as research/nba-providers-research.md, then fold it into SOURCES.md."
           - "2026-11-16: the head's report is in (research/nba-providers-research.md) and folded into SOURCES.md. Front-runner: BALLDONTLIE. Its Free games endpoint carries score, period, clock string, timeouts left and bonus for a whole slate in one request (5 a minute, so every 12 s), and its terms allow a central poller serving every board. ALL-STAR ($9.99) adds player stats; GOAT ($39.99) adds plays and live box scores. No budget feed has a running clock, possession or challenge count. Provider pick is the user's call."
@@ -289,6 +298,9 @@ milestones:
       - id: M7-002
         title: "NBA live/final/clutch cards"
         labels: [nba, rendering, p2]
+        status: shipped # cards v6 (#121), events (#127), the shared board (#128)
+        notes:
+          - "Remaining from the 2026-11-22 to 11-25 dogfood: win swings and play promotions as NFL has; when a run ends; timeout breaks; the order of two plays in one read; a timeout's onset during free throws; Bovada's NBA coupon sometimes answering {}."
 
   - id: M8
     name: nhl_support
@@ -353,6 +365,7 @@ milestones:
       - id: M11-003
         title: "One clock seam everywhere (football launcher on SystemClock; monotonic only for pacing)"
         labels: [app, clock, p2]
+        status: done  # A1a steps 1-2 (#101, #103); the shared app's leagues read the same seam
         notes:
           - "Round 4: one injected seam, two readings: UTC dates observations and release times; monotonic measures dwell, freshness since receipt, backoff, cooldown, animation and pacing. Replay advances both and can jump the wall clock alone. Stamp actual receipts: MLB fallbacks stamp the pass's start (pipeline.py:288)."
           - "A1a step 1: Clock.read() gives ClockReading(utc, monotonic); FakeClock.advance moves both and FakeClock.set jumps the wall clock alone; Pacer paces loops on monotonic time; the football launcher reads SystemClock, and its answers are dated by arrival. Still open: MLB receipt stamps (pipeline.py:288), with the PollPlan. The dev machine's wall clock (WSL2) was seen jumping back about 2.4 s mid-run, while the monotonic beat held."
@@ -381,6 +394,7 @@ milestones:
       - id: M11-007
         title: "Value squeeze: freshness decay per segment kind, preemption classes, cross-league fairness (needs M6-004)"
         labels: [queue, priority, clock, p3]
+        status: partly  # policy v2 (BOARD_POLICY.md, #116-#119) built interrupt classes and debt-based fairness across leagues
         notes:
           - "Round 4 rules:"
           - "Preemption: ordinary sports priority never cuts a visible minimum; only factual invalidation, hard expiry and device controls may clear early."
@@ -392,3 +406,9 @@ milestones:
         notes:
           - "Round 4: publish next_deadline and basic decision traces in A1a step 1, including the contrast treatment (round-3 Q3); a standalone inspector can follow."
           - "A1a step 1: omni/app/trace.py writes a decision line when the pick, its reason (takeover, reminder, rotation) or the provider status changes, naming the next decision; and a presentation line at a new card's first committed frame, with each side's logo variant, tile or bar, meter color and the contrast policy."
+      - id: M11-009
+        title: "A stateless board: decide every 5-6 s whether to keep the card, play one for a full turn, or cut in, instead of a planned timeline"
+        labels: [queue, board, p3]
+        status: parked  # the user's idea, 2026-11-25; parked the same day ("belay the board logic rewrite for now")
+        notes:
+          - "The user, 2026-11-25: 'move away entirely from a planned-timeline approach, and move towards a stateless machine that simply refreshes every 5-6 seconds before deciding whether to play a card for its full 12s, or to cut in.' Weigh it against policy v2's debt ledger and the tower's leases when it's picked up."
