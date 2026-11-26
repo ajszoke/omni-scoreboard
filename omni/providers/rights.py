@@ -472,8 +472,10 @@ READS: Mapping[str, frozenset[DataSource]] = {
     "tools/nflmeta_replay_trace.py": frozenset({DataSource.NFLMETA}),  # reads a recording
     "omni/telemetry/nflmeta_mine.py": frozenset({DataSource.NFLMETA}),  # reads a recording, keeps our measurements
     "omni/telemetry/runner_log_mine.py": frozenset({DataSource.NFLMETA}),  # reads a run log that quotes the feed
+    "omni/telemetry/runner_log_redact.py": frozenset({DataSource.NFLMETA}),  # and writes it in our own words
     "omni/telemetry/miners.py": frozenset({DataSource.NFLMETA}),
     "tools/nflmeta_mine.py": frozenset({DataSource.NFLMETA}),
+    "tools/redact_run_log.py": frozenset({DataSource.NFLMETA}),
 }
 
 

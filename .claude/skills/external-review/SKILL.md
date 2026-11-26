@@ -66,8 +66,9 @@ upload `rounds/round-N.zip` + `round-N-prompt.md` to the flagship directly — n
    (c) plan/sequence the next phase. Later rounds report what changed and converge.
 5. **Bundle `round-N.zip`** — `plans/` snapshot + the prompt + `sources/` (the frozen kernel, current
    `AGENTS.md`/`STATUS.md`/`ARCHITECTURE`, the `omni/` tree, key modules the brief cites ≤~5k lines,
-   a test/coverage snapshot) + the prior round's verbatim verdict. **Verify contents** (`zipinfo -1`)
-   before handing off.
+   a test/coverage snapshot) + the prior round's verbatim verdict. NFL run evidence goes in only as a mined
+   digest or a redacted log, and `tools/redact_run_log.py --check sources/` must pass before zipping.
+   **Verify contents** (`zipinfo -1`) before handing off.
 6. **Hand off → the user runs the flagship → pastes the verbatim verdict back.** You cannot launch
    the flagship yourself.
 7. **Record + adjudicate** in REVIEWS: archive the verdict verbatim (`round-N-verdict.md`), then per

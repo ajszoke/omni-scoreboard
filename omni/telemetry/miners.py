@@ -2,8 +2,10 @@
 
 The sweep (`omni.providers.rights.sweep_expired`) offers each overdue NFLMeta folder to this miner. A
 recording (its scoreboards and play feed) is mined by `mine_recording`; a run's own log folder (``runner.log``)
-by `mine_runner_log`, each night of it to a digest of its own. Digests go under the telemetry root, outside
-every folder the sweep deletes, and hold only our own measurements.
+by `mine_runner_log`, each night of it to a digest of its own, with the night's log redacted beside it
+(`write_redacted_nights`: line for line, our own words only, ``runner-log/<run>/<date>.redacted.log``). Digests
+and redacted logs go under the telemetry root, outside every folder the sweep deletes, and hold nothing of the
+provider's.
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ from omni.app.run_log import RUN_LOG_FILE
 from omni.providers.rights import RetentionStamp
 from omni.telemetry.nflmeta_mine import mine_recording
 from omni.telemetry.runner_log_mine import mine_runner_log
+from omni.telemetry.runner_log_redact import write_redacted_nights
 
 __all__ = ["NflMetaMiner"]
 
@@ -33,10 +36,12 @@ class NflMetaMiner:
         return self._root / "nflmeta" / f"{folder.name}.json"
 
     def mine(self, folder: Path, stamp: RetentionStamp) -> Path | None:
-        """Write ``folder``'s digests; the first's path, or None when it holds nothing to mine."""
+        """Write ``folder``'s digests (and a run log's redacted nights); the first digest's path, or None when it
+        holds nothing to mine. The digests go last: the first one's being there says the folder was mined."""
         if self._is_run_log(folder):
-            out = self._root / "runner-log" / folder.name
-            paths = mine_runner_log(folder / RUN_LOG_FILE, out, _first_date(folder, stamp))
+            out, first = self._root / "runner-log" / folder.name, _first_date(folder, stamp)
+            write_redacted_nights(folder / RUN_LOG_FILE, out, first)
+            paths = mine_runner_log(folder / RUN_LOG_FILE, out, first)
             return paths[0] if paths else None
         return mine_recording(folder, self._root / "nflmeta")
 
