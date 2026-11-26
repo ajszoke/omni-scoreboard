@@ -8,6 +8,7 @@ from omni.core.colors import RGBColor
 from omni.providers.nfl_palette import FREED_BASE_METER_COLOR, LOGO_ALT_COLOR, LOGO_BASE_COLOR
 from omni.providers.nfl_teams import NFL_TEAMS
 from omni.renderers.image import LogoImage
+from omni.renderers.visual_treatment import DEFAULT_CONTRAST_POLICY
 
 _FLOOR = 25.0  # delta_e below which two backgrounds blur together on a small panel
 _FLOOR_DE2000 = 20.0  # delta_e_2000 below which two backgrounds blur together, whatever CIE76 says
@@ -48,13 +49,14 @@ def test_every_club_has_20x20_base_and_alt_tiles(abbreviation: str) -> None:
 
 
 def test_every_meter_color_value_lifts_to_legibility_on_black() -> None:
+    floor = DEFAULT_CONTRAST_POLICY.min_contrast
     black = RGBColor(0, 0, 0)
     for palette in (LOGO_BASE_COLOR, LOGO_ALT_COLOR, FREED_BASE_METER_COLOR):
         for abbreviation, color in palette.items():
             if color == black:
                 continue  # a black background is never spent on a meter; the meter goes white instead
-            lifted = color.value_lifted()
-            assert lifted.contrast_ratio(black) >= 3.0, f"{abbreviation} {color} did not lift"
+            lifted = DEFAULT_CONTRAST_POLICY.lift(color)
+            assert lifted.contrast_ratio(black) >= floor, f"{abbreviation} {color} did not lift"
 
 
 def test_a_logo_drawn_in_its_own_background_color_was_recolored_to_show() -> None:

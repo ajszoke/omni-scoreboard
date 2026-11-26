@@ -133,7 +133,7 @@ def test_a_card_going_up_names_why_and_how_its_teams_were_drawn() -> None:
     assert painted.presented is not None and len(lines) == 1
     up = lines[0]
     assert up.startswith(f"up 23:00:00: {painted.presented.card.raw} (rotation) | away base bar #")
-    assert " meter #" in up and up.endswith("| contrast 3/25|20")
+    assert " meter #" in up and up.endswith("| contrast 4.5/25|20")
 
 
 def test_a_card_without_two_team_rows_goes_up_without_a_treatment() -> None:

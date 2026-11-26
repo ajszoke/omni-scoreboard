@@ -16,6 +16,7 @@ from omni.renderers.canvas import RecordingCanvas
 from omni.renderers.context import RenderContext
 from omni.renderers.image import LogoStore
 from omni.renderers.team_row import draw_matchup_marks, draw_single_bars, draw_team_mark
+from omni.renderers.visual_treatment import DEFAULT_CONTRAST_POLICY
 
 NOW = datetime(2026, 6, 17, 23, 30, tzinfo=timezone.utc)
 REG = MlbTeamRegistry.from_color_file()
@@ -114,7 +115,7 @@ def test_single_bars_stay_lit_for_the_clubs_whose_base_is_black(away_id: int, ho
     rects = {(r.x, r.y, r.w, r.h): r.color for r in canvas.rects()}
     assert set(rects) == {(0, 0, 2, 16), (0, 16, 2, 16)}
     for color in rects.values():
-        assert color is not None and color.contrast_ratio(RGBColor(0, 0, 0)) >= 3.0
+        assert color is not None and color.contrast_ratio(RGBColor(0, 0, 0)) >= DEFAULT_CONTRAST_POLICY.min_contrast
 
 
 def test_single_bars_keep_home_on_its_primary_and_switch_the_away_side_on_a_clash() -> None:
@@ -123,7 +124,7 @@ def test_single_bars_keep_home_on_its_primary_and_switch_the_away_side_on_a_clas
     draw_single_bars(canvas, _ctx(PanelProfile.SINGLE_64X32, None), REG.resolve(113), REG.resolve(108))
     rects = {(r.x, r.y): r.color for r in canvas.rects()}
     assert rects[(0, 0)] == RGBColor(255, 255, 255)
-    assert rects[(0, 16)] == LOGO_BASE_COLOR[108].value_lifted()
+    assert rects[(0, 16)] == DEFAULT_CONTRAST_POLICY.lift(LOGO_BASE_COLOR[108])
 
 
 def test_a_missing_logo_falls_back_to_the_same_resolved_bar_on_the_big_boards() -> None:
@@ -133,4 +134,4 @@ def test_a_missing_logo_falls_back_to_the_same_resolved_bar_on_the_big_boards() 
     )
     rects = {(r.y): r.color for r in canvas.rects()}
     assert rects[0] == LOGO_ALT_COLOR[134]  # PIT: its yellow, not an unlit black bar
-    assert rects[32] == LOGO_BASE_COLOR[119].value_lifted()
+    assert rects[32] == DEFAULT_CONTRAST_POLICY.lift(LOGO_BASE_COLOR[119])

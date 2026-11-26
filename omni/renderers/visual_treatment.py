@@ -68,13 +68,16 @@ class VisualContrastPolicy:
     One policy per `DisplaySink`/device (with optional per-profile overrides): a brighter
     diffuser, a dimmer brightness, or a particular matrix batch path can want a higher floor.
     `min_contrast` is the WCAG ratio a dim brand color is value-lifted to before it paints a
-    meter. `clash_delta_e` (CIE76) and `clash_de2000` (CIEDE2000) are the distances below which
-    two team colors read as one, under either metric (see `logo_clash.clash_metric`): two tiles or
-    bars (one side flips to its alt), or a meter and the mark it sits beside (the meter goes white).
+    meter or a bar. It sits at 4.5, WCAG's floor for ordinary text, rather than the 3:1 graphics
+    floor: on a panel run well below full brightness, a deep blue or purple lifted only to 3:1 still
+    reads as a dark smudge beside its tile. `clash_delta_e` (CIE76) and `clash_de2000` (CIEDE2000)
+    are the distances below which two team colors read as one, under either metric (see
+    `logo_clash.clash_metric`): two tiles or bars (one side flips to its alt), or a meter and the
+    mark it sits beside (the meter goes white).
     The clash defaults are the thresholds `resolve_logo_variants` applies on its own.
     """
 
-    min_contrast: float = 3.0
+    min_contrast: float = 4.5
     clash_delta_e: float = CLASH_DELTA_E
     clash_de2000: float = CLASH_DE2000
 
