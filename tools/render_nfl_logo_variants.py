@@ -46,11 +46,16 @@ _BASE_TREAT: dict[str, Treatment] = {
     "DET": _on("DET", "base", recolors=((RGBColor(0, 112, 176), _WHITE, 40),)),  # white lion on Honolulu blue
     "IND": _on("IND", "base", recolors=((RGBColor(0, 48, 104), _WHITE, 40),)),  # white horseshoe on blue
     "NYG": _on("NYG", "base", recolors=((RGBColor(8, 32, 96), _WHITE, 40),)),  # white "ny", red outline, on blue
+    # Stroked white, to set each mark off its tile: the Bucs' flag, the Panthers' cat and the Dolphins' dolphin.
+    "CAR": _on("CAR", "base", outline=_WHITE),
+    "MIA": _on("MIA", "base", outline=_WHITE),
+    "TB": _on("TB", "base", outline=_WHITE),
 }
 _ALT_TREAT: dict[str, Treatment] = {
     "CLE": _on("CLE", "alt", outline=RGBColor(49, 29, 0)),  # the orange helmet, stroked brown, on orange
     "CHI": _on("CHI", "alt", recolors=((RGBColor(200, 56, 0), RGBColor(11, 22, 42), 50),)),  # navy C on orange
     "LAC": _on("LAC", "alt", recolors=((RGBColor(232, 168, 24), RGBColor(0, 123, 199), 45),)),  # blue bolt on gold
+    "MIA": _on("MIA", "alt", outline=_WHITE),  # the dolphin stroked white, as on its base tile
     # Rams: the horn goes blue and the letters white, so neither melts into the gold.
     "LAR": _on(
         "LAR", "alt", recolors=((RGBColor(248, 208, 0), RGBColor(0, 53, 148), 45), (RGBColor(0, 48, 144), _WHITE, 45))
